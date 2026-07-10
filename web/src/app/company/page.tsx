@@ -9,7 +9,13 @@ import { loadNote, loadWatchlist, saveNote, toggleWatch } from "@/lib/store";
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 type Stmt = { periods: string[]; items: { label: string; values: (number | null)[] }[] };
-type Company = { generated_at: string; snapshot: Row; statements: Record<string, Stmt> };
+type AnnualReport = { from: string; to: string; url: string };
+type Company = {
+  generated_at: string;
+  snapshot: Row;
+  statements: Record<string, Stmt>;
+  documents?: { annual_reports?: AnnualReport[] };
+};
 type ScreenData = { rows: Row[] };
 
 const STMT_TITLES: Record<string, string> = {
@@ -232,6 +238,32 @@ function CompanyView() {
           </div>
         </section>
       )}
+
+      <section className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+        <h2 className="text-sm font-bold text-slate-800">Documents</h2>
+        {(company.documents?.annual_reports?.length ?? 0) > 0 && (
+          <div>
+            <p className="text-xs text-slate-400 mb-1.5">Annual reports (PDF, straight from NSE)</p>
+            <div className="flex gap-2 flex-wrap">
+              {company.documents!.annual_reports!.slice(0, 18).map((ar) => (
+                <a key={ar.url} href={ar.url} target="_blank" rel="noopener noreferrer"
+                  className="text-xs font-semibold bg-slate-100 hover:bg-emerald-50 border border-slate-200 rounded-full px-3 py-1">
+                  FY{ar.from}–{String(ar.to).slice(-2)}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="flex gap-4 flex-wrap text-sm">
+          <a href={`https://www.nseindia.com/get-quotes/equity?symbol=${encodeURIComponent(symbol)}`} target="_blank" rel="noopener noreferrer" className="text-emerald-700 font-semibold hover:underline">
+            All NSE filings &amp; announcements ↗
+          </a>
+          <a href={`https://www.screener.in/company/${encodeURIComponent(symbol)}/`} target="_blank" rel="noopener noreferrer" className="text-emerald-700 font-semibold hover:underline">
+            Cross-check on Screener.in ↗
+          </a>
+        </div>
+        <p className="text-xs text-slate-400">Use the cross-check link before trusting any number here — this app&apos;s data is unverified.</p>
+      </section>
 
       <section className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
         <h2 className="text-sm font-bold text-slate-800">Your notes</h2>

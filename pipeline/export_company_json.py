@@ -79,6 +79,15 @@ def main() -> None:
     has_statements = {
         r[0] for r in con.execute("SELECT DISTINCT symbol FROM statements").fetchall()
     }
+    has_docs_table = con.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='documents'"
+    ).fetchone()
+    docs_by_symbol: dict[str, list[dict]] = {}
+    if has_docs_table:
+        for sym, from_yr, to_yr, url in con.execute(
+            "SELECT symbol, from_yr, to_yr, url FROM documents WHERE doc_type='annual_report' ORDER BY from_yr DESC"
+        ).fetchall():
+            docs_by_symbol.setdefault(sym, []).append({"from": from_yr, "to": to_yr, "url": url})
     snaps["debt_to_equity"] = (snaps["debt_to_equity"] / 100).round(3)
     snaps["market_cap"] = (snaps["market_cap"] / 1e7).round(1)
     for col in ["roe", "roa", "net_margin", "op_margin", "gross_margin", "revenue_growth", "earnings_growth"]:
@@ -98,7 +107,12 @@ def main() -> None:
     n_with, n_without = 0, 0
     for _, snap in snaps.iterrows():
         sym = snap["symbol"]
-        payload = {"generated_at": generated, "snapshot": snap.to_dict(), "statements": {}}
+        payload = {
+            "generated_at": generated,
+            "snapshot": snap.to_dict(),
+            "statements": {},
+            "documents": {"annual_reports": docs_by_symbol.get(sym, [])},
+        }
         if sym in has_statements:
             stmts = pd.read_sql("SELECT * FROM statements WHERE symbol = ?", con, params=(sym,))
             for key, stmt_type, period_type in [
