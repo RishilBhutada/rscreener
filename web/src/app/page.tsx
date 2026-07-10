@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { compile, QueryError, Row } from "@/lib/query";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -225,8 +226,14 @@ export default function Home() {
                   {sorted.slice(0, 300).map((r) => (
                     <tr key={String(r.symbol)} className="border-t border-slate-100 hover:bg-emerald-50/40">
                       {cols.map((c) => (
-                        <td key={c} className={`px-3 py-2 whitespace-nowrap ${c === "symbol" ? "font-semibold text-emerald-700" : c === "name" ? "max-w-56 truncate" : ""}`}>
-                          {fmt(c, r[c] ?? null)}
+                        <td key={c} className={`px-3 py-2 whitespace-nowrap ${c === "name" ? "max-w-56 truncate" : ""}`}>
+                          {c === "symbol" ? (
+                            <Link href={`/company?s=${r.symbol}`} className="font-semibold text-emerald-700 hover:underline">
+                              {String(r.symbol)}
+                            </Link>
+                          ) : (
+                            fmt(c, r[c] ?? null)
+                          )}
                         </td>
                       ))}
                     </tr>
