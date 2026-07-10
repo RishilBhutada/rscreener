@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Row } from "@/lib/query";
+import { loadNote, loadWatchlist, saveNote, toggleWatch } from "@/lib/store";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -99,6 +100,14 @@ function CompanyView() {
   const [company, setCompany] = useState<Company | null>(null);
   const [peers, setPeers] = useState<Row[]>([]);
   const [error, setError] = useState("");
+  const [watched, setWatched] = useState(false);
+  const [note, setNote] = useState("");
+
+  useEffect(() => {
+    if (!symbol) return;
+    setWatched(loadWatchlist().includes(symbol));
+    setNote(loadNote(symbol));
+  }, [symbol]);
 
   useEffect(() => {
     if (!symbol) return;
@@ -149,9 +158,19 @@ function CompanyView() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">{String(s.name ?? symbol)} <span className="text-emerald-700">({symbol})</span></h1>
-        <p className="text-sm text-slate-500">{String(s.sector ?? "—")} · {String(s.industry ?? "—")}</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">{String(s.name ?? symbol)} <span className="text-emerald-700">({symbol})</span></h1>
+          <p className="text-sm text-slate-500">{String(s.sector ?? "—")} · {String(s.industry ?? "—")}</p>
+        </div>
+        <button
+          onClick={() => { toggleWatch(symbol); setWatched(!watched); }}
+          aria-label={watched ? "remove from watchlist" : "add to watchlist"}
+          title={watched ? "On your watchlist — tap to remove" : "Add to watchlist"}
+          className={`text-2xl leading-none ${watched ? "text-emerald-500" : "text-slate-300 hover:text-emerald-400"}`}
+        >
+          ★
+        </button>
       </div>
 
       <section className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -213,6 +232,17 @@ function CompanyView() {
           </div>
         </section>
       )}
+
+      <section className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
+        <h2 className="text-sm font-bold text-slate-800">Your notes</h2>
+        <textarea
+          value={note}
+          onChange={(e) => { setNote(e.target.value); saveNote(symbol, e.target.value); }}
+          rows={4}
+          placeholder="Private notes in your own words — stored only on this device, never uploaded."
+          className="w-full text-sm border border-slate-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+        />
+      </section>
 
       <footer className="text-xs text-slate-400 leading-relaxed pb-8">
         Data: Yahoo Finance via yfinance, as of {company.generated_at} — <strong>every number is unverified until checked against a company filing</strong>. This tool screens; it never recommends.

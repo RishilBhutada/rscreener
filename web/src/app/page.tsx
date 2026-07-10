@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { compile, QueryError, Row } from "@/lib/query";
+import { loadWatchlist, toggleWatch } from "@/lib/store";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -55,6 +56,7 @@ export default function Home() {
   const [sortDesc, setSortDesc] = useState(true);
   const [screens, setScreens] = useState<Screen[]>([]);
   const [screenName, setScreenName] = useState("");
+  const [watch, setWatch] = useState<string[]>([]);
 
   useEffect(() => {
     fetch(`${BASE}/data.json`)
@@ -64,6 +66,7 @@ export default function Home() {
     try {
       setScreens(JSON.parse(localStorage.getItem("rscreener_screens") ?? "[]"));
     } catch { /* corrupted storage - start fresh */ }
+    setWatch(loadWatchlist());
   }, []);
 
   const runQuery = (src: string, rows: Row[]) => {
@@ -125,6 +128,23 @@ export default function Home() {
   const clickSort = (key: string) => {
     if (sortKey === key) setSortDesc(!sortDesc);
     else { setSortKey(key); setSortDesc(true); }
+  };
+
+  const exportCsv = () => {
+    if (!applied) return;
+    const esc = (v: unknown) => {
+      const s = v === null || v === undefined ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [cols.map((c) => COL_LABELS[c] ?? c).join(",")];
+    for (const r of sorted) lines.push(cols.map((c) => esc(r[c])).join(","));
+    const bom = String.fromCharCode(0xfeff); // Excel needs this to read UTF-8 CSVs
+    const blob = new Blob([bom + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "rscreener_screen.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
   };
 
   return (
@@ -204,17 +224,59 @@ export default function Home() {
           </div>
         </section>
 
+        {data && watch.length > 0 && (
+          <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <h2 className="px-4 py-3 text-sm font-bold text-slate-800 border-b border-slate-100">
+              <span className="text-emerald-500">★</span> Watchlist
+            </h2>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 text-xs text-slate-500 uppercase text-left">
+                    <th className="px-3 py-2 w-8"> </th><th className="px-3 py-2">Symbol</th><th className="px-3 py-2">Name</th>
+                    <th className="px-3 py-2 text-right">Price ₹</th><th className="px-3 py-2 text-right">MCap ₹Cr</th>
+                    <th className="px-3 py-2 text-right">P/E</th><th className="px-3 py-2 text-right">ROE %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {watch.map((sym) => {
+                    const r = data.rows.find((x) => x.symbol === sym);
+                    if (!r) return null;
+                    return (
+                      <tr key={sym} className="border-t border-slate-100 hover:bg-emerald-50/40">
+                        <td className="px-3 py-2"><button onClick={() => setWatch(toggleWatch(sym))} aria-label={`remove ${sym} from watchlist`} className="text-emerald-500 hover:text-slate-300">★</button></td>
+                        <td className="px-3 py-2"><Link href={`/company?s=${sym}`} className="font-semibold text-emerald-700 hover:underline">{sym}</Link></td>
+                        <td className="px-3 py-2 max-w-56 truncate">{String(r.name ?? "—")}</td>
+                        <td className="px-3 py-2 text-right">{fmt("price", r.price ?? null)}</td>
+                        <td className="px-3 py-2 text-right">{fmt("mcap", r.mcap ?? null)}</td>
+                        <td className="px-3 py-2 text-right">{fmt("pe", r.pe ?? null)}</td>
+                        <td className="px-3 py-2 text-right">{fmt("roe", r.roe ?? null)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
         {applied && (
           <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <div className="px-4 py-3 text-sm text-slate-600 border-b border-slate-100">
-              <strong className="text-slate-900">{applied.matches.length.toLocaleString("en-IN")}</strong> companies match
-              {applied.skipped > 0 && <span className="text-slate-400"> · {applied.skipped.toLocaleString("en-IN")} skipped (missing a queried field)</span>}
-              {sorted.length > 300 && <span className="text-slate-400"> · showing top 300 by current sort</span>}
+            <div className="px-4 py-3 text-sm text-slate-600 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+              <span>
+                <strong className="text-slate-900">{applied.matches.length.toLocaleString("en-IN")}</strong> companies match
+                {applied.skipped > 0 && <span className="text-slate-400"> · {applied.skipped.toLocaleString("en-IN")} skipped (missing a queried field)</span>}
+                {sorted.length > 300 && <span className="text-slate-400"> · showing top 300 by current sort</span>}
+              </span>
+              <button onClick={exportCsv} className="text-xs font-semibold bg-slate-100 hover:bg-emerald-50 border border-slate-200 rounded-lg px-3 py-1.5">
+                Export CSV (Excel)
+              </button>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 text-left text-xs text-slate-500 uppercase tracking-wide">
+                    <th className="px-3 py-2 w-8"> </th>
                     {cols.map((c) => (
                       <th key={c} className="px-3 py-2 cursor-pointer hover:text-emerald-700 whitespace-nowrap select-none" onClick={() => clickSort(c)}>
                         {COL_LABELS[c] ?? c}{sortKey === c ? (sortDesc ? " ↓" : " ↑") : ""}
@@ -225,6 +287,15 @@ export default function Home() {
                 <tbody>
                   {sorted.slice(0, 300).map((r) => (
                     <tr key={String(r.symbol)} className="border-t border-slate-100 hover:bg-emerald-50/40">
+                      <td className="px-3 py-2">
+                        <button
+                          onClick={() => setWatch(toggleWatch(String(r.symbol)))}
+                          aria-label={`toggle ${r.symbol} on watchlist`}
+                          className={watch.includes(String(r.symbol)) ? "text-emerald-500" : "text-slate-300 hover:text-emerald-400"}
+                        >
+                          ★
+                        </button>
+                      </td>
                       {cols.map((c) => (
                         <td key={c} className={`px-3 py-2 whitespace-nowrap ${c === "name" ? "max-w-56 truncate" : ""}`}>
                           {c === "symbol" ? (
