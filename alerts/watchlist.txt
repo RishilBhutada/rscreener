@@ -1,0 +1,6 @@
+# Rscreener alert watchlist - one NSE symbol per line, # for comments.
+# Edit this file (even from the GitHub app/site on your phone) and the
+# hourly checker picks it up on its next run. Keep it in sync with the
+# stars in the app - they don't sync automatically.
+RELIANCE
+TCS

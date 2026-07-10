@@ -1,0 +1,25 @@
+name: Watchlist alerts
+
+on:
+  schedule:
+    # hourly at :15, 07:45-23:45 IST, Mon-Sat (2:15-18:15 UTC)
+    - cron: "15 2-18 * * 1-6"
+  workflow_dispatch:
+    inputs:
+      test_push:
+        description: "Send a test notification instead of checking"
+        default: "0"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - run: python alerts/check_announcements.py
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          TEST_PUSH: ${{ github.event.inputs.test_push || '0' }}
