@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from trend_lib import build_trends
+
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
 OUT_DIR = ROOT / "web" / "public" / "companies"
@@ -79,6 +81,7 @@ def main() -> None:
     has_statements = {
         r[0] for r in con.execute("SELECT DISTINCT symbol FROM statements").fetchall()
     }
+    trends = build_trends(con)
     has_docs_table = con.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='documents'"
     ).fetchone()
@@ -112,6 +115,7 @@ def main() -> None:
             "snapshot": snap.to_dict(),
             "statements": {},
             "documents": {"annual_reports": docs_by_symbol.get(sym, [])},
+            "trend": trends.get(sym, {}),
         }
         if sym in has_statements:
             stmts = pd.read_sql("SELECT * FROM statements WHERE symbol = ?", con, params=(sym,))

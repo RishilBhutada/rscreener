@@ -34,6 +34,8 @@ const COL_LABELS: Record<string, string> = {
   revenue: "Revenue ₹", net_income: "Net Profit ₹", total_debt: "Debt ₹",
   total_cash: "Cash ₹", free_cashflow: "FCF ₹", wk52_high: "52w High",
   wk52_low: "52w Low", beta: "Beta",
+  sales_cagr_5y: "Sales 5y %", sales_cagr_10y: "Sales 10y %",
+  profit_cagr_5y: "Profit 5y %", profit_cagr_10y: "Profit 10y %",
 };
 
 function fmt(key: string, v: string | number | null): string {

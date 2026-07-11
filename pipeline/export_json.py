@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from trend_lib import build_trends, cagr_pct
+
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
 OUT = ROOT / "web" / "public" / "data.json"
@@ -35,7 +37,19 @@ def main() -> None:
     con = sqlite3.connect(DB)
     df = pd.read_sql("SELECT * FROM fundamentals", con)
     n_universe = pd.read_sql("SELECT COUNT(*) n FROM universe", con)["n"][0]
+    trends = build_trends(con)
     con.close()
+
+    def growth(sym: str, item: str, years: int):
+        t = trends.get(sym, {}).get("annual")
+        if not t:
+            return None
+        return cagr_pct(t[item], t["periods"], years)
+
+    df["sales_cagr_5y"] = df["symbol"].map(lambda s: growth(s, "revenue", 5))
+    df["sales_cagr_10y"] = df["symbol"].map(lambda s: growth(s, "revenue", 10))
+    df["profit_cagr_5y"] = df["symbol"].map(lambda s: growth(s, "pat", 5))
+    df["profit_cagr_10y"] = df["symbol"].map(lambda s: growth(s, "pat", 10))
 
     for col in FRACTION_TO_PCT:
         df[col] = (df[col] * 100).round(2)
@@ -48,6 +62,7 @@ def main() -> None:
         "pb", "book_value", "roe", "roa", "de", "div_yield", "net_margin", "op_margin",
         "gross_margin", "rev_growth", "earn_growth", "revenue", "net_income",
         "total_debt", "total_cash", "free_cashflow", "wk52_high", "wk52_low", "beta",
+        "sales_cagr_5y", "sales_cagr_10y", "profit_cagr_5y", "profit_cagr_10y",
     ]
     df = df[keep]
     df = df.astype(object).where(pd.notna(df), None)

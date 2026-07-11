@@ -24,6 +24,10 @@ const ALIASES: Record<string, string> = {
   earnings_growth: "earn_growth",
   bookvalue: "book_value",
   bv: "book_value",
+  sales_growth_5y: "sales_cagr_5y",
+  sales_growth_10y: "sales_cagr_10y",
+  profit_growth_5y: "profit_cagr_5y",
+  profit_growth_10y: "profit_cagr_10y",
 };
 
 export const NUMERIC_FIELDS = [
@@ -31,6 +35,7 @@ export const NUMERIC_FIELDS = [
   "div_yield", "net_margin", "op_margin", "gross_margin", "rev_growth",
   "earn_growth", "revenue", "net_income", "total_debt", "total_cash",
   "free_cashflow", "wk52_high", "wk52_low", "beta",
+  "sales_cagr_5y", "sales_cagr_10y", "profit_cagr_5y", "profit_cagr_10y",
 ];
 
 type Tok =

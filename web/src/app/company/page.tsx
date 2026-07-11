@@ -10,13 +10,37 @@ const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 type Stmt = { periods: string[]; items: { label: string; values: (number | null)[] }[] };
 type AnnualReport = { from: string; to: string; url: string };
+type Trend = {
+  periods: string[];
+  revenue: (number | null)[];
+  pat: (number | null)[];
+  eps: (number | null)[];
+  source: string[];
+};
 type Company = {
   generated_at: string;
   snapshot: Row;
   statements: Record<string, Stmt>;
   documents?: { annual_reports?: AnnualReport[] };
+  trend?: { annual?: Trend; quarterly?: Trend };
 };
 type ScreenData = { rows: Row[] };
+
+function trendToStmt(t: Trend): Stmt {
+  const margin = t.periods.map((_, i) => {
+    const r = t.revenue[i], p = t.pat[i];
+    return r && p !== null && p !== undefined ? Math.round((p / r) * 1000) / 10 : null;
+  });
+  return {
+    periods: t.periods,
+    items: [
+      { label: "Revenue", values: t.revenue },
+      { label: "Net Profit", values: t.pat },
+      { label: "EPS (Rs)", values: t.eps },
+      { label: "PAT margin %", values: margin },
+    ],
+  };
+}
 
 const STMT_TITLES: Record<string, string> = {
   quarterly_results: "Quarterly Results",
@@ -49,15 +73,20 @@ function Bars({ title, periods, values }: { title: string; periods: string[]; va
           const x = 12 + i * ((W - 24) / values.length);
           const h = Math.abs(v) * scale;
           const y = v >= 0 ? base - h : base;
+          const labelStep = Math.max(1, Math.ceil(values.length / 7));
           return (
             <g key={i}>
               <rect x={x} y={y} width={bw} height={Math.max(h, 1)} rx="2" fill={v >= 0 ? "#059669" : "#dc2626"} />
-              <text x={x + bw / 2} y={H - 22} textAnchor="middle" fontSize="9" fill="#94a3b8">
-                {periodLabel(periods[i]).replace(" ", "'")}
-              </text>
-              <text x={x + bw / 2} y={v >= 0 ? y - 4 : base + h + 10} textAnchor="middle" fontSize="8.5" fill="#475569">
-                {Math.abs(v) >= 1000 ? `${Math.round(v / 100) / 10}k` : Math.round(v)}
-              </text>
+              {i % labelStep === 0 && (
+                <text x={x + bw / 2} y={H - 22} textAnchor="middle" fontSize="9" fill="#94a3b8">
+                  {periodLabel(periods[i]).replace(" ", "'")}
+                </text>
+              )}
+              {values.length <= 8 && (
+                <text x={x + bw / 2} y={v >= 0 ? y - 4 : base + h + 10} textAnchor="middle" fontSize="8.5" fill="#475569">
+                  {Math.abs(v) >= 1000 ? `${Math.round(v / 100) / 10}k` : Math.round(v)}
+                </text>
+              )}
             </g>
           );
         })}
@@ -88,7 +117,7 @@ function StatementTable({ title, stmt }: { title: string; stmt: Stmt }) {
                 <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{it.label}</td>
                 {it.values.map((v, i) => (
                   <td key={i} className={`px-3 py-2 text-right whitespace-nowrap ${typeof v === "number" && v < 0 ? "text-red-600" : ""}`}>
-                    {fmtNum(v, it.label.includes("EPS") ? 2 : 0)}
+                    {fmtNum(v, it.label.includes("EPS") || it.label.includes("%") ? 2 : 0)}
                   </td>
                 ))}
               </tr>
@@ -188,11 +217,26 @@ function CompanyView() {
         ))}
       </section>
 
-      {revenue && profit && annual && (
+      {(company.trend?.annual || (revenue && profit && annual)) && (
         <section className="grid sm:grid-cols-2 gap-4">
-          <Bars title="Revenue" periods={annual.periods} values={revenue.values} />
-          <Bars title="Net Profit" periods={annual.periods} values={profit.values} />
+          <Bars
+            title="Revenue"
+            periods={(company.trend?.annual ?? annual!).periods}
+            values={company.trend?.annual ? company.trend.annual.revenue : revenue!.values}
+          />
+          <Bars
+            title="Net Profit"
+            periods={(company.trend?.annual ?? annual!).periods}
+            values={company.trend?.annual ? company.trend.annual.pat : profit!.values}
+          />
         </section>
+      )}
+
+      {company.trend?.annual && (
+        <StatementTable title="Track record — annual, as filed with NSE" stmt={trendToStmt(company.trend.annual)} />
+      )}
+      {company.trend?.quarterly && (
+        <StatementTable title="Track record — last quarters" stmt={trendToStmt(company.trend.quarterly)} />
       )}
 
       {Object.keys(company.statements).length === 0 && (
