@@ -152,7 +152,10 @@ def main() -> None:
 
     universe = pd.read_csv(DATA / "universe.csv")
     if args.symbols:
-        symbols = [s.strip().upper() for s in args.symbols.split(",")]
+        raw = args.symbols
+        if raw.startswith("@"):
+            raw = (ROOT / raw[1:]).read_text(encoding="utf-8")
+        symbols = [s.strip().upper() for s in raw.split(",") if s.strip()]
     elif args.sample:
         symbols = universe["SYMBOL"].head(args.sample).tolist()
     else:
