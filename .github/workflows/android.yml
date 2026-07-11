@@ -1,0 +1,35 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+        working-directory: web
+      - run: npx cap sync android
+        working-directory: web
+      - run: chmod +x gradlew && ./gradlew assembleDebug
+        working-directory: web/android
+      - run: mv web/android/app/build/outputs/apk/debug/app-debug.apk rscreener.apk
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-latest
+          name: "Rscreener Android APK"
+          body: "Thin-shell APK that loads the live site. Download rscreener.apk on your phone, allow installs from your browser when asked, and install. Rebuilt on demand via the Build Android APK workflow."
+          files: rscreener.apk
