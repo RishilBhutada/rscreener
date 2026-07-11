@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from trend_lib import build_trends
+from trend_lib import build_trends, pe_series
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
@@ -82,6 +82,7 @@ def main() -> None:
         r[0] for r in con.execute("SELECT DISTINCT symbol FROM statements").fetchall()
     }
     trends = build_trends(con)
+    pe_by_symbol = pe_series(con)
     prices_by_symbol: dict[str, dict] = {}
     if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='prices'").fetchone():
         pr = pd.read_sql("SELECT symbol, freq, date, close FROM prices ORDER BY date", con)
@@ -136,6 +137,7 @@ def main() -> None:
             "trend": trends.get(sym, {}),
             "shareholding": shp_by_symbol.get(sym),
             "prices": prices_by_symbol.get(sym),
+            "pe_band": pe_by_symbol.get(sym),
         }
         if sym in has_statements:
             stmts = pd.read_sql("SELECT * FROM statements WHERE symbol = ?", con, params=(sym,))

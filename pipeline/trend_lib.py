@@ -69,6 +69,61 @@ def build_trends(con: sqlite3.Connection) -> dict[str, dict]:
     return out
 
 
+def pe_series(con: sqlite3.Connection) -> dict[str, dict]:
+    """Monthly P/E series per symbol: monthly close / trailing-twelve-month EPS
+    (sum of the four most recent quarterly as-filed EPS at each price date).
+    Returns {symbol: {"series": [[date, pe], ...], "median_5y": float}}."""
+    if not (_table_exists(con, "prices") and _table_exists(con, "results_history")):
+        return {}
+    eps = pd.read_sql(
+        "SELECT symbol, period_end, value FROM results_history "
+        "WHERE period_type='quarterly' AND item='eps' ORDER BY period_end",
+        con,
+    )
+    px = pd.read_sql(
+        "SELECT symbol, date, close FROM prices WHERE freq='monthly' ORDER BY date", con
+    )
+    eps_by_sym = {s: list(zip(g["period_end"], g["value"])) for s, g in eps.groupby("symbol")}
+    out: dict[str, dict] = {}
+    for sym, g in px.groupby("symbol"):
+        quarters = eps_by_sym.get(sym)
+        if not quarters or len(quarters) < 4:
+            continue
+        series = []
+        qi = 0
+        for date, close in zip(g["date"], g["close"]):
+            while qi < len(quarters) and quarters[qi][0] <= date:
+                qi += 1
+            recent = quarters[max(0, qi - 4):qi]
+            if len(recent) < 4:
+                continue
+            ttm = sum(v for _, v in recent)
+            if ttm <= 0:
+                continue
+            series.append([date, round(close / ttm, 1)])
+        if len(series) < 12:
+            continue
+        last5y = [pe for _, pe in series[-60:]]
+        med = sorted(last5y)[len(last5y) // 2]
+        out[sym] = {"series": series, "median_5y": round(med, 1)}
+    return out
+
+
+def avg_npm_5y(trend_annual: dict | None) -> float | None:
+    """Average PAT margin (%) over the last 5 annual periods with both values."""
+    if not trend_annual:
+        return None
+    pairs = [
+        (r, p)
+        for r, p in zip(trend_annual["revenue"], trend_annual["pat"])
+        if r and p is not None
+    ][-5:]
+    if len(pairs) < 3:
+        return None
+    margins = [p / r * 100 for r, p in pairs]
+    return round(sum(margins) / len(margins), 2)
+
+
 def cagr_pct(values: list, periods: list[str], years: int) -> float | None:
     """CAGR over `years` intervals of the annual series; None when not computable."""
     pairs = [(p, v) for p, v in zip(periods, values) if v is not None]

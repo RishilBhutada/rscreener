@@ -17,7 +17,7 @@ from pathlib import Path
 import pandas as pd
 
 from ratios_lib import compute_ratios, latest_annual_items, latest_promoter
-from trend_lib import build_trends, cagr_pct
+from trend_lib import avg_npm_5y, build_trends, cagr_pct, pe_series
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
@@ -41,6 +41,7 @@ def main() -> None:
     trends = build_trends(con)
     items_by_symbol = latest_annual_items(con)
     promoter_by_symbol = latest_promoter(con)
+    pe_by_symbol = pe_series(con)
     con.close()
 
     # computed ratios need RAW rupee values - run before any unit conversion
@@ -52,6 +53,8 @@ def main() -> None:
     for col in comp_df.columns:
         df[col] = comp_df[col].values
     df["promoter_holding"] = df["symbol"].map(promoter_by_symbol)
+    df["median_pe_5y"] = df["symbol"].map(lambda s: pe_by_symbol.get(s, {}).get("median_5y"))
+    df["avg_npm_5y"] = df["symbol"].map(lambda s: avg_npm_5y(trends.get(s, {}).get("annual")))
 
     def growth(sym: str, item: str, years: int):
         t = trends.get(sym, {}).get("annual")
@@ -78,6 +81,7 @@ def main() -> None:
         "sales_cagr_5y", "sales_cagr_10y", "profit_cagr_5y", "profit_cagr_10y",
         "roce", "ev_ebitda", "ps", "peg", "int_coverage", "div_payout",
         "debtor_days", "inventory_days", "promoter_holding",
+        "median_pe_5y", "avg_npm_5y",
     ]
     df = df[keep]
     df = df.astype(object).where(pd.notna(df), None)

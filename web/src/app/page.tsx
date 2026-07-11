@@ -41,6 +41,7 @@ const COL_LABELS: Record<string, string> = {
   int_coverage: "Int Cover", div_payout: "Payout %",
   debtor_days: "Debtor Days", inventory_days: "Inv Days",
   promoter_holding: "Promoter %",
+  median_pe_5y: "Median P/E 5y", avg_npm_5y: "Avg Mgn 5y %",
 };
 
 function fmt(key: string, v: string | number | null): string {
@@ -221,6 +222,7 @@ export default function Home() {
               <nav className="text-sm font-semibold text-emerald-700 flex gap-4">
                 <Link href="/calendar" className="hover:underline">Results calendar</Link>
                 <Link href="/sectors" className="hover:underline">Sectors</Link>
+                <Link href="/portfolio" className="hover:underline">Portfolio</Link>
               </nav>
             </div>
             {data && (
