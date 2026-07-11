@@ -1,0 +1,73 @@
+name: Nightly data refresh
+
+on:
+  schedule:
+    # 22:00 IST daily - after NSE close and Yahoo's EOD settlement
+    - cron: "30 16 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pandas requests yfinance
+      - name: Download the data DB from the data-db release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p data
+          if gh release download data-db --pattern rscreener.db.gz --dir data; then
+            gunzip -f data/rscreener.db.gz
+            echo "DB restored from release"
+          else
+            echo "no data-db release yet - starting from empty DB (historical depth will be missing)"
+          fi
+      - run: python pipeline/fetch_universe.py
+      - name: Refresh snapshot fundamentals (prices, ratios) for the full universe
+        run: python pipeline/fetch_fundamentals.py --all --snapshot-only --max-age-hours 20 --sleep 0.5
+      - run: python pipeline/export_json.py
+      - run: python pipeline/export_company_json.py
+      - name: Upload the updated DB back to the data-db release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gzip -c data/rscreener.db > rscreener.db.gz
+          gh release upload data-db rscreener.db.gz --clobber || \
+          gh release create data-db rscreener.db.gz --title "Data DB" --notes "SQLite data snapshot used and refreshed by the nightly workflow."
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+        env:
+          NEXT_PUBLIC_BASE_PATH: /rscreener
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/out
+
+  deploy:
+    needs: refresh
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

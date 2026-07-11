@@ -14,7 +14,7 @@ Usage:
 import argparse
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -121,13 +121,19 @@ def replace_symbol_rows(con: sqlite3.Connection, table: str, symbols: list[str],
         df.to_sql(table, con, if_exists="append", index=False)
 
 
-def already_done(con: sqlite3.Connection) -> set[str]:
+def already_done(con: sqlite3.Connection, max_age_hours: float = 0) -> set[str]:
     existing = con.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='fetch_log'"
     ).fetchone()
     if not existing:
         return set()
-    rows = con.execute("SELECT symbol FROM fetch_log WHERE error IS NULL").fetchall()
+    if max_age_hours > 0:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)).strftime("%Y-%m-%d %H:%M:%S")
+        rows = con.execute(
+            "SELECT symbol FROM fetch_log WHERE error IS NULL AND fetched_at >= ?", (cutoff,)
+        ).fetchall()
+    else:
+        rows = con.execute("SELECT symbol FROM fetch_log WHERE error IS NULL").fetchall()
     return {r[0] for r in rows}
 
 
@@ -140,6 +146,8 @@ def main() -> None:
     ap.add_argument("--refresh", action="store_true", help="re-fetch even if already done")
     ap.add_argument("--sleep", type=float, default=0.8, help="seconds between symbols")
     ap.add_argument("--snapshot-only", action="store_true", help="skip statements (faster; enough for screening)")
+    ap.add_argument("--max-age-hours", type=float, default=0,
+                    help="re-fetch symbols last fetched more than this many hours ago (0 = skip all previously-fetched)")
     args = ap.parse_args()
 
     universe = pd.read_csv(DATA / "universe.csv")
@@ -152,7 +160,7 @@ def main() -> None:
 
     con = sqlite3.connect(DB)
     if not args.refresh:
-        done = already_done(con)
+        done = already_done(con, args.max_age_hours)
         symbols = [s for s in symbols if s not in done]
     print(f"fetching {len(symbols)} symbols...")
 
