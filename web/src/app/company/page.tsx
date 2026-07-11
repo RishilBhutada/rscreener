@@ -17,12 +17,19 @@ type Trend = {
   eps: (number | null)[];
   source: string[];
 };
+type Shareholding = {
+  dates: string[];
+  promoter: (number | null)[];
+  public: (number | null)[];
+  employee: (number | null)[];
+};
 type Company = {
   generated_at: string;
   snapshot: Row;
   statements: Record<string, Stmt>;
   documents?: { annual_reports?: AnnualReport[] };
   trend?: { annual?: Trend; quarterly?: Trend };
+  shareholding?: Shareholding;
 };
 type ScreenData = { rows: Row[] };
 
@@ -169,6 +176,44 @@ function CompanyView() {
       .catch(() => { /* peers are optional */ });
   }, [company]);
 
+  const exportCompanyCsv = () => {
+    if (!company) return;
+    const esc = (v: unknown) => {
+      const sv = v === null || v === undefined ? "" : String(v);
+      return /[",\n]/.test(sv) ? `"${sv.replace(/"/g, '""')}"` : sv;
+    };
+    const lines: string[] = [`${symbol} — Rscreener export,${company.generated_at}`, ""];
+    lines.push("SNAPSHOT");
+    for (const [k, v] of Object.entries(company.snapshot)) lines.push(`${k},${esc(v)}`);
+    const pushStmt = (title: string, stmt: Stmt) => {
+      lines.push("", title.toUpperCase());
+      lines.push(`,${stmt.periods.join(",")}`);
+      for (const it of stmt.items) lines.push(`${esc(it.label)},${it.values.map(esc).join(",")}`);
+    };
+    if (company.trend?.annual) pushStmt("Track record annual", trendToStmt(company.trend.annual));
+    if (company.trend?.quarterly) pushStmt("Track record quarterly", trendToStmt(company.trend.quarterly));
+    for (const [key, title] of Object.entries(STMT_TITLES)) {
+      if (company.statements[key]) pushStmt(title, company.statements[key]);
+    }
+    if (company.shareholding && company.shareholding.dates.length > 0) {
+      pushStmt("Shareholding pattern", {
+        periods: company.shareholding.dates,
+        items: [
+          { label: "Promoters %", values: company.shareholding.promoter },
+          { label: "Public %", values: company.shareholding.public },
+          { label: "Employee trusts %", values: company.shareholding.employee },
+        ],
+      });
+    }
+    const bom = String.fromCharCode(0xfeff);
+    const blob = new Blob([bom + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${symbol}_rscreener.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
   if (!symbol) return <p className="text-slate-500 p-6">No company selected. <Link className="text-emerald-700 underline" href="/">Back to screener</Link></p>;
   if (error) return <p className="text-red-600 p-6">{error} — <Link className="text-emerald-700 underline" href="/">back to screener</Link></p>;
   if (!company) return <p className="text-slate-400 p-6">Loading {symbol}…</p>;
@@ -196,16 +241,29 @@ function CompanyView() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">{String(s.name ?? symbol)} <span className="text-emerald-700">({symbol})</span></h1>
-          <p className="text-sm text-slate-500">{String(s.sector ?? "—")} · {String(s.industry ?? "—")}</p>
+          <p className="text-sm text-slate-500">
+            {s.sector ? (
+              <Link href={`/sectors?s=${encodeURIComponent(String(s.sector))}`} className="hover:text-emerald-700 hover:underline">{String(s.sector)}</Link>
+            ) : "—"}
+            {" · "}{String(s.industry ?? "—")}
+          </p>
         </div>
-        <button
-          onClick={() => { toggleWatch(symbol); setWatched(!watched); }}
-          aria-label={watched ? "remove from watchlist" : "add to watchlist"}
-          title={watched ? "On your watchlist — tap to remove" : "Add to watchlist"}
-          className={`text-2xl leading-none ${watched ? "text-emerald-500" : "text-slate-300 hover:text-emerald-400"}`}
-        >
-          ★
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={exportCompanyCsv}
+            className="text-xs font-semibold bg-slate-100 hover:bg-emerald-50 border border-slate-200 rounded-lg px-3 py-1.5"
+          >
+            Export CSV
+          </button>
+          <button
+            onClick={() => { toggleWatch(symbol); setWatched(!watched); }}
+            aria-label={watched ? "remove from watchlist" : "add to watchlist"}
+            title={watched ? "On your watchlist — tap to remove" : "Add to watchlist"}
+            className={`text-2xl leading-none ${watched ? "text-emerald-500" : "text-slate-300 hover:text-emerald-400"}`}
+          >
+            ★
+          </button>
+        </div>
       </div>
 
       <section className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -248,6 +306,20 @@ function CompanyView() {
 
       {Object.entries(STMT_TITLES).map(([key, title]) =>
         company.statements[key] ? <StatementTable key={key} title={title} stmt={company.statements[key]} /> : null
+      )}
+
+      {company.shareholding && company.shareholding.dates.length > 0 && (
+        <StatementTable
+          title="Shareholding pattern"
+          stmt={{
+            periods: company.shareholding.dates,
+            items: [
+              { label: "Promoters %", values: company.shareholding.promoter },
+              { label: "Public %", values: company.shareholding.public },
+              { label: "Employee trusts %", values: company.shareholding.employee },
+            ],
+          }}
+        />
       )}
 
       {peers.length > 0 && (

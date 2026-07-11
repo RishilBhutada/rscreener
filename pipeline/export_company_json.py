@@ -82,6 +82,17 @@ def main() -> None:
         r[0] for r in con.execute("SELECT DISTINCT symbol FROM statements").fetchall()
     }
     trends = build_trends(con)
+    shp_by_symbol: dict[str, dict] = {}
+    if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='shareholding'").fetchone():
+        shp = pd.read_sql("SELECT symbol, date, promoter, public, employee_trusts FROM shareholding ORDER BY date", con)
+        for sym_key, grp in shp.groupby("symbol"):
+            tail = grp.tail(12)
+            shp_by_symbol[sym_key] = {
+                "dates": tail["date"].tolist(),
+                "promoter": [None if pd.isna(v) else float(v) for v in tail["promoter"]],
+                "public": [None if pd.isna(v) else float(v) for v in tail["public"]],
+                "employee": [None if pd.isna(v) else float(v) for v in tail["employee_trusts"]],
+            }
     has_docs_table = con.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='documents'"
     ).fetchone()
@@ -116,6 +127,7 @@ def main() -> None:
             "statements": {},
             "documents": {"annual_reports": docs_by_symbol.get(sym, [])},
             "trend": trends.get(sym, {}),
+            "shareholding": shp_by_symbol.get(sym),
         }
         if sym in has_statements:
             stmts = pd.read_sql("SELECT * FROM statements WHERE symbol = ?", con, params=(sym,))

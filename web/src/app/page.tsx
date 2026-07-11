@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { compile, QueryError, Row } from "@/lib/query";
+import { compile, isValidRatioName, QueryError, Row } from "@/lib/query";
 import { loadWatchlist, toggleWatch } from "@/lib/store";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -15,6 +15,7 @@ type Data = {
 };
 
 type Screen = { name: string; query: string };
+type Ratio = { name: string; formula: string };
 
 const EXAMPLES = [
   "pe < 15 and roe > 20",
@@ -59,6 +60,11 @@ export default function Home() {
   const [screens, setScreens] = useState<Screen[]>([]);
   const [screenName, setScreenName] = useState("");
   const [watch, setWatch] = useState<string[]>([]);
+  const [searchQ, setSearchQ] = useState("");
+  const [ratios, setRatios] = useState<Ratio[]>([]);
+  const [ratioName, setRatioName] = useState("");
+  const [ratioFormula, setRatioFormula] = useState("");
+  const [ratioError, setRatioError] = useState("");
 
   useEffect(() => {
     fetch(`${BASE}/data.json`)
@@ -68,12 +74,20 @@ export default function Home() {
     try {
       setScreens(JSON.parse(localStorage.getItem("rscreener_screens") ?? "[]"));
     } catch { /* corrupted storage - start fresh */ }
+    try {
+      setRatios(JSON.parse(localStorage.getItem("rscreener_ratios") ?? "[]"));
+    } catch { /* corrupted storage - start fresh */ }
     setWatch(loadWatchlist());
   }, []);
 
+  const ratiosMap = useMemo(
+    () => Object.fromEntries(ratios.map((r) => [r.name, r.formula])),
+    [ratios]
+  );
+
   const runQuery = (src: string, rows: Row[]) => {
     try {
-      const { run, fields } = compile(src);
+      const { run, fields } = compile(src, ratiosMap);
       const matches: Row[] = [];
       let skipped = 0;
       for (const row of rows) {
@@ -92,7 +106,51 @@ export default function Home() {
   useEffect(() => {
     if (data) runQuery(query, data.rows);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
+  }, [data, ratiosMap]);
+
+  const searchMatches = useMemo(() => {
+    const q = searchQ.trim().toLowerCase();
+    if (!data || q.length < 2) return [];
+    const score = (r: Row): number => {
+      const sym = String(r.symbol).toLowerCase();
+      const name = String(r.name ?? "").toLowerCase();
+      if (sym.startsWith(q)) return 0;
+      if (name.startsWith(q)) return 1;
+      if (name.includes(` ${q}`)) return 2;
+      if (sym.includes(q) || name.includes(q)) return 3;
+      return 9;
+    };
+    return data.rows
+      .map((r) => [score(r), r] as const)
+      .filter(([sc]) => sc < 9)
+      .sort((a, b) => a[0] - b[0] || (((b[1].mcap as number) ?? 0) - ((a[1].mcap as number) ?? 0)))
+      .slice(0, 8)
+      .map(([, r]) => r);
+  }, [data, searchQ]);
+
+  const addRatio = () => {
+    const name = ratioName.trim().toLowerCase();
+    const formula = ratioFormula.trim();
+    const nameErr = isValidRatioName(name);
+    if (nameErr) { setRatioError(nameErr); return; }
+    if (!formula) { setRatioError("formula is empty"); return; }
+    try {
+      compile(`${name} > 0`, { ...ratiosMap, [name]: formula });
+    } catch (e) {
+      setRatioError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    const next = [...ratios.filter((r) => r.name !== name), { name, formula }];
+    setRatios(next);
+    localStorage.setItem("rscreener_ratios", JSON.stringify(next));
+    setRatioName(""); setRatioFormula(""); setRatioError("");
+  };
+
+  const deleteRatio = (name: string) => {
+    const next = ratios.filter((r) => r.name !== name);
+    setRatios(next);
+    localStorage.setItem("rscreener_ratios", JSON.stringify(next));
+  };
 
   const saveScreen = () => {
     if (!screenName.trim()) return;
@@ -152,16 +210,39 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="bg-white border-b border-slate-200">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-baseline justify-between flex-wrap gap-2">
-          <div>
-            <h1 className="text-2xl font-bold text-emerald-700">Rscreener</h1>
-            <p className="text-sm text-slate-500">NSE fundamentals screener — personal, zero-cost</p>
+        <div className="max-w-6xl mx-auto px-4 py-4 space-y-3">
+          <div className="flex items-baseline justify-between flex-wrap gap-2">
+            <div className="flex items-baseline gap-4 flex-wrap">
+              <h1 className="text-2xl font-bold text-emerald-700">Rscreener</h1>
+              <nav className="text-sm font-semibold text-emerald-700 flex gap-4">
+                <Link href="/calendar" className="hover:underline">Results calendar</Link>
+                <Link href="/sectors" className="hover:underline">Sectors</Link>
+              </nav>
+            </div>
+            {data && (
+              <p className="text-xs text-slate-400">
+                {data.covered.toLocaleString("en-IN")} of {data.universe_size.toLocaleString("en-IN")} NSE companies · data as of {data.generated_at}
+              </p>
+            )}
           </div>
-          {data && (
-            <p className="text-xs text-slate-400">
-              {data.covered.toLocaleString("en-IN")} of {data.universe_size.toLocaleString("en-IN")} NSE companies covered · data as of {data.generated_at}
-            </p>
-          )}
+          <div className="relative w-full sm:w-96">
+            <input
+              value={searchQ}
+              onChange={(e) => setSearchQ(e.target.value)}
+              placeholder="Search a company… (e.g. Infosys or INFY)"
+              className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+            {searchMatches.length > 0 && (
+              <div className="absolute z-20 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-80 overflow-auto">
+                {searchMatches.map((m) => (
+                  <Link key={String(m.symbol)} href={`/company?s=${m.symbol}`} className="block px-3 py-2 hover:bg-emerald-50 text-sm">
+                    <span className="font-semibold text-emerald-700">{String(m.symbol)}</span>
+                    <span className="text-slate-500"> — {String(m.name ?? "")}</span>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -221,6 +302,40 @@ export default function Home() {
                   {s.name}
                 </button>
                 <button onClick={() => deleteScreen(s.name)} aria-label={`delete ${s.name}`} className="text-emerald-400 hover:text-red-500">×</button>
+              </span>
+            ))}
+          </div>
+        </section>
+
+        <section className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-slate-700">Custom ratios</span>
+            <input
+              value={ratioName}
+              onChange={(e) => setRatioName(e.target.value)}
+              placeholder="name e.g. earnings_yield"
+              className="text-sm font-mono border border-slate-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+            <span className="text-slate-400">=</span>
+            <input
+              value={ratioFormula}
+              onChange={(e) => setRatioFormula(e.target.value)}
+              placeholder="formula e.g. 100 / pe"
+              className="flex-1 min-w-40 text-sm font-mono border border-slate-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+            <button onClick={addRatio} className="text-sm bg-slate-800 hover:bg-slate-900 text-white px-4 py-1.5 rounded-lg">Add</button>
+          </div>
+          {ratioError && <p className="text-sm text-red-600">{ratioError}</p>}
+          <div className="flex gap-2 flex-wrap">
+            {ratios.length === 0 && (
+              <span className="text-xs text-slate-400">
+                define your own fields for queries — e.g. <code className="font-mono">earnings_yield = 100 / pe</code>, then screen <code className="font-mono">earnings_yield &gt; 6</code>
+              </span>
+            )}
+            {ratios.map((r) => (
+              <span key={r.name} className="inline-flex items-center gap-1 text-xs font-mono bg-slate-100 border border-slate-200 rounded-full px-3 py-1">
+                <span title={r.formula}><strong>{r.name}</strong> = {r.formula}</span>
+                <button onClick={() => deleteRatio(r.name)} aria-label={`delete ratio ${r.name}`} className="text-slate-400 hover:text-red-500">×</button>
               </span>
             ))}
           </div>
@@ -303,6 +418,10 @@ export default function Home() {
                           {c === "symbol" ? (
                             <Link href={`/company?s=${r.symbol}`} className="font-semibold text-emerald-700 hover:underline">
                               {String(r.symbol)}
+                            </Link>
+                          ) : c === "sector" && r.sector ? (
+                            <Link href={`/sectors?s=${encodeURIComponent(String(r.sector))}`} className="hover:text-emerald-700 hover:underline">
+                              {String(r.sector)}
                             </Link>
                           ) : (
                             fmt(c, r[c] ?? null)
