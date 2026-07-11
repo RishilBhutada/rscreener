@@ -42,6 +42,8 @@ jobs:
         run: python pipeline/fetch_events.py
       - name: Refresh shareholding patterns (weekly rotation)
         run: python pipeline/fetch_shareholding.py --symbols @data/top500.txt --max-age-hours 156 --sleep 0.4
+      - name: Refresh price-chart history (weekly rotation)
+        run: python pipeline/fetch_prices.py --symbols @data/top500.txt --max-age-hours 156 --sleep 0.5
       - run: python pipeline/export_json.py
       - run: python pipeline/export_company_json.py
       - name: Upload the updated DB back to the data-db release

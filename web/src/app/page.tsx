@@ -18,10 +18,10 @@ type Screen = { name: string; query: string };
 type Ratio = { name: string; formula: string };
 
 const EXAMPLES = [
+  "roce > 20 and pe < 25",
   "pe < 15 and roe > 20",
   "mcap > 20000 and div_yield > 3",
-  "pb < 2 and rev_growth > 15",
-  "pe < 25 and net_margin > 15 and mcap > 5000",
+  "promoter_holding > 60 and sales_cagr_5y > 12",
 ];
 
 const BASE_COLS = ["symbol", "name", "sector", "price", "mcap", "pe", "pb", "roe", "div_yield"];
@@ -37,6 +37,10 @@ const COL_LABELS: Record<string, string> = {
   wk52_low: "52w Low", beta: "Beta",
   sales_cagr_5y: "Sales 5y %", sales_cagr_10y: "Sales 10y %",
   profit_cagr_5y: "Profit 5y %", profit_cagr_10y: "Profit 10y %",
+  roce: "ROCE %", ev_ebitda: "EV/EBITDA", ps: "P/S", peg: "PEG",
+  int_coverage: "Int Cover", div_payout: "Payout %",
+  debtor_days: "Debtor Days", inventory_days: "Inv Days",
+  promoter_holding: "Promoter %",
 };
 
 function fmt(key: string, v: string | number | null): string {

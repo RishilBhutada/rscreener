@@ -82,6 +82,13 @@ def main() -> None:
         r[0] for r in con.execute("SELECT DISTINCT symbol FROM statements").fetchall()
     }
     trends = build_trends(con)
+    prices_by_symbol: dict[str, dict] = {}
+    if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='prices'").fetchone():
+        pr = pd.read_sql("SELECT symbol, freq, date, close FROM prices ORDER BY date", con)
+        for (sym_key, freq), grp in pr.groupby(["symbol", "freq"]):
+            prices_by_symbol.setdefault(sym_key, {})[freq] = [
+                [d, c] for d, c in zip(grp["date"], grp["close"])
+            ]
     shp_by_symbol: dict[str, dict] = {}
     if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='shareholding'").fetchone():
         shp = pd.read_sql("SELECT symbol, date, promoter, public, employee_trusts FROM shareholding ORDER BY date", con)
@@ -128,6 +135,7 @@ def main() -> None:
             "documents": {"annual_reports": docs_by_symbol.get(sym, [])},
             "trend": trends.get(sym, {}),
             "shareholding": shp_by_symbol.get(sym),
+            "prices": prices_by_symbol.get(sym),
         }
         if sym in has_statements:
             stmts = pd.read_sql("SELECT * FROM statements WHERE symbol = ?", con, params=(sym,))

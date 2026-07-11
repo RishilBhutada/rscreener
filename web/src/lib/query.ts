@@ -28,6 +28,12 @@ const ALIASES: Record<string, string> = {
   sales_growth_10y: "sales_cagr_10y",
   profit_growth_5y: "profit_cagr_5y",
   profit_growth_10y: "profit_cagr_10y",
+  price_to_sales: "ps",
+  evebitda: "ev_ebitda",
+  ev_by_ebitda: "ev_ebitda",
+  interest_coverage: "int_coverage",
+  promoter: "promoter_holding",
+  payout: "div_payout",
 };
 
 export const NUMERIC_FIELDS = [
@@ -36,6 +42,8 @@ export const NUMERIC_FIELDS = [
   "earn_growth", "revenue", "net_income", "total_debt", "total_cash",
   "free_cashflow", "wk52_high", "wk52_low", "beta",
   "sales_cagr_5y", "sales_cagr_10y", "profit_cagr_5y", "profit_cagr_10y",
+  "roce", "ev_ebitda", "ps", "peg", "int_coverage", "div_payout",
+  "debtor_days", "inventory_days", "promoter_holding",
 ];
 
 export function isValidRatioName(name: string): string | null {

@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from ratios_lib import compute_ratios, latest_annual_items, latest_promoter
 from trend_lib import build_trends, cagr_pct
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,11 +35,23 @@ RENAME = {
 
 
 def main() -> None:
-    con = sqlite3.connect(DB)
+    con = sqlite3.connect(DB, timeout=180)
     df = pd.read_sql("SELECT * FROM fundamentals", con)
     n_universe = pd.read_sql("SELECT COUNT(*) n FROM universe", con)["n"][0]
     trends = build_trends(con)
+    items_by_symbol = latest_annual_items(con)
+    promoter_by_symbol = latest_promoter(con)
     con.close()
+
+    # computed ratios need RAW rupee values - run before any unit conversion
+    computed = [
+        compute_ratios(row, items_by_symbol.get(row["symbol"], {}))
+        for row in df.to_dict(orient="records")
+    ]
+    comp_df = pd.DataFrame(computed)
+    for col in comp_df.columns:
+        df[col] = comp_df[col].values
+    df["promoter_holding"] = df["symbol"].map(promoter_by_symbol)
 
     def growth(sym: str, item: str, years: int):
         t = trends.get(sym, {}).get("annual")
@@ -63,6 +76,8 @@ def main() -> None:
         "gross_margin", "rev_growth", "earn_growth", "revenue", "net_income",
         "total_debt", "total_cash", "free_cashflow", "wk52_high", "wk52_low", "beta",
         "sales_cagr_5y", "sales_cagr_10y", "profit_cagr_5y", "profit_cagr_10y",
+        "roce", "ev_ebitda", "ps", "peg", "int_coverage", "div_payout",
+        "debtor_days", "inventory_days", "promoter_holding",
     ]
     df = df[keep]
     df = df.astype(object).where(pd.notna(df), None)

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Row } from "@/lib/query";
@@ -23,6 +23,7 @@ type Shareholding = {
   public: (number | null)[];
   employee: (number | null)[];
 };
+type Prices = { monthly?: [string, number][]; weekly?: [string, number][] };
 type Company = {
   generated_at: string;
   snapshot: Row;
@@ -30,7 +31,60 @@ type Company = {
   documents?: { annual_reports?: AnnualReport[] };
   trend?: { annual?: Trend; quarterly?: Trend };
   shareholding?: Shareholding;
+  prices?: Prices | null;
 };
+
+function PriceChart({ prices, livePrice }: { prices: Prices; livePrice: number | null }) {
+  const [range, setRange] = useState<"1Y" | "5Y" | "10Y">("5Y");
+  const pts = useMemo(() => {
+    let base: [string, number][] =
+      range === "1Y" ? prices.weekly ?? [] : (prices.monthly ?? []).slice(range === "5Y" ? -60 : -120);
+    if (livePrice !== null && base.length > 0) {
+      base = [...base, [new Date().toISOString().slice(0, 10), livePrice]];
+    }
+    return base;
+  }, [prices, range, livePrice]);
+
+  if (pts.length < 2) return null;
+  const W = 640, H = 190, padX = 8, padTop = 24, padBot = 26;
+  const values = pts.map(([, v]) => v);
+  const min = Math.min(...values), max = Math.max(...values);
+  const span = max - min || 1;
+  const x = (i: number) => padX + (i / (pts.length - 1)) * (W - 2 * padX);
+  const y = (v: number) => padTop + (1 - (v - min) / span) * (H - padTop - padBot);
+  const line = pts.map(([, v], i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const change = ((values[values.length - 1] / values[0]) - 1) * 100;
+  const up = change >= 0;
+  const color = up ? "#059669" : "#dc2626";
+  const dateLbl = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { month: "short", year: "2-digit" });
+
+  return (
+    <section className="bg-white rounded-xl border border-slate-200 p-4">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+        <p className="text-sm font-semibold text-slate-700">
+          Price <span className={`font-bold ${up ? "text-emerald-600" : "text-red-600"}`}>{up ? "+" : ""}{change.toFixed(1)}%</span>
+          <span className="font-normal text-slate-400"> over {range}</span>
+        </p>
+        <div className="flex gap-1 text-xs">
+          {(["1Y", "5Y", "10Y"] as const).map((r) => (
+            <button key={r} onClick={() => setRange(r)}
+              className={`rounded-full px-3 py-1 border ${range === r ? "bg-emerald-50 border-emerald-300 text-emerald-800 font-semibold" : "bg-white border-slate-200 text-slate-500"}`}>
+              {r}
+            </button>
+          ))}
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+        <polygon points={`${padX},${y(values[0])} ${line} ${W - padX},${H - padBot} ${padX},${H - padBot}`} fill={color} opacity="0.07" />
+        <polyline points={line} fill="none" stroke={color} strokeWidth="2" />
+        <text x={padX} y={H - 8} fontSize="10" fill="#94a3b8">{dateLbl(pts[0][0])}</text>
+        <text x={W - padX} y={H - 8} fontSize="10" fill="#94a3b8" textAnchor="end">{dateLbl(pts[pts.length - 1][0])}</text>
+        <text x={padX} y={14} fontSize="10" fill="#94a3b8">₹{max.toLocaleString("en-IN")}</text>
+        <text x={padX} y={y(min) - 4} fontSize="10" fill="#94a3b8">₹{min.toLocaleString("en-IN")}</text>
+      </svg>
+    </section>
+  );
+}
 type ScreenData = { rows: Row[] };
 
 function trendToStmt(t: Trend): Stmt {
@@ -274,6 +328,10 @@ function CompanyView() {
           </div>
         ))}
       </section>
+
+      {company.prices && (company.prices.monthly?.length || company.prices.weekly?.length) ? (
+        <PriceChart prices={company.prices} livePrice={(s.price as number) ?? null} />
+      ) : null}
 
       {(company.trend?.annual || (revenue && profit && annual)) && (
         <section className="grid sm:grid-cols-2 gap-4">
