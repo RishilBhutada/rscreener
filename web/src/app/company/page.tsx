@@ -23,8 +23,17 @@ type Shareholding = {
   public: (number | null)[];
   employee: (number | null)[];
 };
-type Prices = { monthly?: [string, number][]; weekly?: [string, number][] };
+type Prices = { monthly?: [string, number][]; weekly?: [string, number][]; daily?: [string, number][] };
 type PeBand = { series: [string, number][]; median_5y: number };
+
+function sma(series: [string, number][], window: number): (number | null)[] {
+  let sum = 0;
+  return series.map(([, v], i) => {
+    sum += v;
+    if (i >= window) sum -= series[i - window][1];
+    return i >= window - 1 ? sum / window : null;
+  });
+}
 type Company = {
   generated_at: string;
   snapshot: Row;
@@ -36,21 +45,48 @@ type Company = {
   pe_band?: PeBand | null;
 };
 
-function PriceChart({ prices, peBand, livePrice }: { prices: Prices; peBand?: PeBand | null; livePrice: number | null }) {
+function PriceChart({ prices, peBand, trendQ, livePrice }: { prices: Prices; peBand?: PeBand | null; trendQ?: Trend | null; livePrice: number | null }) {
   const [range, setRange] = useState<"1Y" | "5Y" | "10Y">("5Y");
-  const [view, setView] = useState<"price" | "pe">("price");
+  const [view, setView] = useState<"price" | "pe" | "sales" | "eps">("price");
+  const [showDma, setShowDma] = useState(false);
+
+  const daily = useMemo(() => prices.daily ?? [], [prices]);
   const pts = useMemo(() => {
     if (view === "pe") {
       const s = peBand?.series ?? [];
       return range === "1Y" ? s.slice(-12) : range === "5Y" ? s.slice(-60) : s;
     }
     let base: [string, number][] =
-      range === "1Y" ? prices.weekly ?? [] : (prices.monthly ?? []).slice(range === "5Y" ? -60 : -120);
+      range === "1Y"
+        ? (daily.length > 50 ? daily.slice(-250) : prices.weekly ?? [])
+        : (prices.monthly ?? []).slice(range === "5Y" ? -60 : -120);
     if (livePrice !== null && base.length > 0) {
       base = [...base, [new Date().toISOString().slice(0, 10), livePrice]];
     }
     return base;
-  }, [prices, peBand, range, view, livePrice]);
+  }, [prices, peBand, range, view, livePrice, daily]);
+
+  const dmaOverlays = useMemo(() => {
+    if (view !== "price" || range !== "1Y" || !showDma || daily.length < 200) return null;
+    const d50 = sma(daily, 50), d200 = sma(daily, 200);
+    const shown = pts.length - (livePrice !== null ? 1 : 0);
+    return {
+      d50: d50.slice(-shown),
+      d200: d200.slice(-shown),
+    };
+  }, [view, range, showDma, daily, pts.length, livePrice]);
+
+  if (view === "sales" || view === "eps") {
+    return (
+      <QuarterChart
+        view={view}
+        setView={setView}
+        trendQ={trendQ ?? null}
+        hasPe={!!peBand}
+        hasSales={!!trendQ}
+      />
+    );
+  }
 
   if (pts.length < 2 && view === "price") return null;
   const W = 640, H = 190, padX = 8, padTop = 24, padBot = 26;
@@ -71,17 +107,8 @@ function PriceChart({ prices, peBand, livePrice }: { prices: Prices; peBand?: Pe
   return (
     <section className="bg-white rounded-xl border border-slate-200 p-4">
       <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
-        <div className="flex items-center gap-3">
-          {peBand && (
-            <div className="flex gap-1 text-xs">
-              {(["price", "pe"] as const).map((v) => (
-                <button key={v} onClick={() => setView(v)}
-                  className={`rounded-full px-3 py-1 border ${view === v ? "bg-slate-800 border-slate-800 text-white font-semibold" : "bg-white border-slate-200 text-slate-500"}`}>
-                  {v === "price" ? "Price" : "P/E"}
-                </button>
-              ))}
-            </div>
-          )}
+        <div className="flex items-center gap-3 flex-wrap">
+          <ChartTabs view={view} setView={setView} hasPe={!!peBand} hasSales={!!trendQ} />
           <p className="text-sm font-semibold text-slate-700">
             {view === "pe" ? (
               <>P/E {values[values.length - 1]?.toFixed(1)} <span className="font-normal text-slate-400">· 5y median {peBand?.median_5y}</span></>
@@ -92,6 +119,12 @@ function PriceChart({ prices, peBand, livePrice }: { prices: Prices; peBand?: Pe
               </>
             )}
           </p>
+          {view === "price" && range === "1Y" && daily.length >= 200 && (
+            <button onClick={() => setShowDma(!showDma)}
+              className={`text-xs rounded-full px-3 py-1 border ${showDma ? "bg-amber-50 border-amber-300 text-amber-800 font-semibold" : "bg-white border-slate-200 text-slate-500"}`}>
+              50/200 DMA
+            </button>
+          )}
         </div>
         <div className="flex gap-1 text-xs">
           {(["1Y", "5Y", "10Y"] as const).map((r) => (
@@ -105,6 +138,13 @@ function PriceChart({ prices, peBand, livePrice }: { prices: Prices; peBand?: Pe
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
         <polygon points={`${padX},${y(values[0])} ${line} ${W - padX},${H - padBot} ${padX},${H - padBot}`} fill={color} opacity="0.07" />
         <polyline points={line} fill="none" stroke={color} strokeWidth="2" />
+        {dmaOverlays && (
+          <g>
+            <polyline points={dmaOverlays.d50.map((v, i) => (v === null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`)).filter(Boolean).join(" ")} fill="none" stroke="#f59e0b" strokeWidth="1.4" />
+            <polyline points={dmaOverlays.d200.map((v, i) => (v === null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`)).filter(Boolean).join(" ")} fill="none" stroke="#6366f1" strokeWidth="1.4" />
+            <text x={W - padX} y={14} fontSize="10" textAnchor="end"><tspan fill="#f59e0b">— 50 DMA</tspan> <tspan fill="#6366f1">— 200 DMA</tspan></text>
+          </g>
+        )}
         {median !== null && (
           <g>
             <line x1={padX} y1={y(median)} x2={W - padX} y2={y(median)} stroke="#64748b" strokeWidth="1" strokeDasharray="6 4" />
@@ -115,6 +155,120 @@ function PriceChart({ prices, peBand, livePrice }: { prices: Prices; peBand?: Pe
         <text x={W - padX} y={H - 8} fontSize="10" fill="#94a3b8" textAnchor="end">{dateLbl(pts[pts.length - 1][0])}</text>
         <text x={padX} y={14} fontSize="10" fill="#94a3b8">{unit}{max.toLocaleString("en-IN")}</text>
         <text x={padX} y={y(min) - 4} fontSize="10" fill="#94a3b8">{unit}{min.toLocaleString("en-IN")}</text>
+      </svg>
+    </section>
+  );
+}
+
+function ChartTabs({ view, setView, hasPe, hasSales }: {
+  view: string; setView: (v: "price" | "pe" | "sales" | "eps") => void; hasPe: boolean; hasSales: boolean;
+}) {
+  const tabs: [string, string][] = [["price", "Price"]];
+  if (hasPe) tabs.push(["pe", "P/E"]);
+  if (hasSales) tabs.push(["sales", "Sales & Margin"], ["eps", "EPS"]);
+  if (tabs.length < 2) return null;
+  return (
+    <div className="flex gap-1 text-xs">
+      {tabs.map(([v, label]) => (
+        <button key={v} onClick={() => setView(v as "price" | "pe" | "sales" | "eps")}
+          className={`rounded-full px-3 py-1 border ${view === v ? "bg-slate-800 border-slate-800 text-white font-semibold" : "bg-white border-slate-200 text-slate-500"}`}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function QuarterChart({ view, setView, trendQ, hasPe, hasSales }: {
+  view: "sales" | "eps"; setView: (v: "price" | "pe" | "sales" | "eps") => void;
+  trendQ: Trend | null; hasPe: boolean; hasSales: boolean;
+}) {
+  if (!trendQ) return null;
+  const n = trendQ.periods.length;
+  const W = 640, H = 200, padX = 14, base = 150;
+  const bw = Math.min(36, (W - 2 * padX) / n - 10);
+  const step = (W - 2 * padX) / n;
+  const qLbl = (iso: string) => {
+    const d = new Date(iso);
+    return `${["Q4", "Q1", "Q2", "Q3"][Math.floor(d.getMonth() / 3)]}'${String(d.getFullYear()).slice(-2)}`;
+  };
+
+  if (view === "eps") {
+    const vals = trendQ.eps.map((v) => v ?? 0);
+    const maxAbs = Math.max(...vals.map(Math.abs), 1);
+    const scale = 110 / maxAbs;
+    return (
+      <section className="bg-white rounded-xl border border-slate-200 p-4">
+        <div className="flex items-center gap-3 mb-1 flex-wrap">
+          <ChartTabs view={view} setView={setView} hasPe={hasPe} hasSales={hasSales} />
+          <p className="text-sm font-semibold text-slate-700">EPS <span className="font-normal text-slate-400">₹ per quarter, as filed</span></p>
+        </div>
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+          <line x1={padX} y1={base} x2={W - padX} y2={base} stroke="#e2e8f0" />
+          {vals.map((v, i) => {
+            const x0 = padX + i * step + (step - bw) / 2;
+            const h = Math.abs(v) * scale;
+            const y0 = v >= 0 ? base - h : base;
+            return (
+              <g key={i}>
+                <rect x={x0} y={y0} width={bw} height={Math.max(h, 1)} rx="2" fill={v >= 0 ? "#0891b2" : "#dc2626"} />
+                {i % 2 === 0 && <text x={x0 + bw / 2} y={H - 24} textAnchor="middle" fontSize="9" fill="#94a3b8">{qLbl(trendQ.periods[i])}</text>}
+                <text x={x0 + bw / 2} y={v >= 0 ? y0 - 4 : base + h + 10} textAnchor="middle" fontSize="8.5" fill="#475569">{v.toFixed(1)}</text>
+              </g>
+            );
+          })}
+        </svg>
+      </section>
+    );
+  }
+
+  const revs = trendQ.revenue.map((v) => v ?? 0);
+  const maxRev = Math.max(...revs, 1);
+  const scale = 110 / maxRev;
+  const margins = trendQ.periods.map((_, i) => {
+    const r = trendQ.revenue[i], p = trendQ.pat[i];
+    return r && p !== null && p !== undefined ? (p / r) * 100 : null;
+  });
+  const mVals = margins.filter((m): m is number => m !== null);
+  const mMin = Math.min(...mVals, 0), mMax = Math.max(...mVals, 1);
+  const mSpan = mMax - mMin || 1;
+  const mY = (m: number) => 30 + (1 - (m - mMin) / mSpan) * 100;
+  const mLine = margins
+    .map((m, i) => (m === null ? null : `${(padX + i * step + step / 2).toFixed(1)},${mY(m).toFixed(1)}`))
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    <section className="bg-white rounded-xl border border-slate-200 p-4">
+      <div className="flex items-center gap-3 mb-1 flex-wrap">
+        <ChartTabs view={view} setView={setView} hasPe={hasPe} hasSales={hasSales} />
+        <p className="text-sm font-semibold text-slate-700">
+          Sales &amp; Margin <span className="font-normal text-slate-400">· <span className="text-emerald-600">bars ₹Cr revenue</span> · <span className="text-violet-600">line PAT margin %</span></span>
+        </p>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+        <line x1={padX} y1={base} x2={W - padX} y2={base} stroke="#e2e8f0" />
+        {revs.map((v, i) => {
+          const x0 = padX + i * step + (step - bw) / 2;
+          const h = v * scale;
+          return (
+            <g key={i}>
+              <rect x={x0} y={base - h} width={bw} height={Math.max(h, 1)} rx="2" fill="#059669" opacity="0.85" />
+              {i % 2 === 0 && <text x={x0 + bw / 2} y={H - 24} textAnchor="middle" fontSize="9" fill="#94a3b8">{qLbl(trendQ.periods[i])}</text>}
+            </g>
+          );
+        })}
+        <polyline points={mLine} fill="none" stroke="#7c3aed" strokeWidth="2" />
+        {margins.map((m, i) =>
+          m === null ? null : (
+            <circle key={i} cx={padX + i * step + step / 2} cy={mY(m)} r="2.5" fill="#7c3aed" />
+          )
+        )}
+        {mVals.length > 0 && (
+          <text x={W - padX} y={mY(margins[margins.length - 1] ?? mVals[mVals.length - 1]) - 6} fontSize="10" fill="#7c3aed" textAnchor="end">
+            {(margins[margins.length - 1] ?? mVals[mVals.length - 1]).toFixed(1)}%
+          </text>
+        )}
       </svg>
     </section>
   );
@@ -364,7 +518,7 @@ function CompanyView() {
       </section>
 
       {company.prices && (company.prices.monthly?.length || company.prices.weekly?.length) ? (
-        <PriceChart prices={company.prices} peBand={company.pe_band} livePrice={(s.price as number) ?? null} />
+        <PriceChart prices={company.prices} peBand={company.pe_band} trendQ={company.trend?.quarterly} livePrice={(s.price as number) ?? null} />
       ) : null}
 
       {(company.trend?.annual || (revenue && profit && annual)) && (

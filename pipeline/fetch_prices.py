@@ -50,6 +50,7 @@ def main() -> None:
     ap.add_argument("--symbols", required=True)
     ap.add_argument("--sleep", type=float, default=0.5)
     ap.add_argument("--max-age-hours", type=float, default=0)
+    ap.add_argument("--refresh", action="store_true", help="re-fetch even if already done")
     args = ap.parse_args()
     raw = (ROOT / args.symbols[1:]).read_text(encoding="utf-8") if args.symbols.startswith("@") else args.symbols
     symbols = [s.strip().upper() for s in raw.split(",") if s.strip()]
@@ -57,7 +58,9 @@ def main() -> None:
     con = sqlite3.connect(DB, timeout=180)
     con.execute("CREATE TABLE IF NOT EXISTS prices (symbol TEXT, freq TEXT, date TEXT, close REAL)")
     con.execute("CREATE TABLE IF NOT EXISTS prices_fetch_log (symbol TEXT PRIMARY KEY, fetched_at TEXT, error TEXT)")
-    if args.max_age_hours > 0:
+    if args.refresh:
+        done: set[str] = set()
+    elif args.max_age_hours > 0:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=args.max_age_hours)).strftime("%Y-%m-%d %H:%M:%S")
         done = {r[0] for r in con.execute("SELECT symbol FROM prices_fetch_log WHERE error IS NULL AND fetched_at >= ?", (cutoff,)).fetchall()}
     else:
@@ -72,17 +75,20 @@ def main() -> None:
         try:
             monthly = series(session, sym, "10y", "1mo")
             weekly = series(session, sym, "1y", "1wk")
-            if not monthly and not weekly:
+            daily = series(session, sym, "2y", "1d")
+            if not monthly and not weekly and not daily:
                 raise ValueError("no price history returned")
             con.execute("DELETE FROM prices WHERE symbol=?", (sym,))
             con.executemany(
                 "INSERT INTO prices VALUES (?,?,?,?)",
-                [(sym, "monthly", d, c) for d, c in monthly] + [(sym, "weekly", d, c) for d, c in weekly],
+                [(sym, "monthly", d, c) for d, c in monthly]
+                + [(sym, "weekly", d, c) for d, c in weekly]
+                + [(sym, "daily", d, c) for d, c in daily],
             )
             con.execute("INSERT OR REPLACE INTO prices_fetch_log VALUES (?,?,?)", (sym, now_utc(), None))
             con.commit()
             ok += 1
-            print(f"[{i}/{len(symbols)}] {sym}: {len(monthly)}m + {len(weekly)}w points")
+            print(f"[{i}/{len(symbols)}] {sym}: {len(monthly)}m + {len(weekly)}w + {len(daily)}d points")
         except Exception as e:  # noqa: BLE001
             err += 1
             con.execute("INSERT OR REPLACE INTO prices_fetch_log VALUES (?,?,?)", (sym, now_utc(), str(e)[:200]))
