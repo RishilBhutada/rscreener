@@ -57,10 +57,13 @@ on the deployed site. "Better than" ideas go at the bottom, locked until parity.
 - [x] Top-500: statements, track records, prices, shareholding, documents
 - [ ] Companies 501–1000 (expansion band running)
 - [ ] Companies 1001–2353 (queued bands)
-- [ ] Pre-2019 as-filed history — SCOPED 12-Jul: old-format ANNUAL filings have NO
-      XBRL on NSE (placeholder links). Routes: (a) 2016-18 New-format files we may
-      have skipped, (b) old-format QUARTERLY XBRLs (Q4 cumulative = annual),
-      (c) BSE results API as fallback
+- [ ] Pre-2019 as-filed history — SCOPED 12-Jul: NSE routes DEAD (annual AND
+      quarterly old-format XBRLs are placeholders). BSE guessed endpoints 404-ish;
+      NEXT: discover real BSE API paths via browser network inspection on
+      bseindia.com's results page, then port the fetcher
+- [ ] QA validators: pipeline consistency checks (price×EPS≈..., series continuity)
+      flagging anomalies to a report — the data-reliability mechanism
+- [ ] APK polish: pull-to-refresh, back-button handling (phone-app parity)
 - [ ] 10-yr balance sheet / cash flow depth
 - [ ] Weekly auto-ingest of newly filed quarters (--newer-than mode)
 
