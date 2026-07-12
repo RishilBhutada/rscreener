@@ -42,6 +42,9 @@ const COL_LABELS: Record<string, string> = {
   debtor_days: "Debtor Days", inventory_days: "Inv Days",
   promoter_holding: "Promoter %",
   median_pe_5y: "Median P/E 5y", avg_npm_5y: "Avg Mgn 5y %",
+  ret_1m: "Ret 1m %", ret_3m: "Ret 3m %", ret_6m: "Ret 6m %",
+  ret_1y: "Ret 1y %", ret_3y: "Ret 3y %", ret_5y: "Ret 5y %",
+  off_52w_high: "Off High %",
 };
 
 function fmt(key: string, v: string | number | null): string {

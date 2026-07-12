@@ -28,20 +28,24 @@ def now_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def series(session: requests.Session, sym: str, rng: str, itv: str) -> list[tuple[str, float]]:
-    """Yahoo chart API directly - yfinance's own session gets rate-limited here."""
+def series(session: requests.Session, sym: str, rng: str, itv: str) -> list[tuple[str, float, float | None]]:
+    """Yahoo chart API directly - yfinance's own session gets rate-limited here.
+    Returns (date, close, volume) tuples."""
     r = session.get(CHART.format(sym=sym, rng=rng, itv=itv), timeout=25)
     r.raise_for_status()
     result = (r.json().get("chart", {}).get("result") or [None])[0]
     if not result:
         return []
     stamps = result.get("timestamp") or []
-    closes = (result.get("indicators", {}).get("quote") or [{}])[0].get("close") or []
+    quote = (result.get("indicators", {}).get("quote") or [{}])[0]
+    closes = quote.get("close") or []
+    volumes = quote.get("volume") or []
     out = []
-    for ts, close in zip(stamps, closes):
+    for i, (ts, close) in enumerate(zip(stamps, closes)):
         if close is None:
             continue
-        out.append((datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d"), round(float(close), 2)))
+        vol = volumes[i] if i < len(volumes) and volumes[i] is not None else None
+        out.append((datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d"), round(float(close), 2), vol))
     return out
 
 
@@ -80,10 +84,10 @@ def main() -> None:
                 raise ValueError("no price history returned")
             con.execute("DELETE FROM prices WHERE symbol=?", (sym,))
             con.executemany(
-                "INSERT INTO prices VALUES (?,?,?,?)",
-                [(sym, "monthly", d, c) for d, c in monthly]
-                + [(sym, "weekly", d, c) for d, c in weekly]
-                + [(sym, "daily", d, c) for d, c in daily],
+                "INSERT INTO prices VALUES (?,?,?,?,?)",
+                [(sym, "monthly", d, c, v) for d, c, v in monthly]
+                + [(sym, "weekly", d, c, v) for d, c, v in weekly]
+                + [(sym, "daily", d, c, v) for d, c, v in daily],
             )
             con.execute("INSERT OR REPLACE INTO prices_fetch_log VALUES (?,?,?)", (sym, now_utc(), None))
             con.commit()

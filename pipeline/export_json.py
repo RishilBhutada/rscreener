@@ -33,6 +33,25 @@ RENAME = {
     "earnings_growth": "earn_growth",
 }
 
+RETURN_ANCHORS = {"ret_1m": 1, "ret_3m": 3, "ret_6m": 6, "ret_1y": 12, "ret_3y": 36, "ret_5y": 60}
+
+
+def price_returns(con: sqlite3.Connection) -> dict[str, dict]:
+    """Trailing returns (%) per symbol from monthly closes (latest point ~= live)."""
+    if not con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='prices'").fetchone():
+        return {}
+    px = pd.read_sql("SELECT symbol, date, close FROM prices WHERE freq='monthly' ORDER BY date", con)
+    out: dict[str, dict] = {}
+    for sym, g in px.groupby("symbol"):
+        closes = list(g["close"])
+        d = {}
+        for key, n in RETURN_ANCHORS.items():
+            if len(closes) > n and closes[-1 - n]:
+                d[key] = round((closes[-1] / closes[-1 - n] - 1) * 100, 1)
+        if d:
+            out[sym] = d
+    return out
+
 
 def main() -> None:
     con = sqlite3.connect(DB, timeout=180)
@@ -42,6 +61,7 @@ def main() -> None:
     items_by_symbol = latest_annual_items(con)
     promoter_by_symbol = latest_promoter(con)
     pe_by_symbol = pe_series(con)
+    returns_by_symbol = price_returns(con)
     con.close()
 
     # computed ratios need RAW rupee values - run before any unit conversion
@@ -55,6 +75,12 @@ def main() -> None:
     df["promoter_holding"] = df["symbol"].map(promoter_by_symbol)
     df["median_pe_5y"] = df["symbol"].map(lambda s: pe_by_symbol.get(s, {}).get("median_5y"))
     df["avg_npm_5y"] = df["symbol"].map(lambda s: avg_npm_5y(trends.get(s, {}).get("annual")))
+    for key in ("ret_1m", "ret_3m", "ret_6m", "ret_1y", "ret_3y", "ret_5y"):
+        df[key] = df["symbol"].map(lambda s, k=key: returns_by_symbol.get(s, {}).get(k))
+    df["off_52w_high"] = [
+        round((p / h - 1) * 100, 1) if p and h else None
+        for p, h in zip(df["price"], df["wk52_high"])
+    ]
 
     def growth(sym: str, item: str, years: int):
         t = trends.get(sym, {}).get("annual")
@@ -82,6 +108,7 @@ def main() -> None:
         "roce", "ev_ebitda", "ps", "peg", "int_coverage", "div_payout",
         "debtor_days", "inventory_days", "promoter_holding",
         "median_pe_5y", "avg_npm_5y",
+        "ret_1m", "ret_3m", "ret_6m", "ret_1y", "ret_3y", "ret_5y", "off_52w_high",
     ]
     df = df[keep]
     df = df.astype(object).where(pd.notna(df), None)
