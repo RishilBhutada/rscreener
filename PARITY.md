@@ -11,6 +11,7 @@ on the deployed site. "Better than" ideas go at the bottom, locked until parity.
 - [x] Saved screens (device)
 - [x] ~40 built-in fields incl. ROCE, EV/EBITDA, PEG, promoter holding
 - [x] Historical fields: sales/profit CAGR 5y/10y, median P/E 5y, avg margin 5y
+- [x] Returns fields: ret_1m/3m/6m/1y/3y/5y + off_52w_high (936 cos, grows with bands)
 - [ ] Historical-average fields batch 2: avg ROE 5y, avg ROCE 5y (needs equity/capital history)
 - [ ] Screen result count parity spot-check vs screener.in on 10 classic queries
 
@@ -56,7 +57,10 @@ on the deployed site. "Better than" ideas go at the bottom, locked until parity.
 - [x] Top-500: statements, track records, prices, shareholding, documents
 - [ ] Companies 501–1000 (expansion band running)
 - [ ] Companies 1001–2353 (queued bands)
-- [ ] Pre-2019 as-filed history (old XBRL taxonomy parser)
+- [ ] Pre-2019 as-filed history — SCOPED 12-Jul: old-format ANNUAL filings have NO
+      XBRL on NSE (placeholder links). Routes: (a) 2016-18 New-format files we may
+      have skipped, (b) old-format QUARTERLY XBRLs (Q4 cumulative = annual),
+      (c) BSE results API as fallback
 - [ ] 10-yr balance sheet / cash flow depth
 - [ ] Weekly auto-ingest of newly filed quarters (--newer-than mode)
 
