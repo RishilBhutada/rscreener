@@ -10,6 +10,7 @@ const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 type Stmt = { periods: string[]; items: { label: string; values: (number | null)[] }[] };
 type AnnualReport = { from: string; to: string; url: string };
+type AnnDoc = { date: string; title: string; url: string };
 type Trend = {
   periods: string[];
   revenue: (number | null)[];
@@ -38,7 +39,7 @@ type Company = {
   generated_at: string;
   snapshot: Row;
   statements: Record<string, Stmt>;
-  documents?: { annual_reports?: AnnualReport[] };
+  documents?: { annual_reports?: AnnualReport[]; concalls?: AnnDoc[]; ratings?: AnnDoc[] };
   trend?: { annual?: Trend; quarterly?: Trend };
   shareholding?: Shareholding;
   prices?: Prices | null;
@@ -614,6 +615,34 @@ function CompanyView() {
                 </a>
               ))}
             </div>
+          </div>
+        )}
+        {(company.documents?.concalls?.length ?? 0) > 0 && (
+          <div>
+            <p className="text-xs text-slate-400 mb-1.5">Concalls, transcripts &amp; investor meets (newest first)</p>
+            <ul className="space-y-1">
+              {company.documents!.concalls!.slice(0, 8).map((d) => (
+                <li key={d.url} className="text-sm truncate">
+                  <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-emerald-700 hover:underline">
+                    <span className="text-slate-400 font-mono text-xs mr-2">{d.date}</span>{d.title || "document"}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {(company.documents?.ratings?.length ?? 0) > 0 && (
+          <div>
+            <p className="text-xs text-slate-400 mb-1.5">Credit-rating updates</p>
+            <ul className="space-y-1">
+              {company.documents!.ratings!.slice(0, 5).map((d) => (
+                <li key={d.url} className="text-sm truncate">
+                  <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-emerald-700 hover:underline">
+                    <span className="text-slate-400 font-mono text-xs mr-2">{d.date}</span>{d.title || "rating document"}
+                  </a>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
         <div className="flex gap-4 flex-wrap text-sm">

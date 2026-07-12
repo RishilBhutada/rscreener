@@ -23,8 +23,8 @@ on the deployed site. "Better than" ideas go at the bottom, locked until parity.
 - [x] Shareholding pattern (promoter / public / employee trusts)
 - [ ] Shareholding: FII / DII split (SHP XBRL parsing)
 - [x] Documents: annual report PDFs (15+ yrs on big caps), NSE filings link, cross-check link
-- [ ] Concall transcripts list per company
-- [ ] Credit ratings list per company
+- [x] Concall transcripts / investor-meet documents listed per company (newest 15)
+- [x] Credit-rating updates listed per company
 - [x] Private notes (device-only)
 - [x] Per-company CSV export
 - [ ] Per-company XLSX export (theirs is .xlsx with a template)

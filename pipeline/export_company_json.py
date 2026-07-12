@@ -101,6 +101,14 @@ def main() -> None:
                 "public": [None if pd.isna(v) else float(v) for v in tail["public"]],
                 "employee": [None if pd.isna(v) else float(v) for v in tail["employee_trusts"]],
             }
+    anndocs_by_symbol: dict[str, dict] = {}
+    if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='announcement_docs'").fetchone():
+        ad = pd.read_sql("SELECT symbol, doc_type, date, title, url FROM announcement_docs ORDER BY date DESC", con)
+        for (sym_key, typ), grp in ad.groupby(["symbol", "doc_type"]):
+            anndocs_by_symbol.setdefault(sym_key, {})[typ] = [
+                {"date": d, "title": t, "url": u}
+                for d, t, u in zip(grp["date"], grp["title"], grp["url"])
+            ]
     has_docs_table = con.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='documents'"
     ).fetchone()
@@ -133,7 +141,11 @@ def main() -> None:
             "generated_at": generated,
             "snapshot": snap.to_dict(),
             "statements": {},
-            "documents": {"annual_reports": docs_by_symbol.get(sym, [])},
+            "documents": {
+                "annual_reports": docs_by_symbol.get(sym, []),
+                "concalls": anndocs_by_symbol.get(sym, {}).get("concall", []),
+                "ratings": anndocs_by_symbol.get(sym, {}).get("rating", []),
+            },
             "trend": trends.get(sym, {}),
             "shareholding": shp_by_symbol.get(sym),
             "prices": prices_by_symbol.get(sym),
