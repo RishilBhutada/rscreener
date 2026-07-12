@@ -40,45 +40,45 @@ export default function CalendarPage() {
   }, [cal, resultsOnly, watchOnly, watch]);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="bg-white border-b border-slate-200">
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
+      <header className="bg-[var(--card)] border-b border-[var(--line)]">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center gap-4">
-          <Link href="/" className="text-sm text-emerald-700 font-semibold hover:underline">← Screener</Link>
-          <span className="text-2xl font-bold text-emerald-700">Rscreener</span>
+          <Link href="/" className="text-sm text-[var(--accent-ink)] font-semibold hover:underline">← Screener</Link>
+          <span className="text-2xl font-bold text-[var(--accent-ink)]">Rscreener</span>
         </div>
       </header>
       <main className="max-w-6xl mx-auto px-4 py-6 space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
-          <h1 className="text-lg font-bold text-slate-800">Upcoming board meetings</h1>
+          <h1 className="text-lg font-bold text-[var(--ink)]">Upcoming board meetings</h1>
           <div className="flex gap-2 text-xs">
             <button onClick={() => setResultsOnly(!resultsOnly)}
-              className={`rounded-full px-3 py-1 border ${resultsOnly ? "bg-emerald-50 border-emerald-300 text-emerald-800 font-semibold" : "bg-white border-slate-200 text-slate-500"}`}>
+              className={`rounded-full px-3 py-1 border ${resultsOnly ? "bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
               Results only
             </button>
             <button onClick={() => setWatchOnly(!watchOnly)}
-              className={`rounded-full px-3 py-1 border ${watchOnly ? "bg-emerald-50 border-emerald-300 text-emerald-800 font-semibold" : "bg-white border-slate-200 text-slate-500"}`}>
+              className={`rounded-full px-3 py-1 border ${watchOnly ? "bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
               ★ My watchlist
             </button>
           </div>
         </div>
-        {error && <p className="text-red-600 text-sm">{error} — run the pipeline&apos;s fetch_events step first.</p>}
-        {!cal && !error && <p className="text-slate-400 text-sm">Loading…</p>}
-        {cal && grouped.length === 0 && <p className="text-slate-400 text-sm">Nothing upcoming under the current filters.</p>}
+        {error && <p className="text-[var(--neg)] text-sm">{error} — run the pipeline&apos;s fetch_events step first.</p>}
+        {!cal && !error && <p className="text-[var(--ink3)] text-sm">Loading…</p>}
+        {cal && grouped.length === 0 && <p className="text-[var(--ink3)] text-sm">Nothing upcoming under the current filters.</p>}
         {grouped.map(([date, evs]) => (
-          <section key={date} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <h2 className="px-4 py-2.5 text-sm font-bold text-slate-800 border-b border-slate-100">{dateLabel(date)}</h2>
+          <section key={date} className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
+            <h2 className="px-4 py-2.5 text-sm font-bold text-[var(--ink)] border-b border-[var(--line)]">{dateLabel(date)}</h2>
             <ul>
               {evs.map((e, i) => (
-                <li key={`${e.symbol}-${i}`} className="px-4 py-2.5 border-t border-slate-50 flex gap-3 items-baseline flex-wrap">
-                  <Link href={`/company?s=${e.symbol}`} className="font-semibold text-emerald-700 hover:underline shrink-0">{e.symbol}</Link>
-                  <span className="text-xs font-semibold text-slate-500 shrink-0">{e.purpose}</span>
-                  <span className="text-xs text-slate-400 truncate max-w-full">{e.desc}</span>
+                <li key={`${e.symbol}-${i}`} className="px-4 py-2.5 border-t border-[var(--line)] flex gap-3 items-baseline flex-wrap">
+                  <Link href={`/company?s=${e.symbol}`} className="font-semibold text-[var(--accent-ink)] hover:underline shrink-0">{e.symbol}</Link>
+                  <span className="text-xs font-semibold text-[var(--ink3)] shrink-0">{e.purpose}</span>
+                  <span className="text-xs text-[var(--ink3)] truncate max-w-full">{e.desc}</span>
                 </li>
               ))}
             </ul>
           </section>
         ))}
-        {cal && <p className="text-xs text-slate-400">Source: NSE event calendar · as of {cal.generated_at} · refreshed nightly</p>}
+        {cal && <p className="text-xs text-[var(--ink3)]">Source: NSE event calendar · as of {cal.generated_at} · refreshed nightly</p>}
       </main>
     </div>
   );

@@ -48,17 +48,17 @@ function SectorsView() {
       .sort((a, b) => (((b.mcap as number) ?? 0) - ((a.mcap as number) ?? 0)));
   }, [data, sector]);
 
-  if (error) return <p className="text-red-600">{error}</p>;
-  if (!data) return <p className="text-slate-400">Loading…</p>;
+  if (error) return <p className="text-[var(--neg)]">{error}</p>;
+  if (!data) return <p className="text-[var(--ink3)]">Loading…</p>;
 
   if (!sector) {
     return (
-      <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <h1 className="px-4 py-3 text-sm font-bold text-slate-800 border-b border-slate-100">Sectors</h1>
+      <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
+        <h1 className="px-4 py-3 text-sm font-bold text-[var(--ink)] border-b border-[var(--line)]">Sectors</h1>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-slate-50 text-xs text-slate-500 uppercase text-left">
+              <tr className="bg-[var(--card2)] text-xs text-[var(--ink3)] uppercase text-left">
                 <th className="px-3 py-2">Sector</th>
                 <th className="px-3 py-2 text-right">Companies</th>
                 <th className="px-3 py-2 text-right">Total MCap ₹Cr</th>
@@ -66,9 +66,9 @@ function SectorsView() {
             </thead>
             <tbody>
               {sectors.map(([name, agg]) => (
-                <tr key={name} className="border-t border-slate-100 hover:bg-emerald-50/40">
+                <tr key={name} className="border-t border-[var(--line)] hover:bg-[var(--accent-soft)]">
                   <td className="px-3 py-2">
-                    <Link href={`/sectors?s=${encodeURIComponent(name)}`} className="font-semibold text-emerald-700 hover:underline">{name}</Link>
+                    <Link href={`/sectors?s=${encodeURIComponent(name)}`} className="font-semibold text-[var(--accent-ink)] hover:underline">{name}</Link>
                   </td>
                   <td className="px-3 py-2 text-right">{agg.count}</td>
                   <td className="px-3 py-2 text-right">{fmtNum(Math.round(agg.mcap), 0)}</td>
@@ -82,14 +82,14 @@ function SectorsView() {
   }
 
   return (
-    <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <h1 className="px-4 py-3 text-sm font-bold text-slate-800 border-b border-slate-100">
-        {sector} <span className="font-normal text-slate-400">· {companies.length} companies · <Link href="/sectors" className="text-emerald-700 hover:underline">all sectors</Link></span>
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
+      <h1 className="px-4 py-3 text-sm font-bold text-[var(--ink)] border-b border-[var(--line)]">
+        {sector} <span className="font-normal text-[var(--ink3)]">· {companies.length} companies · <Link href="/sectors" className="text-[var(--accent-ink)] hover:underline">all sectors</Link></span>
       </h1>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-slate-50 text-xs text-slate-500 uppercase text-left">
+            <tr className="bg-[var(--card2)] text-xs text-[var(--ink3)] uppercase text-left">
               <th className="px-3 py-2">Symbol</th><th className="px-3 py-2">Name</th><th className="px-3 py-2">Industry</th>
               <th className="px-3 py-2 text-right">Price ₹</th><th className="px-3 py-2 text-right">MCap ₹Cr</th>
               <th className="px-3 py-2 text-right">P/E</th><th className="px-3 py-2 text-right">ROE %</th>
@@ -98,8 +98,8 @@ function SectorsView() {
           </thead>
           <tbody>
             {companies.slice(0, 400).map((r) => (
-              <tr key={String(r.symbol)} className="border-t border-slate-100 hover:bg-emerald-50/40">
-                <td className="px-3 py-2"><Link href={`/company?s=${r.symbol}`} className="font-semibold text-emerald-700 hover:underline">{String(r.symbol)}</Link></td>
+              <tr key={String(r.symbol)} className="border-t border-[var(--line)] hover:bg-[var(--accent-soft)]">
+                <td className="px-3 py-2"><Link href={`/company?s=${r.symbol}`} className="font-semibold text-[var(--accent-ink)] hover:underline">{String(r.symbol)}</Link></td>
                 <td className="px-3 py-2 max-w-56 truncate">{String(r.name ?? "—")}</td>
                 <td className="px-3 py-2 max-w-48 truncate">{String(r.industry ?? "—")}</td>
                 <td className="px-3 py-2 text-right">{fmtNum(r.price as number)}</td>
@@ -118,15 +118,15 @@ function SectorsView() {
 
 export default function SectorsPage() {
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="bg-white border-b border-slate-200">
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
+      <header className="bg-[var(--card)] border-b border-[var(--line)]">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center gap-4">
-          <Link href="/" className="text-sm text-emerald-700 font-semibold hover:underline">← Screener</Link>
-          <span className="text-2xl font-bold text-emerald-700">Rscreener</span>
+          <Link href="/" className="text-sm text-[var(--accent-ink)] font-semibold hover:underline">← Screener</Link>
+          <span className="text-2xl font-bold text-[var(--accent-ink)]">Rscreener</span>
         </div>
       </header>
       <main className="max-w-6xl mx-auto px-4 py-6">
-        <Suspense fallback={<p className="text-slate-400">Loading…</p>}>
+        <Suspense fallback={<p className="text-[var(--ink3)]">Loading…</p>}>
           <SectorsView />
         </Suspense>
       </main>

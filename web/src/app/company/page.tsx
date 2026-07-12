@@ -101,28 +101,28 @@ function PriceChart({ prices, peBand, trendQ, livePrice }: { prices: Prices; peB
   const line = pts.map(([, v], i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
   const change = ((values[values.length - 1] / values[0]) - 1) * 100;
   const up = change >= 0;
-  const color = view === "pe" ? "#7c3aed" : up ? "#059669" : "#dc2626";
+  const color = view === "pe" ? "var(--chart-line2)" : up ? "var(--chart-pos)" : "var(--chart-neg)";
   const unit = view === "pe" ? "" : "₹";
   const dateLbl = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { month: "short", year: "2-digit" });
 
   return (
-    <section className="bg-white rounded-xl border border-slate-200 p-4">
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
       <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
         <div className="flex items-center gap-3 flex-wrap">
           <ChartTabs view={view} setView={setView} hasPe={!!peBand} hasSales={!!trendQ} />
-          <p className="text-sm font-semibold text-slate-700">
+          <p className="text-sm font-semibold text-[var(--ink2)]">
             {view === "pe" ? (
-              <>P/E {values[values.length - 1]?.toFixed(1)} <span className="font-normal text-slate-400">· 5y median {peBand?.median_5y}</span></>
+              <>P/E {values[values.length - 1]?.toFixed(1)} <span className="font-normal text-[var(--ink3)]">· 5y median {peBand?.median_5y}</span></>
             ) : (
               <>
-                <span className={`font-bold ${up ? "text-emerald-600" : "text-red-600"}`}>{up ? "+" : ""}{change.toFixed(1)}%</span>
-                <span className="font-normal text-slate-400"> over {range}</span>
+                <span className={`font-bold ${up ? "text-[var(--pos)]" : "text-[var(--neg)]"}`}>{up ? "+" : ""}{change.toFixed(1)}%</span>
+                <span className="font-normal text-[var(--ink3)]"> over {range}</span>
               </>
             )}
           </p>
           {view === "price" && range === "1Y" && daily.length >= 200 && (
             <button onClick={() => setShowDma(!showDma)}
-              className={`text-xs rounded-full px-3 py-1 border ${showDma ? "bg-amber-50 border-amber-300 text-amber-800 font-semibold" : "bg-white border-slate-200 text-slate-500"}`}>
+              className={`text-xs rounded-full px-3 py-1 border ${showDma ? "bg-[var(--warn-soft)] border-[var(--warn-line)] text-[var(--warn-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
               50/200 DMA
             </button>
           )}
@@ -130,7 +130,7 @@ function PriceChart({ prices, peBand, trendQ, livePrice }: { prices: Prices; peB
         <div className="flex gap-1 text-xs">
           {(["1Y", "5Y", "10Y"] as const).map((r) => (
             <button key={r} onClick={() => setRange(r)}
-              className={`rounded-full px-3 py-1 border ${range === r ? "bg-emerald-50 border-emerald-300 text-emerald-800 font-semibold" : "bg-white border-slate-200 text-slate-500"}`}>
+              className={`rounded-full px-3 py-1 border ${range === r ? "bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
               {r}
             </button>
           ))}
@@ -141,21 +141,21 @@ function PriceChart({ prices, peBand, trendQ, livePrice }: { prices: Prices; peB
         <polyline points={line} fill="none" stroke={color} strokeWidth="2" />
         {dmaOverlays && (
           <g>
-            <polyline points={dmaOverlays.d50.map((v, i) => (v === null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`)).filter(Boolean).join(" ")} fill="none" stroke="#f59e0b" strokeWidth="1.4" />
-            <polyline points={dmaOverlays.d200.map((v, i) => (v === null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`)).filter(Boolean).join(" ")} fill="none" stroke="#6366f1" strokeWidth="1.4" />
-            <text x={W - padX} y={14} fontSize="10" textAnchor="end"><tspan fill="#f59e0b">— 50 DMA</tspan> <tspan fill="#6366f1">— 200 DMA</tspan></text>
+            <polyline points={dmaOverlays.d50.map((v, i) => (v === null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`)).filter(Boolean).join(" ")} fill="none" stroke="var(--chart-dma50)" strokeWidth="1.4" />
+            <polyline points={dmaOverlays.d200.map((v, i) => (v === null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`)).filter(Boolean).join(" ")} fill="none" stroke="var(--chart-dma200)" strokeWidth="1.4" />
+            <text x={W - padX} y={14} fontSize="10" textAnchor="end"><tspan fill="var(--chart-dma50)">— 50 DMA</tspan> <tspan fill="var(--chart-dma200)">— 200 DMA</tspan></text>
           </g>
         )}
         {median !== null && (
           <g>
-            <line x1={padX} y1={y(median)} x2={W - padX} y2={y(median)} stroke="#64748b" strokeWidth="1" strokeDasharray="6 4" />
-            <text x={W - padX} y={y(median) - 4} fontSize="10" fill="#64748b" textAnchor="end">median {median}</text>
+            <line x1={padX} y1={y(median)} x2={W - padX} y2={y(median)} stroke="var(--chart-axis)" strokeWidth="1" strokeDasharray="6 4" />
+            <text x={W - padX} y={y(median) - 4} fontSize="10" fill="var(--chart-axis)" textAnchor="end">median {median}</text>
           </g>
         )}
-        <text x={padX} y={H - 8} fontSize="10" fill="#94a3b8">{dateLbl(pts[0][0])}</text>
-        <text x={W - padX} y={H - 8} fontSize="10" fill="#94a3b8" textAnchor="end">{dateLbl(pts[pts.length - 1][0])}</text>
-        <text x={padX} y={14} fontSize="10" fill="#94a3b8">{unit}{max.toLocaleString("en-IN")}</text>
-        <text x={padX} y={y(min) - 4} fontSize="10" fill="#94a3b8">{unit}{min.toLocaleString("en-IN")}</text>
+        <text x={padX} y={H - 8} fontSize="10" fill="var(--chart-axis)">{dateLbl(pts[0][0])}</text>
+        <text x={W - padX} y={H - 8} fontSize="10" fill="var(--chart-axis)" textAnchor="end">{dateLbl(pts[pts.length - 1][0])}</text>
+        <text x={padX} y={14} fontSize="10" fill="var(--chart-axis)">{unit}{max.toLocaleString("en-IN")}</text>
+        <text x={padX} y={y(min) - 4} fontSize="10" fill="var(--chart-axis)">{unit}{min.toLocaleString("en-IN")}</text>
       </svg>
     </section>
   );
@@ -172,7 +172,7 @@ function ChartTabs({ view, setView, hasPe, hasSales }: {
     <div className="flex gap-1 text-xs">
       {tabs.map(([v, label]) => (
         <button key={v} onClick={() => setView(v as "price" | "pe" | "sales" | "eps")}
-          className={`rounded-full px-3 py-1 border ${view === v ? "bg-slate-800 border-slate-800 text-white font-semibold" : "bg-white border-slate-200 text-slate-500"}`}>
+          className={`rounded-full px-3 py-1 border ${view === v ? "bg-[var(--btn)] border-[var(--btn)] text-[var(--btn-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
           {label}
         </button>
       ))}
@@ -199,22 +199,22 @@ function QuarterChart({ view, setView, trendQ, hasPe, hasSales }: {
     const maxAbs = Math.max(...vals.map(Math.abs), 1);
     const scale = 110 / maxAbs;
     return (
-      <section className="bg-white rounded-xl border border-slate-200 p-4">
+      <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
         <div className="flex items-center gap-3 mb-1 flex-wrap">
           <ChartTabs view={view} setView={setView} hasPe={hasPe} hasSales={hasSales} />
-          <p className="text-sm font-semibold text-slate-700">EPS <span className="font-normal text-slate-400">₹ per quarter, as filed</span></p>
+          <p className="text-sm font-semibold text-[var(--ink2)]">EPS <span className="font-normal text-[var(--ink3)]">₹ per quarter, as filed</span></p>
         </div>
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
-          <line x1={padX} y1={base} x2={W - padX} y2={base} stroke="#e2e8f0" />
+          <line x1={padX} y1={base} x2={W - padX} y2={base} stroke="var(--chart-grid)" />
           {vals.map((v, i) => {
             const x0 = padX + i * step + (step - bw) / 2;
             const h = Math.abs(v) * scale;
             const y0 = v >= 0 ? base - h : base;
             return (
               <g key={i}>
-                <rect x={x0} y={y0} width={bw} height={Math.max(h, 1)} rx="2" fill={v >= 0 ? "#0891b2" : "#dc2626"} />
-                {i % 2 === 0 && <text x={x0 + bw / 2} y={H - 24} textAnchor="middle" fontSize="9" fill="#94a3b8">{qLbl(trendQ.periods[i])}</text>}
-                <text x={x0 + bw / 2} y={v >= 0 ? y0 - 4 : base + h + 10} textAnchor="middle" fontSize="8.5" fill="#475569">{v.toFixed(1)}</text>
+                <rect x={x0} y={y0} width={bw} height={Math.max(h, 1)} rx="2" fill={v >= 0 ? "var(--chart-alt)" : "var(--chart-neg)"} />
+                {i % 2 === 0 && <text x={x0 + bw / 2} y={H - 24} textAnchor="middle" fontSize="9" fill="var(--chart-axis)">{qLbl(trendQ.periods[i])}</text>}
+                <text x={x0 + bw / 2} y={v >= 0 ? y0 - 4 : base + h + 10} textAnchor="middle" fontSize="8.5" fill="var(--chart-value)">{v.toFixed(1)}</text>
               </g>
             );
           })}
@@ -240,33 +240,33 @@ function QuarterChart({ view, setView, trendQ, hasPe, hasSales }: {
     .join(" ");
 
   return (
-    <section className="bg-white rounded-xl border border-slate-200 p-4">
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
       <div className="flex items-center gap-3 mb-1 flex-wrap">
         <ChartTabs view={view} setView={setView} hasPe={hasPe} hasSales={hasSales} />
-        <p className="text-sm font-semibold text-slate-700">
-          Sales &amp; Margin <span className="font-normal text-slate-400">· <span className="text-emerald-600">bars ₹Cr revenue</span> · <span className="text-violet-600">line PAT margin %</span></span>
+        <p className="text-sm font-semibold text-[var(--ink2)]">
+          Sales &amp; Margin <span className="font-normal text-[var(--ink3)]">· <span className="text-[var(--pos)]">bars ₹Cr revenue</span> · <span className="text-violet-600">line PAT margin %</span></span>
         </p>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
-        <line x1={padX} y1={base} x2={W - padX} y2={base} stroke="#e2e8f0" />
+        <line x1={padX} y1={base} x2={W - padX} y2={base} stroke="var(--chart-grid)" />
         {revs.map((v, i) => {
           const x0 = padX + i * step + (step - bw) / 2;
           const h = v * scale;
           return (
             <g key={i}>
-              <rect x={x0} y={base - h} width={bw} height={Math.max(h, 1)} rx="2" fill="#059669" opacity="0.85" />
-              {i % 2 === 0 && <text x={x0 + bw / 2} y={H - 24} textAnchor="middle" fontSize="9" fill="#94a3b8">{qLbl(trendQ.periods[i])}</text>}
+              <rect x={x0} y={base - h} width={bw} height={Math.max(h, 1)} rx="2" fill="var(--chart-pos)" opacity="0.85" />
+              {i % 2 === 0 && <text x={x0 + bw / 2} y={H - 24} textAnchor="middle" fontSize="9" fill="var(--chart-axis)">{qLbl(trendQ.periods[i])}</text>}
             </g>
           );
         })}
-        <polyline points={mLine} fill="none" stroke="#7c3aed" strokeWidth="2" />
+        <polyline points={mLine} fill="none" stroke="var(--chart-line2)" strokeWidth="2" />
         {margins.map((m, i) =>
           m === null ? null : (
-            <circle key={i} cx={padX + i * step + step / 2} cy={mY(m)} r="2.5" fill="#7c3aed" />
+            <circle key={i} cx={padX + i * step + step / 2} cy={mY(m)} r="2.5" fill="var(--chart-line2)" />
           )
         )}
         {mVals.length > 0 && (
-          <text x={W - padX} y={mY(margins[margins.length - 1] ?? mVals[mVals.length - 1]) - 6} fontSize="10" fill="#7c3aed" textAnchor="end">
+          <text x={W - padX} y={mY(margins[margins.length - 1] ?? mVals[mVals.length - 1]) - 6} fontSize="10" fill="var(--chart-line2)" textAnchor="end">
             {(margins[margins.length - 1] ?? mVals[mVals.length - 1]).toFixed(1)}%
           </text>
         )}
@@ -315,10 +315,10 @@ function Bars({ title, periods, values }: { title: string; periods: string[]; va
   const W = 300, H = 130, base = 95, scale = 80 / maxAbs;
   const bw = Math.min(40, (W - 20) / values.length - 8);
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-4">
-      <p className="text-sm font-semibold text-slate-700 mb-2">{title} <span className="font-normal text-slate-400">₹Cr</span></p>
+    <div className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
+      <p className="text-sm font-semibold text-[var(--ink2)] mb-2">{title} <span className="font-normal text-[var(--ink3)]">₹Cr</span></p>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
-        <line x1="8" y1={base} x2={W - 8} y2={base} stroke="#e2e8f0" />
+        <line x1="8" y1={base} x2={W - 8} y2={base} stroke="var(--chart-grid)" />
         {nums.map((v, i) => {
           const x = 12 + i * ((W - 24) / values.length);
           const h = Math.abs(v) * scale;
@@ -326,14 +326,14 @@ function Bars({ title, periods, values }: { title: string; periods: string[]; va
           const labelStep = Math.max(1, Math.ceil(values.length / 7));
           return (
             <g key={i}>
-              <rect x={x} y={y} width={bw} height={Math.max(h, 1)} rx="2" fill={v >= 0 ? "#059669" : "#dc2626"} />
+              <rect x={x} y={y} width={bw} height={Math.max(h, 1)} rx="2" fill={v >= 0 ? "var(--chart-pos)" : "var(--chart-neg)"} />
               {i % labelStep === 0 && (
-                <text x={x + bw / 2} y={H - 22} textAnchor="middle" fontSize="9" fill="#94a3b8">
+                <text x={x + bw / 2} y={H - 22} textAnchor="middle" fontSize="9" fill="var(--chart-axis)">
                   {periodLabel(periods[i]).replace(" ", "'")}
                 </text>
               )}
               {values.length <= 8 && (
-                <text x={x + bw / 2} y={v >= 0 ? y - 4 : base + h + 10} textAnchor="middle" fontSize="8.5" fill="#475569">
+                <text x={x + bw / 2} y={v >= 0 ? y - 4 : base + h + 10} textAnchor="middle" fontSize="8.5" fill="var(--chart-value)">
                   {Math.abs(v) >= 1000 ? `${Math.round(v / 100) / 10}k` : Math.round(v)}
                 </text>
               )}
@@ -347,14 +347,14 @@ function Bars({ title, periods, values }: { title: string; periods: string[]; va
 
 function StatementTable({ title, stmt }: { title: string; stmt: Stmt }) {
   return (
-    <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <h2 className="px-4 py-3 text-sm font-bold text-slate-800 border-b border-slate-100">
-        {title} <span className="font-normal text-slate-400">figures in ₹Cr</span>
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
+      <h2 className="px-4 py-3 text-sm font-bold text-[var(--ink)] border-b border-[var(--line)]">
+        {title} <span className="font-normal text-[var(--ink3)]">figures in ₹Cr</span>
       </h2>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-slate-50 text-xs text-slate-500 uppercase">
+            <tr className="bg-[var(--card2)] text-xs text-[var(--ink3)] uppercase">
               <th className="px-3 py-2 text-left"> </th>
               {stmt.periods.map((p) => (
                 <th key={p} className="px-3 py-2 text-right whitespace-nowrap">{periodLabel(p)}</th>
@@ -363,10 +363,10 @@ function StatementTable({ title, stmt }: { title: string; stmt: Stmt }) {
           </thead>
           <tbody>
             {stmt.items.map((it) => (
-              <tr key={it.label} className="border-t border-slate-100">
-                <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{it.label}</td>
+              <tr key={it.label} className="border-t border-[var(--line)]">
+                <td className="px-3 py-2 font-medium text-[var(--ink2)] whitespace-nowrap">{it.label}</td>
                 {it.values.map((v, i) => (
-                  <td key={i} className={`px-3 py-2 text-right whitespace-nowrap ${typeof v === "number" && v < 0 ? "text-red-600" : ""}`}>
+                  <td key={i} className={`px-3 py-2 text-right whitespace-nowrap ${typeof v === "number" && v < 0 ? "text-[var(--neg)]" : ""}`}>
                     {fmtNum(v, it.label.includes("EPS") || it.label.includes("%") ? 2 : 0)}
                   </td>
                 ))}
@@ -457,9 +457,9 @@ function CompanyView() {
     URL.revokeObjectURL(a.href);
   };
 
-  if (!symbol) return <p className="text-slate-500 p-6">No company selected. <Link className="text-emerald-700 underline" href="/">Back to screener</Link></p>;
-  if (error) return <p className="text-red-600 p-6">{error} — <Link className="text-emerald-700 underline" href="/">back to screener</Link></p>;
-  if (!company) return <p className="text-slate-400 p-6">Loading {symbol}…</p>;
+  if (!symbol) return <p className="text-[var(--ink3)] p-6">No company selected. <Link className="text-[var(--accent-ink)] underline" href="/">Back to screener</Link></p>;
+  if (error) return <p className="text-[var(--neg)] p-6">{error} — <Link className="text-[var(--accent-ink)] underline" href="/">back to screener</Link></p>;
+  if (!company) return <p className="text-[var(--ink3)] p-6">Loading {symbol}…</p>;
 
   const s = company.snapshot;
   const annual = company.statements.annual_pnl;
@@ -483,10 +483,10 @@ function CompanyView() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">{String(s.name ?? symbol)} <span className="text-emerald-700">({symbol})</span></h1>
-          <p className="text-sm text-slate-500">
+          <h1 className="text-2xl font-bold text-[var(--ink)]">{String(s.name ?? symbol)} <span className="text-[var(--accent-ink)]">({symbol})</span></h1>
+          <p className="text-sm text-[var(--ink3)]">
             {s.sector ? (
-              <Link href={`/sectors?s=${encodeURIComponent(String(s.sector))}`} className="hover:text-emerald-700 hover:underline">{String(s.sector)}</Link>
+              <Link href={`/sectors?s=${encodeURIComponent(String(s.sector))}`} className="hover:text-[var(--accent-ink)] hover:underline">{String(s.sector)}</Link>
             ) : "—"}
             {" · "}{String(s.industry ?? "—")}
           </p>
@@ -494,7 +494,7 @@ function CompanyView() {
         <div className="flex items-center gap-3">
           <button
             onClick={exportCompanyCsv}
-            className="text-xs font-semibold bg-slate-100 hover:bg-emerald-50 border border-slate-200 rounded-lg px-3 py-1.5"
+            className="text-xs font-semibold bg-[var(--card2)] hover:bg-[var(--accent-soft)] border border-[var(--line)] rounded-lg px-3 py-1.5"
           >
             Export CSV
           </button>
@@ -502,7 +502,7 @@ function CompanyView() {
             onClick={() => { toggleWatch(symbol); setWatched(!watched); }}
             aria-label={watched ? "remove from watchlist" : "add to watchlist"}
             title={watched ? "On your watchlist — tap to remove" : "Add to watchlist"}
-            className={`text-2xl leading-none ${watched ? "text-emerald-500" : "text-slate-300 hover:text-emerald-400"}`}
+            className={`text-2xl leading-none ${watched ? "text-[var(--accent)]" : "text-[var(--line2)] hover:text-[var(--accent)]"}`}
           >
             ★
           </button>
@@ -511,9 +511,9 @@ function CompanyView() {
 
       <section className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {tiles.map(([label, value]) => (
-          <div key={label} className="bg-white rounded-xl border border-slate-200 p-3">
-            <p className="text-xs text-slate-400">{label}</p>
-            <p className="text-base font-semibold text-slate-800">{value}</p>
+          <div key={label} className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3">
+            <p className="text-xs text-[var(--ink3)]">{label}</p>
+            <p className="text-base font-semibold text-[var(--ink)]">{value}</p>
           </div>
         ))}
       </section>
@@ -545,7 +545,7 @@ function CompanyView() {
       )}
 
       {Object.keys(company.statements).length === 0 && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 text-sm">
+        <div className="bg-[var(--warn-soft)] border border-[var(--warn-line)] text-[var(--warn-ink)] rounded-xl p-4 text-sm">
           Financial statements haven&apos;t been fetched for this company yet — showing the snapshot only.
           Statements coverage grows as the pipeline runs.
         </div>
@@ -570,14 +570,14 @@ function CompanyView() {
       )}
 
       {peers.length > 0 && (
-        <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-          <h2 className="px-4 py-3 text-sm font-bold text-slate-800 border-b border-slate-100">
-            Peers <span className="font-normal text-slate-400">{String(s.industry)}</span>
+        <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
+          <h2 className="px-4 py-3 text-sm font-bold text-[var(--ink)] border-b border-[var(--line)]">
+            Peers <span className="font-normal text-[var(--ink3)]">{String(s.industry)}</span>
           </h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-slate-50 text-xs text-slate-500 uppercase text-left">
+                <tr className="bg-[var(--card2)] text-xs text-[var(--ink3)] uppercase text-left">
                   <th className="px-3 py-2">Symbol</th><th className="px-3 py-2">Name</th>
                   <th className="px-3 py-2 text-right">MCap ₹Cr</th><th className="px-3 py-2 text-right">P/E</th>
                   <th className="px-3 py-2 text-right">P/B</th><th className="px-3 py-2 text-right">ROE %</th>
@@ -586,8 +586,8 @@ function CompanyView() {
               </thead>
               <tbody>
                 {peers.map((p) => (
-                  <tr key={String(p.symbol)} className="border-t border-slate-100 hover:bg-emerald-50/40">
-                    <td className="px-3 py-2"><Link className="font-semibold text-emerald-700" href={`/company?s=${p.symbol}`}>{String(p.symbol)}</Link></td>
+                  <tr key={String(p.symbol)} className="border-t border-[var(--line)] hover:bg-[var(--accent-soft)]">
+                    <td className="px-3 py-2"><Link className="font-semibold text-[var(--accent-ink)]" href={`/company?s=${p.symbol}`}>{String(p.symbol)}</Link></td>
                     <td className="px-3 py-2 max-w-56 truncate">{String(p.name ?? "—")}</td>
                     <td className="px-3 py-2 text-right">{fmtNum(p.mcap as number, 0)}</td>
                     <td className="px-3 py-2 text-right">{fmtNum(p.pe as number)}</td>
@@ -602,15 +602,15 @@ function CompanyView() {
         </section>
       )}
 
-      <section className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-        <h2 className="text-sm font-bold text-slate-800">Documents</h2>
+      <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-3">
+        <h2 className="text-sm font-bold text-[var(--ink)]">Documents</h2>
         {(company.documents?.annual_reports?.length ?? 0) > 0 && (
           <div>
-            <p className="text-xs text-slate-400 mb-1.5">Annual reports (PDF, straight from NSE)</p>
+            <p className="text-xs text-[var(--ink3)] mb-1.5">Annual reports (PDF, straight from NSE)</p>
             <div className="flex gap-2 flex-wrap">
               {company.documents!.annual_reports!.slice(0, 18).map((ar) => (
                 <a key={ar.url} href={ar.url} target="_blank" rel="noopener noreferrer"
-                  className="text-xs font-semibold bg-slate-100 hover:bg-emerald-50 border border-slate-200 rounded-full px-3 py-1">
+                  className="text-xs font-semibold bg-[var(--card2)] hover:bg-[var(--accent-soft)] border border-[var(--line)] rounded-full px-3 py-1">
                   FY{ar.from}–{String(ar.to).slice(-2)}
                 </a>
               ))}
@@ -619,12 +619,12 @@ function CompanyView() {
         )}
         {(company.documents?.concalls?.length ?? 0) > 0 && (
           <div>
-            <p className="text-xs text-slate-400 mb-1.5">Concalls, transcripts &amp; investor meets (newest first)</p>
+            <p className="text-xs text-[var(--ink3)] mb-1.5">Concalls, transcripts &amp; investor meets (newest first)</p>
             <ul className="space-y-1">
               {company.documents!.concalls!.slice(0, 8).map((d) => (
                 <li key={d.url} className="text-sm truncate">
-                  <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-emerald-700 hover:underline">
-                    <span className="text-slate-400 font-mono text-xs mr-2">{d.date}</span>{d.title || "document"}
+                  <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-ink)] hover:underline">
+                    <span className="text-[var(--ink3)] font-mono text-xs mr-2">{d.date}</span>{d.title || "document"}
                   </a>
                 </li>
               ))}
@@ -633,12 +633,12 @@ function CompanyView() {
         )}
         {(company.documents?.ratings?.length ?? 0) > 0 && (
           <div>
-            <p className="text-xs text-slate-400 mb-1.5">Credit-rating updates</p>
+            <p className="text-xs text-[var(--ink3)] mb-1.5">Credit-rating updates</p>
             <ul className="space-y-1">
               {company.documents!.ratings!.slice(0, 5).map((d) => (
                 <li key={d.url} className="text-sm truncate">
-                  <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-emerald-700 hover:underline">
-                    <span className="text-slate-400 font-mono text-xs mr-2">{d.date}</span>{d.title || "rating document"}
+                  <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-ink)] hover:underline">
+                    <span className="text-[var(--ink3)] font-mono text-xs mr-2">{d.date}</span>{d.title || "rating document"}
                   </a>
                 </li>
               ))}
@@ -646,28 +646,28 @@ function CompanyView() {
           </div>
         )}
         <div className="flex gap-4 flex-wrap text-sm">
-          <a href={`https://www.nseindia.com/get-quotes/equity?symbol=${encodeURIComponent(symbol)}`} target="_blank" rel="noopener noreferrer" className="text-emerald-700 font-semibold hover:underline">
+          <a href={`https://www.nseindia.com/get-quotes/equity?symbol=${encodeURIComponent(symbol)}`} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-ink)] font-semibold hover:underline">
             All NSE filings &amp; announcements ↗
           </a>
-          <a href={`https://www.screener.in/company/${encodeURIComponent(symbol)}/`} target="_blank" rel="noopener noreferrer" className="text-emerald-700 font-semibold hover:underline">
+          <a href={`https://www.screener.in/company/${encodeURIComponent(symbol)}/`} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-ink)] font-semibold hover:underline">
             Cross-check on Screener.in ↗
           </a>
         </div>
-        <p className="text-xs text-slate-400">Use the cross-check link before trusting any number here — this app&apos;s data is unverified.</p>
+        <p className="text-xs text-[var(--ink3)]">Use the cross-check link before trusting any number here — this app&apos;s data is unverified.</p>
       </section>
 
-      <section className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
-        <h2 className="text-sm font-bold text-slate-800">Your notes</h2>
+      <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-2">
+        <h2 className="text-sm font-bold text-[var(--ink)]">Your notes</h2>
         <textarea
           value={note}
           onChange={(e) => { setNote(e.target.value); saveNote(symbol, e.target.value); }}
           rows={4}
           placeholder="Private notes in your own words — stored only on this device, never uploaded."
-          className="w-full text-sm border border-slate-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          className="w-full text-sm border border-[var(--line2)] rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
         />
       </section>
 
-      <footer className="text-xs text-slate-400 leading-relaxed pb-8">
+      <footer className="text-xs text-[var(--ink3)] leading-relaxed pb-8">
         Data: Yahoo Finance via yfinance, as of {company.generated_at} — <strong>every number is unverified until checked against a company filing</strong>. This tool screens; it never recommends.
       </footer>
     </div>
@@ -676,15 +676,15 @@ function CompanyView() {
 
 export default function CompanyPage() {
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="bg-white border-b border-slate-200">
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
+      <header className="bg-[var(--card)] border-b border-[var(--line)]">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center gap-4">
-          <Link href="/" className="text-sm text-emerald-700 font-semibold hover:underline">← Screener</Link>
-          <span className="text-2xl font-bold text-emerald-700">Rscreener</span>
+          <Link href="/" className="text-sm text-[var(--accent-ink)] font-semibold hover:underline">← Screener</Link>
+          <span className="text-2xl font-bold text-[var(--accent-ink)]">Rscreener</span>
         </div>
       </header>
       <main className="max-w-6xl mx-auto px-4 py-6">
-        <Suspense fallback={<p className="text-slate-400">Loading…</p>}>
+        <Suspense fallback={<p className="text-[var(--ink3)]">Loading…</p>}>
           <CompanyView />
         </Suspense>
       </main>

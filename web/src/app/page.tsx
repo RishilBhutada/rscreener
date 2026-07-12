@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { compile, isValidRatioName, QueryError, Row } from "@/lib/query";
 import { loadWatchlist, toggleWatch } from "@/lib/store";
+import { FIELD_CATALOG, FIELD_GROUPS } from "@/lib/fields";
+import QueryBuilder from "@/components/QueryBuilder";
+import ThemeControls from "@/components/ThemeControls";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -61,6 +64,8 @@ export default function Home() {
   const [data, setData] = useState<Data | null>(null);
   const [loadError, setLoadError] = useState("");
   const [query, setQuery] = useState(EXAMPLES[0]);
+  const [qMode, setQMode] = useState<"builder" | "text">("builder");
+  const [showFields, setShowFields] = useState(false);
   const [applied, setApplied] = useState<{ matches: Row[]; skipped: number; fields: string[] } | null>(null);
   const [queryError, setQueryError] = useState("");
   const [sortKey, setSortKey] = useState("mcap");
@@ -82,6 +87,8 @@ export default function Home() {
     try {
       setScreens(JSON.parse(localStorage.getItem("rscreener_screens") ?? "[]"));
     } catch { /* corrupted storage - start fresh */ }
+    const savedMode = localStorage.getItem("rscreener_qmode");
+    if (savedMode === "text" || savedMode === "builder") setQMode(savedMode);
     try {
       setRatios(JSON.parse(localStorage.getItem("rscreener_ratios") ?? "[]"));
     } catch { /* corrupted storage - start fresh */ }
@@ -216,37 +223,40 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="bg-white border-b border-slate-200">
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
+      <header className="bg-[var(--card)] border-b border-[var(--line)]">
         <div className="max-w-6xl mx-auto px-4 py-4 space-y-3">
           <div className="flex items-baseline justify-between flex-wrap gap-2">
             <div className="flex items-baseline gap-4 flex-wrap">
-              <h1 className="text-2xl font-bold text-emerald-700">Rscreener</h1>
-              <nav className="text-sm font-semibold text-emerald-700 flex gap-4">
+              <h1 className="text-2xl font-bold text-[var(--accent-ink)]">Rscreener</h1>
+              <nav className="text-sm font-semibold text-[var(--accent-ink)] flex gap-4">
                 <Link href="/calendar" className="hover:underline">Results calendar</Link>
                 <Link href="/sectors" className="hover:underline">Sectors</Link>
                 <Link href="/portfolio" className="hover:underline">Portfolio</Link>
               </nav>
             </div>
-            {data && (
-              <p className="text-xs text-slate-400">
-                {data.covered.toLocaleString("en-IN")} of {data.universe_size.toLocaleString("en-IN")} NSE companies · data as of {data.generated_at}
-              </p>
-            )}
+            <div className="flex items-center gap-4">
+              {data && (
+                <p className="text-xs text-[var(--ink3)] hidden md:block">
+                  {data.covered.toLocaleString("en-IN")} of {data.universe_size.toLocaleString("en-IN")} NSE companies · data as of {data.generated_at}
+                </p>
+              )}
+              <ThemeControls />
+            </div>
           </div>
           <div className="relative w-full sm:w-96">
             <input
               value={searchQ}
               onChange={(e) => setSearchQ(e.target.value)}
               placeholder="Search a company… (e.g. Infosys or INFY)"
-              className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="w-full text-sm border border-[var(--line2)] rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
             />
             {searchMatches.length > 0 && (
-              <div className="absolute z-20 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-80 overflow-auto">
+              <div className="absolute z-20 mt-1 w-full bg-[var(--card)] border border-[var(--line)] rounded-lg shadow-lg max-h-80 overflow-auto">
                 {searchMatches.map((m) => (
-                  <Link key={String(m.symbol)} href={`/company?s=${m.symbol}`} className="block px-3 py-2 hover:bg-emerald-50 text-sm">
-                    <span className="font-semibold text-emerald-700">{String(m.symbol)}</span>
-                    <span className="text-slate-500"> — {String(m.name ?? "")}</span>
+                  <Link key={String(m.symbol)} href={`/company?s=${m.symbol}`} className="block px-3 py-2 hover:bg-[var(--accent-soft)] text-sm">
+                    <span className="font-semibold text-[var(--accent-ink)]">{String(m.symbol)}</span>
+                    <span className="text-[var(--ink3)]"> — {String(m.name ?? "")}</span>
                   </Link>
                 ))}
               </div>
@@ -256,109 +266,148 @@ export default function Home() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
-        {loadError && <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 text-sm">{loadError}</div>}
+        {loadError && <div className="bg-[var(--neg-soft)] border border-[var(--neg-line)] text-[var(--neg)] rounded-lg p-4 text-sm">{loadError}</div>}
 
-        <section className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-          <label className="text-sm font-semibold text-slate-700" htmlFor="q">Query</label>
-          <textarea
-            id="q"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) data && runQuery(query, data.rows); }}
-            rows={2}
-            spellCheck={false}
-            className="w-full font-mono text-sm border border-slate-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            placeholder="e.g. pe < 15 and roe > 20"
-          />
-          {queryError && <p className="text-sm text-red-600">{queryError}</p>}
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={() => data && runQuery(query, data.rows)}
-              disabled={!data}
-              className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white text-sm font-semibold px-5 py-2 rounded-lg"
-            >
-              Run screen
-            </button>
-            <span className="text-xs text-slate-400">Ctrl+Enter also runs · fields: pe, pb, roe, mcap (₹Cr), div_yield, de, net_margin, rev_growth…</span>
+        <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <label className="text-sm font-semibold text-[var(--ink2)]" htmlFor="q">Build a screen</label>
+            <div className="flex gap-1 text-xs" role="group" aria-label="query mode">
+              {(["builder", "text"] as const).map((m) => (
+                <button key={m}
+                  onClick={() => { setQMode(m); localStorage.setItem("rscreener_qmode", m); }}
+                  className={`rounded-full px-3 py-1 border ${qMode === m ? "bg-[var(--btn)] border-[var(--btn)] text-[var(--btn-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
+                  {m === "builder" ? "Easy builder" : "Formula"}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="flex gap-2 flex-wrap">
-            {EXAMPLES.map((ex) => (
-              <button key={ex} onClick={() => { setQuery(ex); data && runQuery(ex, data.rows); }}
-                className="text-xs font-mono bg-slate-100 hover:bg-emerald-50 border border-slate-200 rounded-full px-3 py-1">
-                {ex}
-              </button>
-            ))}
-          </div>
+
+          {qMode === "builder" ? (
+            <QueryBuilder onRun={(q) => { setQuery(q); if (data) runQuery(q, data.rows); }} />
+          ) : (
+            <>
+              <textarea
+                id="q"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) data && runQuery(query, data.rows); }}
+                rows={2}
+                spellCheck={false}
+                className="w-full font-mono text-sm border border-[var(--line2)] bg-[var(--card)] text-[var(--ink)] rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                placeholder="e.g. pe < 15 and roe > 20"
+              />
+              {queryError && <p className="text-sm text-[var(--neg)]">{queryError}</p>}
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => data && runQuery(query, data.rows)}
+                  disabled={!data}
+                  className="bg-[var(--accent)] hover:bg-[var(--accent-strong)] disabled:opacity-40 text-white text-sm font-semibold px-5 py-2 rounded-lg"
+                >
+                  Run screen
+                </button>
+                <button onClick={() => setShowFields(!showFields)} className="text-xs font-semibold text-[var(--accent-ink)] hover:underline">
+                  {showFields ? "Hide field guide" : "Field guide"}
+                </button>
+                <span className="text-xs text-[var(--ink3)]">Ctrl+Enter runs · arithmetic works: <code className="font-mono">mcap / revenue &lt; 3</code></span>
+              </div>
+              {showFields && (
+                <div className="border border-[var(--line)] rounded-lg p-3 space-y-2 max-h-64 overflow-auto">
+                  {FIELD_GROUPS.map((g) => (
+                    <div key={g}>
+                      <p className="text-xs font-semibold text-[var(--ink3)] uppercase tracking-wide mb-1">{g}</p>
+                      <div className="flex gap-1.5 flex-wrap">
+                        {FIELD_CATALOG.filter((f) => f.group === g).map((f) => (
+                          <button key={f.key} title={`${f.desc}${f.unit ? ` (${f.unit})` : ""}`}
+                            onClick={() => setQuery((q) => (q.trim() ? `${q.trim()} and ${f.key} ` : `${f.key} `))}
+                            className="text-xs font-mono bg-[var(--card2)] hover:bg-[var(--accent-soft)] border border-[var(--line)] rounded-full px-2.5 py-0.5 text-[var(--ink2)]">
+                            {f.key}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2 flex-wrap">
+                {EXAMPLES.map((ex) => (
+                  <button key={ex} onClick={() => { setQuery(ex); data && runQuery(ex, data.rows); }}
+                    className="text-xs font-mono bg-[var(--card2)] hover:bg-[var(--accent-soft)] border border-[var(--line)] rounded-full px-3 py-1 text-[var(--ink2)]">
+                    {ex}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </section>
 
-        <section className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
+        <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold text-slate-700">Saved screens</span>
+            <span className="text-sm font-semibold text-[var(--ink2)]">Saved screens</span>
             <input
               value={screenName}
               onChange={(e) => setScreenName(e.target.value)}
               placeholder="name this screen"
-              className="text-sm border border-slate-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="text-sm border border-[var(--line2)] rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
             />
-            <button onClick={saveScreen} className="text-sm bg-slate-800 hover:bg-slate-900 text-white px-4 py-1.5 rounded-lg">Save</button>
+            <button onClick={saveScreen} className="text-sm bg-[var(--btn)] hover:opacity-85 text-[var(--btn-ink)] px-4 py-1.5 rounded-lg">Save</button>
           </div>
           <div className="flex gap-2 flex-wrap">
-            {screens.length === 0 && <span className="text-xs text-slate-400">none yet — saved screens live on this device</span>}
+            {screens.length === 0 && <span className="text-xs text-[var(--ink3)]">none yet — saved screens live on this device</span>}
             {screens.map((s) => (
-              <span key={s.name} className="inline-flex items-center gap-1 text-xs bg-emerald-50 border border-emerald-200 rounded-full px-3 py-1">
-                <button className="font-semibold text-emerald-800" title={s.query}
+              <span key={s.name} className="inline-flex items-center gap-1 text-xs bg-[var(--accent-soft)] border border-[var(--accent-line)] rounded-full px-3 py-1">
+                <button className="font-semibold text-[var(--accent-ink)]" title={s.query}
                   onClick={() => { setQuery(s.query); data && runQuery(s.query, data.rows); }}>
                   {s.name}
                 </button>
-                <button onClick={() => deleteScreen(s.name)} aria-label={`delete ${s.name}`} className="text-emerald-400 hover:text-red-500">×</button>
+                <button onClick={() => deleteScreen(s.name)} aria-label={`delete ${s.name}`} className="text-[var(--accent)] hover:text-[var(--neg)]">×</button>
               </span>
             ))}
           </div>
         </section>
 
-        <section className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
+        <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold text-slate-700">Custom ratios</span>
+            <span className="text-sm font-semibold text-[var(--ink2)]">Custom ratios</span>
             <input
               value={ratioName}
               onChange={(e) => setRatioName(e.target.value)}
               placeholder="name e.g. earnings_yield"
-              className="text-sm font-mono border border-slate-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="text-sm font-mono border border-[var(--line2)] rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
             />
-            <span className="text-slate-400">=</span>
+            <span className="text-[var(--ink3)]">=</span>
             <input
               value={ratioFormula}
               onChange={(e) => setRatioFormula(e.target.value)}
               placeholder="formula e.g. 100 / pe"
-              className="flex-1 min-w-40 text-sm font-mono border border-slate-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="flex-1 min-w-40 text-sm font-mono border border-[var(--line2)] rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
             />
-            <button onClick={addRatio} className="text-sm bg-slate-800 hover:bg-slate-900 text-white px-4 py-1.5 rounded-lg">Add</button>
+            <button onClick={addRatio} className="text-sm bg-[var(--btn)] hover:opacity-85 text-[var(--btn-ink)] px-4 py-1.5 rounded-lg">Add</button>
           </div>
-          {ratioError && <p className="text-sm text-red-600">{ratioError}</p>}
+          {ratioError && <p className="text-sm text-[var(--neg)]">{ratioError}</p>}
           <div className="flex gap-2 flex-wrap">
             {ratios.length === 0 && (
-              <span className="text-xs text-slate-400">
+              <span className="text-xs text-[var(--ink3)]">
                 define your own fields for queries — e.g. <code className="font-mono">earnings_yield = 100 / pe</code>, then screen <code className="font-mono">earnings_yield &gt; 6</code>
               </span>
             )}
             {ratios.map((r) => (
-              <span key={r.name} className="inline-flex items-center gap-1 text-xs font-mono bg-slate-100 border border-slate-200 rounded-full px-3 py-1">
+              <span key={r.name} className="inline-flex items-center gap-1 text-xs font-mono bg-[var(--card2)] border border-[var(--line)] rounded-full px-3 py-1">
                 <span title={r.formula}><strong>{r.name}</strong> = {r.formula}</span>
-                <button onClick={() => deleteRatio(r.name)} aria-label={`delete ratio ${r.name}`} className="text-slate-400 hover:text-red-500">×</button>
+                <button onClick={() => deleteRatio(r.name)} aria-label={`delete ratio ${r.name}`} className="text-[var(--ink3)] hover:text-[var(--neg)]">×</button>
               </span>
             ))}
           </div>
         </section>
 
         {data && watch.length > 0 && (
-          <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <h2 className="px-4 py-3 text-sm font-bold text-slate-800 border-b border-slate-100">
-              <span className="text-emerald-500">★</span> Watchlist
+          <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
+            <h2 className="px-4 py-3 text-sm font-bold text-[var(--ink)] border-b border-[var(--line)]">
+              <span className="text-[var(--accent)]">★</span> Watchlist
             </h2>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-slate-50 text-xs text-slate-500 uppercase text-left">
+                  <tr className="bg-[var(--card2)] text-xs text-[var(--ink3)] uppercase text-left">
                     <th className="px-3 py-2 w-8"> </th><th className="px-3 py-2">Symbol</th><th className="px-3 py-2">Name</th>
                     <th className="px-3 py-2 text-right">Price ₹</th><th className="px-3 py-2 text-right">MCap ₹Cr</th>
                     <th className="px-3 py-2 text-right">P/E</th><th className="px-3 py-2 text-right">ROE %</th>
@@ -369,9 +418,9 @@ export default function Home() {
                     const r = data.rows.find((x) => x.symbol === sym);
                     if (!r) return null;
                     return (
-                      <tr key={sym} className="border-t border-slate-100 hover:bg-emerald-50/40">
-                        <td className="px-3 py-2"><button onClick={() => setWatch(toggleWatch(sym))} aria-label={`remove ${sym} from watchlist`} className="text-emerald-500 hover:text-slate-300">★</button></td>
-                        <td className="px-3 py-2"><Link href={`/company?s=${sym}`} className="font-semibold text-emerald-700 hover:underline">{sym}</Link></td>
+                      <tr key={sym} className="border-t border-[var(--line)] hover:bg-[var(--accent-soft)]">
+                        <td className="px-3 py-2"><button onClick={() => setWatch(toggleWatch(sym))} aria-label={`remove ${sym} from watchlist`} className="text-[var(--accent)] hover:text-[var(--line2)]">★</button></td>
+                        <td className="px-3 py-2"><Link href={`/company?s=${sym}`} className="font-semibold text-[var(--accent-ink)] hover:underline">{sym}</Link></td>
                         <td className="px-3 py-2 max-w-56 truncate">{String(r.name ?? "—")}</td>
                         <td className="px-3 py-2 text-right">{fmt("price", r.price ?? null)}</td>
                         <td className="px-3 py-2 text-right">{fmt("mcap", r.mcap ?? null)}</td>
@@ -387,24 +436,24 @@ export default function Home() {
         )}
 
         {applied && (
-          <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <div className="px-4 py-3 text-sm text-slate-600 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+          <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
+            <div className="px-4 py-3 text-sm text-[var(--ink2)] border-b border-[var(--line)] flex items-center justify-between flex-wrap gap-2">
               <span>
-                <strong className="text-slate-900">{applied.matches.length.toLocaleString("en-IN")}</strong> companies match
-                {applied.skipped > 0 && <span className="text-slate-400"> · {applied.skipped.toLocaleString("en-IN")} skipped (missing a queried field)</span>}
-                {sorted.length > 300 && <span className="text-slate-400"> · showing top 300 by current sort</span>}
+                <strong className="text-[var(--ink)]">{applied.matches.length.toLocaleString("en-IN")}</strong> companies match
+                {applied.skipped > 0 && <span className="text-[var(--ink3)]"> · {applied.skipped.toLocaleString("en-IN")} skipped (missing a queried field)</span>}
+                {sorted.length > 300 && <span className="text-[var(--ink3)]"> · showing top 300 by current sort</span>}
               </span>
-              <button onClick={exportCsv} className="text-xs font-semibold bg-slate-100 hover:bg-emerald-50 border border-slate-200 rounded-lg px-3 py-1.5">
+              <button onClick={exportCsv} className="text-xs font-semibold bg-[var(--card2)] hover:bg-[var(--accent-soft)] border border-[var(--line)] rounded-lg px-3 py-1.5">
                 Export CSV (Excel)
               </button>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-slate-50 text-left text-xs text-slate-500 uppercase tracking-wide">
+                  <tr className="bg-[var(--card2)] text-left text-xs text-[var(--ink3)] uppercase tracking-wide">
                     <th className="px-3 py-2 w-8"> </th>
                     {cols.map((c) => (
-                      <th key={c} className="px-3 py-2 cursor-pointer hover:text-emerald-700 whitespace-nowrap select-none" onClick={() => clickSort(c)}>
+                      <th key={c} className="px-3 py-2 cursor-pointer hover:text-[var(--accent-ink)] whitespace-nowrap select-none" onClick={() => clickSort(c)}>
                         {COL_LABELS[c] ?? c}{sortKey === c ? (sortDesc ? " ↓" : " ↑") : ""}
                       </th>
                     ))}
@@ -412,12 +461,12 @@ export default function Home() {
                 </thead>
                 <tbody>
                   {sorted.slice(0, 300).map((r) => (
-                    <tr key={String(r.symbol)} className="border-t border-slate-100 hover:bg-emerald-50/40">
+                    <tr key={String(r.symbol)} className="border-t border-[var(--line)] hover:bg-[var(--accent-soft)]">
                       <td className="px-3 py-2">
                         <button
                           onClick={() => setWatch(toggleWatch(String(r.symbol)))}
                           aria-label={`toggle ${r.symbol} on watchlist`}
-                          className={watch.includes(String(r.symbol)) ? "text-emerald-500" : "text-slate-300 hover:text-emerald-400"}
+                          className={watch.includes(String(r.symbol)) ? "text-[var(--accent)]" : "text-[var(--line2)] hover:text-[var(--accent)]"}
                         >
                           ★
                         </button>
@@ -425,11 +474,11 @@ export default function Home() {
                       {cols.map((c) => (
                         <td key={c} className={`px-3 py-2 whitespace-nowrap ${c === "name" ? "max-w-56 truncate" : ""}`}>
                           {c === "symbol" ? (
-                            <Link href={`/company?s=${r.symbol}`} className="font-semibold text-emerald-700 hover:underline">
+                            <Link href={`/company?s=${r.symbol}`} className="font-semibold text-[var(--accent-ink)] hover:underline">
                               {String(r.symbol)}
                             </Link>
                           ) : c === "sector" && r.sector ? (
-                            <Link href={`/sectors?s=${encodeURIComponent(String(r.sector))}`} className="hover:text-emerald-700 hover:underline">
+                            <Link href={`/sectors?s=${encodeURIComponent(String(r.sector))}`} className="hover:text-[var(--accent-ink)] hover:underline">
                               {String(r.sector)}
                             </Link>
                           ) : (
@@ -445,7 +494,7 @@ export default function Home() {
           </section>
         )}
 
-        <footer className="text-xs text-slate-400 leading-relaxed pb-8">
+        <footer className="text-xs text-[var(--ink3)] leading-relaxed pb-8">
           Data: Yahoo Finance via yfinance — <strong>every number is unverified until checked against a company filing</strong>.
           Blank fields are excluded from screens, never treated as zero. This tool screens; it never recommends buying or selling anything.
         </footer>
