@@ -65,7 +65,7 @@
 }
 
 :root[data-accent="emerald"] { --accent: #059669; --accent-strong: #047857; }
-:root[data-accent="indigo"] { --accent: #4f46e5; --accent-strong: #4338ca; }
+:root[data-accent="indigo"] { --accent: #5a4fca; --accent-strong: #4b40b9; }
 :root[data-accent="rose"] { --accent: #e11d48; --accent-strong: #be123c; }
 :root[data-accent="amber"] { --accent: #d97706; --accent-strong: #b45309; }
 :root[data-theme="dark"][data-accent="emerald"] { --accent: #10b981; --accent-strong: #34d399; }

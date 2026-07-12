@@ -23,7 +23,7 @@ export const viewport: Viewport = {
   themeColor: "#0f172a",
 };
 
-const themeInit = `(function(){try{var t=localStorage.getItem("rs_theme")||"system";var d=document.documentElement;var dark=t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme: dark)").matches);d.dataset.theme=dark?"dark":"light";d.dataset.accent=localStorage.getItem("rs_accent")||"emerald";}catch(e){}})();`;
+const themeInit = `(function(){try{var t=localStorage.getItem("rs_theme")||"system";var d=document.documentElement;var dark=t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme: dark)").matches);d.dataset.theme=dark?"dark":"light";d.dataset.accent=localStorage.getItem("rs_accent")||"indigo";}catch(e){}})();`;
 
 export default function RootLayout({
   children,
@@ -34,7 +34,7 @@ export default function RootLayout({
     <html
       lang="en"
       data-theme="light"
-      data-accent="emerald"
+      data-accent="indigo"
       className={`${interSans.variable} ${geistMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >

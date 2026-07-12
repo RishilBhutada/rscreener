@@ -309,71 +309,169 @@ function periodLabel(p: string): string {
   return new Date(p).toLocaleDateString("en-IN", { month: "short", year: "numeric" });
 }
 
-function Bars({ title, periods, values }: { title: string; periods: string[]; values: (number | null)[] }) {
-  const nums = values.map((v) => v ?? 0);
-  const maxAbs = Math.max(...nums.map(Math.abs), 1);
-  const W = 300, H = 130, base = 95, scale = 80 / maxAbs;
-  const bw = Math.min(40, (W - 20) / values.length - 8);
-  return (
-    <div className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
-      <p className="text-sm font-semibold text-[var(--ink2)] mb-2">{title} <span className="font-normal text-[var(--ink3)]">₹Cr</span></p>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
-        <line x1="8" y1={base} x2={W - 8} y2={base} stroke="var(--chart-grid)" />
-        {nums.map((v, i) => {
-          const x = 12 + i * ((W - 24) / values.length);
-          const h = Math.abs(v) * scale;
-          const y = v >= 0 ? base - h : base;
-          const labelStep = Math.max(1, Math.ceil(values.length / 7));
-          return (
-            <g key={i}>
-              <rect x={x} y={y} width={bw} height={Math.max(h, 1)} rx="2" fill={v >= 0 ? "var(--chart-pos)" : "var(--chart-neg)"} />
-              {i % labelStep === 0 && (
-                <text x={x + bw / 2} y={H - 22} textAnchor="middle" fontSize="9" fill="var(--chart-axis)">
-                  {periodLabel(periods[i]).replace(" ", "'")}
-                </text>
-              )}
-              {values.length <= 8 && (
-                <text x={x + bw / 2} y={v >= 0 ? y - 4 : base + h + 10} textAnchor="middle" fontSize="8.5" fill="var(--chart-value)">
-                  {Math.abs(v) >= 1000 ? `${Math.round(v / 100) / 10}k` : Math.round(v)}
-                </text>
-              )}
-            </g>
-          );
-        })}
-      </svg>
-    </div>
-  );
-}
-
-function StatementTable({ title, stmt }: { title: string; stmt: Stmt }) {
+function StatementTable({ title, stmt, subtitle, boldRows }: { title: string; stmt: Stmt; subtitle?: string; boldRows?: string[] }) {
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
-      <h2 className="px-4 py-3 text-sm font-bold text-[var(--ink)] border-b border-[var(--line)]">
-        {title} <span className="font-normal text-[var(--ink3)]">figures in ₹Cr</span>
-      </h2>
+      <div className="px-4 pt-3.5 pb-2">
+        <h2 className="text-base font-semibold text-[var(--ink)]">{title}</h2>
+        <p className="text-xs text-[var(--ink3)] mt-0.5">{subtitle ?? "Figures in ₹ Crores"}</p>
+      </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm border-collapse">
           <thead>
-            <tr className="bg-[var(--card2)] text-xs text-[var(--ink3)] uppercase">
-              <th className="px-3 py-2 text-left"> </th>
+            <tr className="text-xs text-[var(--ink3)] border-y border-[var(--line)]">
+              <th className="px-3 py-2 text-left font-medium sticky left-0 bg-[var(--card)]"> </th>
               {stmt.periods.map((p) => (
-                <th key={p} className="px-3 py-2 text-right whitespace-nowrap">{periodLabel(p)}</th>
+                <th key={p} className="px-3 py-2 text-right font-medium whitespace-nowrap">{periodLabel(p)}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {stmt.items.map((it) => (
-              <tr key={it.label} className="border-t border-[var(--line)]">
-                <td className="px-3 py-2 font-medium text-[var(--ink2)] whitespace-nowrap">{it.label}</td>
-                {it.values.map((v, i) => (
-                  <td key={i} className={`px-3 py-2 text-right whitespace-nowrap ${typeof v === "number" && v < 0 ? "text-[var(--neg)]" : ""}`}>
-                    {fmtNum(v, it.label.includes("EPS") || it.label.includes("%") ? 2 : 0)}
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {stmt.items.map((it) => {
+              const bold = boldRows?.includes(it.label);
+              return (
+                <tr key={it.label} className="border-b border-[var(--line)] hover:bg-[var(--card2)]">
+                  <td className={`px-3 py-1.5 whitespace-nowrap sticky left-0 bg-[var(--card)] ${bold ? "font-semibold text-[var(--ink)]" : "text-[var(--ink2)]"}`}>{it.label}</td>
+                  {it.values.map((v, i) => (
+                    <td key={i} className={`px-3 py-1.5 text-right whitespace-nowrap tabular-nums ${bold ? "font-semibold" : ""} ${typeof v === "number" && v < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
+                      {fmtNum(v, it.label.includes("EPS") || it.label.includes("%") ? 2 : 0)}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
+      </div>
+    </section>
+  );
+}
+
+function cagr(values: (number | null)[], years: number): number | null {
+  const clean = values.filter((v): v is number => v !== null && v !== undefined);
+  if (clean.length < years + 1) return null;
+  const last = clean[clean.length - 1], start = clean[clean.length - 1 - years];
+  if (!last || !start || start <= 0 || last <= 0) return null;
+  return Math.round((Math.pow(last / start, 1 / years) - 1) * 100);
+}
+
+function GrowthCard({ title, rows }: { title: string; rows: [string, number | null][] }) {
+  return (
+    <div>
+      <p className="text-sm font-semibold text-[var(--ink2)] mb-1.5">{title}</p>
+      <table className="w-full text-sm">
+        <tbody>
+          {rows.map(([label, v]) => (
+            <tr key={label} className="border-b border-[var(--line)] last:border-0">
+              <td className="py-1 text-[var(--ink3)]">{label}</td>
+              <td className={`py-1 text-right font-medium tabular-nums ${v !== null && v < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
+                {v === null ? "—" : `${v}%`}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function CompoundedGrowth({ trend, prices }: { trend?: { annual?: Trend }; prices?: Prices | null }) {
+  const a = trend?.annual;
+  if (!a) return null;
+  const monthly = prices?.monthly ?? [];
+  const stockCagr = (months: number): number | null => {
+    if (monthly.length <= months) return null;
+    const last = monthly[monthly.length - 1][1], start = monthly[monthly.length - 1 - months][1];
+    if (!last || !start || start <= 0) return null;
+    return Math.round((Math.pow(last / start, 12 / months) - 1) * 100);
+  };
+  const cards: [string, [string, number | null][]][] = [
+    ["Compounded sales growth", [["10 years", cagr(a.revenue, 10)], ["5 years", cagr(a.revenue, 5)], ["3 years", cagr(a.revenue, 3)], ["1 year", cagr(a.revenue, 1)]]],
+    ["Compounded profit growth", [["10 years", cagr(a.pat, 10)], ["5 years", cagr(a.pat, 5)], ["3 years", cagr(a.pat, 3)], ["1 year", cagr(a.pat, 1)]]],
+    ["Stock price CAGR", [["10 years", stockCagr(120)], ["5 years", stockCagr(60)], ["3 years", stockCagr(36)], ["1 year", stockCagr(12)]]],
+  ];
+  return (
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 grid sm:grid-cols-3 gap-6">
+      {cards.map(([title, rows]) => (
+        <GrowthCard key={title} title={title} rows={rows} />
+      ))}
+    </section>
+  );
+}
+
+function num(r: Row | null, k: string): number | null {
+  const v = r?.[k];
+  return typeof v === "number" && !Number.isNaN(v) ? v : null;
+}
+
+function ProsCons({ row }: { row: Row | null }) {
+  if (!row) return null;
+  const pros: string[] = [];
+  const cons: string[] = [];
+  const roce = num(row, "roce"), roe = num(row, "roe"), dy = num(row, "div_yield");
+  const de = num(row, "de"), sg = num(row, "sales_cagr_5y"), pg = num(row, "profit_cagr_5y");
+  const payout = num(row, "div_payout"), prom = num(row, "promoter_holding");
+  const pe = num(row, "pe"), medpe = num(row, "median_pe_5y"), offHigh = num(row, "off_52w_high");
+
+  if (roce !== null && roce > 20) pros.push(`Efficient use of capital — ROCE of ${roce.toFixed(0)}%.`);
+  if (roe !== null && roe > 15) pros.push(`Strong return on equity of ${roe.toFixed(0)}%.`);
+  if (dy !== null && dy > 2) pros.push(`Healthy dividend yield of ${dy.toFixed(1)}%.`);
+  if (de !== null && de < 0.1) pros.push(`Nearly debt-free (debt-to-equity ${de.toFixed(2)}).`);
+  if (pg !== null && pg > 15) pros.push(`Profit compounded at ${pg.toFixed(0)}% a year over 5 years.`);
+  if (payout !== null && payout >= 20 && payout <= 80) pros.push(`Sustainable dividend payout of ${payout.toFixed(0)}%.`);
+
+  if (sg !== null && sg < 10) cons.push(`Modest sales growth of ${sg.toFixed(0)}% a year over 5 years.`);
+  if (de !== null && de > 1) cons.push(`Carries meaningful debt (debt-to-equity ${de.toFixed(1)}).`);
+  if (roe !== null && roe < 10) cons.push(`Low return on equity of ${roe.toFixed(0)}%.`);
+  if (pe !== null && medpe !== null && pe > medpe * 1.3) cons.push(`Trading above its 5-year median P/E (${pe.toFixed(0)} vs ${medpe.toFixed(0)}).`);
+  if (prom !== null && prom < 35) cons.push(`Low promoter holding of ${prom.toFixed(0)}%.`);
+  if (offHigh !== null && offHigh < -40) cons.push(`Down ${Math.abs(offHigh).toFixed(0)}% from its 52-week high.`);
+
+  if (pros.length === 0 && cons.length === 0) return null;
+  return (
+    <section className="grid sm:grid-cols-2 gap-4">
+      <div className="rounded-xl border border-[var(--pos)] bg-[color-mix(in_oklab,var(--pos)_8%,var(--card))] p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--pos)] mb-2">Pros</p>
+        <ul className="space-y-1.5 text-sm text-[var(--ink2)] list-disc pl-4">
+          {pros.length ? pros.map((p) => <li key={p}>{p}</li>) : <li className="list-none text-[var(--ink3)]">No standout positives from the current numbers.</li>}
+        </ul>
+      </div>
+      <div className="rounded-xl border border-[var(--neg)] bg-[color-mix(in_oklab,var(--neg)_8%,var(--card))] p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--neg)] mb-2">Cons</p>
+        <ul className="space-y-1.5 text-sm text-[var(--ink2)] list-disc pl-4">
+          {cons.length ? cons.map((c) => <li key={c}>{c}</li>) : <li className="list-none text-[var(--ink3)]">No obvious red flags from the current numbers.</li>}
+        </ul>
+      </div>
+      <p className="sm:col-span-2 text-xs text-[var(--ink3)]">These are generated from the numbers by simple rules — not analysis, and never a recommendation. Verify against the filings before trusting anything.</p>
+    </section>
+  );
+}
+
+function RatioGrid({ snapshot, row }: { snapshot: Row; row: Row | null }) {
+  const g = (k: string) => num(row, k) ?? num(snapshot, k);
+  const cells: [string, string][] = [
+    ["Market Cap", `₹ ${fmtNum(g("mcap"), 0)} Cr`],
+    ["Current Price", `₹ ${fmtNum(g("price"))}`],
+    ["High / Low", `₹ ${fmtNum(g("wk52_high"), 0)} / ${fmtNum(g("wk52_low"), 0)}`],
+    ["Stock P/E", fmtNum(g("pe"))],
+    ["Book Value", `₹ ${fmtNum(g("book_value"))}`],
+    ["Dividend Yield", `${fmtNum(g("div_yield"))} %`],
+    ["ROCE", `${fmtNum(g("roce"))} %`],
+    ["ROE", `${fmtNum(g("roe"))} %`],
+    ["Sales growth 5Y", `${fmtNum(g("sales_cagr_5y"))} %`],
+    ["Profit growth 5Y", `${fmtNum(g("profit_cagr_5y"))} %`],
+    ["Debt / Equity", fmtNum(g("de"))],
+    ["Promoter holding", `${fmtNum(g("promoter_holding"))} %`],
+  ];
+  return (
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3">
+        {cells.map(([label, value]) => (
+          <div key={label} className="flex items-baseline justify-between border-b border-[var(--line)] pb-2">
+            <span className="text-sm text-[var(--ink3)]">{label}</span>
+            <span className="text-sm font-semibold text-[var(--ink)] tabular-nums">{value}</span>
+          </div>
+        ))}
       </div>
     </section>
   );
@@ -384,6 +482,7 @@ function CompanyView() {
   const symbol = (params.get("s") ?? "").toUpperCase();
   const [company, setCompany] = useState<Company | null>(null);
   const [peers, setPeers] = useState<Row[]>([]);
+  const [fullRow, setFullRow] = useState<Row | null>(null);
   const [error, setError] = useState("");
   const [watched, setWatched] = useState(false);
   const [note, setNote] = useState("");
@@ -407,6 +506,7 @@ function CompanyView() {
     fetch(`${BASE}/data.json`)
       .then((r) => r.json())
       .then((d: ScreenData) => {
+        setFullRow(d.rows.find((r) => r.symbol === company.snapshot.symbol) ?? null);
         const ind = company.snapshot.industry;
         if (!ind) return;
         setPeers(
@@ -462,22 +562,12 @@ function CompanyView() {
   if (!company) return <p className="text-[var(--ink3)] p-6">Loading {symbol}…</p>;
 
   const s = company.snapshot;
-  const annual = company.statements.annual_pnl;
-  const revenue = annual?.items.find((i) => i.label === "Revenue");
-  const profit = annual?.items.find((i) => i.label === "Net Profit");
-
-  const tiles: [string, string][] = [
-    ["Price", `₹${fmtNum(s.price as number)}`],
-    ["Market Cap", `₹${fmtNum(s.mcap as number, 0)} Cr`],
-    ["P/E", fmtNum(s.pe as number)],
-    ["P/B", fmtNum(s.pb as number)],
-    ["ROE", `${fmtNum(s.roe as number)}%`],
-    ["Div Yield", `${fmtNum(s.div_yield as number)}%`],
-    ["D/E", fmtNum(s.de as number)],
-    ["Book Value", `₹${fmtNum(s.book_value as number)}`],
-    ["52w High", `₹${fmtNum(s.wk52_high as number)}`],
-    ["52w Low", `₹${fmtNum(s.wk52_low as number)}`],
-  ];
+  const price = num(fullRow, "price") ?? num(s, "price");
+  const off = num(fullRow, "off_52w_high");
+  const quarterly = company.statements.quarterly_results ?? (company.trend?.quarterly ? trendToStmt(company.trend.quarterly) : null);
+  const pnl = company.statements.annual_pnl ?? (company.trend?.annual ? trendToStmt(company.trend.annual) : null);
+  const balance = company.statements.balance_sheet;
+  const cashflow = company.statements.cash_flow;
 
   return (
     <div className="space-y-6">
@@ -509,55 +599,91 @@ function CompanyView() {
         </div>
       </div>
 
-      <section className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        {tiles.map(([label, value]) => (
-          <div key={label} className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3">
-            <p className="text-xs text-[var(--ink3)]">{label}</p>
-            <p className="text-base font-semibold text-[var(--ink)]">{value}</p>
-          </div>
-        ))}
-      </section>
+      {price !== null && (
+        <div className="flex items-baseline gap-3">
+          <span className="text-3xl font-bold text-[var(--ink)] tabular-nums">₹ {fmtNum(price)}</span>
+          {off !== null && (
+            <span className={`text-sm font-semibold ${off < 0 ? "text-[var(--neg)]" : "text-[var(--pos)]"}`}>
+              {off < 0 ? "" : "+"}{off.toFixed(1)}% from 52w high
+            </span>
+          )}
+        </div>
+      )}
+
+      <RatioGrid snapshot={s} row={fullRow} />
 
       {company.prices && (company.prices.monthly?.length || company.prices.weekly?.length) ? (
-        <PriceChart prices={company.prices} peBand={company.pe_band} trendQ={company.trend?.quarterly} livePrice={(s.price as number) ?? null} />
+        <PriceChart prices={company.prices} peBand={company.pe_band} trendQ={company.trend?.quarterly} livePrice={price} />
       ) : null}
 
-      {(company.trend?.annual || (revenue && profit && annual)) && (
-        <section className="grid sm:grid-cols-2 gap-4">
-          <Bars
-            title="Revenue"
-            periods={(company.trend?.annual ?? annual!).periods}
-            values={company.trend?.annual ? company.trend.annual.revenue : revenue!.values}
-          />
-          <Bars
-            title="Net Profit"
-            periods={(company.trend?.annual ?? annual!).periods}
-            values={company.trend?.annual ? company.trend.annual.pat : profit!.values}
-          />
+      <ProsCons row={fullRow} />
+
+      {peers.length > 0 && (
+        <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
+          <div className="px-4 pt-3.5 pb-2">
+            <h2 className="text-base font-semibold text-[var(--ink)]">Peer comparison</h2>
+            <p className="text-xs text-[var(--ink3)] mt-0.5">{String(s.industry)}</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="text-xs text-[var(--ink3)] border-y border-[var(--line)]">
+                  <th className="px-3 py-2 text-left font-medium">Name</th>
+                  <th className="px-3 py-2 text-right font-medium">CMP ₹</th>
+                  <th className="px-3 py-2 text-right font-medium">P/E</th>
+                  <th className="px-3 py-2 text-right font-medium">MCap ₹Cr</th>
+                  <th className="px-3 py-2 text-right font-medium">Div Yld %</th>
+                  <th className="px-3 py-2 text-right font-medium">ROCE %</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-b border-[var(--line)] bg-[var(--card2)]">
+                  <td className="px-3 py-1.5"><span className="font-semibold text-[var(--ink)]">{symbol}</span></td>
+                  <td className="px-3 py-1.5 text-right tabular-nums font-semibold">{fmtNum(price)}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums font-semibold">{fmtNum(num(fullRow, "pe"))}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums font-semibold">{fmtNum(num(fullRow, "mcap"), 0)}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums font-semibold">{fmtNum(num(fullRow, "div_yield"))}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums font-semibold">{fmtNum(num(fullRow, "roce"))}</td>
+                </tr>
+                {peers.map((p) => (
+                  <tr key={String(p.symbol)} className="border-b border-[var(--line)] hover:bg-[var(--card2)]">
+                    <td className="px-3 py-1.5"><Link className="font-medium text-[var(--accent-ink)] hover:underline" href={`/company?s=${p.symbol}`}>{String(p.name ?? p.symbol)}</Link></td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.price as number)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.pe as number)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.mcap as number, 0)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.div_yield as number)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.roce as number)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
 
-      {company.trend?.annual && (
-        <StatementTable title="Track record — annual, as filed with NSE" stmt={trendToStmt(company.trend.annual)} />
-      )}
-      {company.trend?.quarterly && (
-        <StatementTable title="Track record — last quarters" stmt={trendToStmt(company.trend.quarterly)} />
+      {quarterly && <StatementTable title="Quarterly results" stmt={quarterly} subtitle="Consolidated figures in ₹ Crores" boldRows={["Net Profit", "Net profit"]} />}
+
+      {pnl && (
+        <>
+          <StatementTable title="Profit & loss" stmt={pnl} subtitle="Consolidated figures in ₹ Crores" boldRows={["Net Profit", "Net profit"]} />
+          <CompoundedGrowth trend={company.trend} prices={company.prices} />
+        </>
       )}
 
-      {Object.keys(company.statements).length === 0 && (
+      {balance && <StatementTable title="Balance sheet" stmt={balance} subtitle="Consolidated figures in ₹ Crores" boldRows={["Total Assets", "Total Liabilities"]} />}
+      {cashflow && <StatementTable title="Cash flows" stmt={cashflow} subtitle="Consolidated figures in ₹ Crores" boldRows={["Free Cash Flow"]} />}
+
+      {Object.keys(company.statements).length === 0 && !company.trend?.annual && (
         <div className="bg-[var(--warn-soft)] border border-[var(--warn-line)] text-[var(--warn-ink)] rounded-xl p-4 text-sm">
           Financial statements haven&apos;t been fetched for this company yet — showing the snapshot only.
           Statements coverage grows as the pipeline runs.
         </div>
       )}
 
-      {Object.entries(STMT_TITLES).map(([key, title]) =>
-        company.statements[key] ? <StatementTable key={key} title={title} stmt={company.statements[key]} /> : null
-      )}
-
       {company.shareholding && company.shareholding.dates.length > 0 && (
         <StatementTable
           title="Shareholding pattern"
+          subtitle="Figures in %"
           stmt={{
             periods: company.shareholding.dates,
             items: [
@@ -567,39 +693,6 @@ function CompanyView() {
             ],
           }}
         />
-      )}
-
-      {peers.length > 0 && (
-        <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
-          <h2 className="px-4 py-3 text-sm font-bold text-[var(--ink)] border-b border-[var(--line)]">
-            Peers <span className="font-normal text-[var(--ink3)]">{String(s.industry)}</span>
-          </h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-[var(--card2)] text-xs text-[var(--ink3)] uppercase text-left">
-                  <th className="px-3 py-2">Symbol</th><th className="px-3 py-2">Name</th>
-                  <th className="px-3 py-2 text-right">MCap ₹Cr</th><th className="px-3 py-2 text-right">P/E</th>
-                  <th className="px-3 py-2 text-right">P/B</th><th className="px-3 py-2 text-right">ROE %</th>
-                  <th className="px-3 py-2 text-right">Div Yld %</th>
-                </tr>
-              </thead>
-              <tbody>
-                {peers.map((p) => (
-                  <tr key={String(p.symbol)} className="border-t border-[var(--line)] hover:bg-[var(--accent-soft)]">
-                    <td className="px-3 py-2"><Link className="font-semibold text-[var(--accent-ink)]" href={`/company?s=${p.symbol}`}>{String(p.symbol)}</Link></td>
-                    <td className="px-3 py-2 max-w-56 truncate">{String(p.name ?? "—")}</td>
-                    <td className="px-3 py-2 text-right">{fmtNum(p.mcap as number, 0)}</td>
-                    <td className="px-3 py-2 text-right">{fmtNum(p.pe as number)}</td>
-                    <td className="px-3 py-2 text-right">{fmtNum(p.pb as number)}</td>
-                    <td className="px-3 py-2 text-right">{fmtNum(p.roe as number)}</td>
-                    <td className="px-3 py-2 text-right">{fmtNum(p.div_yield as number)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
       )}
 
       <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-3">
