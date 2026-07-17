@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import TopNav from "@/components/TopNav";
 import { Row } from "@/lib/query";
 import { Holding, loadPortfolio, parseHoldings, savePortfolio } from "@/lib/portfolio";
 
@@ -87,12 +88,7 @@ export default function PortfolioPage() {
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
-      <header className="bg-[var(--card)] border-b border-[var(--line)]">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center gap-4">
-          <Link href="/" className="text-sm text-[var(--accent-ink)] font-semibold hover:underline">← Screener</Link>
-          <span className="text-2xl font-bold text-[var(--accent-ink)]">Rscreener</span>
-        </div>
-      </header>
+      <TopNav active="portfolio" />
       <main className="max-w-6xl mx-auto px-4 py-6 space-y-5">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h1 className="text-lg font-bold text-[var(--ink)]">Portfolio</h1>

@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import TopNav from "@/components/TopNav";
 import { Row } from "@/lib/query";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -119,12 +120,7 @@ function SectorsView() {
 export default function SectorsPage() {
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
-      <header className="bg-[var(--card)] border-b border-[var(--line)]">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center gap-4">
-          <Link href="/" className="text-sm text-[var(--accent-ink)] font-semibold hover:underline">← Screener</Link>
-          <span className="text-2xl font-bold text-[var(--accent-ink)]">Rscreener</span>
-        </div>
-      </header>
+      <TopNav active="sectors" />
       <main className="max-w-6xl mx-auto px-4 py-6">
         <Suspense fallback={<p className="text-[var(--ink3)]">Loading…</p>}>
           <SectorsView />

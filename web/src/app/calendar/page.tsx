@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import TopNav from "@/components/TopNav";
 import { loadWatchlist } from "@/lib/store";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -41,12 +42,7 @@ export default function CalendarPage() {
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
-      <header className="bg-[var(--card)] border-b border-[var(--line)]">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center gap-4">
-          <Link href="/" className="text-sm text-[var(--accent-ink)] font-semibold hover:underline">← Screener</Link>
-          <span className="text-2xl font-bold text-[var(--accent-ink)]">Rscreener</span>
-        </div>
-      </header>
+      <TopNav active="calendar" />
       <main className="max-w-6xl mx-auto px-4 py-6 space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h1 className="text-lg font-bold text-[var(--ink)]">Upcoming board meetings</h1>

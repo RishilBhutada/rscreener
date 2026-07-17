@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import TopNav from "@/components/TopNav";
 import { Row } from "@/lib/query";
 import { loadNote, loadWatchlist, saveNote, toggleWatch } from "@/lib/store";
 
@@ -610,16 +611,34 @@ function CompanyView() {
         </div>
       )}
 
-      <RatioGrid snapshot={s} row={fullRow} />
+      <nav className="sticky top-14 z-20 -mx-4 px-4 bg-[var(--card)] border-y border-[var(--line)] flex gap-1 overflow-x-auto text-sm font-medium py-1.5">
+        {([
+          ["summary", "Summary"], ["chart", "Chart"], ["analysis", "Analysis"], ["peers", "Peers"],
+          ["quarters", "Quarters"], ["profit-loss", "Profit & Loss"], ["balance-sheet", "Balance Sheet"],
+          ["cash-flows", "Cash Flow"], ["shareholding", "Investors"], ["documents", "Documents"],
+        ] as [string, string][]).map(([id, label]) => (
+          <a key={id} href={`#${id}`} className="px-3 py-1 rounded-lg whitespace-nowrap text-[var(--ink2)] hover:bg-[var(--card2)] hover:text-[var(--accent-ink)]">
+            {label}
+          </a>
+        ))}
+      </nav>
 
-      {company.prices && (company.prices.monthly?.length || company.prices.weekly?.length) ? (
-        <PriceChart prices={company.prices} peBand={company.pe_band} trendQ={company.trend?.quarterly} livePrice={price} />
-      ) : null}
+      <div id="summary" className="scroll-mt-32">
+        <RatioGrid snapshot={s} row={fullRow} />
+      </div>
 
-      <ProsCons row={fullRow} />
+      <div id="chart" className="scroll-mt-32">
+        {company.prices && (company.prices.monthly?.length || company.prices.weekly?.length) ? (
+          <PriceChart prices={company.prices} peBand={company.pe_band} trendQ={company.trend?.quarterly} livePrice={price} />
+        ) : null}
+      </div>
+
+      <div id="analysis" className="scroll-mt-32">
+        <ProsCons row={fullRow} />
+      </div>
 
       {peers.length > 0 && (
-        <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
+        <section id="peers" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
           <div className="px-4 pt-3.5 pb-2">
             <h2 className="text-base font-semibold text-[var(--ink)]">Peer comparison</h2>
             <p className="text-xs text-[var(--ink3)] mt-0.5">{String(s.industry)}</p>
@@ -661,17 +680,17 @@ function CompanyView() {
         </section>
       )}
 
-      {quarterly && <StatementTable title="Quarterly results" stmt={quarterly} subtitle="Consolidated figures in ₹ Crores" boldRows={["Net Profit", "Net profit"]} />}
+      {quarterly && <div id="quarters" className="scroll-mt-32"><StatementTable title="Quarterly results" stmt={quarterly} subtitle="Consolidated figures in ₹ Crores" boldRows={["Net Profit", "Net profit"]} /></div>}
 
       {pnl && (
-        <>
+        <div id="profit-loss" className="scroll-mt-32 space-y-6">
           <StatementTable title="Profit & loss" stmt={pnl} subtitle="Consolidated figures in ₹ Crores" boldRows={["Net Profit", "Net profit"]} />
           <CompoundedGrowth trend={company.trend} prices={company.prices} />
-        </>
+        </div>
       )}
 
-      {balance && <StatementTable title="Balance sheet" stmt={balance} subtitle="Consolidated figures in ₹ Crores" boldRows={["Total Assets", "Total Liabilities"]} />}
-      {cashflow && <StatementTable title="Cash flows" stmt={cashflow} subtitle="Consolidated figures in ₹ Crores" boldRows={["Free Cash Flow"]} />}
+      {balance && <div id="balance-sheet" className="scroll-mt-32"><StatementTable title="Balance sheet" stmt={balance} subtitle="Consolidated figures in ₹ Crores" boldRows={["Total Assets", "Total Liabilities"]} /></div>}
+      {cashflow && <div id="cash-flows" className="scroll-mt-32"><StatementTable title="Cash flows" stmt={cashflow} subtitle="Consolidated figures in ₹ Crores" boldRows={["Free Cash Flow"]} /></div>}
 
       {Object.keys(company.statements).length === 0 && !company.trend?.annual && (
         <div className="bg-[var(--warn-soft)] border border-[var(--warn-line)] text-[var(--warn-ink)] rounded-xl p-4 text-sm">
@@ -681,7 +700,7 @@ function CompanyView() {
       )}
 
       {company.shareholding && company.shareholding.dates.length > 0 && (
-        <StatementTable
+        <div id="shareholding" className="scroll-mt-32"><StatementTable
           title="Shareholding pattern"
           subtitle="Figures in %"
           stmt={{
@@ -692,10 +711,10 @@ function CompanyView() {
               { label: "Employee trusts %", values: company.shareholding.employee },
             ],
           }}
-        />
+        /></div>
       )}
 
-      <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-3">
+      <section id="documents" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-3">
         <h2 className="text-sm font-bold text-[var(--ink)]">Documents</h2>
         {(company.documents?.annual_reports?.length ?? 0) > 0 && (
           <div>
@@ -770,12 +789,7 @@ function CompanyView() {
 export default function CompanyPage() {
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
-      <header className="bg-[var(--card)] border-b border-[var(--line)]">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center gap-4">
-          <Link href="/" className="text-sm text-[var(--accent-ink)] font-semibold hover:underline">← Screener</Link>
-          <span className="text-2xl font-bold text-[var(--accent-ink)]">Rscreener</span>
-        </div>
-      </header>
+      <TopNav />
       <main className="max-w-6xl mx-auto px-4 py-6">
         <Suspense fallback={<p className="text-[var(--ink3)]">Loading…</p>}>
           <CompanyView />

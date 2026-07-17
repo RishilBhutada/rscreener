@@ -6,7 +6,7 @@ import { compile, isValidRatioName, QueryError, Row } from "@/lib/query";
 import { loadWatchlist, toggleWatch } from "@/lib/store";
 import { FIELD_CATALOG, FIELD_GROUPS } from "@/lib/fields";
 import QueryBuilder from "@/components/QueryBuilder";
-import ThemeControls from "@/components/ThemeControls";
+import TopNav from "@/components/TopNav";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -73,7 +73,6 @@ export default function Home() {
   const [screens, setScreens] = useState<Screen[]>([]);
   const [screenName, setScreenName] = useState("");
   const [watch, setWatch] = useState<string[]>([]);
-  const [searchQ, setSearchQ] = useState("");
   const [ratios, setRatios] = useState<Ratio[]>([]);
   const [ratioName, setRatioName] = useState("");
   const [ratioFormula, setRatioFormula] = useState("");
@@ -122,26 +121,6 @@ export default function Home() {
     if (data) runQuery(query, data.rows);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, ratiosMap]);
-
-  const searchMatches = useMemo(() => {
-    const q = searchQ.trim().toLowerCase();
-    if (!data || q.length < 2) return [];
-    const score = (r: Row): number => {
-      const sym = String(r.symbol).toLowerCase();
-      const name = String(r.name ?? "").toLowerCase();
-      if (sym.startsWith(q)) return 0;
-      if (name.startsWith(q)) return 1;
-      if (name.includes(` ${q}`)) return 2;
-      if (sym.includes(q) || name.includes(q)) return 3;
-      return 9;
-    };
-    return data.rows
-      .map((r) => [score(r), r] as const)
-      .filter(([sc]) => sc < 9)
-      .sort((a, b) => a[0] - b[0] || (((b[1].mcap as number) ?? 0) - ((a[1].mcap as number) ?? 0)))
-      .slice(0, 8)
-      .map(([, r]) => r);
-  }, [data, searchQ]);
 
   const addRatio = () => {
     const name = ratioName.trim().toLowerCase();
@@ -224,46 +203,12 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
-      <header className="bg-[var(--card)] border-b border-[var(--line)]">
-        <div className="max-w-6xl mx-auto px-4 py-4 space-y-3">
-          <div className="flex items-baseline justify-between flex-wrap gap-2">
-            <div className="flex items-baseline gap-4 flex-wrap">
-              <h1 className="text-2xl font-bold text-[var(--accent-ink)]">Rscreener</h1>
-              <nav className="text-sm font-semibold text-[var(--accent-ink)] flex gap-4">
-                <Link href="/calendar" className="hover:underline">Results calendar</Link>
-                <Link href="/sectors" className="hover:underline">Sectors</Link>
-                <Link href="/portfolio" className="hover:underline">Portfolio</Link>
-              </nav>
-            </div>
-            <div className="flex items-center gap-4">
-              {data && (
-                <p className="text-xs text-[var(--ink3)] hidden md:block">
-                  {data.covered.toLocaleString("en-IN")} of {data.universe_size.toLocaleString("en-IN")} NSE companies · data as of {data.generated_at}
-                </p>
-              )}
-              <ThemeControls />
-            </div>
-          </div>
-          <div className="relative w-full sm:w-96">
-            <input
-              value={searchQ}
-              onChange={(e) => setSearchQ(e.target.value)}
-              placeholder="Search a company… (e.g. Infosys or INFY)"
-              className="w-full text-sm border border-[var(--line2)] rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-            />
-            {searchMatches.length > 0 && (
-              <div className="absolute z-20 mt-1 w-full bg-[var(--card)] border border-[var(--line)] rounded-lg shadow-lg max-h-80 overflow-auto">
-                {searchMatches.map((m) => (
-                  <Link key={String(m.symbol)} href={`/company?s=${m.symbol}`} className="block px-3 py-2 hover:bg-[var(--accent-soft)] text-sm">
-                    <span className="font-semibold text-[var(--accent-ink)]">{String(m.symbol)}</span>
-                    <span className="text-[var(--ink3)]"> — {String(m.name ?? "")}</span>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
+      <TopNav active="screens" />
+      {data && (
+        <p className="max-w-6xl mx-auto px-4 pt-3 text-xs text-[var(--ink3)]">
+          {data.covered.toLocaleString("en-IN")} of {data.universe_size.toLocaleString("en-IN")} NSE companies · data as of {data.generated_at}
+        </p>
+      )}
 
       <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
         {loadError && <div className="bg-[var(--neg-soft)] border border-[var(--neg-line)] text-[var(--neg)] rounded-lg p-4 text-sm">{loadError}</div>}
