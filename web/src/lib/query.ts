@@ -36,6 +36,8 @@ const ALIASES: Record<string, string> = {
   payout: "div_payout",
   median_pe: "median_pe_5y",
   avg_margin: "avg_npm_5y",
+  volatility: "volatility_1y",
+  hv: "volatility_1y",
   return_1y: "ret_1y",
   return_3y: "ret_3y",
   return_5y: "ret_5y",
@@ -52,6 +54,7 @@ export const NUMERIC_FIELDS = [
   "debtor_days", "inventory_days", "promoter_holding",
   "median_pe_5y", "avg_npm_5y",
   "ret_1m", "ret_3m", "ret_6m", "ret_1y", "ret_3y", "ret_5y", "off_52w_high",
+  "volatility_1y", "volatility_30d",
 ];
 
 export function isValidRatioName(name: string): string | null {

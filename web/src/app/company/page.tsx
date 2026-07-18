@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
@@ -25,13 +25,14 @@ type Shareholding = {
   public: (number | null)[];
   employee: (number | null)[];
 };
-type Prices = { monthly?: [string, number][]; weekly?: [string, number][]; daily?: [string, number][] };
+type Pt = [string, number] | [string, number, number | null];
+type Prices = { monthly?: Pt[]; weekly?: Pt[]; daily?: Pt[] };
 type PeBand = { series: [string, number][]; median_5y: number };
 
-function sma(series: [string, number][], window: number): (number | null)[] {
+function sma(series: Pt[], window: number): (number | null)[] {
   let sum = 0;
-  return series.map(([, v], i) => {
-    sum += v;
+  return series.map((pt, i) => {
+    sum += pt[1];
     if (i >= window) sum -= series[i - window][1];
     return i >= window - 1 ? sum / window : null;
   });
@@ -47,68 +48,92 @@ type Company = {
   pe_band?: PeBand | null;
 };
 
+const RANGES: [string, number, "d" | "m"][] = [
+  ["1M", 22, "d"], ["6M", 125, "d"], ["1Y", 250, "d"],
+  ["3Y", 36, "m"], ["5Y", 60, "m"], ["10Y", 120, "m"], ["Max", 0, "m"],
+];
+
+function fmtVol(v: number): string {
+  if (v >= 1e7) return `${(v / 1e7).toFixed(1)}Cr`;
+  if (v >= 1e5) return `${(v / 1e5).toFixed(1)}L`;
+  if (v >= 1e3) return `${(v / 1e3).toFixed(0)}K`;
+  return String(v);
+}
+
 function PriceChart({ prices, peBand, trendQ, livePrice }: { prices: Prices; peBand?: PeBand | null; trendQ?: Trend | null; livePrice: number | null }) {
-  const [range, setRange] = useState<"1Y" | "5Y" | "10Y">("5Y");
+  const [range, setRange] = useState("1Y");
   const [view, setView] = useState<"price" | "pe" | "sales" | "eps">("price");
   const [showDma, setShowDma] = useState(false);
+  const [hover, setHover] = useState<{ idx: number; px: number } | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
 
   const daily = useMemo(() => prices.daily ?? [], [prices]);
-  const pts = useMemo(() => {
-    if (view === "pe") {
-      const s = peBand?.series ?? [];
-      return range === "1Y" ? s.slice(-12) : range === "5Y" ? s.slice(-60) : s;
-    }
-    let base: [string, number][] =
-      range === "1Y"
-        ? (daily.length > 50 ? daily.slice(-250) : prices.weekly ?? [])
-        : (prices.monthly ?? []).slice(range === "5Y" ? -60 : -120);
-    if (livePrice !== null && base.length > 0) {
-      base = [...base, [new Date().toISOString().slice(0, 10), livePrice]];
-    }
-    return base;
-  }, [prices, peBand, range, view, livePrice, daily]);
+  const rangeDef = RANGES.find(([r]) => r === range) ?? RANGES[2];
+  const rN = rangeDef[1], rFreq = rangeDef[2];
 
-  const dmaOverlays = useMemo(() => {
-    if (view !== "price" || range !== "1Y" || !showDma || daily.length < 200) return null;
-    const d50 = sma(daily, 50), d200 = sma(daily, 200);
-    const shown = pts.length - (livePrice !== null ? 1 : 0);
-    return {
-      d50: d50.slice(-shown),
-      d200: d200.slice(-shown),
-    };
-  }, [view, range, showDma, daily, pts.length, livePrice]);
+  const { pts, dmaWindowed } = useMemo(() => {
+    if (view === "pe") {
+      const s: Pt[] = (peBand?.series ?? []) as Pt[];
+      const n = rFreq === "d" ? 12 : rN === 0 ? s.length : rN;
+      return { pts: s.slice(-Math.max(n, 12)), dmaWindowed: null as { d50: (number | null)[]; d200: (number | null)[] } | null };
+    }
+    let base: Pt[];
+    if (rFreq === "d" && daily.length > 30) base = daily.slice(-rN);
+    else if (rFreq === "d") base = (prices.weekly ?? prices.monthly ?? []).slice(-Math.ceil(rN / 5));
+    else base = (prices.monthly ?? []).slice(rN === 0 ? 0 : -rN);
+    let dmaW: { d50: (number | null)[]; d200: (number | null)[] } | null = null;
+    if (showDma && rFreq === "d" && daily.length >= 220) {
+      dmaW = { d50: sma(daily, 50).slice(-base.length), d200: sma(daily, 200).slice(-base.length) };
+    }
+    if (livePrice !== null && base.length > 0) {
+      base = [...base, [new Date().toISOString().slice(0, 10), livePrice, null]];
+      if (dmaW) { dmaW.d50.push(dmaW.d50[dmaW.d50.length - 1]); dmaW.d200.push(dmaW.d200[dmaW.d200.length - 1]); }
+    }
+    return { pts: base, dmaWindowed: dmaW };
+  }, [prices, peBand, daily, rN, rFreq, view, livePrice, showDma]);
 
   if (view === "sales" || view === "eps") {
     return (
-      <QuarterChart
-        view={view}
-        setView={setView}
-        trendQ={trendQ ?? null}
-        hasPe={!!peBand}
-        hasSales={!!trendQ}
-      />
+      <QuarterChart view={view} setView={setView} trendQ={trendQ ?? null} hasPe={!!peBand} hasSales={!!trendQ} />
     );
   }
+  if (pts.length < 2) return null;
 
-  if (pts.length < 2 && view === "price") return null;
-  const W = 640, H = 190, padX = 8, padTop = 24, padBot = 26;
-  const values = pts.map(([, v]) => v);
+  const W = 900, mainH = 208, volH = 50, padTop = 16, gap = 8;
+  const H = padTop + mainH + gap + volH + 22;
+  const padX = 2;
+  const values = pts.map((pt) => pt[1]);
+  const vols = pts.map((pt) => (pt.length > 2 ? (pt[2] as number | null) : null));
+  const hasVol = vols.some((v) => v !== null && v > 0);
   const median = view === "pe" ? peBand?.median_5y ?? null : null;
-  const min = Math.min(...values, ...(median !== null ? [median] : []));
-  const max = Math.max(...values, ...(median !== null ? [median] : []));
+  const dmaVals = dmaWindowed ? [...dmaWindowed.d50, ...dmaWindowed.d200].filter((v): v is number => v !== null) : [];
+  const min = Math.min(...values, ...(median !== null ? [median] : []), ...dmaVals);
+  const max = Math.max(...values, ...(median !== null ? [median] : []), ...dmaVals);
   const span = max - min || 1;
   const x = (i: number) => padX + (i / (pts.length - 1)) * (W - 2 * padX);
-  const y = (v: number) => padTop + (1 - (v - min) / span) * (H - padTop - padBot);
-  const line = pts.map(([, v], i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const y = (v: number) => padTop + (1 - (v - min) / span) * mainH;
+  const maxVol = Math.max(...vols.map((v) => v ?? 0), 1);
+  const volY0 = padTop + mainH + gap + volH;
+  const line = pts.map((pt, i) => `${x(i).toFixed(1)},${y(pt[1]).toFixed(1)}`).join(" ");
   const change = ((values[values.length - 1] / values[0]) - 1) * 100;
   const up = change >= 0;
   const color = view === "pe" ? "var(--chart-line2)" : up ? "var(--chart-pos)" : "var(--chart-neg)";
-  const unit = view === "pe" ? "" : "₹";
-  const dateLbl = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { month: "short", year: "2-digit" });
+  const dateLbl = (iso: string, full = false) =>
+    new Date(iso).toLocaleDateString("en-IN", full ? { day: "numeric", month: "short", year: "numeric" } : { month: "short", year: "2-digit" });
+
+  const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    setHover({ idx: Math.round(frac * (pts.length - 1)), px: e.clientX - rect.left });
+  };
+  const h = hover && pts[hover.idx] ? hover : null;
+  const hp = h ? pts[h.idx] : null;
+  const boxW = svgRef.current?.getBoundingClientRect().width ?? 600;
 
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
-      <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
         <div className="flex items-center gap-3 flex-wrap">
           <ChartTabs view={view} setView={setView} hasPe={!!peBand} hasSales={!!trendQ} />
           <p className="text-sm font-semibold text-[var(--ink2)]">
@@ -117,11 +142,11 @@ function PriceChart({ prices, peBand, trendQ, livePrice }: { prices: Prices; peB
             ) : (
               <>
                 <span className={`font-bold ${up ? "text-[var(--pos)]" : "text-[var(--neg)]"}`}>{up ? "+" : ""}{change.toFixed(1)}%</span>
-                <span className="font-normal text-[var(--ink3)]"> over {range}</span>
+                <span className="font-normal text-[var(--ink3)]"> {range}</span>
               </>
             )}
           </p>
-          {view === "price" && range === "1Y" && daily.length >= 200 && (
+          {view === "price" && rFreq === "d" && daily.length >= 220 && (
             <button onClick={() => setShowDma(!showDma)}
               className={`text-xs rounded-full px-3 py-1 border ${showDma ? "bg-[var(--warn-soft)] border-[var(--warn-line)] text-[var(--warn-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
               50/200 DMA
@@ -129,35 +154,94 @@ function PriceChart({ prices, peBand, trendQ, livePrice }: { prices: Prices; peB
           )}
         </div>
         <div className="flex gap-1 text-xs">
-          {(["1Y", "5Y", "10Y"] as const).map((r) => (
+          {RANGES.map(([r]) => (
             <button key={r} onClick={() => setRange(r)}
-              className={`rounded-full px-3 py-1 border ${range === r ? "bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
+              className={`rounded-full px-2.5 py-1 border ${range === r ? "bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
               {r}
             </button>
           ))}
         </div>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
-        <polygon points={`${padX},${y(values[0])} ${line} ${W - padX},${H - padBot} ${padX},${H - padBot}`} fill={color} opacity="0.07" />
-        <polyline points={line} fill="none" stroke={color} strokeWidth="2" />
-        {dmaOverlays && (
-          <g>
-            <polyline points={dmaOverlays.d50.map((v, i) => (v === null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`)).filter(Boolean).join(" ")} fill="none" stroke="var(--chart-dma50)" strokeWidth="1.4" />
-            <polyline points={dmaOverlays.d200.map((v, i) => (v === null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`)).filter(Boolean).join(" ")} fill="none" stroke="var(--chart-dma200)" strokeWidth="1.4" />
-            <text x={W - padX} y={14} fontSize="10" textAnchor="end"><tspan fill="var(--chart-dma50)">— 50 DMA</tspan> <tspan fill="var(--chart-dma200)">— 200 DMA</tspan></text>
-          </g>
+
+      <div className="relative">
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${W} ${H}`}
+          preserveAspectRatio="none"
+          className="w-full touch-none select-none"
+          style={{ height: 300 }}
+          onPointerMove={onMove}
+          onPointerDown={onMove}
+          onPointerLeave={() => setHover(null)}
+        >
+          <defs>
+            <linearGradient id="rsPriceFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={view === "pe" ? "#8b5cf6" : up ? "#10b981" : "#ef4444"} stopOpacity="0.16" />
+              <stop offset="100%" stopColor={view === "pe" ? "#8b5cf6" : up ? "#10b981" : "#ef4444"} stopOpacity="0" />
+            </linearGradient>
+          </defs>
+
+          {[0.25, 0.5, 0.75].map((f) => (
+            <line key={f} x1={padX} x2={W - padX} y1={padTop + mainH * f} y2={padTop + mainH * f} stroke="var(--chart-grid)" strokeWidth="1" strokeDasharray="3 5" />
+          ))}
+
+          <polygon points={`${padX},${y(values[0]).toFixed(1)} ${line} ${(W - padX).toFixed(1)},${padTop + mainH} ${padX},${padTop + mainH}`} fill="url(#rsPriceFill)" />
+          <polyline points={line} fill="none" stroke={color} strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+
+          {dmaWindowed && (
+            <g>
+              <polyline points={dmaWindowed.d50.map((v, i) => (v === null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`)).filter(Boolean).join(" ")} fill="none" stroke="var(--chart-dma50)" strokeWidth="1.3" vectorEffect="non-scaling-stroke" />
+              <polyline points={dmaWindowed.d200.map((v, i) => (v === null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`)).filter(Boolean).join(" ")} fill="none" stroke="var(--chart-dma200)" strokeWidth="1.3" vectorEffect="non-scaling-stroke" />
+            </g>
+          )}
+
+          {median !== null && (
+            <g>
+              <line x1={padX} y1={y(median)} x2={W - padX} y2={y(median)} stroke="var(--chart-axis)" strokeWidth="1" strokeDasharray="6 4" />
+              <text x={W - padX} y={y(median) - 5} fontSize="11" fill="var(--chart-axis)" textAnchor="end">median {median}</text>
+            </g>
+          )}
+
+          {hasVol && vols.map((v, i) => {
+            if (v === null || v <= 0) return null;
+            const bh = (v / maxVol) * volH;
+            const bw = Math.max(((W - 2 * padX) / pts.length) * 0.65, 1);
+            return <rect key={i} x={x(i) - bw / 2} y={volY0 - bh} width={bw} height={bh} fill="var(--chart-axis)" opacity="0.35" />;
+          })}
+
+          <text x={padX + 2} y={padTop - 4} fontSize="11" fill="var(--chart-axis)">{view === "pe" ? "" : "₹"}{max.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</text>
+          <text x={padX + 2} y={padTop + mainH - 4} fontSize="11" fill="var(--chart-axis)">{view === "pe" ? "" : "₹"}{min.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</text>
+          <text x={padX} y={H - 6} fontSize="11" fill="var(--chart-axis)">{dateLbl(String(pts[0][0]))}</text>
+          <text x={W / 2} y={H - 6} fontSize="11" fill="var(--chart-axis)" textAnchor="middle">{dateLbl(String(pts[Math.floor(pts.length / 2)][0]))}</text>
+          <text x={W - padX} y={H - 6} fontSize="11" fill="var(--chart-axis)" textAnchor="end">{dateLbl(String(pts[pts.length - 1][0]))}</text>
+
+          {h && hp && (
+            <g>
+              <line x1={x(h.idx)} x2={x(h.idx)} y1={padTop} y2={volY0} stroke="var(--chart-axis)" strokeWidth="1" strokeDasharray="2 3" />
+              <circle cx={x(h.idx)} cy={y(hp[1])} r="3.5" fill={color} stroke="var(--card)" strokeWidth="1.5" />
+            </g>
+          )}
+        </svg>
+
+        {h && hp && (
+          <div
+            className="absolute top-1 pointer-events-none bg-[var(--card)] border border-[var(--line2)] rounded-lg shadow-lg px-3 py-2 text-xs space-y-0.5 z-10"
+            style={h.px < boxW / 2 ? { left: h.px + 14 } : { right: boxW - h.px + 14 }}
+          >
+            <p className="font-semibold text-[var(--ink)]">{dateLbl(String(hp[0]), true)}</p>
+            <p className="text-[var(--ink2)]">{view === "pe" ? "P/E " : "₹ "}<span className="font-semibold tabular-nums">{hp[1].toLocaleString("en-IN")}</span></p>
+            {dmaWindowed && dmaWindowed.d50[h.idx] != null && (
+              <p className="tabular-nums" style={{ color: "var(--chart-dma50)" }}>DMA50 ₹{Math.round(dmaWindowed.d50[h.idx] as number).toLocaleString("en-IN")}</p>
+            )}
+            {dmaWindowed && dmaWindowed.d200[h.idx] != null && (
+              <p className="tabular-nums" style={{ color: "var(--chart-dma200)" }}>DMA200 ₹{Math.round(dmaWindowed.d200[h.idx] as number).toLocaleString("en-IN")}</p>
+            )}
+            {hasVol && vols[h.idx] != null && (vols[h.idx] as number) > 0 && (
+              <p className="text-[var(--ink3)] tabular-nums">Vol {fmtVol(vols[h.idx] as number)}</p>
+            )}
+          </div>
         )}
-        {median !== null && (
-          <g>
-            <line x1={padX} y1={y(median)} x2={W - padX} y2={y(median)} stroke="var(--chart-axis)" strokeWidth="1" strokeDasharray="6 4" />
-            <text x={W - padX} y={y(median) - 4} fontSize="10" fill="var(--chart-axis)" textAnchor="end">median {median}</text>
-          </g>
-        )}
-        <text x={padX} y={H - 8} fontSize="10" fill="var(--chart-axis)">{dateLbl(pts[0][0])}</text>
-        <text x={W - padX} y={H - 8} fontSize="10" fill="var(--chart-axis)" textAnchor="end">{dateLbl(pts[pts.length - 1][0])}</text>
-        <text x={padX} y={14} fontSize="10" fill="var(--chart-axis)">{unit}{max.toLocaleString("en-IN")}</text>
-        <text x={padX} y={y(min) - 4} fontSize="10" fill="var(--chart-axis)">{unit}{min.toLocaleString("en-IN")}</text>
-      </svg>
+      </div>
     </section>
   );
 }

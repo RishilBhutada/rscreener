@@ -85,10 +85,11 @@ def main() -> None:
     pe_by_symbol = pe_series(con)
     prices_by_symbol: dict[str, dict] = {}
     if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='prices'").fetchone():
-        pr = pd.read_sql("SELECT symbol, freq, date, close FROM prices ORDER BY date", con)
+        pr = pd.read_sql("SELECT symbol, freq, date, close, volume FROM prices ORDER BY date", con)
         for (sym_key, freq), grp in pr.groupby(["symbol", "freq"]):
             prices_by_symbol.setdefault(sym_key, {})[freq] = [
-                [d, c] for d, c in zip(grp["date"], grp["close"])
+                [d, c, None if pd.isna(v) else int(v)]
+                for d, c, v in zip(grp["date"], grp["close"], grp["volume"])
             ]
     shp_by_symbol: dict[str, dict] = {}
     if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='shareholding'").fetchone():
