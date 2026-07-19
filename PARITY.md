@@ -11,6 +11,7 @@ on the deployed site. "Better than" ideas go at the bottom, locked until parity.
 - [x] Saved screens (device)
 - [x] ~40 built-in fields incl. ROCE, EV/EBITDA, PEG, promoter holding
 - [x] Historical fields: sales/profit CAGR 5y/10y, median P/E 5y, avg margin 5y
+- [x] Historical volatility: volatility_1y / volatility_30d (close-to-close, annualised; Yang-Zhang via OHLC queued)
 - [x] Returns fields: ret_1m/3m/6m/1y/3y/5y + off_52w_high (936 cos, grows with bands)
 - [ ] Historical-average fields batch 2: avg ROE 5y, avg ROCE 5y (needs equity/capital history)
 - [ ] Screen result count parity spot-check vs screener.in on 10 classic queries
@@ -35,7 +36,9 @@ on the deployed site. "Better than" ideas go at the bottom, locked until parity.
 - [x] 50 & 200 DMA overlays on price (1Y view; extend when daily depth grows)
 - [x] Sales & margin chart view (quarterly bars + margin line)
 - [x] EPS chart view
-- [ ] Volume on price chart (needs volume series in the price fetcher)
+- [x] Volume on price chart (bars + hover readout)
+- [x] Crosshair + hover tooltip (date, price/PE, DMA, volume)
+- [x] Full range set: 1M / 6M / 1Y / 3Y / 5Y / 10Y / Max
 - [x] Revenue / Net-profit long-term bar charts
 
 ## App-wide

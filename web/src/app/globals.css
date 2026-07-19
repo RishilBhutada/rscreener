@@ -33,6 +33,8 @@
   --chart-value: #49566b;
   --chart-dma50: #f59e0b;
   --chart-dma200: #6366f1;
+  --chart-vol: #b9cdf2;
+  --chart-bar: #b3a8ee;
 }
 
 :root[data-theme="dark"] {
@@ -62,6 +64,8 @@
   --chart-value: #a2b2c8;
   --chart-dma50: #fbbf24;
   --chart-dma200: #818cf8;
+  --chart-vol: #31517e;
+  --chart-bar: #55499b;
 }
 
 :root[data-accent="emerald"] { --accent: #059669; --accent-strong: #047857; }

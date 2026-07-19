@@ -77,7 +77,7 @@ def main() -> None:
     ok = err = 0
     for i, sym in enumerate(symbols, 1):
         try:
-            monthly = series(session, sym, "10y", "1mo")
+            monthly = series(session, sym, "max", "1mo")
             weekly = series(session, sym, "1y", "1wk")
             daily = series(session, sym, "2y", "1d")
             if not monthly and not weekly and not daily:

@@ -107,8 +107,16 @@ export default function TopNav({ active }: { active?: "screens" | "sectors" | "c
           ))}
         </nav>
 
-        <div className="shrink-0">
+        <div className="shrink-0 flex items-center gap-2">
           <ThemeControls />
+          <button
+            onClick={() => window.location.reload()}
+            title="Refresh"
+            aria-label="Refresh the app"
+            className="text-base leading-none rounded-full border border-[var(--line)] bg-[var(--card2)] w-8 h-8 flex items-center justify-center text-[var(--ink2)] hover:border-[var(--line2)] active:rotate-180 transition-transform"
+          >
+            ↻
+          </button>
         </div>
       </div>
 

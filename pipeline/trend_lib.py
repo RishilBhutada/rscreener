@@ -10,8 +10,8 @@ import sqlite3
 
 import pandas as pd
 
-YF_MAP = {"Total Revenue": "revenue", "Net Income": "pat", "Basic EPS": "eps"}
-ITEMS = ["revenue", "pat", "eps"]
+YF_MAP = {"Total Revenue": "revenue", "Net Income": "pat", "Basic EPS": "eps", "Total Expenses": "expenses"}
+ITEMS = ["revenue", "pat", "eps", "expenses"]
 KEEP_ANNUAL = 15
 KEEP_QUARTERLY = 12
 
@@ -21,22 +21,23 @@ def _table_exists(con: sqlite3.Connection, name: str) -> bool:
 
 
 def _to_cr(item: str, value: float) -> float:
-    return round(value / 1e7, 1) if item in ("revenue", "pat") else round(value, 2)
+    return round(value / 1e7, 1) if item in ("revenue", "pat", "expenses") else round(value, 2)
 
 
 def build_trends(con: sqlite3.Connection) -> dict[str, dict]:
     frames = []
     if _table_exists(con, "results_history"):
         xb = pd.read_sql(
-            "SELECT symbol, period_type, period_end, item, value FROM results_history WHERE item IN ('revenue','pat','eps')",
+            "SELECT symbol, period_type, period_end, item, value FROM results_history WHERE item IN ('revenue','pat','eps','total_expenses')",
             con,
         )
+        xb["item"] = xb["item"].replace({"total_expenses": "expenses"})
         xb["source"] = "nse"
         frames.append(xb)
     if _table_exists(con, "statements"):
         yf = pd.read_sql(
             "SELECT symbol, period_type, period_end, item, value FROM statements "
-            "WHERE stmt_type='income' AND item IN ('Total Revenue','Net Income','Basic EPS')",
+            "WHERE stmt_type='income' AND item IN ('Total Revenue','Net Income','Basic EPS','Total Expenses')",
             con,
         )
         yf["item"] = yf["item"].map(YF_MAP)
@@ -62,6 +63,7 @@ def build_trends(con: sqlite3.Connection) -> dict[str, dict]:
             "revenue": [periods[p].get("revenue") for p in ordered],
             "pat": [periods[p].get("pat") for p in ordered],
             "eps": [periods[p].get("eps") for p in ordered],
+            "expenses": [periods[p].get("expenses") for p in ordered],
             "source": [periods[p]["source"] for p in ordered],
         }
         if any(v is not None for v in trend["revenue"]):
