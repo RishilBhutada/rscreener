@@ -31,18 +31,19 @@ on the deployed site. "Better than" ideas go at the bottom, locked until parity.
 - [ ] Per-company XLSX export (theirs is .xlsx with a template)
 
 ## Charts
-- [x] Price chart 1Y/5Y/10Y
-- [x] P/E band with 5-year median line
-- [x] 50 & 200 DMA overlays on price (1Y view; extend when daily depth grows)
-- [x] Sales & margin chart view (quarterly bars + margin line)
+- [x] Interactive chart engine v3 — time-scaled axis, dual L/R axes, smoothing, checkbox legend to toggle each series
+- [x] Price chart with 50 & 200 DMA overlays (daily-based; auto-shown when daily depth covers the window)
+- [x] P/E band with 5-year median line + TTM EPS bars
+- [x] Sales & margin chart view (quarterly bars + OPM% / NPM% margin lines)
 - [x] EPS chart view
 - [x] Volume on price chart (bars + hover readout)
-- [x] Crosshair + hover tooltip (date, price/PE, DMA, volume)
-- [x] Full range set: 1M / 6M / 1Y / 3Y / 5Y / 10Y / Max
+- [x] Crosshair + hover tooltip (date, price/PE, DMA, volume — all visible series)
+- [x] Full range set: 1M / 6M / 1Y / 3Y / 5Y / 10Y / Max — Max now ~30 years of monthly history (RELIANCE 1995→2026), vs screener.in's ~20
 - [x] Revenue / Net-profit long-term bar charts
 
 ## App-wide
 - [x] Search with ranked matches
+- [x] One-tap data refresh (↻ in top-right nav)
 - [x] Sectors browse + drill-down
 - [x] Results calendar (upcoming board meetings, filters)
 - [x] Watchlist (star toggles, home section)
