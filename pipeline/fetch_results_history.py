@@ -19,7 +19,7 @@ import argparse
 import sqlite3
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import requests
@@ -124,7 +124,7 @@ def pick_filings(rows: list[dict], quarters_back: int, period: str) -> list[dict
         if cur is None or (r.get("consolidated") == "Consolidated" and cur.get("consolidated") != "Consolidated"):
             by_period[key] = r
     picked = sorted(by_period.values(), key=lambda r: datetime.strptime(r["toDate"], "%d-%b-%Y"), reverse=True)
-    if period == "Quarterly":
+    if period == "Quarterly" and quarters_back > 0:
         picked = picked[:quarters_back]
     return picked
 
@@ -132,16 +132,15 @@ def pick_filings(rows: list[dict], quarters_back: int, period: str) -> list[dict
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbols", required=True, help="comma list, or @path to file")
-    ap.add_argument("--limit", type=int, default=0, help="only first N symbols of the list")
-    ap.add_argument("--quarters-back", type=int, default=12)
+    ap.add_argument("--limit", type=int, default=0, help="cap the run to the N most-overdue symbols (0 = no cap)")
+    ap.add_argument("--quarters-back", type=int, default=40, help="max quarterly filings per symbol (0 = all available)")
+    ap.add_argument("--max-age-hours", type=float, default=0.0, help="re-fetch a symbol whose last fetch is older than this (0 = only never-fetched symbols)")
     ap.add_argument("--sleep", type=float, default=0.35)
-    ap.add_argument("--refresh", action="store_true")
+    ap.add_argument("--refresh", action="store_true", help="re-fetch every listed symbol regardless of age")
     args = ap.parse_args()
 
     raw = (ROOT / args.symbols[1:]).read_text(encoding="utf-8") if args.symbols.startswith("@") else args.symbols
     symbols = [s.strip().upper() for s in raw.split(",") if s.strip()]
-    if args.limit:
-        symbols = symbols[: args.limit]
 
     con = sqlite3.connect(DB)
     con.execute(
@@ -150,9 +149,19 @@ def main() -> None:
     con.execute(
         "CREATE TABLE IF NOT EXISTS results_fetch_log (symbol TEXT PRIMARY KEY, fetched_at TEXT, error TEXT, n_periods INTEGER)"
     )
-    if not args.refresh:
-        done = {r[0] for r in con.execute("SELECT symbol FROM results_fetch_log WHERE error IS NULL").fetchall()}
-        symbols = [s for s in symbols if s not in done]
+    # decide which symbols are due, oldest-first (a never-fetched symbol counts as oldest)
+    log = {r[0]: r[1] for r in con.execute("SELECT symbol, fetched_at FROM results_fetch_log WHERE error IS NULL").fetchall()}
+    if args.refresh:
+        due = list(symbols)
+    elif args.max_age_hours > 0:
+        cutoff = (datetime.utcnow() - timedelta(hours=args.max_age_hours)).strftime("%Y-%m-%d %H:%M:%S")
+        due = [s for s in symbols if log.get(s, "") < cutoff]  # "" (never-fetched) sorts below any real timestamp
+    else:
+        due = [s for s in symbols if s not in log]
+    due.sort(key=lambda s: log.get(s) or "")  # oldest / missing first
+    if args.limit:
+        due = due[: args.limit]
+    symbols = due
     print(f"fetching results history for {len(symbols)} symbols...")
 
     s = requests.Session()

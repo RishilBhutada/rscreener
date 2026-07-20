@@ -13,7 +13,7 @@ import pandas as pd
 YF_MAP = {"Total Revenue": "revenue", "Net Income": "pat", "Basic EPS": "eps", "Total Expenses": "expenses"}
 ITEMS = ["revenue", "pat", "eps", "expenses"]
 KEEP_ANNUAL = 15
-KEEP_QUARTERLY = 12
+KEEP_QUARTERLY = 32
 
 
 def _table_exists(con: sqlite3.Connection, name: str) -> bool:
