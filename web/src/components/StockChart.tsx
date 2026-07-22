@@ -4,17 +4,23 @@ import { useMemo, useRef, useState } from "react";
 
 type Pt = [string, number] | [string, number, number | null];
 export type ChartPrices = { monthly?: Pt[]; weekly?: Pt[]; daily?: Pt[] };
-export type ChartPeBand = { series: [string, number][]; median_5y: number } | null;
+export type ChartBand = { series: [string, number][]; median_5y: number } | null;
 export type ChartTrendQ = {
   periods: string[];
   revenue: (number | null)[];
   pat: (number | null)[];
   eps: (number | null)[];
   expenses?: (number | null)[];
+  ebitda?: (number | null)[];
+  book_value?: (number | null)[];
+  opm?: (number | null)[];
+  gpm?: (number | null)[];
+  npm?: (number | null)[];
 } | null;
 
-type View = "price" | "pe" | "sales" | "eps";
+type View = "price" | "pe" | "sales" | "ev" | "pb" | "ps";
 type XY = { t: number; v: number };
+type FmtKind = "rupee" | "plain" | "pct" | "vol" | "cr";
 
 const RANGES: [string, number][] = [
   ["1M", 1 / 12], ["6M", 0.5], ["1Yr", 1], ["3Yr", 3], ["5Yr", 5], ["10Yr", 10], ["Max", 999],
@@ -73,7 +79,7 @@ function smoothPath(pts: { x: number; y: number }[]): string {
   return d;
 }
 
-function fmtVal(v: number, kind: "rupee" | "plain" | "pct" | "vol" | "cr"): string {
+function fmtVal(v: number, kind: FmtKind): string {
   if (kind === "vol") {
     if (v >= 1e7) return `${(v / 1e7).toFixed(1)}Cr`;
     if (v >= 1e5) return `${(v / 1e5).toFixed(1)}L`;
@@ -112,22 +118,29 @@ type SeriesDef = {
   kind: "line" | "smooth" | "bars" | "dashed";
   axis: "L" | "R";
   data: XY[];
-  fmt: "rupee" | "plain" | "pct" | "vol" | "cr";
+  fmt: FmtKind;
 };
 
-export default function StockChart({ prices, peBand, trendQ, livePrice }: {
-  prices: ChartPrices; peBand?: ChartPeBand; trendQ?: ChartTrendQ; livePrice: number | null;
+export default function StockChart({ prices, peBand, evBand, pbBand, psBand, trendQ, livePrice }: {
+  prices: ChartPrices;
+  peBand?: ChartBand;
+  evBand?: ChartBand;
+  pbBand?: ChartBand;
+  psBand?: ChartBand;
+  trendQ?: ChartTrendQ;
+  livePrice: number | null;
 }) {
   const [view, setView] = useState<View>("price");
-  const [range, setRange] = useState("1Yr");
+  const [range, setRange] = useState("5Yr");
   const [on, setOn] = useState<Record<string, boolean>>({});
+  const [moreOpen, setMoreOpen] = useState(false);
   const [hover, setHover] = useState<{ t: number; px: number } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
   const isOn = (k: string, dflt = true) => on[k] ?? dflt;
-  const toggle = (k: string, dflt = true) => setOn({ ...on, [k]: !isOn(k, dflt) });
+  const toggle = (k: string) => setOn({ ...on, [k]: !isOn(k) });
 
-  const years = RANGES.find(([r]) => r === range)?.[1] ?? 1;
+  const years = RANGES.find(([r]) => r === range)?.[1] ?? 5;
   const now = Date.now();
   const cutoff = years >= 999 ? 0 : now - years * 365.25 * 86400000;
 
@@ -138,14 +151,39 @@ export default function StockChart({ prices, peBand, trendQ, livePrice }: {
     const defs: SeriesDef[] = [];
 
     const filt = (src: Pt[]): Pt[] => src.filter((p) => toT(p[0]) >= cutoff);
-    const xy = (src: Pt[]): XY[] => src.map((p) => ({ t: toT(p[0]), v: p[1] }));
+    const xy = (src: [string, number][]): XY[] => src.map((p) => ({ t: toT(p[0]), v: p[1] }));
+
+    // quarterly metric -> bars aligned to period-end dates, filtered to the range
+    const qBars = (arr?: (number | null)[]): XY[] =>
+      trendQ && arr
+        ? trendQ.periods
+            .map((p, i) => ({ t: toT(p), v: arr[i] }))
+            .filter((r): r is XY => r.v !== null && r.v !== undefined && r.t >= cutoff)
+        : [];
+
+    // a valuation-band view: ratio line + dashed median + underlying metric bars
+    const bandView = (
+      band: ChartBand | undefined, lineLabel: string, medianLabel: string, lineFmt: FmtKind,
+      bars: XY[], barLabel: string, barFmt: FmtKind,
+    ) => {
+      if (!band) return;
+      const pts = xy(band.series.filter((p) => toT(p[0]) >= cutoff));
+      defs.push({ key: `${view}_line`, label: lineLabel, color: "var(--accent)", kind: "line", axis: "R", data: pts, fmt: lineFmt });
+      if (pts.length) {
+        defs.push({
+          key: `${view}_median`, label: `${medianLabel} = ${band.median_5y}`, color: "var(--chart-axis)", kind: "dashed", axis: "R",
+          data: [{ t: pts[0].t, v: band.median_5y }, { t: pts[pts.length - 1].t, v: band.median_5y }], fmt: lineFmt,
+        });
+      }
+      if (bars.length) defs.push({ key: `${view}_bar`, label: barLabel, color: "var(--chart-vol)", kind: "bars", axis: "L", data: bars, fmt: barFmt });
+    };
 
     if (view === "price") {
       const dailyStart = daily.length ? toT(daily[0][0]) : Infinity;
       const useDaily = daily.length > 30 && dailyStart <= cutoff + 40 * 86400000 && years <= 3;
       let base = useDaily ? filt(daily) : years <= 1 && weekly.length ? filt(weekly) : filt(monthly);
       if (!base.length) base = filt(monthly);
-      const pricePts = xy(base);
+      const pricePts: XY[] = base.map((p) => ({ t: toT(p[0]), v: p[1] }));
       if (livePrice !== null && pricePts.length) pricePts.push({ t: now, v: livePrice });
       defs.push({ key: "price", label: "Price on NSE", color: "var(--accent)", kind: "line", axis: "R", data: pricePts, fmt: "rupee" });
 
@@ -165,17 +203,9 @@ export default function StockChart({ prices, peBand, trendQ, livePrice }: {
       if (volPts.length) defs.push({ key: "volume", label: "Volume", color: "var(--chart-vol)", kind: "bars", axis: "L", data: volPts, fmt: "vol" });
     }
 
-    if (view === "pe" && peBand) {
-      const pePts = xy(filt(peBand.series as Pt[]));
-      defs.push({ key: "pe", label: "PE", color: "var(--accent)", kind: "line", axis: "R", data: pePts, fmt: "plain" });
-      if (pePts.length) {
-        defs.push({
-          key: "median", label: `Median PE = ${peBand.median_5y}`, color: "var(--chart-axis)", kind: "dashed", axis: "R",
-          data: [{ t: pePts[0].t, v: peBand.median_5y }, { t: pePts[pePts.length - 1].t, v: peBand.median_5y }], fmt: "plain",
-        });
-      }
+    if (view === "pe") {
+      const ttm: XY[] = [];
       if (trendQ) {
-        const ttm: XY[] = [];
         for (let i = 3; i < trendQ.periods.length; i++) {
           const w = [trendQ.eps[i - 3], trendQ.eps[i - 2], trendQ.eps[i - 1], trendQ.eps[i]];
           if (w.every((v) => v !== null && v !== undefined)) {
@@ -183,39 +213,40 @@ export default function StockChart({ prices, peBand, trendQ, livePrice }: {
             if (t >= cutoff) ttm.push({ t, v: (w as number[]).reduce((a, b) => a + b, 0) });
           }
         }
-        if (ttm.length) defs.push({ key: "ttmeps", label: "TTM EPS", color: "var(--chart-vol)", kind: "bars", axis: "L", data: ttm, fmt: "plain" });
       }
+      bandView(peBand, "PE", "Median PE", "plain", ttm, "TTM EPS", "plain");
     }
 
+    if (view === "ev") bandView(evBand, "EV / EBITDA", "Median EV Multiple", "plain", qBars(trendQ?.ebitda), "EBITDA", "cr");
+    if (view === "pb") bandView(pbBand, "Price to BV", "Median PBV", "plain", qBars(trendQ?.book_value), "Book Value", "rupee");
+    if (view === "ps") bandView(psBand, "Market Cap / Sales", "Median Market Cap to Sales", "plain", qBars(trendQ?.revenue), "Sales", "cr");
+
     if (view === "sales" && trendQ) {
-      const rows = trendQ.periods.map((p, i) => ({
-        t: toT(p), rev: trendQ.revenue[i], pat: trendQ.pat[i], exp: trendQ.expenses?.[i] ?? null,
-      })).filter((r) => r.t >= cutoff);
-      const sales = rows.filter((r) => r.rev !== null).map((r) => ({ t: r.t, v: r.rev as number }));
+      const sales = qBars(trendQ.revenue);
       if (sales.length) defs.push({ key: "sales", label: "Quarter Sales", color: "var(--chart-bar)", kind: "bars", axis: "L", data: sales, fmt: "cr" });
-      const opm = rows.filter((r) => r.rev && r.exp !== null).map((r) => ({ t: r.t, v: ((r.rev! - r.exp!) / r.rev!) * 100 }));
+      const gpm = qBars(trendQ.gpm);
+      if (gpm.length > 1) defs.push({ key: "gpm", label: "GPM %", color: "var(--chart-alt)", kind: "smooth", axis: "R", data: gpm, fmt: "pct" });
+      const opm = qBars(trendQ.opm);
       if (opm.length > 1) defs.push({ key: "opm", label: "OPM %", color: "var(--chart-dma50)", kind: "smooth", axis: "R", data: opm, fmt: "pct" });
-      const npm = rows.filter((r) => r.rev && r.pat !== null).map((r) => ({ t: r.t, v: (r.pat! / r.rev!) * 100 }));
+      const npm = qBars(trendQ.npm);
       if (npm.length > 1) defs.push({ key: "npm", label: "NPM %", color: "var(--chart-pos)", kind: "smooth", axis: "R", data: npm, fmt: "pct" });
     }
 
-    if (view === "eps" && trendQ) {
-      const eps = trendQ.periods.map((p, i) => ({ t: toT(p), v: trendQ.eps[i] }))
-        .filter((r): r is { t: number; v: number } => r.v !== null && r.v !== undefined && r.t >= cutoff);
-      if (eps.length) defs.push({ key: "epsq", label: "EPS", color: "var(--chart-vol)", kind: "bars", axis: "L", data: eps, fmt: "plain" });
-    }
-
     return defs;
-  }, [prices, peBand, trendQ, view, cutoff, livePrice, now]);
+  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, cutoff, livePrice, now]);
 
   const visible = model.filter((s) => isOn(s.key));
-  const allPts = visible.flatMap((s) => s.data);
   if (!model.length || !model.some((s) => s.data.length > 1)) {
-    return <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 text-sm text-[var(--ink3)]">No chart data yet for this view.</section>;
+    return (
+      <ChartShell range={range} setRange={setRange} view={view} setView={setView}
+        moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand }}>
+        <div className="h-64 flex items-center justify-center text-sm text-[var(--ink3)]">No data yet for this view.</div>
+      </ChartShell>
+    );
   }
 
-  const t0 = Math.min(...model.filter((s) => isOn(s.key)).flatMap((s) => s.data.length ? [s.data[0].t] : []));
-  const t1 = Math.max(...model.filter((s) => isOn(s.key)).flatMap((s) => s.data.length ? [s.data[s.data.length - 1].t] : []));
+  const t0 = Math.min(...visible.flatMap((s) => (s.data.length ? [s.data[0].t] : [])));
+  const t1 = Math.max(...visible.flatMap((s) => (s.data.length ? [s.data[s.data.length - 1].t] : [])));
   const x = (t: number) => ML + ((t - t0) / Math.max(1, t1 - t0)) * plotW;
 
   const axisVals = (axis: "L" | "R") => visible.filter((s) => s.axis === axis).flatMap((s) => s.data.map((d) => d.v));
@@ -224,7 +255,7 @@ export default function StockChart({ prices, peBand, trendQ, livePrice }: {
     if (!vals.length) return null;
     let lo = Math.min(...vals), hi = Math.max(...vals);
     if (axis === "L") lo = Math.min(0, lo);
-    const pad = (hi - lo) * 0.06 || hi * 0.06 || 1;
+    const pad = (hi - lo) * 0.06 || Math.abs(hi) * 0.06 || 1;
     const ticks = niceTicks(lo, hi + pad, 5);
     const dLo = Math.min(lo, ticks[0] ?? lo), dHi = Math.max(hi + pad, ticks[ticks.length - 1] ?? hi);
     const scale = (v: number) => MT + (1 - (v - dLo) / Math.max(1e-9, dHi - dLo)) * plotH;
@@ -232,52 +263,25 @@ export default function StockChart({ prices, peBand, trendQ, livePrice }: {
   };
   const axL = mkAxis("L"), axR = mkAxis("R");
   const xt = timeTicks(t0, t1);
-
   const fmtKindOf = (axis: "L" | "R") => visible.find((s) => s.axis === axis)?.fmt ?? "plain";
 
   const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
     const rect = svgRef.current?.getBoundingClientRect();
     if (!rect) return;
     const fx = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-    const svgX = fx * W;
-    const t = t0 + ((svgX - ML) / plotW) * (t1 - t0);
+    const t = t0 + ((fx * W - ML) / plotW) * (t1 - t0);
     setHover({ t: Math.min(t1, Math.max(t0, t)), px: e.clientX - rect.left });
   };
 
   const primary = visible.find((s) => s.kind !== "bars" && s.kind !== "dashed") ?? visible[0];
   const hoverPt = hover && primary ? nearest(primary.data, hover.t) : null;
-
-  const views: [View, string, boolean][] = [
-    ["price", "Price", true],
-    ["pe", "PE Ratio", !!peBand],
-    ["sales", "Sales & Margin", !!trendQ],
-    ["eps", "EPS", !!trendQ],
-  ];
-
   const barW = (s: SeriesDef) => Math.max(1.5, Math.min(26, (plotW / Math.max(1, s.data.length)) * 0.62));
   const boxW = svgRef.current?.getBoundingClientRect().width ?? 600;
 
   return (
-    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
-      <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
-        <div className="flex gap-1 text-xs flex-wrap">
-          {RANGES.map(([r]) => (
-            <button key={r} onClick={() => setRange(r)}
-              className={`rounded-lg px-2.5 py-1.5 font-medium ${range === r ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)] hover:bg-[var(--card2)]"}`}>
-              {r}
-            </button>
-          ))}
-        </div>
-        <div className="flex gap-1 text-xs flex-wrap">
-          {views.filter(([, , ok]) => ok).map(([v, label]) => (
-            <button key={v} onClick={() => { setView(v); setHover(null); }}
-              className={`rounded-lg px-3 py-1.5 font-medium ${view === v ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)] hover:bg-[var(--card2)]"}`}>
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
+    <ChartShell range={range} setRange={setRange} view={view} setView={setView}
+      moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand }}
+      onViewChange={() => setHover(null)}>
       <div className="relative">
         <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full touch-none select-none"
           onPointerMove={onMove} onPointerDown={onMove} onPointerLeave={() => setHover(null)}>
@@ -320,7 +324,7 @@ export default function StockChart({ prices, peBand, trendQ, livePrice }: {
             return (
               <polyline key={s.key}
                 points={pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")}
-                fill="none" stroke={s.color} strokeWidth={s.key === "price" || s.key === "pe" ? 1.9 : 1.4}
+                fill="none" stroke={s.color} strokeWidth={s.key === "price" || s.key.endsWith("_line") ? 1.9 : 1.4}
                 strokeDasharray={s.kind === "dashed" ? "6 5" : undefined}
                 strokeLinejoin="round" strokeLinecap="round" />
             );
@@ -371,6 +375,62 @@ export default function StockChart({ prices, peBand, trendQ, livePrice }: {
           </button>
         ))}
       </div>
+    </ChartShell>
+  );
+}
+
+const MORE_VIEWS: [View, string][] = [
+  ["sales", "Sales & Margin"], ["ev", "EV / EBITDA"], ["pb", "Price to Book"], ["ps", "Market Cap / Sales"],
+];
+
+function ChartShell({
+  range, setRange, view, setView, moreOpen, setMoreOpen, avail, onViewChange, children,
+}: {
+  range: string; setRange: (r: string) => void;
+  view: View; setView: (v: View) => void;
+  moreOpen: boolean; setMoreOpen: (b: boolean) => void;
+  avail: { pe: boolean; sales: boolean; ev: boolean; pb: boolean; ps: boolean };
+  onViewChange?: () => void;
+  children: React.ReactNode;
+}) {
+  const pick = (v: View) => { setView(v); setMoreOpen(false); onViewChange?.(); };
+  const moreItems = MORE_VIEWS.filter(([v]) => avail[v as keyof typeof avail]);
+  const activeMore = moreItems.find(([v]) => v === view);
+  const btn = (active: boolean) =>
+    `rounded-lg px-3 py-1.5 font-medium ${active ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)] hover:bg-[var(--card2)]"}`;
+
+  return (
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+        <div className="flex gap-1 text-xs flex-wrap">
+          {RANGES.map(([r]) => (
+            <button key={r} onClick={() => setRange(r)} className={btn(range === r)}>{r}</button>
+          ))}
+        </div>
+        <div className="flex gap-1 text-xs flex-wrap items-center">
+          <button onClick={() => pick("price")} className={btn(view === "price")}>Price</button>
+          {avail.pe && <button onClick={() => pick("pe")} className={btn(view === "pe")}>PE Ratio</button>}
+          {moreItems.length > 0 && (
+            <div className="relative">
+              <button onClick={() => setMoreOpen(!moreOpen)} className={btn(!!activeMore)}>
+                {activeMore ? activeMore[1] : "More"} <span className="text-[10px]">▾</span>
+              </button>
+              {moreOpen && <div className="fixed inset-0 z-10" onClick={() => setMoreOpen(false)} />}
+              {moreOpen && (
+                <div className="absolute right-0 mt-1 z-20 min-w-44 bg-[var(--card)] border border-[var(--line)] rounded-xl shadow-xl overflow-hidden">
+                  {moreItems.map(([v, label]) => (
+                    <button key={v} onClick={() => pick(v)}
+                      className={`block w-full text-left px-3 py-2 ${view === v ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] font-semibold" : "text-[var(--ink2)] hover:bg-[var(--card2)]"}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+      {children}
     </section>
   );
 }

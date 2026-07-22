@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from trend_lib import build_trends, pe_series
+from trend_lib import build_trends, ratio_bands
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
@@ -81,8 +81,22 @@ def main() -> None:
     has_statements = {
         r[0] for r in con.execute("SELECT DISTINCT symbol FROM statements").fetchall()
     }
-    trends = build_trends(con)
-    pe_by_symbol = pe_series(con)
+    shares_by_symbol = {
+        r["symbol"]: r["market_cap"] / r["price"]
+        for r in snaps.to_dict(orient="records")
+        if r.get("market_cap") and r.get("price")
+    }
+    netdebt_by_symbol: dict[str, list] = {}
+    nd = pd.read_sql(
+        "SELECT symbol, period_end, value FROM statements WHERE stmt_type='balance' AND item='Net Debt' ORDER BY period_end",
+        con,
+    )
+    for sym_key, grp in nd.groupby("symbol"):
+        netdebt_by_symbol[sym_key] = [
+            [d, v / 1e7] for d, v in zip(grp["period_end"], grp["value"]) if pd.notna(v)
+        ]
+    trends = build_trends(con, shares_by_symbol)
+    bands = ratio_bands(con, shares_by_symbol, netdebt_by_symbol)
     prices_by_symbol: dict[str, dict] = {}
     if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='prices'").fetchone():
         pr = pd.read_sql("SELECT symbol, freq, date, close, volume FROM prices ORDER BY date", con)
@@ -150,7 +164,10 @@ def main() -> None:
             "trend": trends.get(sym, {}),
             "shareholding": shp_by_symbol.get(sym),
             "prices": prices_by_symbol.get(sym),
-            "pe_band": pe_by_symbol.get(sym),
+            "pe_band": bands.get(sym, {}).get("pe"),
+            "ev_band": bands.get(sym, {}).get("ev"),
+            "pb_band": bands.get(sym, {}).get("pb"),
+            "ps_band": bands.get(sym, {}).get("ps"),
         }
         if sym in has_statements:
             stmts = pd.read_sql("SELECT * FROM statements WHERE symbol = ?", con, params=(sym,))

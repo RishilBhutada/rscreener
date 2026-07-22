@@ -19,6 +19,11 @@ type Trend = {
   pat: (number | null)[];
   eps: (number | null)[];
   expenses?: (number | null)[];
+  ebitda?: (number | null)[];
+  book_value?: (number | null)[];
+  opm?: (number | null)[];
+  gpm?: (number | null)[];
+  npm?: (number | null)[];
   source: string[];
 };
 type Shareholding = {
@@ -42,6 +47,9 @@ type Company = {
   shareholding?: Shareholding;
   prices?: Prices | null;
   pe_band?: PeBand | null;
+  ev_band?: PeBand | null;
+  pb_band?: PeBand | null;
+  ps_band?: PeBand | null;
 };
 
 
@@ -397,7 +405,7 @@ function CompanyView() {
 
       <div id="chart" className="scroll-mt-32">
         {company.prices && (company.prices.monthly?.length || company.prices.weekly?.length) ? (
-          <StockChart prices={company.prices} peBand={company.pe_band} trendQ={company.trend?.quarterly} livePrice={price} />
+          <StockChart prices={company.prices} peBand={company.pe_band} evBand={company.ev_band} pbBand={company.pb_band} psBand={company.ps_band} trendQ={company.trend?.quarterly} livePrice={price} />
         ) : null}
       </div>
 

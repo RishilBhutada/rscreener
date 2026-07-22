@@ -17,7 +17,7 @@ from pathlib import Path
 import pandas as pd
 
 from ratios_lib import compute_ratios, latest_annual_items, latest_promoter
-from trend_lib import avg_npm_5y, build_trends, cagr_pct, pe_series
+from trend_lib import avg_npm_5y, build_trends, cagr_pct, ratio_bands
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
@@ -84,10 +84,15 @@ def main() -> None:
     con = sqlite3.connect(DB, timeout=180)
     df = pd.read_sql("SELECT * FROM fundamentals", con)
     n_universe = pd.read_sql("SELECT COUNT(*) n FROM universe", con)["n"][0]
-    trends = build_trends(con)
+    shares_by_symbol = {
+        r["symbol"]: r["market_cap"] / r["price"]
+        for r in df.to_dict(orient="records")
+        if r.get("market_cap") and r.get("price")
+    }
+    trends = build_trends(con, shares_by_symbol)
     items_by_symbol = latest_annual_items(con)
     promoter_by_symbol = latest_promoter(con)
-    pe_by_symbol = pe_series(con)
+    pe_by_symbol = {s: b["pe"] for s, b in ratio_bands(con, shares_by_symbol).items() if "pe" in b}
     returns_by_symbol = price_returns(con)
     vol_by_symbol = volatility_fields(con)
     con.close()

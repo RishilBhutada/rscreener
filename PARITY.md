@@ -30,16 +30,18 @@ on the deployed site. "Better than" ideas go at the bottom, locked until parity.
 - [x] Per-company CSV export
 - [ ] Per-company XLSX export (theirs is .xlsx with a template)
 
-## Charts
-- [x] Interactive chart engine v3 — time-scaled axis, dual L/R axes, smoothing, checkbox legend to toggle each series
-- [x] Price chart with 50 & 200 DMA overlays (daily-based; auto-shown when daily depth covers the window)
-- [x] P/E band with 5-year median line + TTM EPS bars
-- [x] Sales & margin chart view (quarterly bars + OPM% / NPM% margin lines)
-- [x] EPS chart view
-- [x] Volume on price chart (bars + hover readout)
-- [x] Crosshair + hover tooltip (date, price/PE, DMA, volume — all visible series)
-- [x] Full range set: 1M / 6M / 1Y / 3Y / 5Y / 10Y / Max — Max now ~30 years of monthly history (RELIANCE 1995→2026), vs screener.in's ~20
-- [x] Revenue / Net-profit long-term bar charts
+## Charts — full screener.in chart-section parity (studied live, rebuilt to match)
+- [x] Exact view set: **Price · PE Ratio · More▾[Sales & Margin · EV / EBITDA · Price to Book · Market Cap / Sales]** — same buttons, same "More" dropdown, same default (5Yr)
+- [x] Price view: Price on NSE · 50 DMA · 200 DMA · Volume (checkbox toggles)
+- [x] PE Ratio view: PE line · dashed "Median PE = x" · TTM EPS bars — EPS restated for bonus/splits (share-capital ratio) so PE matches screener (RELIANCE 25.6 vs 25.4)
+- [x] Sales & Margin view: Quarter Sales bars · GPM % · OPM % · NPM % — OPM fixed to Operating Profit basis (was understated); GPM from as-filed COGS
+- [x] EV / EBITDA view: line · "Median EV Multiple = x" · EBITDA bars (EBITDA = Sales − Expenses + Interest + Depreciation)
+- [x] Price to Book view: "Price to BV" · "Median PBV = x" · Book Value bars
+- [x] Market Cap / Sales view: line · "Median Market Cap to Sales = x" · Sales bars
+- [x] Time-scaled axis, dual L/R axes, smoothing, crosshair tooltip listing every visible series
+- [x] Full range set: 1M / 6M / 1Yr / 3Yr / 5Yr / 10Yr / Max — Max ~30 years of monthly price history (RELIANCE 1995→2026), vs screener.in's ~20
+- [ ] EV / Price-to-Book depth: capped ~4y by free balance-sheet data (net debt, equity are ~6 annual pts); screener has deep balance sheets. PE / MCap-Sales reach ~7y.
+- [ ] Pre-2018 ratio depth: XBRL index reaches 2005 but the parser reads the Ind-AS era (~2018+); pre-2016 old-taxonomy filings skipped
 
 ## App-wide
 - [x] Search with ranked matches
