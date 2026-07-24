@@ -47,7 +47,7 @@ def main() -> None:
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "events": events,
     }
-    OUT.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    OUT.write_text(json.dumps(payload, ensure_ascii=False, allow_nan=False), encoding="utf-8")
     print(f"calendar: {len(events)} upcoming events -> {OUT}")
 
 

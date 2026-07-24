@@ -53,7 +53,7 @@ export const FIELD_CATALOG: FieldDef[] = [
 
   { key: "promoter_holding", label: "Promoter holding", group: "Ownership", unit: "%", desc: "Founders'/promoters' stake — skin in the game" },
 
-  { key: "volatility_1y", label: "Volatility (1y)", group: "Risk", unit: "%", desc: "How wildly the price swings — annualised from a year of daily moves; under ~25% is calm, over ~50% is stormy" },
+  { key: "volatility_1y", label: "Volatility (1y)", group: "Risk", unit: "%", desc: "How wildly the price swings — annualised realised volatility from a year of daily bars (Yang-Zhang OHLC estimator); under ~25% is calm, over ~50% is stormy" },
   { key: "volatility_30d", label: "Volatility (30d)", group: "Risk", unit: "%", desc: "Same measure over just the last month — spikes when news hits" },
 ];
 

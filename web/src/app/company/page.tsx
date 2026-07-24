@@ -254,6 +254,51 @@ function RatioGrid({ snapshot, row }: { snapshot: Row; row: Row | null }) {
   );
 }
 
+function VolatilityCard({ snapshot, row }: { snapshot: Row; row: Row | null }) {
+  const g = (k: string) => num(row, k) ?? num(snapshot, k);
+  const v1 = g("volatility_1y"), v30 = g("volatility_30d");
+  if (v1 === null && v30 === null) return null;
+  const method = String((row?.["vol_method"] ?? snapshot["vol_method"]) ?? "");
+  const band = (v: number | null) =>
+    v === null ? { t: "—", c: "var(--ink3)" }
+      : v < 20 ? { t: "Low", c: "var(--pos)" }
+      : v < 35 ? { t: "Moderate", c: "var(--warn-ink)" }
+      : v < 55 ? { t: "High", c: "var(--neg)" }
+      : { t: "Very high", c: "var(--neg)" };
+  const cells: [string, number | null][] = [["1-Year", v1], ["30-Day", v30]];
+  return (
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
+      <div className="flex items-baseline justify-between mb-3">
+        <h2 className="text-base font-semibold text-[var(--ink)]">
+          Volatility <span className="text-xs font-normal text-[var(--ink3)]">· annualised</span>
+        </h2>
+        <span className="text-xs text-[var(--ink3)]">
+          {method === "yang-zhang" ? "Yang-Zhang (OHLC)" : "close-to-close"}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {cells.map(([label, v]) => {
+          const b = band(v);
+          return (
+            <div key={label} className="rounded-lg bg-[var(--card2)] p-3">
+              <div className="text-xs text-[var(--ink3)]">{label}</div>
+              <div className="text-2xl font-bold text-[var(--ink)] tabular-nums leading-tight">
+                {v === null ? "—" : v.toFixed(1)}<span className="text-base font-medium text-[var(--ink3)]">%</span>
+              </div>
+              <div className="text-xs font-semibold mt-0.5" style={{ color: b.c }}>{b.t}</div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-xs text-[var(--ink3)] mt-3 leading-relaxed">
+        Realised (historical) volatility — the annualised standard deviation of daily returns. Yang-Zhang uses each
+        day&apos;s open/high/low/close for a less-noisy estimate than close-to-close. Computed from Yahoo daily prices;
+        unverified against exchange data. Not implied volatility.
+      </p>
+    </section>
+  );
+}
+
 function CompanyView() {
   const params = useSearchParams();
   const symbol = (params.get("s") ?? "").toUpperCase();
@@ -409,7 +454,8 @@ function CompanyView() {
         ) : null}
       </div>
 
-      <div id="analysis" className="scroll-mt-32">
+      <div id="analysis" className="scroll-mt-32 space-y-4">
+        <VolatilityCard snapshot={s} row={fullRow} />
         <ProsCons row={fullRow} />
       </div>
 

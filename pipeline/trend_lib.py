@@ -43,7 +43,7 @@ def _table_exists(con: sqlite3.Connection, name: str) -> bool:
 
 
 def _cr(v):
-    return None if v is None else round(v / 1e7, 1)
+    return round(v / 1e7, 1) if pd.notna(v) else None  # pd.notna guards None AND NaN
 
 
 def _stitched(con: sqlite3.Connection) -> dict:
@@ -147,7 +147,7 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None) -> dict[st
             "eps": [round(v, 2) if v is not None else None for v in eps],
             "expenses": [_cr(v) for v in exp],
             "ebitda": [_cr(v) for v in ebitda],
-            "book_value": [round(e / sh, 2) if (e is not None and sh) else None for e in equity],
+            "book_value": [round(e / sh, 2) if (pd.notna(e) and sh) else None for e in equity],
             "opm": [pct(ebitda[i], rev[i]) for i in range(len(ordered))],
             "gpm": [pct(gp[i], rev[i]) for i in range(len(ordered))],
             "npm": [pct(pat[i], rev[i]) for i in range(len(ordered))],

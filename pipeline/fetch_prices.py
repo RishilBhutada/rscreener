@@ -28,9 +28,10 @@ def now_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def series(session: requests.Session, sym: str, rng: str, itv: str) -> list[tuple[str, float, float | None]]:
+def series(session: requests.Session, sym: str, rng: str, itv: str) -> list[tuple]:
     """Yahoo chart API directly - yfinance's own session gets rate-limited here.
-    Returns (date, close, volume) tuples."""
+    Returns (date, open, high, low, close, volume) tuples (OHLC feed the
+    Yang-Zhang volatility estimator; open/high/low may be None on gap rows)."""
     r = session.get(CHART.format(sym=sym, rng=rng, itv=itv), timeout=25)
     r.raise_for_status()
     result = (r.json().get("chart", {}).get("result") or [None])[0]
@@ -38,14 +39,24 @@ def series(session: requests.Session, sym: str, rng: str, itv: str) -> list[tupl
         return []
     stamps = result.get("timestamp") or []
     quote = (result.get("indicators", {}).get("quote") or [{}])[0]
+    opens = quote.get("open") or []
+    highs = quote.get("high") or []
+    lows = quote.get("low") or []
     closes = quote.get("close") or []
     volumes = quote.get("volume") or []
+
+    def at(arr, i):
+        return round(float(arr[i]), 2) if i < len(arr) and arr[i] is not None else None
+
     out = []
     for i, (ts, close) in enumerate(zip(stamps, closes)):
         if close is None:
             continue
         vol = volumes[i] if i < len(volumes) and volumes[i] is not None else None
-        out.append((datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d"), round(float(close), 2), vol))
+        out.append((
+            datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d"),
+            at(opens, i), at(highs, i), at(lows, i), round(float(close), 2), vol,
+        ))
     return out
 
 
@@ -60,7 +71,11 @@ def main() -> None:
     symbols = [s.strip().upper() for s in raw.split(",") if s.strip()]
 
     con = sqlite3.connect(DB, timeout=180)
-    con.execute("CREATE TABLE IF NOT EXISTS prices (symbol TEXT, freq TEXT, date TEXT, close REAL)")
+    con.execute("CREATE TABLE IF NOT EXISTS prices (symbol TEXT, freq TEXT, date TEXT, close REAL, volume REAL, open REAL, high REAL, low REAL)")
+    have = {c[1] for c in con.execute("PRAGMA table_info(prices)").fetchall()}
+    for col in ("volume", "open", "high", "low"):  # bring older DBs up to schema
+        if col not in have:
+            con.execute(f"ALTER TABLE prices ADD COLUMN {col} REAL")
     con.execute("CREATE TABLE IF NOT EXISTS prices_fetch_log (symbol TEXT PRIMARY KEY, fetched_at TEXT, error TEXT)")
     if args.refresh:
         done: set[str] = set()
@@ -84,10 +99,10 @@ def main() -> None:
                 raise ValueError("no price history returned")
             con.execute("DELETE FROM prices WHERE symbol=?", (sym,))
             con.executemany(
-                "INSERT INTO prices VALUES (?,?,?,?,?)",
-                [(sym, "monthly", d, c, v) for d, c, v in monthly]
-                + [(sym, "weekly", d, c, v) for d, c, v in weekly]
-                + [(sym, "daily", d, c, v) for d, c, v in daily],
+                "INSERT INTO prices (symbol,freq,date,open,high,low,close,volume) VALUES (?,?,?,?,?,?,?,?)",
+                [(sym, "monthly", d, o, h, l, c, v) for d, o, h, l, c, v in monthly]
+                + [(sym, "weekly", d, o, h, l, c, v) for d, o, h, l, c, v in weekly]
+                + [(sym, "daily", d, o, h, l, c, v) for d, o, h, l, c, v in daily],
             )
             con.execute("INSERT OR REPLACE INTO prices_fetch_log VALUES (?,?,?)", (sym, now_utc(), None))
             con.commit()

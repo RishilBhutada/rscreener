@@ -6,6 +6,7 @@ key line items only, values in Rs CRORE). Companies whose statements haven't
 been fetched yet get snapshot-only files - the page shows a notice.
 """
 import json
+import math
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +14,18 @@ from pathlib import Path
 import pandas as pd
 
 from trend_lib import build_trends, ratio_bands
+
+
+def clean_nan(o):
+    """Recursively replace NaN/Inf floats with None so the output is valid JSON
+    (Python's json.dumps emits bare NaN, which browsers reject on JSON.parse)."""
+    if isinstance(o, float):
+        return o if math.isfinite(o) else None
+    if isinstance(o, dict):
+        return {k: clean_nan(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [clean_nan(v) for v in o]
+    return o
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
@@ -185,7 +198,7 @@ def main() -> None:
         else:
             n_without += 1
         (OUT_DIR / f"{sym}.json").write_text(
-            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+            json.dumps(clean_nan(payload), ensure_ascii=False, allow_nan=False), encoding="utf-8"
         )
     con.close()
     print(f"company files: {n_with} with statements, {n_without} snapshot-only -> {OUT_DIR}")
