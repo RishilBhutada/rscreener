@@ -211,17 +211,17 @@ export default function Home() {
         </p>
       )}
 
-      <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
+      <main className="max-w-6xl mx-auto px-4 py-5 sm:py-6 space-y-4 sm:space-y-6">
         {loadError && <div className="bg-[var(--neg-soft)] border border-[var(--neg-line)] text-[var(--neg)] rounded-lg p-4 text-sm">{loadError}</div>}
 
-        <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-3">
+        <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4 space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <label className="text-sm font-semibold text-[var(--ink2)]" htmlFor="q">Build a screen</label>
             <div className="flex gap-1 text-xs" role="group" aria-label="query mode">
               {(["builder", "text"] as const).map((m) => (
                 <button key={m}
                   onClick={() => { setQMode(m); localStorage.setItem("rscreener_qmode", m); }}
-                  className={`rounded-full px-3 py-1 border ${qMode === m ? "bg-[var(--btn)] border-[var(--btn)] text-[var(--btn-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
+                  className={`rounded-full px-3.5 py-2 sm:py-1 border ${qMode === m ? "bg-[var(--btn)] border-[var(--btn)] text-[var(--btn-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
                   {m === "builder" ? "Easy builder" : "Formula"}
                 </button>
               ))}
@@ -286,7 +286,7 @@ export default function Home() {
           )}
         </section>
 
-        <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-2">
+        <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4 space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-[var(--ink2)]">Saved screens</span>
             <input
@@ -311,7 +311,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-2">
+        <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4 space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-[var(--ink2)]">Custom ratios</span>
             <input
@@ -354,9 +354,9 @@ export default function Home() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-[var(--card2)] text-xs text-[var(--ink3)] uppercase text-left">
-                    <th className="px-3 py-2 w-8"> </th><th className="px-3 py-2">Symbol</th><th className="px-3 py-2">Name</th>
-                    <th className="px-3 py-2 text-right">Price ₹</th><th className="px-3 py-2 text-right">MCap ₹Cr</th>
-                    <th className="px-3 py-2 text-right">P/E</th><th className="px-3 py-2 text-right">ROE %</th>
+                    <th className="px-2 py-2 sm:px-3 w-8"> </th><th className="px-2 py-2 sm:px-3">Symbol</th><th className="px-2 py-2 sm:px-3">Name</th>
+                    <th className="px-2 py-2 sm:px-3 text-right">Price ₹</th><th className="px-2 py-2 sm:px-3 text-right">MCap ₹Cr</th>
+                    <th className="px-2 py-2 sm:px-3 text-right">P/E</th><th className="px-2 py-2 sm:px-3 text-right">ROE %</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -365,13 +365,13 @@ export default function Home() {
                     if (!r) return null;
                     return (
                       <tr key={sym} className="border-t border-[var(--line)] hover:bg-[var(--accent-soft)]">
-                        <td className="px-3 py-2"><button onClick={() => setWatch(toggleWatch(sym))} aria-label={`remove ${sym} from watchlist`} className="text-[var(--accent)] hover:text-[var(--line2)]">★</button></td>
-                        <td className="px-3 py-2"><Link href={`/company?s=${sym}`} className="font-semibold text-[var(--accent-ink)] hover:underline">{sym}</Link></td>
-                        <td className="px-3 py-2 max-w-56 truncate">{String(r.name ?? "—")}</td>
-                        <td className="px-3 py-2 text-right">{fmt("price", r.price ?? null)}</td>
-                        <td className="px-3 py-2 text-right">{fmt("mcap", r.mcap ?? null)}</td>
-                        <td className="px-3 py-2 text-right">{fmt("pe", r.pe ?? null)}</td>
-                        <td className="px-3 py-2 text-right">{fmt("roe", r.roe ?? null)}</td>
+                        <td className="px-2 py-2 sm:px-3"><button onClick={() => setWatch(toggleWatch(sym))} aria-label={`remove ${sym} from watchlist`} className="text-[var(--accent)] hover:text-[var(--line2)]">★</button></td>
+                        <td className="px-2 py-2 sm:px-3"><Link href={`/company?s=${sym}`} className="font-semibold text-[var(--accent-ink)] hover:underline">{sym}</Link></td>
+                        <td className="px-2 py-2 sm:px-3 max-w-56 truncate">{String(r.name ?? "—")}</td>
+                        <td className="px-2 py-2 sm:px-3 text-right">{fmt("price", r.price ?? null)}</td>
+                        <td className="px-2 py-2 sm:px-3 text-right">{fmt("mcap", r.mcap ?? null)}</td>
+                        <td className="px-2 py-2 sm:px-3 text-right">{fmt("pe", r.pe ?? null)}</td>
+                        <td className="px-2 py-2 sm:px-3 text-right">{fmt("roe", r.roe ?? null)}</td>
                       </tr>
                     );
                   })}
@@ -397,9 +397,9 @@ export default function Home() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-[var(--card2)] text-left text-xs text-[var(--ink3)] uppercase tracking-wide">
-                    <th className="px-3 py-2 w-8"> </th>
+                    <th className="px-2 py-2 sm:px-3 w-8"> </th>
                     {cols.map((c) => (
-                      <th key={c} className="px-3 py-2 cursor-pointer hover:text-[var(--accent-ink)] whitespace-nowrap select-none" onClick={() => clickSort(c)}>
+                      <th key={c} className="px-2 py-2 sm:px-3 cursor-pointer hover:text-[var(--accent-ink)] whitespace-nowrap select-none" onClick={() => clickSort(c)}>
                         {COL_LABELS[c] ?? c}{sortKey === c ? (sortDesc ? " ↓" : " ↑") : ""}
                       </th>
                     ))}
@@ -408,7 +408,7 @@ export default function Home() {
                 <tbody>
                   {sorted.slice(0, 300).map((r) => (
                     <tr key={String(r.symbol)} className="border-t border-[var(--line)] hover:bg-[var(--accent-soft)]">
-                      <td className="px-3 py-2">
+                      <td className="px-2 py-2 sm:px-3">
                         <button
                           onClick={() => setWatch(toggleWatch(String(r.symbol)))}
                           aria-label={`toggle ${r.symbol} on watchlist`}

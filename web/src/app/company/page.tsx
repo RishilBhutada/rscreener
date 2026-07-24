@@ -108,9 +108,9 @@ function StatementTable({ title, stmt, subtitle, boldRows }: { title: string; st
               const bold = boldRows?.includes(it.label);
               return (
                 <tr key={it.label} className="border-b border-[var(--line)] hover:bg-[var(--card2)]">
-                  <td className={`px-3 py-1.5 whitespace-nowrap sticky left-0 bg-[var(--card)] ${bold ? "font-semibold text-[var(--ink)]" : "text-[var(--ink2)]"}`}>{it.label}</td>
+                  <td className={`px-3 py-2 sm:py-1.5 truncate max-w-[42vw] sm:max-w-none sm:whitespace-nowrap sticky left-0 bg-[var(--card)] ${bold ? "font-semibold text-[var(--ink)]" : "text-[var(--ink2)]"}`}>{it.label}</td>
                   {it.values.map((v, i) => (
-                    <td key={i} className={`px-3 py-1.5 text-right whitespace-nowrap tabular-nums ${bold ? "font-semibold" : ""} ${typeof v === "number" && v < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
+                    <td key={i} className={`px-3 py-2 sm:py-1.5 text-right whitespace-nowrap tabular-nums ${bold ? "font-semibold" : ""} ${typeof v === "number" && v < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
                       {fmtNum(v, it.label.includes("EPS") || it.label.includes("%") ? 2 : 0)}
                     </td>
                   ))}
@@ -242,7 +242,7 @@ function RatioGrid({ snapshot, row }: { snapshot: Row; row: Row | null }) {
   ];
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-2.5">
         {cells.map(([label, value]) => (
           <div key={label} className="flex items-baseline justify-between border-b border-[var(--line)] pb-2">
             <span className="text-sm text-[var(--ink3)]">{label}</span>
@@ -393,7 +393,7 @@ function CompanyView() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[var(--ink)]">{String(s.name ?? symbol)} <span className="text-[var(--accent-ink)]">({symbol})</span></h1>
           <p className="text-sm text-[var(--ink3)]">
@@ -432,13 +432,13 @@ function CompanyView() {
         </div>
       )}
 
-      <nav className="sticky top-14 z-20 -mx-4 px-4 bg-[var(--card)] border-y border-[var(--line)] flex gap-1 overflow-x-auto text-sm font-medium py-1.5">
+      <nav className="static sm:sticky sm:top-14 z-20 -mx-4 px-4 bg-[var(--card)] border-y border-[var(--line)] flex gap-1 overflow-x-auto text-sm font-medium py-2 sm:py-1.5 [scrollbar-width:none]">
         {([
           ["summary", "Summary"], ["chart", "Chart"], ["analysis", "Analysis"], ["peers", "Peers"],
           ["quarters", "Quarters"], ["profit-loss", "Profit & Loss"], ["balance-sheet", "Balance Sheet"],
           ["cash-flows", "Cash Flow"], ["shareholding", "Investors"], ["documents", "Documents"],
         ] as [string, string][]).map(([id, label]) => (
-          <a key={id} href={`#${id}`} className="px-3 py-1 rounded-lg whitespace-nowrap text-[var(--ink2)] hover:bg-[var(--card2)] hover:text-[var(--accent-ink)]">
+          <a key={id} href={`#${id}`} className="px-3 py-2.5 sm:py-1 rounded-lg whitespace-nowrap text-[var(--ink2)] hover:bg-[var(--card2)] hover:text-[var(--accent-ink)]">
             {label}
           </a>
         ))}
@@ -556,7 +556,7 @@ function CompanyView() {
             <p className="text-xs text-[var(--ink3)] mb-1.5">Concalls, transcripts &amp; investor meets (newest first)</p>
             <ul className="space-y-1">
               {company.documents!.concalls!.slice(0, 8).map((d) => (
-                <li key={d.url} className="text-sm truncate">
+                <li key={d.url} className="text-sm line-clamp-2 sm:truncate">
                   <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-ink)] hover:underline">
                     <span className="text-[var(--ink3)] font-mono text-xs mr-2">{d.date}</span>{d.title || "document"}
                   </a>
@@ -570,7 +570,7 @@ function CompanyView() {
             <p className="text-xs text-[var(--ink3)] mb-1.5">Credit-rating updates</p>
             <ul className="space-y-1">
               {company.documents!.ratings!.slice(0, 5).map((d) => (
-                <li key={d.url} className="text-sm truncate">
+                <li key={d.url} className="text-sm line-clamp-2 sm:truncate">
                   <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-ink)] hover:underline">
                     <span className="text-[var(--ink3)] font-mono text-xs mr-2">{d.date}</span>{d.title || "rating document"}
                   </a>

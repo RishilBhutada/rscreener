@@ -60,19 +60,19 @@ function SectorsView() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-[var(--card2)] text-xs text-[var(--ink3)] uppercase text-left">
-                <th className="px-3 py-2">Sector</th>
-                <th className="px-3 py-2 text-right">Companies</th>
-                <th className="px-3 py-2 text-right">Total MCap ₹Cr</th>
+                <th className="px-2 py-2 sm:px-3">Sector</th>
+                <th className="px-2 py-2 sm:px-3 text-right">Companies</th>
+                <th className="px-2 py-2 sm:px-3 text-right">Total MCap ₹Cr</th>
               </tr>
             </thead>
             <tbody>
               {sectors.map(([name, agg]) => (
                 <tr key={name} className="border-t border-[var(--line)] hover:bg-[var(--accent-soft)]">
-                  <td className="px-3 py-2">
+                  <td className="px-2 py-2 sm:px-3">
                     <Link href={`/sectors?s=${encodeURIComponent(name)}`} className="font-semibold text-[var(--accent-ink)] hover:underline">{name}</Link>
                   </td>
-                  <td className="px-3 py-2 text-right">{agg.count}</td>
-                  <td className="px-3 py-2 text-right">{fmtNum(Math.round(agg.mcap), 0)}</td>
+                  <td className="px-2 py-2 sm:px-3 text-right">{agg.count}</td>
+                  <td className="px-2 py-2 sm:px-3 text-right">{fmtNum(Math.round(agg.mcap), 0)}</td>
                 </tr>
               ))}
             </tbody>
@@ -91,23 +91,23 @@ function SectorsView() {
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-[var(--card2)] text-xs text-[var(--ink3)] uppercase text-left">
-              <th className="px-3 py-2">Symbol</th><th className="px-3 py-2">Name</th><th className="px-3 py-2">Industry</th>
-              <th className="px-3 py-2 text-right">Price ₹</th><th className="px-3 py-2 text-right">MCap ₹Cr</th>
-              <th className="px-3 py-2 text-right">P/E</th><th className="px-3 py-2 text-right">ROE %</th>
-              <th className="px-3 py-2 text-right">Div Yld %</th>
+              <th className="px-2 py-2 sm:px-3">Symbol</th><th className="px-2 py-2 sm:px-3">Name</th><th className="px-2 py-2 sm:px-3">Industry</th>
+              <th className="px-2 py-2 sm:px-3 text-right">Price ₹</th><th className="px-2 py-2 sm:px-3 text-right">MCap ₹Cr</th>
+              <th className="px-2 py-2 sm:px-3 text-right">P/E</th><th className="px-2 py-2 sm:px-3 text-right">ROE %</th>
+              <th className="px-2 py-2 sm:px-3 text-right">Div Yld %</th>
             </tr>
           </thead>
           <tbody>
             {companies.slice(0, 400).map((r) => (
               <tr key={String(r.symbol)} className="border-t border-[var(--line)] hover:bg-[var(--accent-soft)]">
-                <td className="px-3 py-2"><Link href={`/company?s=${r.symbol}`} className="font-semibold text-[var(--accent-ink)] hover:underline">{String(r.symbol)}</Link></td>
-                <td className="px-3 py-2 max-w-56 truncate">{String(r.name ?? "—")}</td>
-                <td className="px-3 py-2 max-w-48 truncate">{String(r.industry ?? "—")}</td>
-                <td className="px-3 py-2 text-right">{fmtNum(r.price as number)}</td>
-                <td className="px-3 py-2 text-right">{fmtNum(r.mcap as number, 0)}</td>
-                <td className="px-3 py-2 text-right">{fmtNum(r.pe as number)}</td>
-                <td className="px-3 py-2 text-right">{fmtNum(r.roe as number)}</td>
-                <td className="px-3 py-2 text-right">{fmtNum(r.div_yield as number)}</td>
+                <td className="px-2 py-2 sm:px-3"><Link href={`/company?s=${r.symbol}`} className="font-semibold text-[var(--accent-ink)] hover:underline">{String(r.symbol)}</Link></td>
+                <td className="px-2 py-2 sm:px-3 max-w-56 truncate">{String(r.name ?? "—")}</td>
+                <td className="px-2 py-2 sm:px-3 max-w-48 truncate">{String(r.industry ?? "—")}</td>
+                <td className="px-2 py-2 sm:px-3 text-right">{fmtNum(r.price as number)}</td>
+                <td className="px-2 py-2 sm:px-3 text-right">{fmtNum(r.mcap as number, 0)}</td>
+                <td className="px-2 py-2 sm:px-3 text-right">{fmtNum(r.pe as number)}</td>
+                <td className="px-2 py-2 sm:px-3 text-right">{fmtNum(r.roe as number)}</td>
+                <td className="px-2 py-2 sm:px-3 text-right">{fmtNum(r.div_yield as number)}</td>
               </tr>
             ))}
           </tbody>

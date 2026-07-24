@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Pt = [string, number] | [string, number, number | null];
 export type ChartPrices = { monthly?: Pt[]; weekly?: Pt[]; daily?: Pt[] };
@@ -26,8 +26,8 @@ const RANGES: [string, number][] = [
   ["1M", 1 / 12], ["6M", 0.5], ["1Yr", 1], ["3Yr", 3], ["5Yr", 5], ["10Yr", 10], ["Max", 999],
 ];
 
-const W = 920, H = 470, ML = 62, MR = 62, MT = 12, MB = 30;
-const plotW = W - ML - MR, plotH = H - MT - MB;
+// chart geometry is computed inside the component so it can shrink for phones
+// (a fixed 920-wide viewBox scaled to ~340px renders 12px text at ~4px)
 
 const toT = (iso: string) => new Date(iso).getTime();
 
@@ -136,6 +136,19 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const [moreOpen, setMoreOpen] = useState(false);
   const [hover, setHover] = useState<{ t: number; px: number } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 640px)");
+    const sync = () => setIsMobile(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  const W = isMobile ? 470 : 920, H = isMobile ? 420 : 470;
+  const ML = isMobile ? 46 : 62, MR = isMobile ? 46 : 62, MT = 12, MB = isMobile ? 32 : 30;
+  const plotW = W - ML - MR, plotH = H - MT - MB;
+  const FS = isMobile ? 19 : 12;
 
   const isOn = (k: string, dflt = true) => on[k] ?? dflt;
   const toggle = (k: string) => setOn({ ...on, [k]: !isOn(k) });
@@ -289,14 +302,14 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
           {axR && axR.ticks.map((v) => (
             <g key={`r${v}`}>
               <line x1={ML} x2={W - MR} y1={axR.scale(v)} y2={axR.scale(v)} stroke="var(--chart-grid)" strokeWidth="1" />
-              <text x={W - MR + 8} y={axR.scale(v) + 4} fontSize="12" fill="var(--chart-axis)">{fmtVal(v, fmtKindOf("R"))}</text>
+              <text x={W - MR + 8} y={axR.scale(v) + 4} fontSize={FS} fill="var(--chart-axis)">{fmtVal(v, fmtKindOf("R"))}</text>
             </g>
           ))}
           {axL && axL.ticks.map((v) => (
-            <text key={`l${v}`} x={ML - 8} y={axL.scale(v) + 4} fontSize="12" fill="var(--chart-axis)" textAnchor="end">{fmtVal(v, fmtKindOf("L"))}</text>
+            <text key={`l${v}`} x={ML - 8} y={axL.scale(v) + 4} fontSize={FS} fill="var(--chart-axis)" textAnchor="end">{fmtVal(v, fmtKindOf("L"))}</text>
           ))}
           {xt.map((tk) => (
-            <text key={tk.t} x={x(tk.t)} y={H - 8} fontSize="12" fill="var(--chart-axis)" textAnchor="middle">{tk.label}</text>
+            <text key={tk.t} x={x(tk.t)} y={H - 8} fontSize={FS} fill="var(--chart-axis)" textAnchor="middle">{tk.label}</text>
           ))}
 
           {visible.filter((s) => s.kind === "bars").map((s) => {
@@ -397,12 +410,12 @@ function ChartShell({
   const moreItems = MORE_VIEWS.filter(([v]) => avail[v as keyof typeof avail]);
   const activeMore = moreItems.find(([v]) => v === view);
   const btn = (active: boolean) =>
-    `rounded-lg px-3 py-1.5 font-medium ${active ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)] hover:bg-[var(--card2)]"}`;
+    `rounded-lg px-3 py-2 sm:py-1.5 min-h-[38px] sm:min-h-0 inline-flex items-center whitespace-nowrap font-medium ${active ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)] hover:bg-[var(--card2)]"}`;
 
   return (
-    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
-      <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
-        <div className="flex gap-1 text-xs flex-wrap">
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:flex-wrap mb-2">
+        <div className="flex gap-1 text-xs flex-nowrap overflow-x-auto sm:flex-wrap -mx-1 px-1 [scrollbar-width:none]">
           {RANGES.map(([r]) => (
             <button key={r} onClick={() => setRange(r)} className={btn(range === r)}>{r}</button>
           ))}

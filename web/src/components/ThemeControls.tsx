@@ -47,11 +47,11 @@ export default function ThemeControls() {
         onClick={cycleTheme}
         title={`Theme: ${theme} (tap to change)`}
         aria-label={`Theme: ${theme}, tap to change`}
-        className="text-sm rounded-full border border-[var(--line)] bg-[var(--card2)] px-3 py-1 text-[var(--ink2)] hover:border-[var(--line2)]"
+        className="text-sm rounded-full border border-[var(--line)] bg-[var(--card2)] px-3 py-2 sm:py-1 text-[var(--ink2)] hover:border-[var(--line2)]"
       >
         {theme === "dark" ? "🌙" : theme === "light" ? "☀️" : "🌗"}
       </button>
-      <div className="flex items-center gap-1.5" role="group" aria-label="Accent colour">
+      <div className="hidden sm:flex items-center gap-1.5" role="group" aria-label="Accent colour">
         {ACCENTS.map((a) => (
           <button
             key={a}

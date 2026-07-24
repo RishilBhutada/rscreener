@@ -48,11 +48,11 @@ export default function CalendarPage() {
           <h1 className="text-lg font-bold text-[var(--ink)]">Upcoming board meetings</h1>
           <div className="flex gap-2 text-xs">
             <button onClick={() => setResultsOnly(!resultsOnly)}
-              className={`rounded-full px-3 py-1 border ${resultsOnly ? "bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
+              className={`rounded-full px-3.5 py-2 sm:py-1 border${resultsOnly ? "bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
               Results only
             </button>
             <button onClick={() => setWatchOnly(!watchOnly)}
-              className={`rounded-full px-3 py-1 border ${watchOnly ? "bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
+              className={`rounded-full px-3.5 py-2 sm:py-1 border${watchOnly ? "bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
               ★ My watchlist
             </button>
           </div>
@@ -65,7 +65,7 @@ export default function CalendarPage() {
             <h2 className="px-4 py-2.5 text-sm font-bold text-[var(--ink)] border-b border-[var(--line)]">{dateLabel(date)}</h2>
             <ul>
               {evs.map((e, i) => (
-                <li key={`${e.symbol}-${i}`} className="px-4 py-2.5 border-t border-[var(--line)] flex gap-3 items-baseline flex-wrap">
+                <li key={`${e.symbol}-${i}`} className="px-4 py-3 sm:py-2.5 border-t border-[var(--line)] flex flex-col gap-1 sm:flex-row sm:gap-3 sm:items-baseline sm:flex-wrap">
                   <Link href={`/company?s=${e.symbol}`} className="font-semibold text-[var(--accent-ink)] hover:underline shrink-0">{e.symbol}</Link>
                   <span className="text-xs font-semibold text-[var(--ink3)] shrink-0">{e.purpose}</span>
                   <span className="text-xs text-[var(--ink3)] truncate max-w-full">{e.desc}</span>

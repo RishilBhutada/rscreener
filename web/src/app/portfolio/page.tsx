@@ -155,35 +155,35 @@ export default function PortfolioPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-[var(--card2)] text-xs text-[var(--ink3)] uppercase text-left">
-                      <th className="px-3 py-2">Symbol</th><th className="px-3 py-2">Name</th>
-                      <th className="px-3 py-2 text-right">Qty</th><th className="px-3 py-2 text-right">Avg ₹</th>
-                      <th className="px-3 py-2 text-right">Price ₹</th><th className="px-3 py-2 text-right">Invested ₹</th>
-                      <th className="px-3 py-2 text-right">Current ₹</th><th className="px-3 py-2 text-right">P&amp;L ₹</th>
-                      <th className="px-3 py-2 text-right">P&amp;L %</th><th className="px-3 py-2 text-right">Weight %</th>
-                      <th className="px-3 py-2 text-right">P/E</th><th className="px-3 py-2 text-right">ROCE %</th>
+                      <th className="px-2 py-2 sm:px-3">Symbol</th><th className="px-2 py-2 sm:px-3">Name</th>
+                      <th className="px-2 py-2 sm:px-3 text-right">Qty</th><th className="px-2 py-2 sm:px-3 text-right">Avg ₹</th>
+                      <th className="px-2 py-2 sm:px-3 text-right">Price ₹</th><th className="px-2 py-2 sm:px-3 text-right">Invested ₹</th>
+                      <th className="px-2 py-2 sm:px-3 text-right">Current ₹</th><th className="px-2 py-2 sm:px-3 text-right">P&amp;L ₹</th>
+                      <th className="px-2 py-2 sm:px-3 text-right">P&amp;L %</th><th className="px-2 py-2 sm:px-3 text-right">Weight %</th>
+                      <th className="px-2 py-2 sm:px-3 text-right">P/E</th><th className="px-2 py-2 sm:px-3 text-right">ROCE %</th>
                     </tr>
                   </thead>
                   <tbody>
                     {enriched.map((h) => (
                       <tr key={h.symbol} className="border-t border-[var(--line)] hover:bg-[var(--accent-soft)]">
-                        <td className="px-3 py-2">
+                        <td className="px-2 py-2 sm:px-3">
                           {h.matched ? (
                             <Link href={`/company?s=${h.symbol}`} className="font-semibold text-[var(--accent-ink)] hover:underline">{h.symbol}</Link>
                           ) : (
                             <span className="font-semibold text-[var(--ink3)]" title="not found in the NSE universe">{h.symbol}?</span>
                           )}
                         </td>
-                        <td className="px-3 py-2 max-w-48 truncate">{h.name}</td>
-                        <td className="px-3 py-2 text-right">{fmt(h.qty, 0)}</td>
-                        <td className="px-3 py-2 text-right">{fmt(h.avg)}</td>
-                        <td className="px-3 py-2 text-right">{fmt(h.price)}</td>
-                        <td className="px-3 py-2 text-right">{fmt(h.invested, 0)}</td>
-                        <td className="px-3 py-2 text-right">{fmt(h.current, 0)}</td>
+                        <td className="px-2 py-2 sm:px-3 max-w-48 truncate">{h.name}</td>
+                        <td className="px-2 py-2 sm:px-3 text-right">{fmt(h.qty, 0)}</td>
+                        <td className="px-2 py-2 sm:px-3 text-right">{fmt(h.avg)}</td>
+                        <td className="px-2 py-2 sm:px-3 text-right">{fmt(h.price)}</td>
+                        <td className="px-2 py-2 sm:px-3 text-right">{fmt(h.invested, 0)}</td>
+                        <td className="px-2 py-2 sm:px-3 text-right">{fmt(h.current, 0)}</td>
                         <td className={`px-3 py-2 text-right ${h.pnl !== null && h.pnl < 0 ? "text-[var(--neg)]" : "text-[var(--accent-ink)]"}`}>{fmt(h.pnl, 0)}</td>
                         <td className={`px-3 py-2 text-right ${h.pnlPct !== null && h.pnlPct < 0 ? "text-[var(--neg)]" : "text-[var(--accent-ink)]"}`}>{fmt(h.pnlPct)}</td>
-                        <td className="px-3 py-2 text-right">{totals.current > 0 && h.current !== null ? fmt((h.current / totals.current) * 100, 1) : "—"}</td>
-                        <td className="px-3 py-2 text-right">{fmt(h.pe)}</td>
-                        <td className="px-3 py-2 text-right">{fmt(h.roce)}</td>
+                        <td className="px-2 py-2 sm:px-3 text-right">{totals.current > 0 && h.current !== null ? fmt((h.current / totals.current) * 100, 1) : "—"}</td>
+                        <td className="px-2 py-2 sm:px-3 text-right">{fmt(h.pe)}</td>
+                        <td className="px-2 py-2 sm:px-3 text-right">{fmt(h.roce)}</td>
                       </tr>
                     ))}
                   </tbody>

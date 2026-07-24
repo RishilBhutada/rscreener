@@ -56,14 +56,14 @@ export default function TopNav({ active }: { active?: "screens" | "sectors" | "c
   ];
 
   return (
-    <header className="bg-[var(--card)] border-b border-[var(--line)] sticky top-0 z-30">
-      <div className="max-w-6xl mx-auto px-4 h-14 flex items-center gap-4">
+    <header className="bg-[var(--card)] border-b border-[var(--line)] sm:sticky sm:top-0 z-30">
+      <div className="max-w-6xl mx-auto px-4 h-auto sm:h-14 py-2.5 sm:py-0 flex flex-wrap items-center gap-x-3 gap-y-2 sm:gap-4">
         <Link href="/" className="flex items-baseline gap-0.5 shrink-0">
-          <span className="text-xl font-bold tracking-tight text-[var(--ink)]">Rscreener</span>
-          <span className="text-xl font-bold text-[var(--accent)]">▮▮▮</span>
+          <span className="text-lg sm:text-xl font-bold tracking-tight text-[var(--ink)]">Rscreener</span>
+          <span className="text-lg sm:text-xl font-bold text-[var(--accent)] hidden sm:inline">▮▮▮</span>
         </Link>
 
-        <div ref={boxRef} className="relative flex-1 max-w-md group">
+        <div ref={boxRef} className="relative order-last w-full sm:order-none sm:flex-1 sm:max-w-md group">
           <input
             value={q}
             onFocus={ensureData}
@@ -76,7 +76,7 @@ export default function TopNav({ active }: { active?: "screens" | "sectors" | "c
             }}
             placeholder="Search for a company"
             aria-label="Search for a company"
-            className="w-full text-sm bg-[var(--card2)] border border-[var(--line)] rounded-full px-4 py-1.5 focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:bg-[var(--card)]"
+            className="w-full text-sm bg-[var(--card2)] border border-[var(--line)] rounded-full px-4 py-2.5 sm:py-1.5 focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:bg-[var(--card)]"
           />
           {matches.length > 0 && (
             <div className="absolute z-40 mt-1.5 w-full bg-[var(--card)] border border-[var(--line)] rounded-xl shadow-xl overflow-hidden hidden group-focus-within:block">
@@ -113,19 +113,19 @@ export default function TopNav({ active }: { active?: "screens" | "sectors" | "c
             onClick={() => window.location.reload()}
             title="Refresh"
             aria-label="Refresh the app"
-            className="text-base leading-none rounded-full border border-[var(--line)] bg-[var(--card2)] w-8 h-8 flex items-center justify-center text-[var(--ink2)] hover:border-[var(--line2)] active:rotate-180 transition-transform"
+            className="text-base leading-none rounded-full border border-[var(--line)] bg-[var(--card2)] w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-[var(--ink2)] hover:border-[var(--line2)] active:rotate-180 transition-transform"
           >
             ↻
           </button>
         </div>
       </div>
 
-      <nav className="sm:hidden flex items-center gap-1 px-4 pb-2 text-sm font-medium overflow-x-auto">
+      <nav className="sm:hidden grid grid-cols-4 gap-1 px-3 pb-2 text-sm font-medium">
         {links.map(([key, label, href]) => (
           <Link
             key={key}
             href={href}
-            className={`px-3 py-1 rounded-lg whitespace-nowrap ${active === key ? "text-[var(--accent-ink)] bg-[var(--accent-soft)] font-semibold" : "text-[var(--ink2)]"}`}
+            className={`px-2 py-2 rounded-lg text-center whitespace-nowrap ${active === key ? "text-[var(--accent-ink)] bg-[var(--accent-soft)] font-semibold" : "text-[var(--ink2)]"}`}
           >
             {label}
           </Link>
