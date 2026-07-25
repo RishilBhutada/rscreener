@@ -39,9 +39,17 @@ on the deployed site. "Better than" ideas go at the bottom, locked until parity.
 - [x] Price to Book view: "Price to BV" · "Median PBV = x" · Book Value bars
 - [x] Market Cap / Sales view: line · "Median Market Cap to Sales = x" · Sales bars
 - [x] Time-scaled axis, dual L/R axes, smoothing, crosshair tooltip listing every visible series
-- [x] Full range set: 1M / 6M / 1Yr / 3Yr / 5Yr / 10Yr / Max — Max ~30 years of monthly price history (RELIANCE 1995→2026), vs screener.in's ~20
-- [ ] EV / Price-to-Book depth: capped ~4y by free balance-sheet data (net debt, equity are ~6 annual pts); screener has deep balance sheets. PE / MCap-Sales reach ~7y.
-- [ ] Pre-2018 ratio depth: XBRL index reaches 2005 but the parser reads the Ind-AS era (~2018+); pre-2016 old-taxonomy filings skipped
+- [x] 50 & 200 DMA render on **every** range: the averages are expressed in whichever series covers the window (50 trading days ≈ 10 weeks ≈ 2.4 months), so they no longer vanish past 3Yr
+- [x] Full range set: 1M / 6M / 1Yr / 3Yr / 5Yr / 10Yr / Max — Max ~30 years of monthly price history (RELIANCE 1995→2026), vs screener.in's ~21
+- [x] **Ratio-range parity (measured against screener's own chart API, which serves 2005-04→2026 on Max):**
+  every band now starts ~2005 — PE, EV/EBITDA, Price-to-Book and MCap/Sales, plus ~83 quarters of
+  Sales & Margin. Medians land on theirs: PE 25.6 vs 25.4 · P/BV 2.18 vs 2.1 · MCap/Sales 1.98 vs 2.0.
+  Unlocked by parsing the pre-Ind-AS `resultDetailedDataLink` HTML sheets (2005-2018 filings have no
+  XBRL — that field is a `/-` placeholder). Verified live: PE/Max axis reads Jan 2006 → Jan 2026.
+- [ ] Backfill coverage: the ~20-year history is fetched per company (one-time; old filings never
+  change). Top names done; the rest fill via the nightly rotation at full depth.
+- [ ] Banks: no OPM/GPM/EV-EBITDA on pre-2018 sheets — they don't report a comparable expenditure
+  breakdown. screener.in omits EV/EBITDA for banks for the same reason; genuine data-shape limit.
 
 ## App-wide
 - [x] Search with ranked matches
