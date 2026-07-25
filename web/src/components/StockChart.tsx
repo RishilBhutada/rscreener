@@ -192,23 +192,31 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     };
 
     if (view === "price") {
-      const dailyStart = daily.length ? toT(daily[0][0]) : Infinity;
-      const useDaily = daily.length > 30 && dailyStart <= cutoff + 40 * 86400000 && years <= 3;
-      let base = useDaily ? filt(daily) : years <= 1 && weekly.length ? filt(weekly) : filt(monthly);
+      // Pick the finest series that actually covers the selected window, then
+      // express the 50/200-day averages in that series' own bars (50 trading
+      // days ~ 10 weeks ~ 2.4 months) so both lines show on every range.
+      const covers = (src: Pt[]) => src.length > 30 && toT(src[0][0]) <= cutoff + 40 * 86400000;
+      const [src, w50, w200] =
+        covers(daily) && years <= 3 ? [daily, 50, 200] as const
+        : covers(weekly) ? [weekly, 10, 40] as const
+        : [monthly, 2, 9] as const;
+
+      let base = filt(src);
       if (!base.length) base = filt(monthly);
       const pricePts: XY[] = base.map((p) => ({ t: toT(p[0]), v: p[1] }));
       if (livePrice !== null && pricePts.length) pricePts.push({ t: now, v: livePrice });
       defs.push({ key: "price", label: "Price on NSE", color: "var(--accent)", kind: "line", axis: "R", data: pricePts, fmt: "rupee" });
 
-      if (useDaily && daily.length >= 210) {
-        const closes = daily.map((p) => p[1]);
-        const times = daily.map((p) => toT(p[0]));
+      if (src.length >= w200 + 5) {
+        const closes = src.map((p) => p[1]);
+        const times = src.map((p) => toT(p[0]));
         const mk = (win: number): XY[] =>
           sma(closes, win)
             .map((v, i) => (v === null ? null : { t: times[i], v }))
             .filter((p): p is XY => !!p && p.t >= cutoff);
-        defs.push({ key: "dma50", label: "50 DMA", color: "var(--chart-dma50)", kind: "line", axis: "R", data: mk(50), fmt: "rupee" });
-        defs.push({ key: "dma200", label: "200 DMA", color: "var(--chart-dma200)", kind: "line", axis: "R", data: mk(200), fmt: "rupee" });
+        const d50 = mk(w50), d200 = mk(w200);
+        if (d50.length > 1) defs.push({ key: "dma50", label: "50 DMA", color: "var(--chart-dma50)", kind: "line", axis: "R", data: d50, fmt: "rupee" });
+        if (d200.length > 1) defs.push({ key: "dma200", label: "200 DMA", color: "var(--chart-dma200)", kind: "line", axis: "R", data: d200, fmt: "rupee" });
       }
       const volPts: XY[] = base
         .filter((p) => p.length > 2 && p[2] !== null && (p[2] as number) > 0)
