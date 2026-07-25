@@ -89,7 +89,7 @@ def build_statement(df: pd.DataFrame, stmt_type: str, period_type: str) -> dict 
 
 
 def main() -> None:
-    con = sqlite3.connect(DB)
+    con = sqlite3.connect(DB, timeout=180)
     snaps = pd.read_sql("SELECT * FROM fundamentals", con)
     has_statements = {
         r[0] for r in con.execute("SELECT DISTINCT symbol FROM statements").fetchall()

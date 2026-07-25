@@ -161,7 +161,7 @@ def main() -> None:
     else:
         symbols = universe["SYMBOL"].tolist()
 
-    con = sqlite3.connect(DB)
+    con = sqlite3.connect(DB, timeout=180)
     if not args.refresh:
         done = already_done(con, args.max_age_hours)
         symbols = [s for s in symbols if s not in done]

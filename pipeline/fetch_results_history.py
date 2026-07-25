@@ -306,7 +306,11 @@ def main() -> None:
     raw = (ROOT / args.symbols[1:]).read_text(encoding="utf-8") if args.symbols.startswith("@") else args.symbols
     symbols = [s.strip().upper() for s in raw.split(",") if s.strip()]
 
-    con = sqlite3.connect(DB)
+    # timeout + WAL let several fetchers (and an export) share the DB instead of
+    # failing instantly with "database is locked"
+    con = sqlite3.connect(DB, timeout=180)
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA busy_timeout=180000")
     con.execute(
         "CREATE TABLE IF NOT EXISTS results_history (symbol TEXT, basis TEXT, period_type TEXT, period_start TEXT, period_end TEXT, item TEXT, value REAL)"
     )

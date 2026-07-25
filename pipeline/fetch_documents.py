@@ -42,7 +42,7 @@ def main() -> None:
     except Exception:
         pass
 
-    con = sqlite3.connect(DB)
+    con = sqlite3.connect(DB, timeout=180)
     con.execute(
         "CREATE TABLE IF NOT EXISTS documents (symbol TEXT, doc_type TEXT, from_yr TEXT, to_yr TEXT, url TEXT)"
     )
