@@ -85,7 +85,11 @@ INSTANT_TAGS = {"Equity": "equity", "PaidUpValueOfEquityShareCapital": "share_ca
 # Rules are ordered; the first match for a still-unset item wins.
 OLD_HTML_RULES: list[tuple[str, str]] = [
     (r"^total income from operations", "revenue"),
-    (r"^net sales ?/ ?income from operations", "revenue_net"),
+    # "...from Operation" (singular) appears in the 2011-era sheets
+    (r"^net sales ?/ ?income from operation", "revenue_net"),
+    (r"^revenue from operations", "revenue_net"),
+    (r"^net income from sales", "revenue_net"),   # services-sector variant
+    (r"^gross profit", "gross_profit"),           # some sheets report GP directly
     (r"^interest earned", "revenue_bank"),
     (r"^total income$", "total_income"),
     (r"^other income", "other_income"),

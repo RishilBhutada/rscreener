@@ -29,6 +29,7 @@ YF_INCOME_MAP = {
 NSE_ITEMS = [
     "revenue", "pat", "eps", "total_expenses", "finance_cost", "depreciation",
     "cost_materials", "purchases", "inv_change", "equity", "share_capital",
+    "gross_profit",
 ]
 MONEY = {  # fields to convert Rs -> Rs crore on emit (eps / margins / book-value-per-share excluded)
     "revenue", "pat", "total_expenses", "finance_cost", "depreciation",
@@ -91,12 +92,14 @@ def _derive(slot: dict) -> dict:
     ebitda = slot.get("ebitda_direct")
     if ebitda is None and rev is not None and exp is not None:
         ebitda = rev - exp + fin + dep
-    cogs = slot.get("cogs_direct")
-    if cogs is None:
-        parts = [slot.get(k) for k in ("cost_materials", "purchases", "inv_change")]
-        if any(p is not None for p in parts):
-            cogs = sum(p for p in parts if p is not None)
-    gp = (rev - cogs) if (rev is not None and cogs is not None) else None
+    gp = slot.get("gross_profit")  # some old sheets report Gross Profit outright
+    if gp is None:
+        cogs = slot.get("cogs_direct")
+        if cogs is None:
+            parts = [slot.get(k) for k in ("cost_materials", "purchases", "inv_change")]
+            if any(p is not None for p in parts):
+                cogs = sum(p for p in parts if p is not None)
+        gp = (rev - cogs) if (rev is not None and cogs is not None) else None
     return {"ebitda": ebitda, "gross_profit": gp}
 
 
