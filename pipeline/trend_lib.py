@@ -34,8 +34,8 @@ MONEY = {  # fields to convert Rs -> Rs crore on emit (eps / margins / book-valu
     "revenue", "pat", "total_expenses", "finance_cost", "depreciation",
     "cost_materials", "purchases", "inv_change", "equity", "ebitda_direct", "cogs_direct",
 }
-KEEP_ANNUAL = 15
-KEEP_QUARTERLY = 32
+KEEP_ANNUAL = 25
+KEEP_QUARTERLY = 88  # ~22 years, matching screener.in's Max span on the ratio charts
 
 
 def _table_exists(con: sqlite3.Connection, name: str) -> bool:
@@ -165,9 +165,13 @@ def _median(vals: list[float]) -> float:
 
 
 def _band(series: list[list], round_to: int = 1) -> dict | None:
+    """Median is taken over the trailing 5 years by DATE, so it means the same
+    thing whether the series is weekly or monthly."""
     if len(series) < 12:
         return None
-    last5y = [v for _, v in series[-60:]]
+    end = series[-1][0]
+    cutoff = f"{int(end[:4]) - 5}{end[4:]}"
+    last5y = [v for d, v in series if d >= cutoff] or [v for _, v in series]
     return {"series": series, "median_5y": round(_median(last5y), round_to)}
 
 
@@ -254,9 +258,18 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                 merged.setdefault(r["period_end"], r["value"])  # nse wins
             equity_by_sym[sym] = sorted(merged.items())
 
-    px = pd.read_sql("SELECT symbol, date, close FROM prices WHERE freq='monthly' ORDER BY date", con)
+    # weekly gives ~1,100 points over 20+ years (screener.in serves the same
+    # density); fall back to monthly for symbols whose weekly history is short
+    wk = pd.read_sql("SELECT symbol, date, close FROM prices WHERE freq='weekly' ORDER BY date", con)
+    mo = pd.read_sql("SELECT symbol, date, close FROM prices WHERE freq='monthly' ORDER BY date", con)
+    wk_by = {s: g for s, g in wk.groupby("symbol")}
+    mo_by = {s: g for s, g in mo.groupby("symbol")}
     out: dict[str, dict] = {}
-    for sym, g in px.groupby("symbol"):
+    for sym in sorted(set(wk_by) | set(mo_by)):
+        gw, gm = wk_by.get(sym), mo_by.get(sym)
+        g = gw if (gw is not None and len(gw) >= (len(gm) if gm is not None else 0)) else gm
+        if g is None or not len(g):
+            continue
         flows = flow_by_sym.get(sym)
         sh = shares.get(sym)
         if not flows or not sh:
@@ -264,8 +277,11 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
         eqs = equity_by_sym.get(sym, [])
         nd = netdebt.get(sym, [])  # list of (date, netdebt_cr) or []
         pe_s, ev_s, pb_s, ps_s = [], [], [], []
+        fi = 0  # pointer into `flows` (both it and the price series are date-sorted)
         for date, close in zip(g["date"], g["close"]):
-            recent = [f for f in flows if f[0] <= date][-4:]
+            while fi < len(flows) and flows[fi][0] <= date:
+                fi += 1
+            recent = flows[max(0, fi - 4):fi]
             mcap_cr = close * sh / 1e7
             if len(recent) == 4:
                 ttm_eps = sum(f[1] for f in recent) if all(f[1] is not None for f in recent) else None

@@ -16,6 +16,7 @@ Usage:
   python fetch_results_history.py --symbols @data/top500.txt --limit 100
 """
 import argparse
+import re
 import sqlite3
 import time
 import xml.etree.ElementTree as ET
@@ -72,6 +73,134 @@ OLD_TAGS = {
 }
 INSTANT_TAGS = {"Equity": "equity", "PaidUpValueOfEquityShareCapital": "share_capital"}
 
+# Pre-Ind-AS filings (roughly 2005-2018) have NO XBRL - the index's `xbrl` field is
+# the placeholder ".../xbrl/-". Those rows instead carry `resultDetailedDataLink`,
+# an HTML page on the (unblocked) nsearchives host holding the same P&L as a
+# label/value table. Parsing it is what extends every ratio band back to ~2005.
+# Two label dialects appear across the pre-Ind-AS era and both must be read:
+#   2005-2011  plain Clause-41 ("Consumption of Raw Materials", "Total Expenditure")
+#   2012-2017  revised Clause-41 ("(a) Cost of materials consumed", "Total expenses",
+#              and EPS split under "Earnings per share (after extraordinary items)"
+#              section headers with a bare "(a) Basic" row beneath)
+# Rules are ordered; the first match for a still-unset item wins.
+OLD_HTML_RULES: list[tuple[str, str]] = [
+    (r"^total income from operations", "revenue"),
+    (r"^net sales ?/ ?income from operations", "revenue_net"),
+    (r"^interest earned", "revenue_bank"),
+    (r"^total income$", "total_income"),
+    (r"^other income", "other_income"),
+    (r"^total expenditure$", "total_expenses"),
+    (r"^total expenses$", "total_expenses"),
+    (r"^cost of materials consumed", "cost_materials"),
+    (r"^consumption of raw materials", "cost_materials"),
+    (r"^purchases? of stock-?in-?trade", "purchases"),
+    (r"^purchase of traded goods", "purchases"),
+    (r"^changes in inventories", "inv_change"),
+    (r"^increase ?/ ?decrease in stock", "inv_change"),
+    (r"^employee benefits expense", "employee_cost"),
+    (r"^employees cost", "employee_cost"),
+    (r"^depreciation", "depreciation"),
+    (r"^finance costs?", "finance_cost"),
+    (r"^interest$", "finance_cost"),
+    (r"from ordinary activities before tax", "pbt"),
+    (r"^tax expense", "tax"),
+    (r"^net profit.*for the period", "pat"),
+    (r"^net profit.*after tax", "pat_old"),
+    (r"^paid-?up equity share capital", "share_capital"),
+    (r"^reserves? excluding revaluation reserves", "reserves"),
+    (r"^basic eps after extraordinary", "eps"),
+    (r"^basic eps before extraordinary", "eps_before"),
+]
+OLD_HTML_RULES_C = [(re.compile(p), k) for p, k in OLD_HTML_RULES]
+_EPS_AFTER = re.compile(r"^earnings per share.*after extraordinary")
+_EPS_BEFORE = re.compile(r"^earnings per share.*before extraordinary")
+_EPS_BASIC = re.compile(r"^basic$")
+# values that are per-share rupees, never scaled by the sheet's unit
+_UNSCALED = {"eps", "eps_before"}
+_AUX = ("revenue_bank", "revenue_net", "pat_old", "eps_before", "reserves")
+_UNITS = [("crore", 1e7), ("million", 1e6), ("lakh", 1e5)]
+
+
+def _num(s: str) -> float | None:
+    s = s.replace(",", "").strip()
+    if s in ("", "-", "--", "NA", "N.A."):
+        return None
+    try:
+        v = float(s)
+    except ValueError:
+        return None
+    # NSE uses -999 as a "not reported" sentinel in the shareholding columns
+    return None if v == -999.0 else v
+
+
+def parse_old_html(text: str) -> dict[str, float]:
+    """Extract the P&L from a pre-Ind-AS `resultDetailedDataLink` page.
+
+    Values are reported in a unit named in the sheet header ("Amount(Rs. in
+    lakhs)"); they are scaled to plain rupees so they match the XBRL rows.
+    """
+    body = re.sub(r"<script.*?</script>", "", text, flags=re.S | re.I)
+    cells = re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", body, flags=re.S | re.I)
+    clean = [re.sub(r"<[^>]+>", "", c).replace("&nbsp;", " ").strip() for c in cells]
+    clean = [c for c in clean if c]
+
+    scale = 1.0
+    for c in clean:
+        m = re.search(r"amount\s*\(?\s*rs\.?\s*in\s*([a-z]+)", c, flags=re.I)
+        if m:
+            unit = m.group(1).lower()
+            for key, mult in _UNITS:
+                if unit.startswith(key):
+                    scale = mult
+            break
+
+    facts: dict[str, float] = {}
+    eps_section: str | None = None
+    for i, raw in enumerate(clean[:-1]):
+        label = re.sub(r"\s+", " ", raw).strip().lower()
+        label = re.sub(r"^\(?[a-z]\)\s*", "", label).strip()  # drop "(a) " / "a) " markers
+        if _EPS_AFTER.search(label):
+            eps_section = "eps"
+            continue
+        if _EPS_BEFORE.search(label):
+            eps_section = "eps_before"
+            continue
+        key = None
+        if _EPS_BASIC.match(label) and eps_section:
+            key = eps_section
+        else:
+            for rx, k in OLD_HTML_RULES_C:
+                if rx.search(label):
+                    key = k
+                    break
+        if not key or key in facts:
+            continue
+        v = _num(clean[i + 1])
+        if v is None:
+            continue
+        facts[key] = v if key in _UNSCALED else v * scale
+
+    if "revenue" not in facts and "revenue_net" in facts:
+        facts["revenue"] = facts["revenue_net"]
+    if "revenue" not in facts and "revenue_bank" in facts:
+        facts["revenue"] = facts["revenue_bank"]
+    if "pat" not in facts and "pat_old" in facts:
+        facts["pat"] = facts["pat_old"]
+    if "eps" not in facts and "eps_before" in facts:
+        facts["eps"] = facts["eps_before"]
+    # Convention fix: the old sheet's "Total Expenditure" excludes interest
+    # (PBT = Total Income - Total Expenditure - Interest), whereas Ind-AS
+    # "Expenses" includes it. Fold interest in so downstream EBITDA/OPM math
+    # (revenue - expenses + interest + depreciation) is uniform across eras.
+    if "total_expenses" in facts and "finance_cost" in facts:
+        facts["total_expenses"] += facts["finance_cost"]
+    # net worth = paid-up capital + reserves (the old sheet has no single equity line)
+    if "equity" not in facts and "share_capital" in facts and "reserves" in facts:
+        facts["equity"] = facts["share_capital"] + facts["reserves"]
+    for aux in _AUX:
+        facts.pop(aux, None)
+    return facts
+
 
 def iso(d: str) -> str:
     return datetime.strptime(d, "%d-%b-%Y").strftime("%Y-%m-%d")
@@ -114,17 +243,45 @@ def parse_xbrl(xml_bytes: bytes, period_type: str) -> dict[str, float]:
     return facts
 
 
+def _has_xbrl(r: dict) -> bool:
+    x = str(r.get("xbrl") or "").strip()
+    return bool(x) and not x.endswith("/-") and x not in ("-", "")
+
+
 def pick_filings(rows: list[dict], quarters_back: int, period: str) -> list[dict]:
-    """One filing per period: consolidated wins over standalone; newest first."""
+    """One filing per period: consolidated wins over standalone; newest first.
+
+    Accepts both modern XBRL filings and pre-Ind-AS ones that only expose the
+    HTML `resultDetailedDataLink`. Quarterly picks are restricted to filings
+    that actually cover ~one quarter, so cumulative half/nine-month sheets
+    (common in the old format) can't masquerade as a quarter.
+    """
     by_period: dict[tuple, dict] = {}
     for r in rows:
-        if not r.get("xbrl") or str(r.get("xbrl")).strip() in ("-", ""):
+        if not _has_xbrl(r) and not r.get("resultDetailedDataLink"):
             continue
         if not r.get("fromDate") or not r.get("toDate"):
             continue
+        try:
+            d0 = datetime.strptime(r["fromDate"], "%d-%b-%Y")
+            d1 = datetime.strptime(r["toDate"], "%d-%b-%Y")
+        except ValueError:
+            continue
+        span = (d1 - d0).days
+        if period == "Quarterly" and not (80 <= span <= 100):
+            continue
+        if period == "Annual" and not (330 <= span <= 400):
+            continue
         key = (r["fromDate"], r["toDate"])
         cur = by_period.get(key)
-        if cur is None or (r.get("consolidated") == "Consolidated" and cur.get("consolidated") != "Consolidated"):
+        if cur is None:
+            by_period[key] = r
+            continue
+        # prefer consolidated, then a real XBRL over the HTML fallback
+        better = (r.get("consolidated") == "Consolidated" and cur.get("consolidated") != "Consolidated") or (
+            r.get("consolidated") == cur.get("consolidated") and _has_xbrl(r) and not _has_xbrl(cur)
+        )
+        if better:
             by_period[key] = r
     picked = sorted(by_period.values(), key=lambda r: datetime.strptime(r["toDate"], "%d-%b-%Y"), reverse=True)
     if period == "Quarterly" and quarters_back > 0:
@@ -190,8 +347,12 @@ def main() -> None:
                 time.sleep(args.sleep)
             for f in filings:
                 try:
-                    xml = requests.get(f["xbrl"], headers=HEADERS, timeout=25).content
-                    facts = parse_xbrl(xml, f["_ptype"])
+                    if _has_xbrl(f):
+                        xml = requests.get(f["xbrl"], headers=HEADERS, timeout=25).content
+                        facts = parse_xbrl(xml, f["_ptype"])
+                    else:  # pre-Ind-AS: parse the HTML detail sheet instead
+                        html = requests.get(f["resultDetailedDataLink"], headers=HEADERS, timeout=25).text
+                        facts = parse_old_html(html)
                 except Exception:
                     skipped += 1
                     continue

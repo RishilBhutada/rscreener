@@ -92,9 +92,11 @@ def main() -> None:
     ok = err = 0
     for i, sym in enumerate(symbols, 1):
         try:
-            monthly = series(session, sym, "max", "1mo")
-            weekly = series(session, sym, "1y", "1wk")
-            daily = series(session, sym, "2y", "1d")
+            # NOTE: Yahoo silently downgrades 1wk to monthly bars when range=max,
+            # so weekly is requested with an explicit span.
+            monthly = series(session, sym, "max", "1mo")   # ~30y, drives Max + ratio bands
+            weekly = series(session, sym, "5y", "1wk")     # density for the 3Yr/5Yr views
+            daily = series(session, sym, "2y", "1d")       # 1M/6M/1Yr + DMA + volatility
             if not monthly and not weekly and not daily:
                 raise ValueError("no price history returned")
             con.execute("DELETE FROM prices WHERE symbol=?", (sym,))
