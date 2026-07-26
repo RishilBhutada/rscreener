@@ -266,6 +266,23 @@ def get_retry(session, url: str, tries: int = 4, timeout: int = 25):
     raise last  # type: ignore[misc]
 
 
+def db_retry(fn, tries: int = 6, delay: float = 2.0):
+    """Run a DB write, waiting out 'database is locked'.
+
+    WAL lets readers and a writer coexist, but two writers still serialise, and a
+    checkpoint can hold the file briefly. Without this a lock turns one symbol's
+    write into a crash that loses the whole run.
+    """
+    for attempt in range(tries):
+        try:
+            return fn()
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e).lower() or attempt == tries - 1:
+                raise
+            time.sleep(delay)
+            delay *= 1.6
+
+
 def _has_xbrl(r: dict) -> bool:
     x = str(r.get("xbrl") or "").strip()
     return bool(x) and not x.endswith("/-") and x not in ("-", "")
@@ -385,30 +402,33 @@ def main() -> None:
                     continue
                 basis = "consolidated" if f.get("consolidated") == "Consolidated" else "standalone"
                 ps, pe = iso(f["fromDate"]), iso(f["toDate"])
-                con.execute(
+                rows_in = [(sym, basis, f["_ptype"], ps, pe, k, v) for k, v in facts.items()]
+                db_retry(lambda: con.execute(
                     "DELETE FROM results_history WHERE symbol=? AND period_type=? AND period_start=? AND period_end=?",
                     (sym, f["_ptype"], ps, pe),
-                )
-                con.executemany(
-                    "INSERT INTO results_history VALUES (?,?,?,?,?,?,?)",
-                    [(sym, basis, f["_ptype"], ps, pe, k, v) for k, v in facts.items()],
-                )
+                ))
+                db_retry(lambda: con.executemany("INSERT INTO results_history VALUES (?,?,?,?,?,?,?)", rows_in))
                 n_periods += 1
                 time.sleep(0.15)
-            con.execute(
+            db_retry(lambda: con.execute(
                 "INSERT OR REPLACE INTO results_fetch_log VALUES (?,?,?,?)",
                 (sym, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), None, n_periods),
-            )
-            con.commit()
+            ))
+            db_retry(con.commit)
             print(f"[{i}/{len(symbols)}] {sym}: {n_periods} periods parsed, {skipped} skipped")
         except Exception as e:  # noqa: BLE001
             err = str(e)[:200]
-            con.execute(
-                "INSERT OR REPLACE INTO results_fetch_log VALUES (?,?,?,?)",
-                (sym, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), err, n_periods),
-            )
-            con.commit()
-            print(f"[{i}/{len(symbols)}] {sym}: ERROR {err}")
+            # logging the failure must never itself end the run - one bad symbol
+            # should cost that symbol, not the hundreds still queued behind it
+            try:
+                db_retry(lambda: con.execute(
+                    "INSERT OR REPLACE INTO results_fetch_log VALUES (?,?,?,?)",
+                    (sym, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), err, n_periods),
+                ))
+                db_retry(con.commit)
+            except Exception as log_err:  # noqa: BLE001
+                print(f"[{i}/{len(symbols)}] {sym}: could not record failure ({str(log_err)[:60]})", flush=True)
+            print(f"[{i}/{len(symbols)}] {sym}: ERROR {err}", flush=True)
         time.sleep(args.sleep)
     print("done")
 
