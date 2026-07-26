@@ -247,6 +247,25 @@ def parse_xbrl(xml_bytes: bytes, period_type: str) -> dict[str, float]:
     return facts
 
 
+def get_retry(session, url: str, tries: int = 4, timeout: int = 25):
+    """GET with backoff. NSE (and the local resolver, under parallel load) throws
+    transient DNS/reset/timeout errors far more often than real failures - without
+    a retry those look like missing data and permanently mark the symbol failed."""
+    delay = 1.5
+    last = None
+    for attempt in range(tries):
+        try:
+            r = (session or requests).get(url, headers=HEADERS, timeout=timeout)
+            r.raise_for_status()
+            return r
+        except Exception as e:  # noqa: BLE001
+            last = e
+            if attempt < tries - 1:
+                time.sleep(delay)
+                delay *= 2
+    raise last  # type: ignore[misc]
+
+
 def _has_xbrl(r: dict) -> bool:
     x = str(r.get("xbrl") or "").strip()
     return bool(x) and not x.endswith("/-") and x not in ("-", "")
@@ -345,8 +364,7 @@ def main() -> None:
         try:
             filings = []
             for period in ("Annual", "Quarterly"):
-                r = s.get(INDEX_API.format(sym=sym, period=period), timeout=25)
-                r.raise_for_status()
+                r = get_retry(s, INDEX_API.format(sym=sym, period=period))
                 body = r.json()
                 rows = body if isinstance(body, list) else body.get("data", [])
                 for f in pick_filings(rows, args.quarters_back, period):
@@ -356,11 +374,9 @@ def main() -> None:
             for f in filings:
                 try:
                     if _has_xbrl(f):
-                        xml = requests.get(f["xbrl"], headers=HEADERS, timeout=25).content
-                        facts = parse_xbrl(xml, f["_ptype"])
+                        facts = parse_xbrl(get_retry(s, f["xbrl"], tries=3).content, f["_ptype"])
                     else:  # pre-Ind-AS: parse the HTML detail sheet instead
-                        html = requests.get(f["resultDetailedDataLink"], headers=HEADERS, timeout=25).text
-                        facts = parse_old_html(html)
+                        facts = parse_old_html(get_retry(s, f["resultDetailedDataLink"], tries=3).text)
                 except Exception:
                     skipped += 1
                     continue
