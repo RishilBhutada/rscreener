@@ -48,8 +48,13 @@ jobs:
         run: python pipeline/fetch_announcement_docs.py --symbols @data/top500.txt --max-age-hours 156 --sleep 0.5
       - name: Deepen as-filed P&L history (bounded weekly rotation, full ~20yr depth)
         run: python pipeline/fetch_results_history.py --symbols @data/top500.txt --max-age-hours 720 --limit 25 --quarters-back 0 --sleep 0.3
+      - name: Refresh IPOs (official NSE issues + live subscription)
+        run: python pipeline/fetch_ipos.py
+      - name: Snapshot grey-market premium (unofficial; builds the accuracy record)
+        run: python pipeline/fetch_gmp.py
       - run: python pipeline/export_json.py
       - run: python pipeline/export_company_json.py
+      - run: python pipeline/export_ipos.py
       - name: Upload the updated DB back to the data-db release
         env:
           GH_TOKEN: ${{ github.token }}
