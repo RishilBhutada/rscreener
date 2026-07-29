@@ -17,7 +17,7 @@ import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
-CHART = "https://query2.finance.yahoo.com/v8/finance/chart/{sym}.NS?range={rng}&interval={itv}"
+CHART = "https://query2.finance.yahoo.com/v8/finance/chart/{sym}.NS?range={rng}&interval={itv}&events=split"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     "Accept": "*/*",
@@ -26,6 +26,37 @@ HEADERS = {
 
 def now_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def splits_of(session: requests.Session, sym: str) -> list[tuple[str, float]]:
+    """Split/bonus events from Yahoo, as (date, ratio).
+
+    Yahoo's prices are split-adjusted but as-filed EPS is not, so PE is wrong by
+    the cumulative factor unless EPS is put on the same basis. A 1:1 bonus is
+    reported here as a 2:1 split, so this one feed covers bonuses too.
+    """
+    ev = None
+    for attempt in range(3):  # a silent [] here leaves EPS unadjusted and PE badly wrong
+        try:
+            r = session.get(CHART.format(sym=sym, rng="max", itv="1mo"), timeout=25)
+            r.raise_for_status()
+            result = (r.json().get("chart", {}).get("result") or [None])[0]
+            ev = ((result or {}).get("events") or {}).get("splits") or {}
+            break
+        except Exception:
+            time.sleep(1.5 * (attempt + 1))
+    if ev is None:
+        raise RuntimeError("split events unavailable")
+    out = []
+    for v in ev.values():
+        num, den = v.get("numerator"), v.get("denominator")
+        if not num or not den:
+            continue
+        out.append((
+            datetime.fromtimestamp(int(v["date"]), tz=timezone.utc).strftime("%Y-%m-%d"),
+            float(num) / float(den),
+        ))
+    return sorted(out)
 
 
 def series(session: requests.Session, sym: str, rng: str, itv: str) -> list[tuple]:
@@ -77,6 +108,7 @@ def main() -> None:
         if col not in have:
             con.execute(f"ALTER TABLE prices ADD COLUMN {col} REAL")
     con.execute("CREATE TABLE IF NOT EXISTS prices_fetch_log (symbol TEXT PRIMARY KEY, fetched_at TEXT, error TEXT)")
+    con.execute("CREATE TABLE IF NOT EXISTS splits (symbol TEXT, date TEXT, ratio REAL, PRIMARY KEY (symbol, date))")
     if args.refresh:
         done: set[str] = set()
     elif args.max_age_hours > 0:
@@ -106,6 +138,10 @@ def main() -> None:
                 + [(sym, "weekly", d, o, h, l, c, v) for d, o, h, l, c, v in weekly]
                 + [(sym, "daily", d, o, h, l, c, v) for d, o, h, l, c, v in daily],
             )
+            sp = splits_of(session, sym)
+            if sp:
+                con.execute("DELETE FROM splits WHERE symbol=?", (sym,))
+                con.executemany("INSERT OR REPLACE INTO splits VALUES (?,?,?)", [(sym, d, r) for d, r in sp])
             con.execute("INSERT OR REPLACE INTO prices_fetch_log VALUES (?,?,?)", (sym, now_utc(), None))
             con.commit()
             ok += 1

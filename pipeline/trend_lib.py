@@ -106,15 +106,8 @@ def _derive(slot: dict) -> dict:
 def build_trends(con: sqlite3.Connection, shares: dict | None = None) -> dict[str, dict]:
     shares = shares or {}
     comps = _stitched(con)
-    # latest paid-up share capital per symbol -> restate as-filed per-share EPS to
-    # the current share base (catches bonus issues; keeps EPS bars/PE comparable to
-    # the split/bonus-adjusted price series)
-    sc_latest: dict[str, float] = {}
-    for (symbol, _pt), periods in comps.items():
-        for p in sorted(periods):
-            sc = periods[p].get("share_capital")
-            if sc:
-                sc_latest[symbol] = sc
+    splits = split_factors(con)
+    known = splits_known(con)
     out: dict[str, dict] = {}
     for (symbol, ptype), periods in comps.items():
         keep = KEEP_ANNUAL if ptype == "annual" else KEEP_QUARTERLY
@@ -126,14 +119,26 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None) -> dict[st
         def pct(num, den):
             return round(num / den * 100, 2) if (num is not None and den) else None
 
-        scr = sc_latest.get(symbol)
+        ev = splits.get(symbol)
 
         def adj_eps(p):
+            """As-filed EPS put on today's share base, to match the adjusted price.
+
+            Splits and bonuses only - the same convention screener.in uses. A
+            MERGER is deliberately not restated: HDFC Bank absorbing HDFC Ltd in
+            2023 raised the share count ~65%, but those shares bought a second
+            business, so dividing old profits by the enlarged count understates
+            historical EPS (it put HDFC Bank's 2006 PE at 70 instead of ~30).
+            PAT / current shares is only a fallback for symbols whose split
+            history was never successfully fetched.
+            """
             e = periods[p].get("eps")
-            if e is None:
-                return None
-            sc = periods[p].get("share_capital")
-            return round(e * (sc / scr if (sc and scr) else 1.0), 2)
+            if symbol in known:
+                return None if e is None else round(e / adj_factor(ev, p), 2)
+            pat_v = periods[p].get("pat")
+            if pat_v is not None and sh:
+                return round(pat_v / sh, 2)
+            return None if e is None else round(e / adj_factor(ev, p), 2)
 
         rev = [periods[p].get("revenue") for p in ordered]
         pat = [periods[p].get("pat") for p in ordered]
@@ -159,6 +164,49 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None) -> dict[st
         if any(v is not None for v in trend["revenue"]):
             out.setdefault(symbol, {})[ptype] = trend
     return out
+
+
+def split_factors(con: sqlite3.Connection) -> dict[str, list[tuple[str, float]]]:
+    """{symbol: [(date, ratio), ...]} of split/bonus events, oldest first."""
+    if not _table_exists(con, "splits"):
+        return {}
+    out: dict[str, list[tuple[str, float]]] = {}
+    for sym, d, r in con.execute("SELECT symbol, date, ratio FROM splits ORDER BY date"):
+        if r and r > 0:
+            out.setdefault(sym, []).append((d, float(r)))
+    return out
+
+
+def splits_known(con: sqlite3.Connection) -> set[str]:
+    """Symbols with at least one recorded split/bonus.
+
+    Only these take the exact split-factor path. An empty split list is
+    ambiguous - it means either "never split" or "never fetched" - and guessing
+    wrong leaves EPS unadjusted, which put ITC's 2006 PE at 1.0. For those the
+    PAT / current-shares fallback is used instead: it is exact when a company
+    truly never split, and merely approximate otherwise, so it fails softly
+    in both directions.
+    """
+    if not _table_exists(con, "splits"):
+        return set()
+    return {r[0] for r in con.execute("SELECT DISTINCT symbol FROM splits")}
+
+
+def adj_factor(events: list[tuple[str, float]] | None, period_end: str) -> float:
+    """How many of today's shares one share at `period_end` became.
+
+    Yahoo's price series is already divided by this; as-filed EPS is not. Divide
+    EPS by the same factor and price/EPS finally compare like with like.
+    Share CAPITAL cannot substitute here: in a split the face value falls as the
+    count rises, so capital is unchanged and the split is invisible to it.
+    """
+    if not events:
+        return 1.0
+    f = 1.0
+    for d, r in events:
+        if d > period_end:
+            f *= r
+    return f or 1.0
 
 
 def _median(vals: list[float]) -> float:
@@ -189,10 +237,13 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
     if not (_table_exists(con, "prices") and _table_exists(con, "results_history")):
         return {}
     netdebt = netdebt or {}
+    splits = split_factors(con)
+    known = splits_known(con)
     q = pd.read_sql(
         "SELECT symbol, period_end, item, value FROM results_history "
         "WHERE period_type='quarterly' AND item IN "
-        "('eps','revenue','total_expenses','finance_cost','depreciation','equity','share_capital') ORDER BY period_end",
+        "('eps','pat','revenue','total_expenses','finance_cost','depreciation','equity','share_capital') "
+        "ORDER BY period_end",
         con,
     )
     # recent quarters yfinance covers but the XBRL index doesn't yet (keeps the
@@ -202,7 +253,7 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
         yq = pd.read_sql(
             "SELECT symbol, period_end, item, value FROM statements "
             "WHERE stmt_type='income' AND period_type='quarterly' "
-            "AND item IN ('Total Revenue','Basic EPS','EBITDA') ORDER BY period_end",
+            "AND item IN ('Total Revenue','Basic EPS','EBITDA','Net Income') ORDER BY period_end",
             con,
         )
         for sym, g in yq.groupby("symbol"):
@@ -218,31 +269,54 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
         by_pe: dict[str, dict] = {}
         for _, r in g.iterrows():
             by_pe.setdefault(r["period_end"], {})[r["item"]] = r["value"]
-        sc_ref = None
-        for pe in sorted(by_pe):
-            sc = by_pe[pe].get("share_capital")
-            if sc:
-                sc_ref = sc
+        ev = splits.get(sym)
         flows, eqs = [], []
         for pe in sorted(by_pe):
             s = by_pe[pe]
             rev, exp = s.get("revenue"), s.get("total_expenses")
             fin, dep = s.get("finance_cost") or 0.0, s.get("depreciation") or 0.0
             ebitda = (rev - exp + fin + dep) if (rev is not None and exp is not None) else None
+            # Mirror adj_eps(): exact split factor when the split history is
+            # known, else PAT / current shares. Testing "eps is None" first (as
+            # this once did) meant a symbol with no split data kept its raw
+            # as-filed EPS - ITC's 2006 PE came out at 1.0 instead of ~20.
             eps = s.get("eps")
-            if eps is not None:
-                sc = s.get("share_capital")
-                eps *= (sc / sc_ref) if (sc and sc_ref) else 1.0
+            if sym in known:
+                if eps is not None:
+                    eps /= adj_factor(ev, pe)
+            else:
+                pat_v, sh_now = s.get("pat"), shares.get(sym)
+                if pat_v is not None and sh_now:
+                    eps = pat_v / sh_now
             flows.append((pe, eps, (rev / 1e7 if rev is not None else None),
                           (ebitda / 1e7 if ebitda is not None else None)))
             if s.get("equity") is not None:
                 eqs.append((pe, s["equity"]))
         last_nse = flows[-1][0] if flows else "0000-00-00"
-        for pe in sorted(yq_by_sym.get(sym, {})):
+        # Only splice yfinance in if it AGREES with the as-filed series on a
+        # shared quarter. For dual-listed names yfinance serves the ADR line in
+        # USD (Infosys: 0.23 vs NSE's Rs 16.43), and splicing that silently
+        # multiplied the PE by ~70x.
+        yrows = yq_by_sym.get(sym, {})
+        nse_eps = {p: e for p, e, _, _ in flows if e is not None}
+        agree = True
+        for p in set(yrows) & set(nse_eps):
+            yv_ = yrows[p].get("Basic EPS")
+            if yv_ and pd.notna(yv_) and nse_eps[p]:
+                ratio = (yv_ / adj_factor(splits.get(sym), p)) / nse_eps[p]
+                agree = 0.5 <= ratio <= 2.0
+                break
+        for pe in sorted(yrows if agree else {}):
             if pe > last_nse:
                 ys = yq_by_sym[sym][pe]
                 yv = lambda k: (ys[k] if (k in ys and pd.notna(ys[k])) else None)
                 rev_y, eps_y, eb_y = yv("Total Revenue"), yv("Basic EPS"), yv("EBITDA")
+                if eps_y is None:
+                    # A quarter with revenue but no EPS still lands in the trailing
+                    # -4 window and nulls the TTM, which silently truncated the PE
+                    # line by a year or more. Skip it and keep the last known four.
+                    continue
+                eps_y /= adj_factor(splits.get(sym), pe)
                 flows.append((pe, eps_y, (rev_y / 1e7 if rev_y is not None else None),
                               (eb_y / 1e7 if eb_y is not None else None)))
         flow_by_sym[sym] = flows
