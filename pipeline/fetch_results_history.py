@@ -28,6 +28,14 @@ import requests
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
 INDEX_API = "https://www.nseindia.com/api/corporates-financial-results?index=equities&symbol={sym}&period={period}"
+# From 2025 NSE publishes quarterly results under the Integrated Filing regime and
+# the older endpoint above simply STOPS (HDFC Bank's last row there is Dec-2024).
+# Without this the newest ~6 quarters are missing, so every TTM - and therefore
+# every PE - is more than a year stale.
+INTEGRATED_API = (
+    "https://www.nseindia.com/api/integrated-filing-results?index=equities&symbol={sym}"
+    "&type=Integrated%20Filing-%20Financials"
+)
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     "Accept": "*/*",
@@ -283,6 +291,43 @@ def db_retry(fn, tries: int = 6, delay: float = 2.0):
             delay *= 1.6
 
 
+def integrated_filings(session, sym: str) -> list[dict]:
+    """Recent quarters from the Integrated Filing regime, newest first.
+
+    Returns rows shaped like the legacy index so the same parse/store path can
+    handle them: quarter end comes from `qe_Date`, and the period start is
+    derived as the first day of that quarter. Consolidated wins over standalone.
+    """
+    try:
+        body = get_retry(session, INTEGRATED_API.format(sym=sym), tries=3).json()
+    except Exception:
+        return []
+    rows = body.get("data", []) if isinstance(body, dict) else (body or [])
+    best: dict[str, dict] = {}
+    for r in rows:
+        qe, x = r.get("qe_Date"), r.get("xbrl")
+        if not qe or not x or len(str(x)) < 60:
+            continue
+        try:
+            end = datetime.strptime(str(qe).strip().title(), "%d-%b-%Y")
+        except ValueError:
+            continue
+        start = datetime(end.year, ((end.month - 1) // 3) * 3 + 1, 1)
+        key = end.strftime("%Y-%m-%d")
+        cons = (r.get("consolidated") or "").lower().startswith("cons")
+        if key in best and not (cons and not best[key]["_cons"]):
+            continue
+        best[key] = {
+            "xbrl": x,
+            "fromDate": start.strftime("%d-%b-%Y"),
+            "toDate": end.strftime("%d-%b-%Y"),
+            "consolidated": "Consolidated" if cons else "Standalone",
+            "_ptype": "quarterly",
+            "_cons": cons,
+        }
+    return sorted(best.values(), key=lambda r: r["toDate"], reverse=True)
+
+
 def _has_xbrl(r: dict) -> bool:
     x = str(r.get("xbrl") or "").strip()
     return bool(x) and not x.endswith("/-") and x not in ("-", "")
@@ -388,6 +433,12 @@ def main() -> None:
                     f["_ptype"] = "annual" if period == "Annual" else "quarterly"
                     filings.append(f)
                 time.sleep(args.sleep)
+            # the legacy index stops in 2024; the newest quarters live here
+            have = {(f["fromDate"], f["toDate"]) for f in filings}
+            for f in integrated_filings(s, sym):
+                if (f["fromDate"], f["toDate"]) not in have:
+                    filings.append(f)
+            time.sleep(args.sleep)
             for f in filings:
                 try:
                     if _has_xbrl(f):

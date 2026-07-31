@@ -13,6 +13,7 @@ Derived per period (matching screener.in's chart section):
 Money is converted to Rs crore here (eps and per-share book value stay in rupees).
 """
 import sqlite3
+from datetime import datetime
 
 import pandas as pd
 
@@ -364,6 +365,17 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
             while fi < len(flows) and flows[fi][0] <= date:
                 fi += 1
             recent = flows[max(0, fi - 4):fi]
+            # The four must actually be CONSECUTIVE quarters. With a gap in the
+            # data the window silently spanned five or six calendar quarters and
+            # still got called a TTM (HDFC Bank summed Jun-24, Sep-24, Dec-24 and
+            # Jun-25, understating earnings and inflating PE).
+            if len(recent) == 4:
+                span = (
+                    datetime.strptime(recent[-1][0], "%Y-%m-%d")
+                    - datetime.strptime(recent[0][0], "%Y-%m-%d")
+                ).days
+                if span > 300:  # 3 gaps of ~92 days each; more means a hole
+                    recent = []
             mcap_cr = close * sh / 1e7
             if len(recent) == 4:
                 ttm_eps = sum(f[1] for f in recent) if all(f[1] is not None for f in recent) else None

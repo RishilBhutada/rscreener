@@ -308,7 +308,15 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     const vals = axisVals(axis);
     if (!vals.length) return null;
     let lo = Math.min(...vals), hi = Math.max(...vals);
-    if (axis === "L") lo = Math.min(0, lo);
+    if (axis === "L") {
+      // Earnings compound ~40x over 20 years. Anchored at zero the early bars
+      // collapse into invisible slivers and the series reads as "line goes up"
+      // with no detail - which is why screener.in floors this axis near the data
+      // minimum. Only applied when the span is genuinely extreme.
+      const pos = vals.filter((v) => v > 0);
+      const minPos = pos.length ? Math.min(...pos) : 0;
+      lo = minPos > 0 && hi / minPos > 15 ? minPos * 0.85 : Math.min(0, lo);
+    }
     const pad = (hi - lo) * 0.06 || Math.abs(hi) * 0.06 || 1;
     const ticks = niceTicks(lo, hi + pad, 5);
     const dLo = Math.min(lo, ticks[0] ?? lo), dHi = Math.max(hi + pad, ticks[ticks.length - 1] ?? hi);
