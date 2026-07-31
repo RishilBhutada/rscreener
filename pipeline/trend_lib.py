@@ -354,6 +354,11 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
         eqs = equity_by_sym.get(sym, [])
         nd = netdebt.get(sym, [])  # list of (date, netdebt_cr) or []
         pe_s, ev_s, pb_s, ps_s = [], [], [], []
+        # Shorter earnings windows, each annualised so they sit on the same scale
+        # as the 4-quarter TTM and can be read against it: 1Q x4, 2Q x2, 3Q x4/3.
+        # They react to an earnings turn far sooner than TTM, at the cost of
+        # carrying that quarter's seasonality and one-offs undiluted.
+        pe_alt: dict[str, list] = {"q1": [], "q2": [], "q3": []}
         fi = 0  # pointer into `flows` (both it and the price series are date-sorted)
         for date, close in zip(g["date"], g["close"]):
             while fi < len(flows) and flows[fi][0] <= date:
@@ -366,6 +371,11 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                 ttm_eb = sum(f[3] for f in recent) if all(f[3] is not None for f in recent) else None
                 if ttm_eps and ttm_eps > 0:
                     pe_s.append([date, round(close / ttm_eps, 1)])
+                    # aligned by index with pe_s, so only the values travel
+                    for key, n, mult in (("q1", 1, 4.0), ("q2", 2, 2.0), ("q3", 3, 4.0 / 3.0)):
+                        tail = [f[1] for f in recent[-n:]]
+                        ann = sum(tail) * mult if all(v is not None for v in tail) else None
+                        pe_alt[key].append(round(close / ann, 1) if (ann and ann > 0) else None)
                 if ttm_rev and ttm_rev > 0:
                     ps_s.append([date, round(mcap_cr / ttm_rev, 2)])
                 if ttm_eb and ttm_eb > 0:
@@ -381,6 +391,19 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
             b = _band(ser, rnd)
             if b:
                 bands[key] = b
+        if "pe" in bands and pe_s:
+            cutoff = f"{int(pe_s[-1][0][:4]) - 5}{pe_s[-1][0][4:]}"
+            alt, med = {}, {}
+            for key, vals in pe_alt.items():
+                if not any(v is not None for v in vals):
+                    continue
+                alt[key] = vals
+                last5 = [v for (d, _), v in zip(pe_s, vals) if v is not None and d >= cutoff]
+                if last5:
+                    med[key] = round(_median(last5), 1)
+            if alt:
+                bands["pe"]["alt"] = alt
+                bands["pe"]["alt_median_5y"] = med
         if bands:
             out[sym] = bands
     return out

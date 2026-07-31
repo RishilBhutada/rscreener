@@ -4,7 +4,21 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 type Pt = [string, number] | [string, number, number | null];
 export type ChartPrices = { monthly?: Pt[]; weekly?: Pt[]; daily?: Pt[] };
-export type ChartBand = { series: [string, number][]; median_5y: number } | null;
+export type ChartBand = {
+  series: [string, number][];
+  median_5y: number;
+  /** shorter earnings windows, annualised, aligned index-for-index with `series` */
+  alt?: Record<string, (number | null)[]>;
+  alt_median_5y?: Record<string, number>;
+} | null;
+
+/** earnings window behind the PE line; each is annualised onto the TTM scale */
+const PE_WINDOWS: [string, string, string][] = [
+  ["ttm", "TTM", "Trailing 4 quarters — the standard PE"],
+  ["q1", "1Q×4", "Latest quarter annualised (×4) — fastest to react, but carries that quarter's seasonality and one-offs"],
+  ["q2", "2Q×2", "Last two quarters annualised (×2)"],
+  ["q3", "3Q×⁴⁄₃", "Last three quarters annualised (×4/3)"],
+];
 export type ChartTrendQ = {
   periods: string[];
   revenue: (number | null)[];
@@ -132,6 +146,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
 }) {
   const [view, setView] = useState<View>("price");
   const [range, setRange] = useState("5Yr");
+  const [peWin, setPeWin] = useState("ttm");
   const [on, setOn] = useState<Record<string, boolean>>({});
   const [moreOpen, setMoreOpen] = useState(false);
   const [hover, setHover] = useState<{ t: number; px: number } | null>(null);
@@ -225,17 +240,35 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     }
 
     if (view === "pe") {
-      const ttm: XY[] = [];
+      // earnings bars follow the selected window, annualised the same way the
+      // PE line is, so the two always describe the same earnings
+      const nQ = peWin === "q1" ? 1 : peWin === "q2" ? 2 : peWin === "q3" ? 3 : 4;
+      const mult = peWin === "q1" ? 4 : peWin === "q2" ? 2 : peWin === "q3" ? 4 / 3 : 1;
+      const epsBars: XY[] = [];
       if (trendQ) {
-        for (let i = 3; i < trendQ.periods.length; i++) {
-          const w = [trendQ.eps[i - 3], trendQ.eps[i - 2], trendQ.eps[i - 1], trendQ.eps[i]];
-          if (w.every((v) => v !== null && v !== undefined)) {
+        for (let i = nQ - 1; i < trendQ.periods.length; i++) {
+          const w = trendQ.eps.slice(i - nQ + 1, i + 1);
+          if (w.length === nQ && w.every((v) => v !== null && v !== undefined)) {
             const t = toT(trendQ.periods[i]);
-            if (t >= cutoff) ttm.push({ t, v: (w as number[]).reduce((a, b) => a + b, 0) });
+            if (t >= cutoff) epsBars.push({ t, v: (w as number[]).reduce((a, b) => a + b, 0) * mult });
           }
         }
       }
-      bandView(peBand, "PE", "Median PE", "plain", ttm, "TTM EPS", "plain");
+      const win = PE_WINDOWS.find(([k]) => k === peWin);
+      const suffix = peWin === "ttm" ? "" : ` (${win?.[1]})`;
+      // swap in the selected window's values; they align index-for-index
+      let band = peBand ?? null;
+      if (band && peWin !== "ttm" && band.alt?.[peWin]) {
+        const vals = band.alt[peWin];
+        band = {
+          ...band,
+          series: band.series
+            .map((p, i) => [p[0], vals[i]] as [string, number | null])
+            .filter((p): p is [string, number] => p[1] !== null && p[1] !== undefined),
+          median_5y: band.alt_median_5y?.[peWin] ?? band.median_5y,
+        };
+      }
+      bandView(band, `PE${suffix}`, "Median PE", "plain", epsBars, `EPS${suffix}`, "plain");
     }
 
     if (view === "ev") bandView(evBand, "EV / EBITDA", "Median EV Multiple", "plain", qBars(trendQ?.ebitda), "EBITDA", "cr");
@@ -254,7 +287,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     }
 
     return defs;
-  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, cutoff, livePrice, now]);
+  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now]);
 
   const visible = model.filter((s) => isOn(s.key));
   if (!model.length || !model.some((s) => s.data.length > 1)) {
@@ -303,6 +336,30 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     <ChartShell range={range} setRange={setRange} view={view} setView={setView}
       moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand }}
       onViewChange={() => setHover(null)}>
+      {view === "pe" && peBand?.alt && (
+        <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
+          <span className="text-[var(--ink3)]">Earnings window</span>
+          <div className="flex gap-1 flex-wrap">
+            {PE_WINDOWS.filter(([k]) => k === "ttm" || peBand.alt?.[k]).map(([k, label, tip]) => (
+              <button
+                key={k}
+                onClick={() => { setPeWin(k); setHover(null); }}
+                title={tip}
+                className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium ${
+                  peWin === k
+                    ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]"
+                    : "text-[var(--ink2)] hover:bg-[var(--card2)]"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className="text-[var(--ink3)] hidden sm:inline">
+            · shorter windows are annualised onto the TTM scale, so they can be read against it
+          </span>
+        </div>
+      )}
       <div className="relative">
         <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full touch-none select-none"
           onPointerMove={onMove} onPointerDown={onMove} onPointerLeave={() => setHover(null)}>

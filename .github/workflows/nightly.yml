@@ -55,6 +55,12 @@ jobs:
       - run: python pipeline/export_json.py
       - run: python pipeline/export_company_json.py
       - run: python pipeline/export_ipos.py
+      - name: Refuse to publish if chart history went backwards
+        # Guards the failure that shipped for weeks: a stale restored DB exports
+        # ~7 years of ratio history in place of ~20, and deploys it silently.
+        # Failing here also stops the stale DB being re-uploaded below, so the
+        # loop cannot feed itself.
+        run: python pipeline/check_depth.py
       - name: Upload the updated DB back to the data-db release
         env:
           GH_TOKEN: ${{ github.token }}
