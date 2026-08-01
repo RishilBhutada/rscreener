@@ -350,9 +350,14 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
             flows.append((pe, eps, (rev / 1e7 if rev is not None else None),
                           (ebitda / 1e7 if ebitda is not None else None),
                           effective_shares(s.get("pat"), s.get("eps"), adj_factor(ev, pe))))
-            # deliberately NOT taking equity from the results filing: Reg-33's
-            # "Equity" tag is paid-up share capital, not shareholders' funds.
-            # Book value comes from the balance sheet below.
+            # The filings' "Equity" is paid-up capital in the Ind-AS/bank
+            # taxonomies but real net worth in the older sheets (capital +
+            # reserves). net_worth() tells them apart, so the deep history is
+            # kept and only the paid-up-capital values are dropped - excluding
+            # the lot cost 20 years of Price/Book depth.
+            nw = net_worth(s)
+            if nw is not None:
+                eqs.append((pe, nw))
         last_nse = flows[-1][0] if flows else "0000-00-00"
         # Only splice yfinance in if it AGREES with the as-filed series on a
         # shared quarter. For dual-listed names yfinance serves the ADR line in

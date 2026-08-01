@@ -125,9 +125,14 @@ def main() -> None:
 
     base = json.loads(BASELINE.read_text(encoding="utf-8")) if BASELINE.exists() else None
     if base is None or args.update:
+        # --update is a deliberate override, so it REPLACES the bar rather than
+        # merging. The reason to reach for it is that the old numbers were wrong
+        # - a Price/Book series that was long only because it divided by paid-up
+        # capital - and merging would keep defending that bad figure forever.
         BASELINE.parent.mkdir(parents=True, exist_ok=True)
-        BASELINE.write_text(json.dumps(merge_best(cur, base or {}), indent=1), encoding="utf-8")
-        print(f"baseline {'updated' if base else 'created'} -> {BASELINE}")
+        cur["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        BASELINE.write_text(json.dumps(cur, indent=1), encoding="utf-8")
+        print(f"baseline {'replaced' if base else 'created'} -> {BASELINE}")
         return
 
     fails = compare(cur, base)
