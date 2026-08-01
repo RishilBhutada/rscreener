@@ -182,6 +182,22 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     const xy = (src: [string, number][]): XY[] => src.map((p) => ({ t: toT(p[0]), v: p[1] }));
 
     // quarterly metric -> bars aligned to period-end dates, filtered to the range
+    // The ratio lines use trailing-twelve-month figures, so the bars beneath them
+    // must too - plotting one quarter against a TTM ratio made Sales read 4x
+    // smaller than screener's for the same date.
+    const ttmBars = (arr?: (number | null)[]): XY[] => {
+      if (!trendQ || !arr) return [];
+      const out: XY[] = [];
+      for (let i = 3; i < trendQ.periods.length; i++) {
+        const w = arr.slice(i - 3, i + 1);
+        if (w.length === 4 && w.every((v) => v !== null && v !== undefined)) {
+          const t = toT(trendQ.periods[i]);
+          if (t >= cutoff) out.push({ t, v: (w as number[]).reduce((a, b) => a + b, 0) });
+        }
+      }
+      return out;
+    };
+
     const qBars = (arr?: (number | null)[]): XY[] =>
       trendQ && arr
         ? trendQ.periods
@@ -271,9 +287,9 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       bandView(band, `PE${suffix}`, "Median PE", "plain", epsBars, `EPS${suffix}`, "plain");
     }
 
-    if (view === "ev") bandView(evBand, "EV / EBITDA", "Median EV Multiple", "plain", qBars(trendQ?.ebitda), "EBITDA", "cr");
+    if (view === "ev") bandView(evBand, "EV / EBITDA", "Median EV Multiple", "plain", ttmBars(trendQ?.ebitda), "EBITDA (TTM)", "cr");
     if (view === "pb") bandView(pbBand, "Price to BV", "Median PBV", "plain", qBars(trendQ?.book_value), "Book Value", "rupee");
-    if (view === "ps") bandView(psBand, "Market Cap / Sales", "Median Market Cap to Sales", "plain", qBars(trendQ?.revenue), "Sales", "cr");
+    if (view === "ps") bandView(psBand, "Market Cap / Sales", "Median Market Cap to Sales", "plain", ttmBars(trendQ?.revenue), "Sales (TTM)", "cr");
 
     if (view === "sales" && trendQ) {
       const sales = qBars(trendQ.revenue);

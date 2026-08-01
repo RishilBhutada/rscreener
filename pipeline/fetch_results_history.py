@@ -63,6 +63,14 @@ TAGS = {
     # banks file a different P&L shape
     "InterestEarned": "revenue_bank",
     "NetProfitLossForThePeriod": "pat_old",
+    # A bank has no cost of goods and files no "Expenses" total, so the generic
+    # EBITDA formula returns nothing and OPM / EV-EBITDA come out blank for every
+    # bank. Banks DO file operating profit directly - the line screener.in shows
+    # as "Financing Profit" - so read it and the two costs behind it.
+    "OperatingProfitBeforeProvisionAndContingencies": "op_profit_direct",
+    "InterestExpended": "interest_expended",
+    "OperatingExpenses": "operating_expenses",
+    "ExpenditureExcludingProvisionsAndContingencies": "expenditure_ex_prov",
 }
 # old (pre-Ind-AS) + bank taxonomy fallbacks; setdefault keeps Ind-AS values
 # when both taxonomies appear in one file
@@ -101,6 +109,8 @@ OLD_HTML_RULES: list[tuple[str, str]] = [
     (r"^interest earned", "revenue_bank"),
     (r"^total income$", "total_income"),
     (r"^other income", "other_income"),
+    (r"^operating profit before provision", "op_profit_direct"),
+    (r"^interest expended", "interest_expended"),
     (r"^total expenditure$", "total_expenses"),
     (r"^total expenses$", "total_expenses"),
     (r"^cost of materials consumed", "cost_materials"),

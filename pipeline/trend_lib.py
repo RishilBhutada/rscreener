@@ -30,7 +30,7 @@ YF_INCOME_MAP = {
 NSE_ITEMS = [
     "revenue", "pat", "eps", "total_expenses", "finance_cost", "depreciation",
     "cost_materials", "purchases", "inv_change", "equity", "share_capital",
-    "gross_profit",
+    "gross_profit", "op_profit_direct", "interest_expended", "operating_expenses",
 ]
 MONEY = {  # fields to convert Rs -> Rs crore on emit (eps / margins / book-value-per-share excluded)
     "revenue", "pat", "total_expenses", "finance_cost", "depreciation",
@@ -84,13 +84,69 @@ def _stitched(con: sqlite3.Connection) -> dict:
     return out
 
 
+def balance_equity(con: sqlite3.Connection) -> dict:
+    """{(symbol, period_end): shareholders' funds} from the balance sheet.
+
+    The results filings only carry paid-up capital, so real net worth - and with
+    it any usable book value - has to come from the balance sheet.
+    """
+    if not _table_exists(con, "statements"):
+        return {}
+    df = pd.read_sql(
+        "SELECT symbol, period_end, item, value FROM statements WHERE stmt_type='balance' "
+        "AND item IN ('Common Stock Equity','Stockholders Equity') ORDER BY period_end",
+        con,
+    )
+    out: dict = {}
+    for _, r in df.iterrows():
+        if pd.notna(r["value"]):
+            out.setdefault((r["symbol"], r["period_end"]), float(r["value"]))
+    return out
+
+
+def effective_shares(pat, eps, factor: float):
+    """Share count at a past date, expressed on the ADJUSTED-price basis.
+
+    Market cap at time t is unadjusted_price(t) x shares(t). Our price series is
+    split-adjusted - unadjusted/F(t) - so the matching count is shares(t)*F(t).
+    Using TODAY's count instead is only valid when every change was a split;
+    HDFC Bank issued ~65% new shares for the HDFC merger, so its 2007 market cap
+    came out 2.4x too large, taking Price/Book, EV/EBITDA and MCap/Sales with it.
+    shares(t) comes from PAT/EPS - both as-filed in the same statement, so their
+    ratio is exactly the count that filing was written against.
+    """
+    if not pat or not eps:
+        return None
+    shares = pat / eps
+    return shares * factor if shares > 0 else None
+
+
+def net_worth(slot: dict):
+    """Shareholders' funds, or None if the filing only gave paid-up capital.
+
+    The Reg-33 'Equity' tag is PAID-UP EQUITY SHARE CAPITAL, not net worth -
+    HDFC Bank files Rs 1,540 cr there against a real net worth near Rs 7.7 lakh
+    cr. Dividing by it produced a book value ~190x too small and a Price/Book of
+    2,382 where screener shows 3.6. Net worth is always a large multiple of paid-up
+    capital, so anything close to it is rejected and the balance sheet used instead.
+    """
+    eq, sc = slot.get("equity"), slot.get("share_capital")
+    if eq is None:
+        return None
+    if sc and eq < sc * 3:
+        return None
+    return eq
+
+
 def _derive(slot: dict) -> dict:
     """Compute ebitda / gross_profit / margins from a period's raw fields (raw Rs)."""
     rev = slot.get("revenue")
     exp = slot.get("total_expenses")
     fin = slot.get("finance_cost") or 0.0
     dep = slot.get("depreciation") or 0.0
-    ebitda = slot.get("ebitda_direct")
+    # Banks file operating profit outright ("Financing Profit" on screener.in);
+    # for everyone else it is Revenue - Expenses + Interest + Depreciation.
+    ebitda = slot.get("op_profit_direct") or slot.get("ebitda_direct")
     if ebitda is None and rev is not None and exp is not None:
         ebitda = rev - exp + fin + dep
     gp = slot.get("gross_profit")  # some old sheets report Gross Profit outright
@@ -109,6 +165,7 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None) -> dict[st
     comps = _stitched(con)
     splits = split_factors(con)
     known = splits_known(con)
+    bal = balance_equity(con)
     out: dict[str, dict] = {}
     for (symbol, ptype), periods in comps.items():
         keep = KEEP_ANNUAL if ptype == "annual" else KEEP_QUARTERLY
@@ -148,7 +205,8 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None) -> dict[st
         deriv = [_derive(periods[p]) for p in ordered]
         ebitda = [d["ebitda"] for d in deriv]
         gp = [d["gross_profit"] for d in deriv]
-        equity = [periods[p].get("equity") for p in ordered]
+        # filings give paid-up capital only; the balance sheet gives net worth
+        equity = [net_worth(periods[p]) or bal.get((symbol, p)) for p in ordered]
         trend = {
             "periods": ordered,
             "revenue": [_cr(v) for v in rev],
@@ -290,16 +348,18 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                 if pat_v is not None and sh_now:
                     eps = pat_v / sh_now
             flows.append((pe, eps, (rev / 1e7 if rev is not None else None),
-                          (ebitda / 1e7 if ebitda is not None else None)))
-            if s.get("equity") is not None:
-                eqs.append((pe, s["equity"]))
+                          (ebitda / 1e7 if ebitda is not None else None),
+                          effective_shares(s.get("pat"), s.get("eps"), adj_factor(ev, pe))))
+            # deliberately NOT taking equity from the results filing: Reg-33's
+            # "Equity" tag is paid-up share capital, not shareholders' funds.
+            # Book value comes from the balance sheet below.
         last_nse = flows[-1][0] if flows else "0000-00-00"
         # Only splice yfinance in if it AGREES with the as-filed series on a
         # shared quarter. For dual-listed names yfinance serves the ADR line in
         # USD (Infosys: 0.23 vs NSE's Rs 16.43), and splicing that silently
         # multiplied the PE by ~70x.
         yrows = yq_by_sym.get(sym, {})
-        nse_eps = {p: e for p, e, _, _ in flows if e is not None}
+        nse_eps = {p: e for p, e, *_ in flows if e is not None}
         agree = True
         for p in set(yrows) & set(nse_eps):
             yv_ = yrows[p].get("Basic EPS")
@@ -319,7 +379,8 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                     continue
                 eps_y /= adj_factor(splits.get(sym), pe)
                 flows.append((pe, eps_y, (rev_y / 1e7 if rev_y is not None else None),
-                              (eb_y / 1e7 if eb_y is not None else None)))
+                              (eb_y / 1e7 if eb_y is not None else None),
+                              effective_shares(yv("Net Income"), eps_y, 1.0)))
         flow_by_sym[sym] = flows
         if eqs:
             equity_by_sym[sym] = eqs
@@ -333,7 +394,8 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
         for sym, g in yb.groupby("symbol"):
             merged = {d: v for d, v in equity_by_sym.get(sym, [])}
             for _, r in g.iterrows():
-                merged.setdefault(r["period_end"], r["value"])  # nse wins
+                if pd.notna(r["value"]):
+                    merged[r["period_end"]] = float(r["value"])  # balance sheet is authoritative
             equity_by_sym[sym] = sorted(merged.items())
 
     # weekly gives ~1,100 points over 20+ years (screener.in serves the same
@@ -376,7 +438,10 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                 ).days
                 if span > 300:  # 3 gaps of ~92 days each; more means a hole
                     recent = []
-            mcap_cr = close * sh / 1e7
+            # point-in-time share count; falls back to today's only when a
+            # filing didn't give us PAT and EPS together
+            eff = next((f[4] for f in reversed(flows[:fi]) if len(f) > 4 and f[4]), None) or sh
+            mcap_cr = close * eff / 1e7
             if len(recent) == 4:
                 ttm_eps = sum(f[1] for f in recent) if all(f[1] is not None for f in recent) else None
                 ttm_rev = sum(f[2] for f in recent) if all(f[2] is not None for f in recent) else None
@@ -394,10 +459,10 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                     ndv = next((v for d, v in reversed(nd) if d <= date), (nd[0][1] if nd else 0.0))
                     ev_s.append([date, round((mcap_cr + (ndv or 0.0)) / ttm_eb, 1)])
             eq = next((v for d, v in reversed(eqs) if d <= date), None)
-            if eq and sh:
-                bvps = eq / sh
-                if bvps > 0:
-                    pb_s.append([date, round(close / bvps, 2)])
+            if eq and eq > 0:
+                # price/book == market cap / shareholders' funds, which keeps the
+                # share count consistent on both sides of the ratio
+                pb_s.append([date, round(mcap_cr / (eq / 1e7), 2)])
         bands = {}
         for key, ser, rnd in (("pe", pe_s, 1), ("ev", ev_s, 1), ("pb", pb_s, 2), ("ps", ps_s, 2)):
             b = _band(ser, rnd)

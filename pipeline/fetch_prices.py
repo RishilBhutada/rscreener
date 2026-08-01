@@ -28,6 +28,32 @@ def now_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
+SPIKE = 2.5  # a bar this far above BOTH neighbours, then straight back, is a bad print
+
+
+def drop_spikes(rows: list[tuple]) -> tuple[list[tuple], int]:
+    """Remove single-bar price spikes that immediately revert.
+
+    Yahoo's long history carries occasional corrupt prints - HDFC Bank's
+    March-2006 monthly close comes back as 165.16 between neighbours of 38.71 and
+    37.26: a 4x spike and a 4x collapse in consecutive months. Left in, it
+    distorts the Max price chart and every ratio computed at that date. A real
+    move does not reverse itself completely in one bar, so testing against BOTH
+    neighbours leaves genuine crashes and rallies untouched.
+    """
+    if len(rows) < 3:
+        return rows, 0
+    keep, dropped = [rows[0]], 0
+    for i in range(1, len(rows) - 1):
+        prev, cur, nxt = rows[i - 1][4], rows[i][4], rows[i + 1][4]
+        if prev and nxt and cur and cur / prev > SPIKE and cur / nxt > SPIKE:
+            dropped += 1
+            continue
+        keep.append(rows[i])
+    keep.append(rows[-1])
+    return keep, dropped
+
+
 def splits_of(session: requests.Session, sym: str) -> list[tuple[str, float]]:
     """Split/bonus events from Yahoo, as (date, ratio).
 
@@ -126,8 +152,8 @@ def main() -> None:
         try:
             # NOTE: Yahoo silently downgrades 1wk to monthly bars when range=max,
             # so weekly is requested with an explicit span.
-            monthly = series(session, sym, "max", "1mo")   # ~30y, drives Max + ratio bands
-            weekly = series(session, sym, "5y", "1wk")     # density for the 3Yr/5Yr views
+            monthly, _sp = drop_spikes(series(session, sym, "max", "1mo"))  # ~30y, drives Max + bands
+            weekly, _ = drop_spikes(series(session, sym, "5y", "1wk"))   # 3Yr/5Yr density
             daily = series(session, sym, "2y", "1d")       # 1M/6M/1Yr + DMA + volatility
             if not monthly and not weekly and not daily:
                 raise ValueError("no price history returned")

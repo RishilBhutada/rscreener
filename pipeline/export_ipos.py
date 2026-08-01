@@ -56,13 +56,15 @@ def main() -> None:
     def issues(phase: str) -> list[dict]:
         out = []
         for r in con.execute(
-            "SELECT symbol, company, issue_start, issue_end, price_band, issue_size, status "
+            "SELECT symbol, company, issue_start, issue_end, price_band, issue_size, status, security_type "
             "FROM ipos WHERE phase=? ORDER BY issue_start DESC", (phase,)
         ):
+            st = str(r["security_type"] or "").upper()
             out.append({
                 "symbol": r["symbol"], "company": r["company"],
                 "open": r["issue_start"], "close": r["issue_end"],
                 "band": r["price_band"], "size": r["issue_size"], "status": r["status"],
+                "segment": "SME" if st.startswith("SM") else "Mainboard",
                 "subscription": subs.get(r["symbol"], []),
             })
         return out

@@ -67,6 +67,9 @@ export default function Home() {
   const [query, setQuery] = useState(EXAMPLES[0]);
   const [qMode, setQMode] = useState<"builder" | "text">("builder");
   const [showFields, setShowFields] = useState(false);
+  // a screen can match hundreds of rows; rendering them all at once was the main
+  // reason the home page felt like a wall of data
+  const [rowLimit, setRowLimit] = useState(25);
   const [applied, setApplied] = useState<{ matches: Row[]; skipped: number; fields: string[] } | null>(null);
   const [queryError, setQueryError] = useState("");
   const [sortKey, setSortKey] = useState("mcap");
@@ -111,6 +114,7 @@ export default function Home() {
         else if (res === null) skipped++;
       }
       setApplied({ matches, skipped, fields });
+      setRowLimit(25);
       setQueryError("");
     } catch (e) {
       if (e instanceof QueryError) setQueryError(e.message);
@@ -286,9 +290,16 @@ export default function Home() {
           )}
         </section>
 
-        <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4 space-y-2">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold text-[var(--ink2)]">Saved screens</span>
+        <details className="group bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4 space-y-2" open={screens.length > 0}>
+          <summary className="flex items-center gap-2 cursor-pointer list-none text-sm font-semibold text-[var(--ink2)] select-none">
+            <span className="text-[var(--ink3)] transition-transform group-open:rotate-90">›</span>
+            Saved screens
+            <span className="text-xs font-normal text-[var(--ink3)]">
+              {screens.length ? `${screens.length} saved` : "none yet"}
+            </span>
+          </summary>
+          <div className="flex items-center gap-2 flex-wrap pt-1">
+            <span className="sr-only">Saved screens</span>
             <input
               value={screenName}
               onChange={(e) => setScreenName(e.target.value)}
@@ -309,11 +320,18 @@ export default function Home() {
               </span>
             ))}
           </div>
-        </section>
+        </details>
 
-        <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4 space-y-2">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold text-[var(--ink2)]">Custom ratios</span>
+        <details className="group bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4 space-y-2" open={ratios.length > 0}>
+          <summary className="flex items-center gap-2 cursor-pointer list-none text-sm font-semibold text-[var(--ink2)] select-none">
+            <span className="text-[var(--ink3)] transition-transform group-open:rotate-90">›</span>
+            Custom ratios
+            <span className="text-xs font-normal text-[var(--ink3)]">
+              {ratios.length ? `${ratios.length} defined` : "define your own screening fields"}
+            </span>
+          </summary>
+          <div className="flex items-center gap-2 flex-wrap pt-1">
+            <span className="sr-only">Custom ratios</span>
             <input
               value={ratioName}
               onChange={(e) => setRatioName(e.target.value)}
@@ -343,13 +361,15 @@ export default function Home() {
               </span>
             ))}
           </div>
-        </section>
+        </details>
 
         {data && watch.length > 0 && (
-          <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
-            <h2 className="px-4 py-3 text-sm font-bold text-[var(--ink)] border-b border-[var(--line)]">
+          <details className="group bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden" open>
+            <summary className="px-4 py-3 text-sm font-bold text-[var(--ink)] border-b border-[var(--line)] cursor-pointer list-none select-none flex items-center gap-2">
+              <span className="text-[var(--ink3)] font-normal transition-transform group-open:rotate-90">›</span>
               <span className="text-[var(--accent)]">★</span> Watchlist
-            </h2>
+              <span className="text-xs font-normal text-[var(--ink3)]">{watch.length}</span>
+            </summary>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -378,7 +398,7 @@ export default function Home() {
                 </tbody>
               </table>
             </div>
-          </section>
+          </details>
         )}
 
         {applied && (
@@ -406,7 +426,7 @@ export default function Home() {
                   </tr>
                 </thead>
                 <tbody>
-                  {sorted.slice(0, 300).map((r) => (
+                  {sorted.slice(0, rowLimit).map((r) => (
                     <tr key={String(r.symbol)} className="border-t border-[var(--line)] hover:bg-[var(--accent-soft)]">
                       <td className="px-2 py-2 sm:px-3">
                         <button
@@ -437,6 +457,27 @@ export default function Home() {
                 </tbody>
               </table>
             </div>
+            {sorted.length > rowLimit && (
+              <div className="px-4 py-3 border-t border-[var(--line)] flex items-center justify-between gap-3 flex-wrap">
+                <span className="text-xs text-[var(--ink3)]">
+                  showing {rowLimit} of {sorted.length.toLocaleString("en-IN")}
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setRowLimit(rowLimit + 50)}
+                    className="text-sm font-semibold bg-[var(--card2)] hover:bg-[var(--accent-soft)] border border-[var(--line)] rounded-lg px-4 py-2 sm:py-1.5"
+                  >
+                    Show 50 more
+                  </button>
+                  <button
+                    onClick={() => setRowLimit(sorted.length)}
+                    className="text-sm text-[var(--accent-ink)] hover:underline px-2"
+                  >
+                    Show all
+                  </button>
+                </div>
+              </div>
+            )}
           </section>
         )}
 

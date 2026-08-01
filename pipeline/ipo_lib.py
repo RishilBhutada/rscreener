@@ -66,6 +66,9 @@ def listing_gains(con: sqlite3.Connection) -> dict[str, dict]:
         rec = {
             "symbol": sym, "company": company, "listing_date": listing,
             "issue_price": round(issue, 2), "price_band": band,
+            # SME issues have their own lot sizes, bands and liquidity - the UI
+            # separates them so one segment's behaviour can't be read as the other's
+            "segment": "SME" if str(stype or "").upper().startswith("SM") else "Mainboard",
             "listing_close": None, "listing_gain_pct": None, "basis": None,
         }
         if have_prices:

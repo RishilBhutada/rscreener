@@ -9,11 +9,12 @@ const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 type Sub = { category: string; times: number | null; offered: number | null; bid: number | null; as_of: string };
 type Issue = {
   symbol: string; company: string | null; open: string | null; close: string | null;
-  band: string | null; size: number | null; status: string | null; subscription: Sub[];
+  band: string | null; size: number | null; status: string | null; segment?: string; subscription: Sub[];
 };
 type Listed = {
   symbol: string; company: string | null; listing_date: string | null;
   issue_price: number | null; listing_close: number | null; listing_gain_pct: number | null;
+  segment?: string;
 };
 type GmpRow = {
   ipo_name: string; gmp: number | null; price: number | null; est_listing: number | null;
@@ -99,9 +100,18 @@ function IssueCard({ it }: { it: Issue }) {
   );
 }
 
+/** SME issues behave nothing like mainboard ones - different lot sizes, listing
+ *  bands and liquidity - so mixing them in one list makes both harder to read. */
+function segmentOf(x: { ipo_type?: string | null; symbol?: string; band?: string | null }): "Mainboard" | "SME" {
+  return /sme/i.test(String(x.ipo_type ?? "")) ? "SME" : "Mainboard";
+}
+
 export default function IpoPage() {
   const [d, setD] = useState<Data | null>(null);
   const [err, setErr] = useState("");
+  const [seg, setSeg] = useState<"All" | "Mainboard" | "SME">("All");
+  const [tab, setTab] = useState<"open" | "upcoming" | "listed" | "gmp">("open");
+  const [q, setQ] = useState("");
 
   useEffect(() => {
     fetch(`${BASE}/ipos.json`)
@@ -128,26 +138,81 @@ export default function IpoPage() {
         {err && <p className="text-[var(--neg)] text-sm">{err} — run the pipeline&apos;s fetch_ipos step first.</p>}
         {!d && !err && <p className="text-[var(--ink3)] text-sm">Loading…</p>}
 
-        {d && (
-          <>
-            <Card title="Open now" sub="Live subscription from NSE — official">
-              {d.current.length === 0 ? (
-                <p className="text-sm text-[var(--ink3)]">No issue is open today.</p>
-              ) : (
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {d.current.map((it) => <IssueCard key={it.symbol + it.open} it={it} />)}
-                </div>
-              )}
-            </Card>
+        {d && (() => {
+          const ql = q.trim().toLowerCase();
+          const hit = (...fields: (string | null | undefined)[]) =>
+            !ql || fields.some((f) => String(f ?? "").toLowerCase().includes(ql));
+          const bySeg = <T extends { segment?: string }>(xs: T[]) =>
+            xs.filter((x) => seg === "All" || (x.segment ?? "Mainboard") === seg);
 
-            {d.upcoming.length > 0 && (
-              <Card title="Upcoming" sub="Announced, not yet open — official">
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {d.upcoming.map((it) => <IssueCard key={it.symbol + it.open} it={it} />)}
+          const open = bySeg(d.current).filter((x) => hit(x.company, x.symbol));
+          const upcoming = bySeg(d.upcoming).filter((x) => hit(x.company, x.symbol));
+          const listed = bySeg(d.recent).filter((x) => hit(x.company, x.symbol));
+          const gmpRows = d.gmp.rows.filter(
+            (r) => (seg === "All" || segmentOf(r) === seg) && hit(r.ipo_name),
+          );
+          const counts = { open: open.length, upcoming: upcoming.length, listed: listed.length, gmp: gmpRows.length };
+          const TABS: [typeof tab, string][] = [
+            ["open", "Open now"], ["upcoming", "Upcoming"],
+            ["listed", "Recently listed"], ["gmp", "Grey market"],
+          ];
+
+          return (
+          <>
+            {/* one control bar instead of four stacked walls of content */}
+            <div className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4 space-y-3">
+              <div className="flex gap-2 flex-wrap items-center">
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Search an IPO by name or symbol"
+                  aria-label="Search IPOs"
+                  className="flex-1 min-w-48 text-sm bg-[var(--card2)] border border-[var(--line)] rounded-full px-4 py-2.5 sm:py-1.5 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                />
+                <div className="flex gap-1 text-xs" role="group" aria-label="Segment">
+                  {(["All", "Mainboard", "SME"] as const).map((sgm) => (
+                    <button key={sgm} onClick={() => setSeg(sgm)}
+                      className={`rounded-full px-3.5 py-2 sm:py-1 border ${seg === sgm ? "bg-[var(--btn)] border-[var(--btn)] text-[var(--btn-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
+                      {sgm}
+                    </button>
+                  ))}
                 </div>
+              </div>
+              <div className="flex gap-1 flex-wrap text-sm">
+                {TABS.map(([k, label]) => (
+                  <button key={k} onClick={() => setTab(k)}
+                    className={`rounded-lg px-3 py-2 sm:py-1.5 font-medium ${tab === k ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)] hover:bg-[var(--card2)]"}`}>
+                    {label} <span className="text-xs text-[var(--ink3)]">{counts[k]}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {tab === "open" && (
+              <Card title="Open now" sub="Live subscription from NSE — official">
+                {open.length === 0 ? (
+                  <p className="text-sm text-[var(--ink3)]">Nothing open under these filters.</p>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {open.map((it) => <IssueCard key={it.symbol + it.open} it={it} />)}
+                  </div>
+                )}
               </Card>
             )}
 
+            {tab === "upcoming" && (
+              <Card title="Upcoming" sub="Announced, not yet open — official">
+                {upcoming.length === 0 ? (
+                  <p className="text-sm text-[var(--ink3)]">Nothing upcoming under these filters.</p>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {upcoming.map((it) => <IssueCard key={it.symbol + it.open} it={it} />)}
+                  </div>
+                )}
+              </Card>
+            )}
+
+            {tab === "gmp" && (<>
             <Card
               title="Grey market premium"
               sub={`Unofficial · source ${d.gmp.source}${d.gmp.as_of ? ` · captured ${d.gmp.as_of}` : ""}`}
@@ -160,8 +225,8 @@ export default function IpoPage() {
                   Treat it as a rumour with a track record — which is exactly what the next section measures.
                 </p>
               </div>
-              {d.gmp.rows.length === 0 ? (
-                <p className="text-sm text-[var(--ink3)]">No grey-market quotes captured yet.</p>
+              {gmpRows.length === 0 ? (
+                <p className="text-sm text-[var(--ink3)]">No grey-market quotes under these filters.</p>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm border-collapse">
@@ -176,7 +241,7 @@ export default function IpoPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {d.gmp.rows.map((r, i) => (
+                      {gmpRows.map((r, i) => (
                         <tr key={r.ipo_name + i} className="border-b border-[var(--line)]">
                           <td className="px-2 py-2 sm:px-3 max-w-[42vw] sm:max-w-none truncate">{r.ipo_name}</td>
                           <td className="px-2 py-2 sm:px-3 text-right tabular-nums">{r.gmp ?? "—"}</td>
@@ -249,7 +314,9 @@ export default function IpoPage() {
                 </p>
               )}
             </Card>
+            </>)}
 
+            {tab === "listed" && (
             <Card
               title="Recent listings — what actually happened"
               sub="Listing-day close vs issue price, computed from exchange prices — official"
@@ -281,7 +348,7 @@ export default function IpoPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {d.recent.map((r) => (
+                    {listed.map((r) => (
                       <tr key={r.symbol + (r.listing_date ?? "")} className="border-b border-[var(--line)]">
                         <td className="px-2 py-2 sm:px-3 max-w-[38vw] sm:max-w-none truncate">
                           <Link href={`/company?s=${r.symbol}`} className="font-medium text-[var(--accent-ink)] hover:underline">
@@ -300,6 +367,7 @@ export default function IpoPage() {
                 </table>
               </div>
             </Card>
+            )}
 
             <p className="text-xs text-[var(--ink2)] leading-relaxed">
               <strong>Rscreener does not tell you whether to apply for an IPO.</strong> Official figures come from NSE;
@@ -307,7 +375,8 @@ export default function IpoPage() {
               company&apos;s own filings before it informs a decision. Data as of {d.generated_at}.
             </p>
           </>
-        )}
+          );
+        })()}
       </main>
     </div>
   );
