@@ -16,6 +16,9 @@ type Source = {
   pct: number;
   missing: number;
   universe: number;
+  per_night: number | null;
+  nights_left: number | null;
+  eta: string | null;
   newest: string | null;
   oldest: string | null;
 };
@@ -93,6 +96,25 @@ export default function StatusPage() {
               ))}
             </div>
 
+            <div className="bg-[var(--card)] border border-[var(--line)] rounded-xl px-4 py-3 flex items-start justify-between gap-4 flex-wrap">
+              <div>
+                <p className="text-sm font-semibold text-[var(--ink)]">Refresh now</p>
+                <p className="text-xs text-[var(--ink3)] mt-0.5 max-w-xl leading-relaxed">
+                  You don&rsquo;t need to — the refresh runs by itself every night and each source below
+                  shows when it reaches 100%. Use this only to pull data in sooner. It opens GitHub,
+                  where you press <span className="font-medium text-[var(--ink2)]">Run workflow</span>;
+                  a refresh takes roughly 30&ndash;60 minutes and the site updates itself when it finishes.
+                </p>
+              </div>
+              <a
+                href="https://github.com/RishilBhutada/rscreener/actions/workflows/nightly.yml"
+                target="_blank" rel="noopener noreferrer"
+                className="shrink-0 rounded-lg px-3 py-2 text-sm font-medium bg-[var(--accent-soft)] text-[var(--accent-ink)] border border-[var(--accent-line)] hover:opacity-90"
+              >
+                Run refresh →
+              </a>
+            </div>
+
             <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
               {s.sources.map((src, i) => {
                 const t = tone(src.pct);
@@ -125,6 +147,13 @@ export default function StatusPage() {
                         <span className="text-[var(--neg)]">{src.missing.toLocaleString("en-IN")} not fetched yet</span>
                       )}
                       <span>refreshes {src.cadence}</span>
+                      {src.nights_left === 0 ? (
+                        <span className="text-[var(--pos)]">complete</span>
+                      ) : src.nights_left ? (
+                        <span className="text-[var(--ink2)]">
+                          100% in {src.nights_left} night{src.nights_left === 1 ? "" : "s"} — by {fmtDate(src.eta)}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                 );

@@ -19,6 +19,19 @@ ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
 OUT = ROOT / "web" / "public" / "status.json"
 
+# Companies each source gets through per nightly run. These MUST track the --limit
+# values in .github/workflows/nightly.yml; if they drift, the finish dates the app
+# shows become a comforting fiction rather than arithmetic.
+PER_NIGHT = {
+    "prices": 600,
+    "snapshot": 2357,        # --all, no cap
+    "results": 800,
+    "filing_dates": 900,
+    "shareholding": 700,
+    "statements": 2357,      # refreshed with the snapshot
+    "ipos": None,            # not a backlog - the whole list is rewritten nightly
+}
+
 
 def _has(con, table: str) -> bool:
     return bool(con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone())
@@ -125,6 +138,7 @@ def main() -> None:
     for s in sources:
         s["current"] = s["covered"] - s["behind"]
         s["universe"] = s["covered"] if s.get("own_population") else int(universe)
+        s["per_night"] = PER_NIGHT.get(s["key"])
         # Measured against the WHOLE universe, not against what happens to be
         # covered. Dividing by `covered` let a source with 23 companies fetched out
         # of 2,357 report "96% up to date" - true of the 23, useless to a reader,
@@ -133,6 +147,19 @@ def main() -> None:
         denom = s["universe"] or 1
         s["pct"] = round(s["current"] / denom * 100)
         s["missing"] = max(0, denom - s["covered"])
+        # Nights to reach 100%, and the date that lands on. Stated as arithmetic
+        # the reader can check - outstanding work divided by throughput - rather
+        # than a progress bar that only ever says "soon".
+        todo = s["behind"] + s["missing"]
+        rate = s["per_night"]
+        if todo == 0:
+            s["nights_left"], s["eta"] = 0, None
+        elif rate:
+            nights = max(1, -(-todo // rate))          # ceiling division
+            s["nights_left"] = nights
+            s["eta"] = (datetime.now(timezone.utc) + timedelta(days=nights)).strftime("%Y-%m-%d")
+        else:
+            s["nights_left"], s["eta"] = None, None
 
     payload = {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
@@ -143,7 +170,9 @@ def main() -> None:
     OUT.write_text(json.dumps(payload, indent=1), encoding="utf-8")
     print(f"status -> {OUT}")
     for s in sources:
-        print(f"  {s['name']:30} {s['current']:>5}/{s['covered']:<5} current ({s['pct']:>3}%)  newest {s['newest']}")
+        eta = "complete" if s["nights_left"] == 0 else (
+            f"{s['nights_left']} night(s) -> {s['eta']}" if s["nights_left"] else "no schedule")
+        print(f"  {s['name']:30} {s['pct']:>3}%  {s['behind'] + s['missing']:>5} to do  {eta}")
     con.close()
 
 

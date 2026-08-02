@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-08-02 14:48 UTC",
+ "generated_at": "2026-08-02 15:04 UTC",
  "universe": 2357,
  "sources": [
   {
@@ -13,8 +13,11 @@
    "cadence": "every night",
    "current": 2354,
    "universe": 2357,
+   "per_night": 600,
    "pct": 100,
-   "missing": 0
+   "missing": 0,
+   "nights_left": 1,
+   "eta": "2026-08-03"
   },
   {
    "key": "snapshot",
@@ -27,22 +30,28 @@
    "cadence": "every night",
    "current": 2310,
    "universe": 2357,
+   "per_night": 2357,
    "pct": 98,
-   "missing": 3
+   "missing": 3,
+   "nights_left": 1,
+   "eta": "2026-08-03"
   },
   {
    "key": "results",
    "name": "Quarterly results (as filed)",
    "what": "Earnings straight from the NSE filings. Everything on the P/E chart rests on these.",
-   "covered": 2161,
+   "covered": 2166,
    "newest": "2026-06-30",
-   "behind": 672,
+   "behind": 627,
    "oldest": "2010-02-28",
    "cadence": "every night, 800 companies a night",
-   "current": 1489,
+   "current": 1539,
    "universe": 2357,
-   "pct": 63,
-   "missing": 196
+   "per_night": 800,
+   "pct": 65,
+   "missing": 191,
+   "nights_left": 2,
+   "eta": "2026-08-04"
   },
   {
    "key": "filing_dates",
@@ -55,8 +64,11 @@
    "cadence": "every night, 900 companies a night",
    "current": 23,
    "universe": 2357,
+   "per_night": 900,
    "pct": 1,
-   "missing": 2333
+   "missing": 2333,
+   "nights_left": 3,
+   "eta": "2026-08-05"
   },
   {
    "key": "shareholding",
@@ -69,8 +81,11 @@
    "cadence": "weekly rotation",
    "current": 1916,
    "universe": 2357,
+   "per_night": 700,
    "pct": 81,
-   "missing": 432
+   "missing": 432,
+   "nights_left": 1,
+   "eta": "2026-08-03"
   },
   {
    "key": "statements",
@@ -83,8 +98,11 @@
    "cadence": "with the snapshot",
    "current": 2224,
    "universe": 2357,
+   "per_night": 2357,
    "pct": 94,
-   "missing": 128
+   "missing": 128,
+   "nights_left": 1,
+   "eta": "2026-08-03"
   },
   {
    "key": "ipos",
@@ -98,8 +116,11 @@
    "own_population": true,
    "current": 1337,
    "universe": 1337,
+   "per_night": null,
    "pct": 100,
-   "missing": 0
+   "missing": 0,
+   "nights_left": 0,
+   "eta": null
   }
  ]
 }

@@ -36,19 +36,30 @@ jobs:
             echo "no data-db release yet - starting from empty DB (historical depth will be missing)"
           fi
       - run: python pipeline/fetch_universe.py
+      - name: Write the full-universe symbol list every fetcher works from
+        run: |
+          python -c "import sqlite3;from pathlib import Path;c=sqlite3.connect('data/rscreener.db',timeout=180);s=[r[0] for r in c.execute('SELECT symbol FROM universe ORDER BY symbol')];Path('data/all_symbols.txt').write_text(','.join(s));print(len(s),'symbols')"
       - name: Refresh snapshot fundamentals (prices, ratios) for the full universe
         run: python pipeline/fetch_fundamentals.py --all --snapshot-only --max-age-hours 20 --sleep 0.5
       - name: Refresh upcoming events calendar
         run: python pipeline/fetch_events.py
-      - name: Refresh shareholding patterns (weekly rotation)
-        run: python pipeline/fetch_shareholding.py --symbols @data/top500.txt --max-age-hours 156 --sleep 0.4
-      - name: Refresh price-chart history (weekly rotation)
-        run: python pipeline/fetch_prices.py --symbols @data/top500.txt --max-age-hours 156 --sleep 0.5
-      - name: Refresh concall/rating documents (weekly rotation)
-        run: python pipeline/fetch_announcement_docs.py --symbols @data/top500.txt --max-age-hours 156 --sleep 0.5
-      - name: Write the full-universe symbol list for the earnings refresh
-        run: |
-          python -c "import sqlite3;from pathlib import Path;c=sqlite3.connect('data/rscreener.db',timeout=180);s=[r[0] for r in c.execute('SELECT symbol FROM universe ORDER BY symbol')];Path('data/all_symbols.txt').write_text(','.join(s));print(len(s),'symbols')"
+      - name: Refresh shareholding patterns (whole universe, rotating)
+        # Was @data/top500.txt, so the other 1,857 companies were unreachable: 432
+        # had never been fetched at all and never would be. A rotation that cannot
+        # reach part of its own universe is not a rotation, it is a permanent hole.
+        run: python pipeline/fetch_shareholding.py --symbols @data/all_symbols.txt --max-age-hours 336 --limit 700 --sleep 0.3
+        continue-on-error: true
+      - name: Refresh price-chart history (whole universe, rotating)
+        # Same fault: only the top 500 were ever revisited, so every other chart
+        # slowly aged out. --max-age-hours 168 makes each symbol come up weekly;
+        # --limit 600 keeps one night inside the Actions job timeout.
+        run: python pipeline/fetch_prices.py --symbols @data/all_symbols.txt --max-age-hours 168 --limit 600 --sleep 0.4
+        continue-on-error: true
+      - name: Refresh concall/rating documents (whole universe, rotating)
+        # 480 of 2,357 companies covered, and capped at the top 500 it would have
+        # stayed that way permanently.
+        run: python pipeline/fetch_announcement_docs.py --symbols @data/all_symbols.txt --max-age-hours 336 --limit 500 --sleep 0.35
+        continue-on-error: true
       - name: Keep as-filed earnings CURRENT across the whole universe
         # This was `--symbols @data/top500.txt --limit 25`: 25 names a night out of
         # 500. At that rate the other 1,800 symbols were never revisited at all -
