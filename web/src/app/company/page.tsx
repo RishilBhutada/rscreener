@@ -181,6 +181,27 @@ function num(r: Row | null, k: string): number | null {
   return typeof v === "number" && !Number.isNaN(v) ? v : null;
 }
 
+/** The date the displayed price actually belongs to.
+ *  A price with no date on it is untestable — that is how a snapshot from 10-Jul
+ *  stayed on screen for three weeks looking exactly like a live quote. If the
+ *  close is older than the last trading day, say so instead of implying "now". */
+function PriceAsOf({ row, snapshot }: { row: Row | null; snapshot?: Row | null }) {
+  const d = row?.["price_date"] ?? snapshot?.["price_date"];
+  if (typeof d !== "string" || !d) return null;
+  const asof = new Date(d + "T00:00:00");
+  const days = Math.floor((Date.now() - asof.getTime()) / 86400000);
+  const label = asof.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  const old = days > 4;
+  return (
+    <span
+      title={old ? "This close is behind the market — the price feed has not refreshed for this stock." : "Closing price on this date"}
+      className={`text-xs font-medium ${old ? "text-[var(--neg)]" : "text-[var(--ink3)]"}`}
+    >
+      close of {label}{old ? " · stale" : ""}
+    </span>
+  );
+}
+
 function ProsCons({ row }: { row: Row | null }) {
   if (!row) return null;
   const pros: string[] = [];
@@ -422,13 +443,14 @@ function CompanyView() {
       </div>
 
       {price !== null && (
-        <div className="flex items-baseline gap-3">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <span className="text-3xl font-bold text-[var(--ink)] tabular-nums">₹ {fmtNum(price)}</span>
           {off !== null && (
             <span className={`text-sm font-semibold ${off < 0 ? "text-[var(--neg)]" : "text-[var(--pos)]"}`}>
               {off < 0 ? "" : "+"}{off.toFixed(1)}% from 52w high
             </span>
           )}
+          <PriceAsOf row={fullRow} snapshot={s} />
         </div>
       )}
 

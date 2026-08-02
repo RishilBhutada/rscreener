@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from trend_lib import build_trends, ratio_bands
+from export_json import freshen_prices
+from trend_lib import build_trends, net_debt_series, ratio_bands
 
 
 def clean_nan(o):
@@ -91,6 +92,10 @@ def build_statement(df: pd.DataFrame, stmt_type: str, period_type: str) -> dict 
 def main() -> None:
     con = sqlite3.connect(DB, timeout=180)
     snaps = pd.read_sql("SELECT * FROM fundamentals", con)
+    # Same correction as data.json, from the same function: the company page falls
+    # back to this snapshot when the screener row is missing, so a stale price here
+    # would leak straight back onto the page the fix was written for.
+    snaps, _ = freshen_prices(con, snaps)
     has_statements = {
         r[0] for r in con.execute("SELECT DISTINCT symbol FROM statements").fetchall()
     }
@@ -99,15 +104,7 @@ def main() -> None:
         for r in snaps.to_dict(orient="records")
         if r.get("market_cap") and r.get("price")
     }
-    netdebt_by_symbol: dict[str, list] = {}
-    nd = pd.read_sql(
-        "SELECT symbol, period_end, value FROM statements WHERE stmt_type='balance' AND item='Net Debt' ORDER BY period_end",
-        con,
-    )
-    for sym_key, grp in nd.groupby("symbol"):
-        netdebt_by_symbol[sym_key] = [
-            [d, v / 1e7] for d, v in zip(grp["period_end"], grp["value"]) if pd.notna(v)
-        ]
+    netdebt_by_symbol = net_debt_series(con)
     trends = build_trends(con, shares_by_symbol)
     bands = ratio_bands(con, shares_by_symbol, netdebt_by_symbol)
     prices_by_symbol: dict[str, dict] = {}

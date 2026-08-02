@@ -12,6 +12,7 @@ const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 type Data = {
   generated_at: string;
+  price_asof?: string | null;   // trading date every price in this file belongs to
   universe_size: number;
   covered: number;
   rows: Row[];
@@ -211,7 +212,8 @@ export default function Home() {
       <TopNav active="screens" />
       {data && (
         <p className="max-w-6xl mx-auto px-4 pt-3 text-xs text-[var(--ink3)]">
-          {data.covered.toLocaleString("en-IN")} of {data.universe_size.toLocaleString("en-IN")} NSE companies · data as of {data.generated_at}
+          {data.covered.toLocaleString("en-IN")} of {data.universe_size.toLocaleString("en-IN")} NSE companies · built {data.generated_at}
+          {data.price_asof && <> · <span className="font-medium">prices at close of {data.price_asof}</span></>}
         </p>
       )}
 

@@ -21,6 +21,17 @@ jobs:
       NEXT_PUBLIC_BASE_PATH: /rscreener
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Refuse to deploy stale prices or shallower charts
+        # The committed data files are what this job publishes, so a hand-run
+        # export from a local database lands here without ever touching the
+        # nightly job. That path is how a three-week-old price snapshot and a
+        # truncated ratio history both reached production. Same gates, both roads.
+        run: |
+          python pipeline/check_prices.py
+          python pipeline/check_depth.py
       - uses: actions/setup-node@v4
         with:
           node-version: 22

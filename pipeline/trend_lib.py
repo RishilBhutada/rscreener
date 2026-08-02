@@ -12,6 +12,7 @@ Derived per period (matching screener.in's chart section):
   - OPM/GPM/NPM % and per-share Book Value
 Money is converted to Rs crore here (eps and per-share book value stay in rupees).
 """
+import math
 import sqlite3
 from datetime import datetime
 
@@ -104,7 +105,113 @@ def balance_equity(con: sqlite3.Connection) -> dict:
     return out
 
 
-def effective_shares(pat, eps, factor: float):
+STALE_EQUITY_DAYS = 400  # a filing older than this is not evidence about today
+
+
+def equity_at(eqs: list, date: str):
+    """Shareholders' funds on `date`, or None if no filing is recent enough.
+
+    Filed net worth is sparse and unevenly spaced - Reliance has gaps of 4.0 and
+    5.5 years - because the quarterly filings carry only paid-up capital and the
+    annual sheet is all that gives real net worth. Three ways of bridging those
+    gaps were measured against screener.in's own Price/Book series, on the same
+    harness, over ~1,900 shared months:
+
+        drop past 400 days              7.9% median error   <- this
+        interpolate between filings    13.9% median error
+        carry the last filing forward  35.8% median error
+
+    Carrying forward is not merely imprecise, it is the source of the absurd
+    values: HDFC Bank's 2016 Price/Book came out at 648 against a real ~3,
+    because a stale row that `net_worth()` could not reject as paid-up capital
+    got held across years. Interpolation is no answer either - `eqs` merges
+    as-filed net worth with Yahoo's balance-sheet equity, which sit on different
+    bases, so a straight line between them ramps across a definitional step.
+
+    A gap in the line is honest; 648 is not. The way to win the range back is
+    deeper balance-sheet history, not a looser staleness rule.
+    """
+    if not eqs:
+        return None
+    return next(
+        (v for d, v in reversed(eqs)
+         if d <= date
+         and (datetime.strptime(date, "%Y-%m-%d") - datetime.strptime(d, "%Y-%m-%d")).days
+         <= STALE_EQUITY_DAYS),
+        None,
+    )
+
+
+def filed_net_worth(con: sqlite3.Connection) -> dict[str, list]:
+    """{symbol: [(period_end, net worth in raw Rs)]} from the NSE results filings.
+
+    Reads BOTH quarterly and annual periods. Reg-33 only obliges a company to
+    report net worth annually - quarterly it files paid-up capital - so reading
+    quarterly rows alone (which the band builder did) threw away 4,924 annual
+    figures covering 1,593 symbols back to 2005. HDFC Bank kept exactly one
+    equity point out of 84 that way, and it was the corrupt one; its real Rs
+    91,794 cr net worth sat in the annual row the query never asked for.
+    """
+    if not _table_exists(con, "results_history"):
+        return {}
+    df = pd.read_sql(
+        "SELECT symbol, period_end, item, value FROM results_history "
+        "WHERE item IN ('equity','share_capital') ORDER BY period_end",
+        con,
+    )
+    out: dict[str, list] = {}
+    for sym, g in df.groupby("symbol"):
+        by_period: dict[str, dict] = {}
+        for _, r in g.iterrows():
+            if pd.notna(r["value"]):
+                by_period.setdefault(r["period_end"], {})[r["item"]] = float(r["value"])
+        ref = share_capital_ref(by_period)
+        vals = [(p, nw) for p in sorted(by_period)
+                if (nw := net_worth(by_period[p], ref)) is not None]
+        if vals:
+            out[sym] = vals
+    return out
+
+
+def net_debt_series(con: sqlite3.Connection) -> dict[str, list]:
+    """{symbol: [(period_end, net debt in Rs crore)]} for the EV calculation.
+
+    Yahoo publishes a `Net Debt` line only for companies that carry net debt - it
+    is simply absent for net-cash names like TCS, Infosys and Maruti, and absent
+    for ITC in every year but the last. Reading that line alone left EV/EBITDA
+    with one data point (or none) per symbol, so the chart either vanished or
+    applied a 2026 balance sheet to a 2005 price.
+
+    `Total Debt` and `Cash And Cash Equivalents` are present for ~2,200 symbols
+    across every balance-sheet year, and their difference reproduces Yahoo's own
+    Net Debt to within a few percent where both exist (Reliance 2.61 vs 2.37 lakh
+    crore, Coal India 5,453 vs 5,202 crore). So compute it, and keep Yahoo's
+    figure where it is given.
+    """
+    if not _table_exists(con, "statements"):
+        return {}
+    df = pd.read_sql(
+        "SELECT symbol, period_end, item, value FROM statements WHERE stmt_type='balance' "
+        "AND item IN ('Net Debt','Total Debt','Cash And Cash Equivalents') ORDER BY period_end",
+        con,
+    )
+    by: dict[tuple, dict] = {}
+    for _, r in df.iterrows():
+        if pd.notna(r["value"]):
+            by.setdefault((r["symbol"], r["period_end"]), {})[r["item"]] = float(r["value"])
+    out: dict[str, list] = {}
+    for (sym, period), items in sorted(by.items(), key=lambda kv: kv[0][1]):
+        nd = items.get("Net Debt")
+        if nd is None:
+            td = items.get("Total Debt")
+            if td is None:
+                continue
+            nd = td - (items.get("Cash And Cash Equivalents") or 0.0)
+        out.setdefault(sym, []).append((period, nd / 1e7))
+    return out
+
+
+def effective_shares(pat, eps, factor: float, sh_now: float | None = None):
     """Share count at a past date, expressed on the ADJUSTED-price basis.
 
     Market cap at time t is unadjusted_price(t) x shares(t). Our price series is
@@ -114,14 +221,43 @@ def effective_shares(pat, eps, factor: float):
     came out 2.4x too large, taking Price/Book, EV/EBITDA and MCap/Sales with it.
     shares(t) comes from PAT/EPS - both as-filed in the same statement, so their
     ratio is exactly the count that filing was written against.
+
+    PAT/EPS is unstable near a breakeven quarter: an EPS of 0.01 turns a real
+    30 cr shares into 3,000 cr, and since this count multiplies the price into
+    market cap, every band built on it explodes with it - Geekay Wire's
+    Price/Book reached 292,421. `sh_now` is today's count; anything outside a
+    generous band around it is arithmetic noise, not a share issue, so the
+    caller falls back to today's count instead.
     """
     if not pat or not eps:
         return None
     shares = pat / eps
-    return shares * factor if shares > 0 else None
+    if shares <= 0:
+        return None
+    out = shares * factor
+    if sh_now and not (sh_now / 50 <= out <= sh_now * 5):
+        return None                      # implied count is not physically plausible
+    return out
 
 
-def net_worth(slot: dict):
+def share_capital_ref(by_period: dict) -> float | None:
+    """A symbol's typical paid-up capital, as the yardstick net_worth() tests against.
+
+    Taken across all of the symbol's filings rather than from the row being
+    judged, because the row being judged is exactly what may be corrupt: HDFC
+    Bank's Dec-2016 filing reports share capital of Rs 200,000 - two hundredths
+    of a crore against a real Rs 512 cr. A per-row test compares a bad number
+    with itself and passes. The median of the whole history does not move for
+    one bad row.
+    """
+    vals = sorted(
+        v for s in by_period.values()
+        if (v := s.get("share_capital")) and v > 0 and not math.isnan(v)
+    )
+    return vals[len(vals) // 2] if vals else None
+
+
+def net_worth(slot: dict, sc_ref: float | None = None):
     """Shareholders' funds, or None if the filing only gave paid-up capital.
 
     The Reg-33 'Equity' tag is PAID-UP EQUITY SHARE CAPITAL, not net worth -
@@ -129,11 +265,24 @@ def net_worth(slot: dict):
     cr. Dividing by it produced a book value ~190x too small and a Price/Book of
     2,382 where screener shows 3.6. Net worth is always a large multiple of paid-up
     capital, so anything close to it is rejected and the balance sheet used instead.
+
+    `sc_ref` is the symbol's median share capital (see share_capital_ref). Judging
+    against it rather than the row's own share-capital field is what makes the
+    test survive a corrupt row - with the per-row check alone, HDFC Bank's Dec-2016
+    Price/Book shipped at 648 against a real ~3.
     """
-    eq, sc = slot.get("equity"), slot.get("share_capital")
-    if eq is None:
+    eq = slot.get("equity")
+    if eq is None or (isinstance(eq, float) and math.isnan(eq)):
         return None
-    if sc and eq < sc * 3:
+    sc = slot.get("share_capital")
+    if sc is not None and isinstance(sc, float) and math.isnan(sc):
+        sc = None
+    ref = sc_ref if sc_ref else sc
+    if not ref:
+        # Nothing credible to compare against, so the two cannot be told apart
+        # and accepting on faith is how paid-up capital reaches the chart.
+        return None
+    if eq < ref * 3:
         return None
     return eq
 
@@ -164,7 +313,7 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None) -> dict[st
     shares = shares or {}
     comps = _stitched(con)
     splits = split_factors(con)
-    known = splits_known(con)
+    known = splits_trustworthy(con, shares)
     bal = balance_equity(con)
     out: dict[str, dict] = {}
     for (symbol, ptype), periods in comps.items():
@@ -206,7 +355,8 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None) -> dict[st
         ebitda = [d["ebitda"] for d in deriv]
         gp = [d["gross_profit"] for d in deriv]
         # filings give paid-up capital only; the balance sheet gives net worth
-        equity = [net_worth(periods[p]) or bal.get((symbol, p)) for p in ordered]
+        sc_ref = share_capital_ref(periods)
+        equity = [net_worth(periods[p], sc_ref) or bal.get((symbol, p)) for p in ordered]
         trend = {
             "periods": ordered,
             "revenue": [_cr(v) for v in rev],
@@ -236,19 +386,42 @@ def split_factors(con: sqlite3.Connection) -> dict[str, list[tuple[str, float]]]
     return out
 
 
-def splits_known(con: sqlite3.Connection) -> set[str]:
-    """Symbols with at least one recorded split/bonus.
+def splits_trustworthy(con: sqlite3.Connection, shares: dict) -> set[str]:
+    """Symbols whose recorded split history actually explains their share growth.
 
-    Only these take the exact split-factor path. An empty split list is
-    ambiguous - it means either "never split" or "never fetched" - and guessing
-    wrong leaves EPS unadjusted, which put ITC's 2006 PE at 1.0. For those the
-    PAT / current-shares fallback is used instead: it is exact when a company
-    truly never split, and merely approximate otherwise, so it fails softly
-    in both directions.
+    Yahoo's corporate-action feed can silently omit events: it lists only the
+    2:1 split for Bajaj Finance in 2025 and misses the accompanying 4:1 bonus,
+    so EPS was adjusted 10x where the price series was adjusted ~100x and PE
+    read 2.5 against screener's 30.8.
+
+    The share count implied by PAT/EPS is an independent witness. Growth beyond
+    the recorded splits is normal share issuance (HDFC Bank's merger is 2.5x,
+    ITC 1.7x), but a 37x gap means events are missing. Past that threshold the
+    split feed is discarded for that symbol in favour of PAT / current shares.
+
+    This also covers the empty-split-list case, which is ambiguous on its own -
+    it means either "never split" or "never fetched". Trusting it blindly left
+    EPS unadjusted and put ITC's 2006 PE at 1.0; here a symbol with no recorded
+    events only keeps the exact path if its implied share growth agrees.
     """
-    if not _table_exists(con, "splits"):
-        return set()
-    return {r[0] for r in con.execute("SELECT DISTINCT symbol FROM splits")}
+    out = set()
+    sp = split_factors(con)
+    rows = con.execute(
+        "SELECT symbol, period_end, "
+        "MAX(CASE WHEN item='pat' THEN value END), MAX(CASE WHEN item='eps' THEN value END) "
+        "FROM results_history WHERE period_type='quarterly' GROUP BY symbol, period_end "
+        "ORDER BY symbol, period_end"
+    ).fetchall()
+    seen: set[str] = set()
+    for sym, pe, pat, eps in rows:
+        if sym in seen or not pat or not eps or not shares.get(sym):
+            continue
+        seen.add(sym)
+        implied = shares[sym] / (pat / eps)
+        recorded = adj_factor(sp.get(sym), pe)
+        if recorded and implied / recorded <= 3.0:
+            out.add(sym)
+    return out
 
 
 def adj_factor(events: list[tuple[str, float]] | None, period_end: str) -> float:
@@ -297,7 +470,7 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
         return {}
     netdebt = netdebt or {}
     splits = split_factors(con)
-    known = splits_known(con)
+    known = splits_trustworthy(con, shares)
     q = pd.read_sql(
         "SELECT symbol, period_end, item, value FROM results_history "
         "WHERE period_type='quarterly' AND item IN "
@@ -324,11 +497,13 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
     # quarterly components per symbol: period_end -> {eps, revenue_cr, ebitda_cr}
     flow_by_sym: dict[str, list] = {}
     equity_by_sym: dict[str, list] = {}
+    filed = filed_net_worth(con)
     for sym, g in q.groupby("symbol"):
         by_pe: dict[str, dict] = {}
         for _, r in g.iterrows():
             by_pe.setdefault(r["period_end"], {})[r["item"]] = r["value"]
         ev = splits.get(sym)
+        sh_now = shares.get(sym)   # yardstick for effective_shares sanity
         flows, eqs = [], []
         for pe in sorted(by_pe):
             s = by_pe[pe]
@@ -349,15 +524,11 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                     eps = pat_v / sh_now
             flows.append((pe, eps, (rev / 1e7 if rev is not None else None),
                           (ebitda / 1e7 if ebitda is not None else None),
-                          effective_shares(s.get("pat"), s.get("eps"), adj_factor(ev, pe))))
-            # The filings' "Equity" is paid-up capital in the Ind-AS/bank
-            # taxonomies but real net worth in the older sheets (capital +
-            # reserves). net_worth() tells them apart, so the deep history is
-            # kept and only the paid-up-capital values are dropped - excluding
-            # the lot cost 20 years of Price/Book depth.
-            nw = net_worth(s)
-            if nw is not None:
-                eqs.append((pe, nw))
+                          effective_shares(s.get("pat"), s.get("eps"), adj_factor(ev, pe), sh_now)))
+        # Net worth comes from filed_net_worth(), which reads the ANNUAL rows too -
+        # Reg-33 only requires net worth once a year, so collecting it here inside
+        # the quarterly loop is what starved the Price/Book line.
+        eqs = list(filed.get(sym, []))
         last_nse = flows[-1][0] if flows else "0000-00-00"
         # Only splice yfinance in if it AGREES with the as-filed series on a
         # shared quarter. For dual-listed names yfinance serves the ADR line in
@@ -385,7 +556,7 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                 eps_y /= adj_factor(splits.get(sym), pe)
                 flows.append((pe, eps_y, (rev_y / 1e7 if rev_y is not None else None),
                               (eb_y / 1e7 if eb_y is not None else None),
-                              effective_shares(yv("Net Income"), eps_y, 1.0)))
+                              effective_shares(yv("Net Income"), eps_y, 1.0, sh_now)))
         flow_by_sym[sym] = flows
         if eqs:
             equity_by_sym[sym] = eqs
@@ -397,10 +568,22 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
             con,
         )
         for sym, g in yb.groupby("symbol"):
-            merged = {d: v for d, v in equity_by_sym.get(sym, [])}
-            for _, r in g.iterrows():
-                if pd.notna(r["value"]):
-                    merged[r["period_end"]] = float(r["value"])  # balance sheet is authoritative
+            have = {d: v for d, v in equity_by_sym.get(sym, [])}
+            ybal = {r["period_end"]: float(r["value"]) for _, r in g.iterrows() if pd.notna(r["value"])}
+            # Only let the balance sheet override the filings if the two agree on a
+            # shared period. For dual-listed names yfinance serves the US line in
+            # DOLLARS - Infosys came back at Rs 979 cr against a filed Rs 93,297 cr,
+            # and because the balance sheet was treated as authoritative it
+            # overwrote the truth and put Infosys' current Price/Book at 468.
+            trust = True
+            for p in sorted(set(ybal) & set(have), reverse=True):
+                if have[p]:
+                    ratio = ybal[p] / have[p]
+                    trust = 0.5 <= ratio <= 2.0
+                    break
+            merged = dict(have)
+            if trust:
+                merged.update(ybal)          # newer, and audited, where it checks out
             equity_by_sym[sym] = sorted(merged.items())
 
     # weekly gives ~1,100 points over 20+ years (screener.in serves the same
@@ -461,9 +644,12 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                 if ttm_rev and ttm_rev > 0:
                     ps_s.append([date, round(mcap_cr / ttm_rev, 2)])
                 if ttm_eb and ttm_eb > 0:
-                    ndv = next((v for d, v in reversed(nd) if d <= date), (nd[0][1] if nd else 0.0))
-                    ev_s.append([date, round((mcap_cr + (ndv or 0.0)) / ttm_eb, 1)])
-            eq = next((v for d, v in reversed(eqs) if d <= date), None)
+                    ndv = next((v for d, v in reversed(nd)
+                                if d <= date and (datetime.strptime(date, "%Y-%m-%d")
+                                                  - datetime.strptime(d, "%Y-%m-%d")).days <= 400), None)
+                    if ndv is not None:  # no current net debt -> no EV, rather than a guess
+                        ev_s.append([date, round((mcap_cr + ndv) / ttm_eb, 1)])
+            eq = equity_at(eqs, date)
             if eq and eq > 0:
                 # price/book == market cap / shareholders' funds, which keeps the
                 # share count consistent on both sides of the ratio

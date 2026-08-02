@@ -140,9 +140,98 @@ def price_returns(con: sqlite3.Connection) -> dict[str, dict]:
     return out
 
 
+def freshen_prices(con, df):
+    """Replace the snapshot price with the newest close we actually hold, and
+    stamp every row with the date that price belongs to.
+
+    `fundamentals` is a point-in-time snapshot; nothing forced it to be re-fetched
+    before an export, so a snapshot taken on 10-Jul shipped unchanged for weeks.
+    HDFC Bank showed Rs 824.95 against a real Rs 750.35 and MTAR Tech Rs 7,101
+    against Rs 5,194 - 27% out, on the number every other figure on the page is
+    derived from. The daily series is refreshed far more often, so wherever it is
+    newer it wins, and market cap is rescaled with it (share count is the thing
+    that actually stays put between refreshes, so mcap/price is the safe pivot).
+
+    The date is exported too: a price with no date attached is untestable, which
+    is exactly how this survived so long.
+    """
+    latest = {}
+    for sym, d, c in con.execute(
+        "SELECT symbol, MAX(date), close FROM prices WHERE freq='daily' GROUP BY symbol"
+    ):
+        if c:
+            latest[sym] = (d, float(c))
+    moved = 0
+    px, mc = df["price"].copy(), df["market_cap"].copy()
+    # Every ratio Yahoo hands us with a price in the numerator has to move with the
+    # price, or the page ends up quoting a fresh price beside a three-week-old P/E.
+    SCALE_UP = ["pe", "pb", "forward_pe"]      # price/x  -> multiply by the move
+    SCALE_DOWN = ["dividend_yield"]            # x/price  -> divide by it
+    # coerced: a few rows carry these as text ("None", ""), and scaling a string
+    # by a float raises rather than degrading quietly
+    scaled = {
+        c: pd.to_numeric(df[c], errors="coerce")
+        for c in SCALE_UP + SCALE_DOWN if c in df.columns
+    }
+    # Share count taken from the snapshot BEFORE anything is rescaled. Every ratio
+    # already uses mcap/price as its share count, and exporting the same figure
+    # lets check_prices.py assert price x shares == mcap afterwards - which is the
+    # test that would have caught a price moving without its market cap.
+    df["shares_out"] = [
+        (m / p) if (m and p) else None for m, p in zip(df["market_cap"], df["price"])
+    ]
+    # Two price sources. The daily bar carries a real trading date and is
+    # reproducible; the fundamentals snapshot carries only a fetch timestamp, which
+    # is not a market date at all - a quote pulled on Saturday belongs to Friday's
+    # session. So the bar wins wherever we have one, and the snapshot is the
+    # fallback for tickers with no series (delisted, renamed, freshly listed).
+    # Live intraday pricing is a separate layer (a broker feed), not this one.
+    snap_date = [(str(v)[:10] if v else None) for v in df.get("fetch_date", pd.Series([None] * len(df)))]
+    dates = []
+    for i, sym in enumerate(df["symbol"]):
+        hit = latest.get(sym)
+        if not hit:
+            dates.append(snap_date[i])
+            continue
+        d, close = hit
+        old = px.iat[i]
+        dates.append(d)
+        if not old or not close:
+            continue
+        if abs(close - old) / old > 0.002:          # ignore rounding-level drift
+            r = close / old
+            shares = (mc.iat[i] / old) if mc.iat[i] else None
+            px.iat[i] = close
+            if shares:
+                mc.iat[i] = shares * close          # keep mcap = price x shares
+            for c in SCALE_UP:
+                v = scaled.get(c)
+                if v is not None and v.iat[i]:
+                    v.iat[i] = v.iat[i] * r
+            for c in SCALE_DOWN:
+                v = scaled.get(c)
+                if v is not None and v.iat[i]:
+                    v.iat[i] = v.iat[i] / r
+            moved += 1
+    df["price"], df["market_cap"] = px, mc
+    for c, v in scaled.items():
+        df[c] = v
+    # The yardstick is the newest TRADING date in the export - snapshot fetch dates
+    # are excluded, or one ticker re-pulled on a Saturday would mark the whole
+    # market stale against a day the exchange never opened.
+    fresh = max([d for d, _ in latest.values()], default=None)
+    stale = [bool(fresh and d and d < fresh) for d in dates]
+    df["price_date"], df["price_stale"] = dates, stale
+    undated = sum(1 for d in dates if not d)
+    print(f"  price refresh: {moved} symbols moved onto the latest traded close "
+          f"(as of {fresh}, {sum(stale)} behind it, {undated} undated)")
+    return df, fresh
+
+
 def main() -> None:
     con = sqlite3.connect(DB, timeout=180)
     df = pd.read_sql("SELECT * FROM fundamentals", con)
+    df, price_asof = freshen_prices(con, df)  # never show a price older than the series we hold
     n_universe = pd.read_sql("SELECT COUNT(*) n FROM universe", con)["n"][0]
     shares_by_symbol = {
         r["symbol"]: r["market_cap"] / r["price"]
@@ -208,12 +297,14 @@ def main() -> None:
         "median_pe_5y", "avg_npm_5y",
         "ret_1m", "ret_3m", "ret_6m", "ret_1y", "ret_3y", "ret_5y", "off_52w_high",
         "volatility_1y", "volatility_30d", "vol_method",
+        "shares_out", "price_date",
     ]
     df = df[keep]
     df = df.astype(object).where(pd.notna(df), None)
 
     payload = {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "price_asof": price_asof,          # the newest close in this file; check_prices.py enforces it
         "universe_size": int(n_universe),
         "covered": len(df),
         "rows": df.to_dict(orient="records"),

@@ -112,7 +112,13 @@ def merge_best(cur: dict, base: dict) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--update", action="store_true", help="accept current depth as the baseline")
+    ap.add_argument("--reason", help="why the loss is intended - stored in the baseline file")
     args = ap.parse_args()
+    if args.update and not args.reason:
+        raise SystemExit(
+            "--update lowers the bar this guard defends, so it needs --reason '<why>'.\n"
+            "An unexplained baseline reset looks exactly like the failure being guarded against."
+        )
 
     cur = measure()
     print("current depth:")
@@ -131,6 +137,13 @@ def main() -> None:
         # capital - and merging would keep defending that bad figure forever.
         BASELINE.parent.mkdir(parents=True, exist_ok=True)
         cur["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        if args.reason:
+            cur["reason"] = args.reason
+            cur.setdefault("history", [])
+            if base:
+                cur["history"] = (base.get("history") or []) + [
+                    {"at": base.get("updated_at"), "reason": base.get("reason"), "totals": base.get("totals")}
+                ]
         BASELINE.write_text(json.dumps(cur, indent=1), encoding="utf-8")
         print(f"baseline {'replaced' if base else 'created'} -> {BASELINE}")
         return

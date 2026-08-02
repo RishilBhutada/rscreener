@@ -61,6 +61,12 @@ jobs:
         # Failing here also stops the stale DB being re-uploaded below, so the
         # loop cannot feed itself.
         run: python pipeline/check_depth.py
+      - name: Refuse to publish stale or inconsistent prices
+        # Same class of failure, on the number everything else is derived from:
+        # a snapshot that stopped refreshing kept HDFC Bank at Rs 824.95 for three
+        # weeks against a real Rs 750. A wrong price looks exactly like a right
+        # one on screen, so it has to be caught here rather than by eye.
+        run: python pipeline/check_prices.py
       - name: Upload the updated DB back to the data-db release
         env:
           GH_TOKEN: ${{ github.token }}
