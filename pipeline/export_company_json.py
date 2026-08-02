@@ -89,6 +89,53 @@ def build_statement(df: pd.DataFrame, stmt_type: str, period_type: str) -> dict 
     return {"periods": periods, "items": items}
 
 
+def quarter_blocks(con: sqlite3.Connection) -> dict[str, list[dict]]:
+    """{symbol: [{start, end, eps, announced, q}]} - one block per filed quarter.
+
+    Drives the quarter-coloured EPS bars and the result-declaration markers on the
+    company charts. Each block carries the period it actually covers (as filed, so
+    consecutive blocks butt together with no gap) and the date NSE broadcast it.
+
+    `q` is the INDIAN FISCAL quarter, not the calendar one: Apr-Jun is Q1. That is
+    what the colour cycle keys off, so a company's Q1 is the same colour every year
+    regardless of when in the calendar it falls.
+    """
+    if not _table_exists(con, "results_history"):
+        return {}
+    announced: dict[tuple, str] = {}
+    if _table_exists(con, "filing_dates"):
+        announced = {
+            (s, p): a for s, p, a in con.execute(
+                "SELECT symbol, period_end, announced_on FROM filing_dates"
+            ) if a
+        }
+    rows = con.execute(
+        "SELECT symbol, period_start, period_end, value FROM results_history "
+        "WHERE period_type='quarterly' AND item='eps' AND period_start<>'' "
+        "ORDER BY symbol, period_end"
+    ).fetchall()
+    out: dict[str, list[dict]] = {}
+    for sym, start, end, eps in rows:
+        if eps is None or not start or not end:
+            continue
+        month = int(end[5:7])
+        fq = {6: 1, 9: 2, 12: 3, 3: 4}.get(month)
+        if fq is None:  # a non-standard year-end; colour it by calendar quarter
+            fq = (month - 1) // 3 + 1
+        out.setdefault(sym, []).append({
+            "start": start,
+            "end": end,
+            "eps": round(float(eps), 2),
+            "announced": announced.get((sym, end)),
+            "q": fq,
+        })
+    return out
+
+
+def _table_exists(con: sqlite3.Connection, name: str) -> bool:
+    return bool(con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone())
+
+
 def main() -> None:
     con = sqlite3.connect(DB, timeout=180)
     snaps = pd.read_sql("SELECT * FROM fundamentals", con)
@@ -105,6 +152,7 @@ def main() -> None:
         if r.get("market_cap") and r.get("price")
     }
     netdebt_by_symbol = net_debt_series(con)
+    quarters_by_symbol = quarter_blocks(con)
     trends = build_trends(con, shares_by_symbol)
     bands = ratio_bands(con, shares_by_symbol, netdebt_by_symbol)
     prices_by_symbol: dict[str, dict] = {}
@@ -178,6 +226,7 @@ def main() -> None:
             "ev_band": bands.get(sym, {}).get("ev"),
             "pb_band": bands.get(sym, {}).get("pb"),
             "ps_band": bands.get(sym, {}).get("ps"),
+            "quarters": quarters_by_symbol.get(sym),
         }
         if sym in has_statements:
             stmts = pd.read_sql("SELECT * FROM statements WHERE symbol = ?", con, params=(sym,))

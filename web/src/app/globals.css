@@ -30,6 +30,13 @@
   --chart-alt: #0891b2;
   --chart-axis: #94a3b8;
   --chart-grid: #e5e8ee;
+  /* Quarter colours, fixed per Indian fiscal quarter and repeating every year, so
+     the same quarter always reads the same. Q3 is red by the owner's choice - it
+     marks the quarter, not a loss. */
+  --q1: #3b7dd8;
+  --q2: #2e9e63;
+  --q3: #d4483b;
+  --q4: #d9a521;
   --chart-value: #49566b;
   --chart-dma50: #f59e0b;
   --chart-dma200: #6366f1;
@@ -61,6 +68,10 @@
   --chart-alt: #22d3ee;
   --chart-axis: #64748b;
   --chart-grid: #223048;
+  --q1: #5b9bf0;
+  --q2: #43b87a;
+  --q3: #e86355;
+  --q4: #eab73a;
   --chart-value: #a2b2c8;
   --chart-dma50: #fbbf24;
   --chart-dma200: #818cf8;

@@ -14,7 +14,7 @@ Money is converted to Rs crore here (eps and per-share book value stay in rupees
 """
 import math
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 
@@ -140,6 +140,45 @@ def equity_at(eqs: list, date: str):
          <= STALE_EQUITY_DAYS),
         None,
     )
+
+
+TYPICAL_REPORTING_LAG = 45  # days, used only where NSE gave us no broadcast date
+
+
+def filing_dates(con: sqlite3.Connection) -> dict[str, dict]:
+    """{symbol: {period_end: announcement date}} - when results reached the market."""
+    if not _table_exists(con, "filing_dates"):
+        return {}
+    out: dict[str, dict] = {}
+    for sym, period, announced in con.execute(
+        "SELECT symbol, period_end, announced_on FROM filing_dates"
+    ):
+        if period and announced:
+            out.setdefault(sym, {})[period] = announced
+    return out
+
+
+def available_from(period_end: str, announced: dict) -> str:
+    """The date a quarter's earnings could first be known.
+
+    A P/E chart is meant to show what the market could see at each point. Using
+    the quarter's END date instead credits the market with figures nobody had
+    read yet - and the gap is neither small nor constant. TCS publishes 9 to 12
+    days after quarter end; MTAR Technologies takes 29 to 42, and between
+    29-Jan-2026 and 29-Jul-2026 it published nothing at all. Over those six
+    months its trailing EPS was frozen at 16.88 while the price ran up, so the
+    real P/E reached ~496. Our chart, stepping earnings in on 31-Mar and 30-Jun,
+    showed ~230 for the same weeks and hid the spike completely.
+
+    So the announcement date is used where NSE gave us one, and TYPICAL_REPORTING_LAG
+    stands in where it did not (mostly the yfinance-spliced newest quarters).
+    """
+    hit = announced.get(period_end)
+    if hit:
+        return hit
+    return (
+        datetime.strptime(period_end, "%Y-%m-%d") + timedelta(days=TYPICAL_REPORTING_LAG)
+    ).strftime("%Y-%m-%d")
 
 
 def filed_net_worth(con: sqlite3.Connection) -> dict[str, list]:
@@ -532,6 +571,7 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
     flow_by_sym: dict[str, list] = {}
     equity_by_sym: dict[str, list] = {}
     filed = filed_net_worth(con)
+    announced = filing_dates(con)   # when the market could first read each quarter
     for sym, g in q.groupby("symbol"):
         by_pe: dict[str, dict] = {}
         for _, r in g.iterrows():
@@ -645,8 +685,9 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
         # carrying that quarter's seasonality and one-offs undiluted.
         pe_alt: dict[str, list] = {"q1": [], "q2": [], "q3": []}
         fi = 0  # pointer into `flows` (both it and the price series are date-sorted)
+        avail = announced.get(sym, {})
         for date, close in zip(g["date"], g["close"]):
-            while fi < len(flows) and flows[fi][0] <= date:
+            while fi < len(flows) and available_from(flows[fi][0], avail) <= date:
                 fi += 1
             recent = flows[max(0, fi - 4):fi]
             # The four must actually be CONSECUTIVE quarters. With a gap in the

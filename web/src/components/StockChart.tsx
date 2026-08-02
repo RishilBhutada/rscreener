@@ -135,7 +135,26 @@ type SeriesDef = {
   fmt: FmtKind;
 };
 
-export default function StockChart({ prices, peBand, evBand, pbBand, psBand, trendQ, livePrice }: {
+/** One filed quarter: the period it covers, its EPS, and when NSE broadcast it. */
+export type Quarter = {
+  start: string;
+  end: string;
+  eps: number;
+  announced?: string | null;
+  q: number;      // Indian fiscal quarter — Apr-Jun is 1
+};
+
+/** Fixed colour per fiscal quarter, repeating every year, so the same quarter is
+ *  always the same colour. Q3 is red by request; it does NOT mean a loss. */
+const Q_COLOUR: Record<number, string> = {
+  1: "var(--q1)",
+  2: "var(--q2)",
+  3: "var(--q3)",
+  4: "var(--q4)",
+};
+const Q_LABEL: Record<number, string> = { 1: "Q1 Apr–Jun", 2: "Q2 Jul–Sep", 3: "Q3 Oct–Dec", 4: "Q4 Jan–Mar" };
+
+export default function StockChart({ prices, peBand, evBand, pbBand, psBand, trendQ, livePrice, quarters }: {
   prices: ChartPrices;
   peBand?: ChartBand;
   evBand?: ChartBand;
@@ -143,10 +162,12 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   psBand?: ChartBand;
   trendQ?: ChartTrendQ;
   livePrice: number | null;
+  quarters?: Quarter[] | null;
 }) {
   const [view, setView] = useState<View>("price");
   const [range, setRange] = useState("5Yr");
   const [peWin, setPeWin] = useState("ttm");
+  const [showQ, setShowQ] = useState(false);
   const [on, setOn] = useState<Record<string, boolean>>({});
   const [moreOpen, setMoreOpen] = useState(false);
   const [hover, setHover] = useState<{ t: number; px: number } | null>(null);
@@ -351,6 +372,15 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     setHover({ t: Math.min(t1, Math.max(t0, t)), px: e.clientX - rect.left });
   };
 
+  // EPS bars get their own strip along the bottom of the plot rather than sharing
+  // a value axis with price or a ratio — the magnitudes are unrelated, and sharing
+  // one would flatten whichever series is smaller into nothing.
+  const qShown = (quarters ?? []).filter((q) => toT(q.end) >= t0 && toT(q.start) <= t1);
+  const qStripH = plotH * 0.22;
+  const qBase = MT + plotH;
+  const qMax = Math.max(...qShown.map((q) => Math.abs(q.eps)), 1);
+  const qScale = (v: number) => (Math.max(0, v) / qMax) * qStripH;
+
   const primary = visible.find((s) => s.kind !== "bars" && s.kind !== "dashed") ?? visible[0];
   const hoverPt = hover && primary ? nearest(primary.data, hover.t) : null;
   const barW = (s: SeriesDef) => Math.max(1.5, Math.min(26, (plotW / Math.max(1, s.data.length)) * 0.62));
@@ -384,6 +414,35 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
           </span>
         </div>
       )}
+      {(quarters?.length ?? 0) > 0 && (
+        <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
+          <button
+            onClick={() => setShowQ(!showQ)}
+            title="Colour each quarter's EPS and mark the day its results were declared"
+            className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium border ${
+              showQ
+                ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
+                : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
+            }`}
+          >
+            {showQ ? "✓ " : ""}Quarterly results
+          </button>
+          {showQ && (
+            <div className="flex items-center gap-2.5 flex-wrap text-[var(--ink3)]">
+              {[1, 2, 3, 4].map((n) => (
+                <span key={n} className="inline-flex items-center gap-1">
+                  <i className="inline-block w-3 h-3 rounded-sm" style={{ background: Q_COLOUR[n] }} />
+                  {Q_LABEL[n]}
+                </span>
+              ))}
+              <span className="inline-flex items-center gap-1">
+                <i className="inline-block w-4 border-t-2 border-dashed border-[var(--ink3)]" />
+                declared
+              </span>
+            </div>
+          )}
+        </div>
+      )}
       <div className="relative">
         <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full touch-none select-none"
           onPointerMove={onMove} onPointerDown={onMove} onPointerLeave={() => setHover(null)}>
@@ -399,6 +458,42 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
           ))}
           {xt.map((tk) => (
             <text key={tk.t} x={x(tk.t)} y={H - 8} fontSize={FS} fill="var(--chart-axis)" textAnchor="middle">{tk.label}</text>
+          ))}
+
+          {/* Quarter-coloured EPS bars, spanning the period each result actually
+              covers so consecutive quarters butt together with no gap, plus a
+              dropline on the day NSE broadcast them. The gap between a bar's
+              right edge and its own dropline IS the reporting lag - the weeks
+              where the market is still valuing the company on older earnings. */}
+          {showQ && qShown.length > 0 && (
+            <g>
+              {qShown.map((q, i) => {
+                // A quarter ends 30-Jun and the next starts 01-Jul, so plotting
+                // start->end leaves a one-day sliver between every pair. The bar
+                // runs to the END of its last day, which closes it exactly.
+                const x0 = x(toT(q.start)), x1v = x(toT(q.end) + 86400000);
+                const h = qScale(q.eps);
+                return (
+                  <rect key={`qb${i}`} x={Math.min(x0, x1v)} y={qBase - h}
+                    width={Math.max(1, Math.abs(x1v - x0))} height={Math.max(1, h)}
+                    fill={Q_COLOUR[q.q] ?? "var(--q1)"} opacity="0.8">
+                    <title>{`${Q_LABEL[q.q] ?? `Q${q.q}`} · EPS ₹${q.eps}${q.announced ? ` · declared ${q.announced}` : ""}`}</title>
+                  </rect>
+                );
+              })}
+              <line x1={ML} x2={W - MR} y1={qBase} y2={qBase} stroke="var(--chart-grid)" strokeWidth="1" />
+            </g>
+          )}
+          {showQ && qShown.map((q, i) => (
+            q.announced && toT(q.announced) >= t0 && toT(q.announced) <= t1 ? (
+              <g key={`ql${i}`}>
+                <line x1={x(toT(q.announced))} x2={x(toT(q.announced))} y1={MT} y2={MT + plotH}
+                  stroke={Q_COLOUR[q.q] ?? "var(--q1)"} strokeWidth="1.4" strokeDasharray="4 3" opacity="0.9" />
+                <circle cx={x(toT(q.announced))} cy={MT + 3} r="3" fill={Q_COLOUR[q.q] ?? "var(--q1)"}>
+                  <title>{`${Q_LABEL[q.q] ?? `Q${q.q}`} results declared ${q.announced}`}</title>
+                </circle>
+              </g>
+            ) : null
           ))}
 
           {visible.filter((s) => s.kind === "bars").map((s) => {

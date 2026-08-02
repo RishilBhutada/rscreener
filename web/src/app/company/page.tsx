@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
-import StockChart from "@/components/StockChart";
+import StockChart, { Quarter } from "@/components/StockChart";
 import { Row } from "@/lib/query";
 import { loadNote, loadWatchlist, saveNote, toggleWatch } from "@/lib/store";
 
@@ -50,6 +50,7 @@ type Company = {
   ev_band?: PeBand | null;
   pb_band?: PeBand | null;
   ps_band?: PeBand | null;
+  quarters?: Quarter[] | null;
 };
 
 
@@ -472,7 +473,7 @@ function CompanyView() {
 
       <div id="chart" className="scroll-mt-32">
         {company.prices && (company.prices.monthly?.length || company.prices.weekly?.length) ? (
-          <StockChart prices={company.prices} peBand={company.pe_band} evBand={company.ev_band} pbBand={company.pb_band} psBand={company.ps_band} trendQ={company.trend?.quarterly} livePrice={price} />
+          <StockChart prices={company.prices} peBand={company.pe_band} evBand={company.ev_band} pbBand={company.pb_band} psBand={company.ps_band} trendQ={company.trend?.quarterly} livePrice={price} quarters={company.quarters} />
         ) : null}
       </div>
 

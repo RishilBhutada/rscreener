@@ -61,6 +61,15 @@ jobs:
         # up weekly, so steady state is ~340 a night and the cap never binds.
         run: python pipeline/fetch_results_history.py --symbols @data/all_symbols.txt --max-age-hours 168 --limit 800 --quarters-back 8 --sleep 0.25
         continue-on-error: true
+      - name: Record when each set of results was ANNOUNCED
+        # Drives the quarter-coloured EPS bars and result markers on the charts,
+        # and - more importantly - lets the ratio bands step earnings in on the day
+        # the market could read them rather than the day the quarter ended. TCS
+        # publishes 9-12 days after quarter end, MTAR Technologies 29-42, and MTAR
+        # published nothing at all between 29-Jan and 29-Jul 2026. One index call
+        # per symbol, so this is cheap next to a results re-fetch.
+        run: python pipeline/fetch_filing_dates.py --symbols @data/all_symbols.txt --max-age-hours 168 --limit 900 --sleep 0.2
+        continue-on-error: true
       - name: Deepen as-filed P&L history (bounded rotation, full ~20yr depth)
         run: python pipeline/fetch_results_history.py --symbols @data/all_symbols.txt --max-age-hours 4320 --limit 60 --quarters-back 0 --sleep 0.3
         continue-on-error: true
@@ -71,6 +80,8 @@ jobs:
       - run: python pipeline/export_json.py
       - run: python pipeline/export_company_json.py
       - run: python pipeline/export_ipos.py
+      - name: Publish the data-freshness report the app shows on /status
+        run: python pipeline/export_status.py
       - name: Refuse to publish if chart history went backwards
         # Guards the failure that shipped for weeks: a stale restored DB exports
         # ~7 years of ratio history in place of ~20, and deploys it silently.
