@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-08-02 15:04 UTC",
+ "generated_at": "2026-08-02 20:23 UTC",
  "universe": 2357,
  "sources": [
   {
@@ -40,18 +40,18 @@
    "key": "results",
    "name": "Quarterly results (as filed)",
    "what": "Earnings straight from the NSE filings. Everything on the P/E chart rests on these.",
-   "covered": 2166,
+   "covered": 2223,
    "newest": "2026-06-30",
-   "behind": 627,
+   "behind": 228,
    "oldest": "2010-02-28",
    "cadence": "every night, 800 companies a night",
-   "current": 1539,
+   "current": 1995,
    "universe": 2357,
    "per_night": 800,
-   "pct": 65,
-   "missing": 191,
-   "nights_left": 2,
-   "eta": "2026-08-04"
+   "pct": 85,
+   "missing": 134,
+   "nights_left": 1,
+   "eta": "2026-08-03"
   },
   {
    "key": "filing_dates",

@@ -26,6 +26,7 @@ from pathlib import Path
 
 import requests
 
+from db_lib import retry as db_retry
 from fetch_results_history import INDEX_API, INTEGRATED_API, get_retry
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -101,14 +102,14 @@ def main() -> None:
     # even though the mode is the one we wanted all along.
     if con.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
         con.execute("PRAGMA journal_mode=WAL")
-    con.execute(
+    db_retry(lambda: con.execute(
         "CREATE TABLE IF NOT EXISTS filing_dates "
         "(symbol TEXT, period_end TEXT, announced_on TEXT, PRIMARY KEY (symbol, period_end))"
-    )
-    con.execute(
+    ))
+    db_retry(lambda: con.execute(
         "CREATE TABLE IF NOT EXISTS filing_dates_log "
         "(symbol TEXT PRIMARY KEY, fetched_at TEXT, error TEXT, n INTEGER)"
-    )
+    ))
     log = {r[0]: r[1] for r in con.execute("SELECT symbol, fetched_at FROM filing_dates_log WHERE error IS NULL")}
     if args.max_age_hours > 0:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=args.max_age_hours)).strftime("%Y-%m-%d %H:%M:%S")
@@ -139,25 +140,26 @@ def main() -> None:
             for p, a in pairs:
                 if p not in best or a < best[p]:
                     best[p] = a
-            if best:
-                con.executemany(
-                    "INSERT OR REPLACE INTO filing_dates VALUES (?,?,?)",
-                    [(sym, p, a) for p, a in best.items()],
+            def _write():
+                if best:
+                    con.executemany(
+                        "INSERT OR REPLACE INTO filing_dates VALUES (?,?,?)",
+                        [(sym, p, a) for p, a in best.items()],
+                    )
+                con.execute(
+                    "INSERT OR REPLACE INTO filing_dates_log VALUES (?,?,?,?)",
+                    (sym, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), None, len(best)),
                 )
-            con.execute(
-                "INSERT OR REPLACE INTO filing_dates_log VALUES (?,?,?,?)",
-                (sym, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), None, len(best)),
-            )
-            con.commit()
+                con.commit()
+            db_retry(_write)
             ok += 1
             print(f"[{i}/{len(due)}] {sym}: {len(best)} periods dated", flush=True)
         except Exception as e:  # noqa: BLE001
             err += 1
-            con.execute(
+            db_retry(lambda: (con.execute(
                 "INSERT OR REPLACE INTO filing_dates_log VALUES (?,?,?,?)",
                 (sym, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), str(e)[:200], 0),
-            )
-            con.commit()
+            ), con.commit()))
             print(f"[{i}/{len(due)}] {sym}: ERROR {e}", flush=True)
         time.sleep(args.sleep)
     print(f"done: {ok} ok, {err} errors")

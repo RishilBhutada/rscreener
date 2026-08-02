@@ -10,7 +10,51 @@ export type ChartBand = {
   /** shorter earnings windows, annualised, aligned index-for-index with `series` */
   alt?: Record<string, (number | null)[]>;
   alt_median_5y?: Record<string, number>;
+  /** the inputs behind each point, aligned index-for-index with `series`:
+   *  pe [price, ttmEps, quarters[]] · pb [mcapCr, netWorthCr]
+   *  ps [mcapCr, ttmSalesCr]        · ev [mcapCr, netDebtCr, ttmEbitdaCr] */
+  parts?: (number | string[])[][];
 } | null;
+
+/** How a ratio was arrived at, in the units it was arrived in. */
+type Working = { label: string; value: string; note?: string }[];
+
+function workingFor(view: View, band: ChartBand, idx: number, qs?: Quarter[] | null): Working | null {
+  const p = band?.parts?.[idx];
+  if (!p) return null;
+  const n = (v: unknown, d = 2) =>
+    typeof v === "number" ? v.toLocaleString("en-IN", { maximumFractionDigits: d }) : "—";
+  if (view === "pe") {
+    const out: Working = [
+      { label: "Price", value: `₹ ${n(p[0])}` },
+      { label: "÷ EPS (trailing 4 quarters)", value: `₹ ${n(p[1])}` },
+    ];
+    const ends = Array.isArray(p[2]) ? (p[2] as string[]) : [];
+    for (const end of ends) {
+      const q = qs?.find((x) => x.end === end);
+      out.push({
+        label: `      ${new Date(end).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}`,
+        value: q ? `₹ ${n(q.eps)}` : "—",
+        note: q?.announced ? `declared ${new Date(q.announced).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" })}` : undefined,
+      });
+    }
+    return out;
+  }
+  if (view === "pb") return [
+    { label: "Market cap", value: `₹ ${n(p[0], 0)} Cr` },
+    { label: "÷ Net worth", value: `₹ ${n(p[1], 0)} Cr` },
+  ];
+  if (view === "ps") return [
+    { label: "Market cap", value: `₹ ${n(p[0], 0)} Cr` },
+    { label: "÷ Sales (trailing 4 quarters)", value: `₹ ${n(p[1], 0)} Cr` },
+  ];
+  if (view === "ev") return [
+    { label: "Market cap", value: `₹ ${n(p[0], 0)} Cr` },
+    { label: "+ Net debt", value: `₹ ${n(p[1], 0)} Cr` },
+    { label: "÷ EBITDA (trailing 4 quarters)", value: `₹ ${n(p[2], 0)} Cr` },
+  ];
+  return null;
+}
 
 /** earnings window behind the PE line; each is annualised onto the TTM scale */
 const PE_WINDOWS: [string, string, string][] = [
@@ -35,6 +79,13 @@ export type ChartTrendQ = {
 type View = "price" | "pe" | "sales" | "ev" | "pb" | "ps";
 type XY = { t: number; v: number };
 type FmtKind = "rupee" | "plain" | "pct" | "vol" | "cr";
+
+const CHART_BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
+type CmpData = {
+  symbol: string; name: string;
+  prices?: ChartPrices; pe?: ChartBand; pb?: ChartBand; ps?: ChartBand; ev?: ChartBand;
+};
 
 const RANGES: [string, number][] = [
   ["1M", 1 / 12], ["6M", 0.5], ["1Yr", 1], ["3Yr", 3], ["5Yr", 5], ["10Yr", 10], ["Max", 999],
@@ -154,7 +205,7 @@ const Q_COLOUR: Record<number, string> = {
 };
 const Q_LABEL: Record<number, string> = { 1: "Q1 Apr–Jun", 2: "Q2 Jul–Sep", 3: "Q3 Oct–Dec", 4: "Q4 Jan–Mar" };
 
-export default function StockChart({ prices, peBand, evBand, pbBand, psBand, trendQ, livePrice, quarters }: {
+export default function StockChart({ prices, peBand, evBand, pbBand, psBand, trendQ, livePrice, quarters, symbol, peers }: {
   prices: ChartPrices;
   peBand?: ChartBand;
   evBand?: ChartBand;
@@ -163,11 +214,29 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   trendQ?: ChartTrendQ;
   livePrice: number | null;
   quarters?: Quarter[] | null;
+  symbol?: string;
+  peers?: { symbol?: unknown; name?: unknown }[];
 }) {
   const [view, setView] = useState<View>("price");
   const [range, setRange] = useState("5Yr");
   const [peWin, setPeWin] = useState("ttm");
   const [showQ, setShowQ] = useState(false);
+  // A valuation is never absolute. "Is 30x expensive?" only means something
+  // against the company's own history AND against someone else's 30x, so any
+  // second company can be laid over the same view.
+  const [cmpSym, setCmpSym] = useState<string | null>(null);
+  const [cmp, setCmp] = useState<CmpData | null>(null);
+  const [cmpErr, setCmpErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!cmpSym) { setCmp(null); setCmpErr(null); return; }
+    let live = true;
+    setCmpErr(null);
+    fetch(`${CHART_BASE}/companies/${cmpSym}.json`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("not found"))))
+      .then((d) => { if (live) setCmp({ symbol: cmpSym, name: String(d?.snapshot?.name ?? cmpSym), prices: d.prices, pe: d.pe_band, pb: d.pb_band, ps: d.ps_band, ev: d.ev_band }); })
+      .catch(() => { if (live) { setCmp(null); setCmpErr(`No data for ${cmpSym}`); } });
+    return () => { live = false; };
+  }, [cmpSym]);
   const [on, setOn] = useState<Record<string, boolean>>({});
   const [moreOpen, setMoreOpen] = useState(false);
   const [hover, setHover] = useState<{ t: number; px: number } | null>(null);
@@ -323,8 +392,51 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       if (npm.length > 1) defs.push({ key: "npm", label: "NPM %", color: "var(--chart-pos)", kind: "smooth", axis: "R", data: npm, fmt: "pct" });
     }
 
+    // The peer is drawn on the SAME axis as the metric it is compared against,
+    // except price: two share prices in rupees have no common scale (₹5,726 beside
+    // ₹748 makes the smaller one a flat line), so both are rebased to percent
+    // change from the left edge of the visible range, which is the only reading
+    // of "which did better" that means anything.
+    if (cmp !== null && cmp !== undefined) {
+      const peer: CmpData = cmp;
+      const rebase = (src: XY[]): XY[] => {
+        const base = src.length ? src[0].v : 0;
+        return base ? src.map((d) => ({ t: d.t, v: (d.v / base - 1) * 100 })) : [];
+      };
+      const band: ChartBand =
+        view === "pe" ? peer.pe ?? null : view === "pb" ? peer.pb ?? null
+        : view === "ps" ? peer.ps ?? null : view === "ev" ? peer.ev ?? null : null;
+      if (view === "price") {
+        const src: Pt[] = peer.prices?.weekly ?? peer.prices?.monthly ?? [];
+        const theirs = xy(src.filter((q) => toT(q[0]) >= cutoff).map((q) => [q[0], q[1]] as [string, number]));
+        const mineIdx = defs.findIndex((d) => d.key === "price");
+        if (mineIdx >= 0 && theirs.length > 1) {
+          const mineData = defs[mineIdx].data;
+          const mineColor = defs[mineIdx].color;
+          defs.length = 0;                   // volume and DMAs mean nothing once rebased
+          defs.push({
+            key: "price", label: `${symbol ?? "This company"} %`, color: mineColor,
+            kind: "line", axis: "R", data: rebase(mineData), fmt: "pct",
+          });
+          defs.push({
+            key: "cmp", label: `${peer.symbol} %`, color: "var(--chart-alt)",
+            kind: "line", axis: "R", data: rebase(theirs), fmt: "pct",
+          });
+        }
+      } else if (band && band.series.length) {
+        const theirs = xy(band.series.filter((r) => toT(r[0]) >= cutoff));
+        const rightFmt = defs.find((d) => d.axis === "R");
+        if (theirs.length > 1) {
+          defs.push({
+            key: "cmp", label: peer.symbol, color: "var(--chart-alt)",
+            kind: "line", axis: "R", data: theirs, fmt: rightFmt ? rightFmt.fmt : "plain",
+          });
+        }
+      }
+    }
+
     return defs;
-  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now]);
+  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, cmp, symbol]);
 
   const visible = model.filter((s) => isOn(s.key));
   if (!model.length || !model.some((s) => s.data.length > 1)) {
@@ -382,6 +494,9 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const qScale = (v: number) => (Math.max(0, v) / qMax) * qStripH;
 
   const primary = visible.find((s) => s.kind !== "bars" && s.kind !== "dashed") ?? visible[0];
+  const activeBand: ChartBand =
+    view === "pe" ? peBand ?? null : view === "pb" ? pbBand ?? null
+    : view === "ps" ? psBand ?? null : view === "ev" ? evBand ?? null : null;
   const hoverPt = hover && primary ? nearest(primary.data, hover.t) : null;
   const barW = (s: SeriesDef) => Math.max(1.5, Math.min(26, (plotW / Math.max(1, s.data.length)) * 0.62));
   const boxW = svgRef.current?.getBoundingClientRect().width ?? 600;
@@ -414,6 +529,30 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
           </span>
         </div>
       )}
+      <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
+        <span className="text-[var(--ink3)]">Compare with</span>
+        <select
+          value={cmpSym ?? ""}
+          onChange={(e) => { setCmpSym(e.target.value || null); setHover(null); }}
+          className="rounded-lg border border-[var(--line)] bg-[var(--card2)] text-[var(--ink2)] px-2 py-1.5 sm:py-1 max-w-[52vw] sm:max-w-none"
+        >
+          <option value="">nothing</option>
+          {(peers ?? [])
+            .map((p) => ({ sym: String(p.symbol ?? ""), nm: String(p.name ?? p.symbol ?? "") }))
+            .filter((p) => p.sym && p.sym !== symbol)
+            .map((p) => (
+              <option key={p.sym} value={p.sym}>{p.nm} ({p.sym})</option>
+            ))}
+        </select>
+        {cmp && (
+          <span className="inline-flex items-center gap-1.5 text-[var(--ink3)]">
+            <i className="inline-block w-3 h-1 rounded-sm" style={{ background: "var(--chart-alt)" }} />
+            {cmp.name}
+            {view === "price" && <span>· both shown as % change over the range</span>}
+          </span>
+        )}
+        {cmpErr && <span className="text-[var(--neg)]">{cmpErr}</span>}
+      </div>
       {(quarters?.length ?? 0) > 0 && (
         <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
           <button
@@ -557,6 +696,24 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                 </p>
               );
             })}
+            {(() => {
+              if (!hoverPt || !activeBand?.parts) return null;
+              const idx = activeBand.series.findIndex((r) => toT(r[0]) === hoverPt.t);
+              const w = idx >= 0 ? workingFor(view, activeBand, idx, quarters) : null;
+              if (!w) return null;
+              return (
+                <div className="mt-1.5 pt-1.5 border-t border-[var(--line)] space-y-0.5">
+                  <p className="text-[10px] uppercase tracking-wide text-[var(--ink3)]">How this was worked out</p>
+                  {w.map((r, i) => (
+                    <p key={i} className="tabular-nums flex items-baseline gap-2 whitespace-pre">
+                      <span className="text-[var(--ink3)] flex-1">{r.label}</span>
+                      <span className="font-medium text-[var(--ink)]">{r.value}</span>
+                      {r.note && <span className="text-[10px] text-[var(--ink3)]">{r.note}</span>}
+                    </p>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>

@@ -679,6 +679,13 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
         eqs = equity_by_sym.get(sym, [])
         nd = netdebt.get(sym, [])  # list of (date, netdebt_cr) or []
         pe_s, ev_s, pb_s, ps_s = [], [], [], []
+        # Inputs behind every point, aligned by index with the series above.
+        # A ratio you cannot take apart is a ratio you have to take on faith, and
+        # every error found on 2-Aug-2026 - Price/Book 648, a balance sheet in
+        # dollars, a P/E line frozen for seven months - rendered as a perfectly
+        # ordinary-looking point. Shipping the numerator and denominator lets the
+        # chart be checked instead of trusted.
+        pe_p, ev_p, pb_p, ps_p = [], [], [], []
         # Shorter earnings windows, each annualised so they sit on the same scale
         # as the 4-quarter TTM and can be read against it: 1Q x4, 2Q x2, 3Q x4/3.
         # They react to an earnings turn far sooner than TTM, at the cost of
@@ -711,6 +718,8 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                 ttm_eb = sum(f[3] for f in recent) if all(f[3] is not None for f in recent) else None
                 if ttm_eps and ttm_eps > 0:
                     pe_s.append([date, round(close / ttm_eps, 1)])
+                    pe_p.append([round(close, 2), round(ttm_eps, 2),
+                                 [f[0] for f in recent]])   # price, TTM EPS, the four quarters
                     # aligned by index with pe_s, so only the values travel
                     for key, n, mult in (("q1", 1, 4.0), ("q2", 2, 2.0), ("q3", 3, 4.0 / 3.0)):
                         tail = [f[1] for f in recent[-n:]]
@@ -718,21 +727,27 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                         pe_alt[key].append(round(close / ann, 1) if (ann and ann > 0) else None)
                 if ttm_rev and ttm_rev > 0:
                     ps_s.append([date, round(mcap_cr / ttm_rev, 2)])
+                    ps_p.append([round(mcap_cr, 1), round(ttm_rev, 1)])
                 if ttm_eb and ttm_eb > 0:
                     ndv = next((v for d, v in reversed(nd)
                                 if d <= date and (datetime.strptime(date, "%Y-%m-%d")
                                                   - datetime.strptime(d, "%Y-%m-%d")).days <= 400), None)
                     if ndv is not None:  # no current net debt -> no EV, rather than a guess
                         ev_s.append([date, round((mcap_cr + ndv) / ttm_eb, 1)])
+                        ev_p.append([round(mcap_cr, 1), round(ndv, 1), round(ttm_eb, 1)])
             eq = equity_at(eqs, date)
             if eq and eq > 0:
                 # price/book == market cap / shareholders' funds, which keeps the
                 # share count consistent on both sides of the ratio
                 pb_s.append([date, round(mcap_cr / (eq / 1e7), 2)])
+                pb_p.append([round(mcap_cr, 1), round(eq / 1e7, 1)])
         bands = {}
-        for key, ser, rnd in (("pe", pe_s, 1), ("ev", ev_s, 1), ("pb", pb_s, 2), ("ps", ps_s, 2)):
+        for key, ser, rnd, parts in (("pe", pe_s, 1, pe_p), ("ev", ev_s, 1, ev_p),
+                                     ("pb", pb_s, 2, pb_p), ("ps", ps_s, 2, ps_p)):
             b = _band(ser, rnd)
             if b:
+                if len(parts) == len(ser):
+                    b["parts"] = parts
                 bands[key] = b
         if "pe" in bands and pe_s:
             cutoff = f"{int(pe_s[-1][0][:4]) - 5}{pe_s[-1][0][4:]}"
