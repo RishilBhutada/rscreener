@@ -489,9 +489,17 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   // one would flatten whichever series is smaller into nothing.
   const qShown = (quarters ?? []).filter((q) => toT(q.end) >= t0 && toT(q.start) <= t1);
   const qStripH = plotH * 0.22;
-  const qBase = MT + plotH;
-  const qMax = Math.max(...qShown.map((q) => Math.abs(q.eps)), 1);
-  const qScale = (v: number) => (Math.max(0, v) / qMax) * qStripH;
+  const qFloor = MT + plotH;
+  // A loss has to read as a loss. Clamping at zero drew a loss-making quarter as
+  // no bar at all, so the worst quarters were the ones you could not see. The
+  // strip is split between the largest profit and the largest loss present, the
+  // zero line sits at the boundary, and bars grow up from it or down from it.
+  // With no losses in view the zero line is the floor and nothing moves.
+  const qPos = Math.max(0, ...qShown.map((q) => q.eps));
+  const qNeg = Math.max(0, ...qShown.map((q) => -q.eps));
+  const qSpan = qPos + qNeg || 1;
+  const qZero = qFloor - (qNeg / qSpan) * qStripH;
+  const qLen = (v: number) => (Math.abs(v) / qSpan) * qStripH;
 
   const primary = visible.find((s) => s.kind !== "bars" && s.kind !== "dashed") ?? visible[0];
   const activeBand: ChartBand =
@@ -611,16 +619,20 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                 // start->end leaves a one-day sliver between every pair. The bar
                 // runs to the END of its last day, which closes it exactly.
                 const x0 = x(toT(q.start)), x1v = x(toT(q.end) + 86400000);
-                const h = qScale(q.eps);
+                const h = Math.max(1, qLen(q.eps));
+                const loss = q.eps < 0;
                 return (
-                  <rect key={`qb${i}`} x={Math.min(x0, x1v)} y={qBase - h}
-                    width={Math.max(1, Math.abs(x1v - x0))} height={Math.max(1, h)}
-                    fill={Q_COLOUR[q.q] ?? "var(--q1)"} opacity="0.8">
-                    <title>{`${Q_LABEL[q.q] ?? `Q${q.q}`} · EPS ₹${q.eps}${q.announced ? ` · declared ${q.announced}` : ""}`}</title>
+                  <rect key={`qb${i}`} x={Math.min(x0, x1v)} y={loss ? qZero : qZero - h}
+                    width={Math.max(1, Math.abs(x1v - x0))} height={h}
+                    fill={Q_COLOUR[q.q] ?? "var(--q1)"} opacity={loss ? 0.55 : 0.8}>
+                    <title>{`${Q_LABEL[q.q] ?? `Q${q.q}`} · EPS ₹${q.eps}${loss ? " (loss)" : ""}${q.announced ? ` · declared ${q.announced}` : ""}`}</title>
                   </rect>
                 );
               })}
-              <line x1={ML} x2={W - MR} y1={qBase} y2={qBase} stroke="var(--chart-grid)" strokeWidth="1" />
+              {/* zero line — bars rise above it and hang below it */}
+              <line x1={ML} x2={W - MR} y1={qZero} y2={qZero}
+                stroke="var(--chart-axis)" strokeWidth={qNeg > 0 ? 1.2 : 1}
+                strokeDasharray={qNeg > 0 ? undefined : "0"} opacity={qNeg > 0 ? 0.9 : 0.5} />
             </g>
           )}
           {showQ && qShown.map((q, i) => (

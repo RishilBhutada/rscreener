@@ -6,7 +6,7 @@ import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import StockChart, { Quarter } from "@/components/StockChart";
 import { Row } from "@/lib/query";
-import { loadNote, loadWatchlist, saveNote, toggleWatch } from "@/lib/store";
+import { loadNote, loadWatchlist, pushRecent, saveNote, toggleWatch } from "@/lib/store";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -334,6 +334,7 @@ function CompanyView() {
   useEffect(() => {
     if (!symbol) return;
     setWatched(loadWatchlist().includes(symbol));
+    pushRecent(symbol);
     setNote(loadNote(symbol));
   }, [symbol]);
 

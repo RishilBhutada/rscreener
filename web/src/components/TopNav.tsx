@@ -123,12 +123,17 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
         </div>
       </div>
 
-      <nav className="sm:hidden grid grid-cols-5 gap-1 px-3 pb-2 text-[13px] font-medium">
+      {/* Content-sized and wrapping, NOT a fixed column count. `grid-cols-5` gave
+          every link a 67px cell, which is narrower than "Other screens" — the
+          label then overflowed its cell and printed straight over "Data" sitting
+          beside it. Any fixed grid breaks the moment a label or the link count
+          changes; letting each item take its own width cannot. */}
+      <nav className="sm:hidden flex flex-wrap gap-x-1 gap-y-0.5 px-3 pb-2 text-[13px] font-medium">
         {links.map(([key, label, href]) => (
           <Link
             key={key}
             href={href}
-            className={`px-2 py-2 rounded-lg text-center whitespace-nowrap ${active === key ? "text-[var(--accent-ink)] bg-[var(--accent-soft)] font-semibold" : "text-[var(--ink2)]"}`}
+            className={`px-2.5 py-2 rounded-lg whitespace-nowrap ${active === key ? "text-[var(--accent-ink)] bg-[var(--accent-soft)] font-semibold" : "text-[var(--ink2)]"}`}
           >
             {label}
           </Link>
