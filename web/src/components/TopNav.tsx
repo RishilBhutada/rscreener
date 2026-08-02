@@ -10,7 +10,7 @@ const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 type Lite = { symbol: string; name: string; mcap: number };
 let cache: Lite[] | null = null;
 
-export default function TopNav({ active }: { active?: "screens" | "sectors" | "calendar" | "portfolio" | "ipo" | "status" }) {
+export default function TopNav({ active }: { active?: "home" | "screens" | "sectors" | "calendar" | "portfolio" | "ipo" | "status" }) {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<Lite[]>([]);
@@ -49,11 +49,12 @@ export default function TopNav({ active }: { active?: "screens" | "sectors" | "c
   };
 
   const links: [string, string, string][] = [
-    ["screens", "Screens", "/"],
+    ["home", "Home", "/"],
     ["sectors", "Sectors", "/sectors"],
     ["ipo", "IPO", "/ipo"],
     ["calendar", "Calendar", "/calendar"],
     ["portfolio", "Portfolio", "/portfolio"],
+    ["screens", "Other screens", "/screens"],
     ["status", "Data", "/status"],
   ];
 
