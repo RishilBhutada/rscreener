@@ -1,0 +1,16 @@
+{
+ "at": "2026-08-02 21:37 UTC",
+ "coverage": {
+  "Share prices": 100,
+  "Company snapshot": 98,
+  "Quarterly results (as filed)": 93,
+  "Result declaration dates": 1,
+  "Shareholding pattern": 81,
+  "Balance sheet & cash flow": 94,
+  "IPOs": 100
+ },
+ "accepted_regressions": [
+  "Shareholding pattern: 100% -> 81%"
+ ],
+ "reason": "shareholding mid-backfill after the top500 fix"
+}

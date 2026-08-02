@@ -5,6 +5,7 @@ Contains the snapshot row plus trimmed financial statements (screener.in-style
 key line items only, values in Rs CRORE). Companies whose statements haven't
 been fetched yet get snapshot-only files - the page shows a notice.
 """
+import argparse
 import json
 import math
 import sqlite3
@@ -137,6 +138,16 @@ def _table_exists(con: sqlite3.Connection, name: str) -> bool:
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--symbols", help="comma list, or @path - rebuild only these "
+                                      "(the full run computes 2,354 companies' bands and takes ~9 minutes)")
+    args = ap.parse_args()
+    only = None
+    if args.symbols:
+        raw = (ROOT / args.symbols[1:]).read_text(encoding="utf-8") if args.symbols.startswith("@") else args.symbols
+        only = {s.strip().upper() for s in raw.split(",") if s.strip()}
+        print(f"rebuilding {len(only)} symbol(s) only")
+
     con = sqlite3.connect(DB, timeout=180)
     snaps = pd.read_sql("SELECT * FROM fundamentals", con)
     # Same correction as data.json, from the same function: the company page falls
@@ -153,8 +164,8 @@ def main() -> None:
     }
     netdebt_by_symbol = net_debt_series(con)
     quarters_by_symbol = quarter_blocks(con)
-    trends = build_trends(con, shares_by_symbol)
-    bands = ratio_bands(con, shares_by_symbol, netdebt_by_symbol)
+    trends = build_trends(con, shares_by_symbol, only)
+    bands = ratio_bands(con, shares_by_symbol, netdebt_by_symbol, only)
     prices_by_symbol: dict[str, dict] = {}
     if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='prices'").fetchone():
         pr = pd.read_sql("SELECT symbol, freq, date, close, volume FROM prices ORDER BY date", con)
@@ -210,6 +221,8 @@ def main() -> None:
     n_with, n_without = 0, 0
     for _, snap in snaps.iterrows():
         sym = snap["symbol"]
+        if only is not None and sym not in only:
+            continue
         payload = {
             "generated_at": generated,
             "snapshot": snap.to_dict(),

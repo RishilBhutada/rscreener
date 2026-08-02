@@ -382,7 +382,8 @@ def _derive(slot: dict) -> dict:
     return {"ebitda": ebitda, "gross_profit": gp}
 
 
-def build_trends(con: sqlite3.Connection, shares: dict | None = None) -> dict[str, dict]:
+def build_trends(con: sqlite3.Connection, shares: dict | None = None,
+                 only: set | None = None) -> dict[str, dict]:
     shares = shares or {}
     comps = _stitched(con)
     splits = split_factors(con)
@@ -390,6 +391,8 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None) -> dict[st
     bal = balance_equity(con)
     out: dict[str, dict] = {}
     for (symbol, ptype), periods in comps.items():
+        if only is not None and symbol not in only:
+            continue
         keep = KEEP_ANNUAL if ptype == "annual" else KEEP_QUARTERLY
         ordered = sorted(periods)[-keep:]
         if not ordered:
@@ -531,7 +534,8 @@ def _band(series: list[list], round_to: int = 1) -> dict | None:
     return {"series": series, "median_5y": round(_median(last5y), round_to)}
 
 
-def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = None) -> dict[str, dict]:
+def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = None,
+                only: set | None = None) -> dict[str, dict]:
     """Monthly PE / EV-EBITDA / Price-to-Book / MarketCap-to-Sales bands per symbol.
 
     All ratios use as-filed quarterly fundamentals (results_history) against the
@@ -667,7 +671,12 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
     wk_by = {s: g for s, g in wk.groupby("symbol")}
     mo_by = {s: g for s, g in mo.groupby("symbol")}
     out: dict[str, dict] = {}
+    # `only` exists for the iteration loop, not for production: rebuilding the
+    # bands for all 2,354 companies takes ~9 minutes, which is a long time to
+    # wait to find out whether a one-line change to a formula helped.
     for sym in sorted(set(wk_by) | set(mo_by)):
+        if only is not None and sym not in only:
+            continue
         gw, gm = wk_by.get(sym), mo_by.get(sym)
         g = gw if (gw is not None and len(gw) >= (len(gm) if gm is not None else 0)) else gm
         if g is None or not len(g):
