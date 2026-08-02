@@ -136,3 +136,22 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # A failed refresh is SILENT otherwise: the site keeps serving yesterday's data
+  # and looks completely normal. That is what happened on 1-Aug-2026 - the depth
+  # guard correctly refused to publish, nothing shipped, and nothing said so.
+  # `if: failure()` covers both jobs, so a broken fetch, a tripped guard and a
+  # failed deploy all reach the phone.
+  notify:
+    needs: [refresh, deploy]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Push a failure notification
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          if [ -z "$NTFY_TOPIC" ]; then
+            echo "NTFY_TOPIC secret is not set - nothing to notify"; exit 0
+          fi
+          curl -s --max-time 20             -H "Title: Rscreener nightly refresh failed"             -H "Priority: high"             -H "Tags: warning"             -d "The data did not update tonight. The site is still showing the last good data, not wrong data - the guards stop a bad release rather than publishing it. Open the run to see which step stopped: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"             "https://ntfy.sh/$NTFY_TOPIC" || echo "notification failed to send"
