@@ -168,9 +168,43 @@ def filed_net_worth(con: sqlite3.Connection) -> dict[str, list]:
         ref = share_capital_ref(by_period)
         vals = [(p, nw) for p in sorted(by_period)
                 if (nw := net_worth(by_period[p], ref)) is not None]
+        vals = _drop_scale_outliers(vals)
         if vals:
             out[sym] = vals
     return out
+
+
+NW_COLLAPSE = 0.25  # a filing under this share of BOTH neighbours is a parse artifact
+
+
+def _drop_scale_outliers(vals: list) -> list:
+    """Drop filings whose net worth collapses against BOTH neighbouring filings.
+
+    The paid-up-capital test only catches a value close to share capital. It does
+    not catch one that is merely far too small: every FY2017 annual filing we
+    parse comes back ~80x under the truth - TCS at Rs 1,061 cr sitting between a
+    real Rs 65,361 cr in FY16 and Rs 98,112 cr in FY23, with the identical window
+    broken for Shree Cement, Hero MotoCorp, 3M India and Vedanta. Rs 1,061 cr is
+    5.4x share capital, so it clears the 3x bar, and Price/Book printed 660
+    against a real 8.
+
+    The test has to be LOCAL. Comparing against the symbol's median instead
+    throws away real early history - net worth compounds, so Reliance's genuine
+    Rs 82,630 cr in FY08 is a small fraction of its median and looks identical to
+    an artifact by that measure. Against its neighbours it sits on a smooth ramp.
+    Only a value that collapses in both directions and recovers is a parse error;
+    a real write-off does not un-write itself the following year.
+    """
+    if len(vals) < 3:
+        return vals
+    keep = [vals[0]]
+    for i in range(1, len(vals) - 1):
+        prev, cur, nxt = vals[i - 1][1], vals[i][1], vals[i + 1][1]
+        if prev > 0 and nxt > 0 and cur / prev < NW_COLLAPSE and cur / nxt < NW_COLLAPSE:
+            continue
+        keep.append(vals[i])
+    keep.append(vals[-1])
+    return keep
 
 
 def net_debt_series(con: sqlite3.Connection) -> dict[str, list]:

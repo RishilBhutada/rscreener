@@ -46,8 +46,24 @@ jobs:
         run: python pipeline/fetch_prices.py --symbols @data/top500.txt --max-age-hours 156 --sleep 0.5
       - name: Refresh concall/rating documents (weekly rotation)
         run: python pipeline/fetch_announcement_docs.py --symbols @data/top500.txt --max-age-hours 156 --sleep 0.5
-      - name: Deepen as-filed P&L history (bounded weekly rotation, full ~20yr depth)
-        run: python pipeline/fetch_results_history.py --symbols @data/top500.txt --max-age-hours 720 --limit 25 --quarters-back 0 --sleep 0.3
+      - name: Write the full-universe symbol list for the earnings refresh
+        run: |
+          python -c "import sqlite3;from pathlib import Path;c=sqlite3.connect('data/rscreener.db',timeout=180);s=[r[0] for r in c.execute('SELECT symbol FROM universe ORDER BY symbol')];Path('data/all_symbols.txt').write_text(','.join(s));print(len(s),'symbols')"
+      - name: Keep as-filed earnings CURRENT across the whole universe
+        # This was `--symbols @data/top500.txt --limit 25`: 25 names a night out of
+        # 500. At that rate the other 1,800 symbols were never revisited at all -
+        # 1,430 of them sat on earnings that stopped at Dec-2024, so their P/E
+        # lines died 19 months back while the price line kept moving. MTAR Tech's
+        # chart topped out at 153 where screener showed 496. Recent quarters,
+        # whole universe, every night; depth stays a bounded rotation below.
+        # --limit 800 keeps one night inside the Actions job timeout. Three nights
+        # clear the backlog; after that --max-age-hours 168 means each symbol comes
+        # up weekly, so steady state is ~340 a night and the cap never binds.
+        run: python pipeline/fetch_results_history.py --symbols @data/all_symbols.txt --max-age-hours 168 --limit 800 --quarters-back 8 --sleep 0.25
+        continue-on-error: true
+      - name: Deepen as-filed P&L history (bounded rotation, full ~20yr depth)
+        run: python pipeline/fetch_results_history.py --symbols @data/all_symbols.txt --max-age-hours 4320 --limit 60 --quarters-back 0 --sleep 0.3
+        continue-on-error: true
       - name: Refresh IPOs (official NSE issues + live subscription)
         run: python pipeline/fetch_ipos.py
       - name: Snapshot grey-market premium (unofficial; builds the accuracy record)
