@@ -37,6 +37,13 @@
   --q2: #78b898;
   --q3: #dd9086;
   --q4: #dfc077;
+  /* corporate actions - deliberately clear of the muted quarter palette above */
+  --ca-div: #2f8f6f;
+  --ca-bon: #8163cf;
+  --ca-spl: #2f7fc4;
+  --ca-rgt: #c9762c;
+  --ca-buy: #c2508f;
+  --ca-oth: #7b8494;
   --chart-value: #49566b;
   --chart-dma50: #f59e0b;
   --chart-dma200: #6366f1;
@@ -72,6 +79,12 @@
   --q2: #4e8a6b;
   --q3: #a86259;
   --q4: #a89050;
+  --ca-div: #4fb894;
+  --ca-bon: #a68bea;
+  --ca-spl: #5aa3e0;
+  --ca-rgt: #e0995a;
+  --ca-buy: #e07ab0;
+  --ca-oth: #98a1b2;
   --chart-value: #a2b2c8;
   --chart-dma50: #fbbf24;
   --chart-dma200: #818cf8;

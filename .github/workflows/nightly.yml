@@ -72,6 +72,13 @@ jobs:
         # up weekly, so steady state is ~340 a night and the cap never binds.
         run: python pipeline/fetch_results_history.py --symbols @data/all_symbols.txt --max-age-hours 168 --limit 800 --quarters-back 8 --sleep 0.25
         continue-on-error: true
+      - name: Refresh corporate actions (dividends, bonuses, splits, rights)
+        # One index call per symbol against the same NSE host as the filing dates,
+        # so it rides the same rate budget. Corrects an existing error too: the
+        # Yahoo splits table files Reliance's Oct-2024 one-for-one BONUS as a
+        # "2:1 split", and NSE labels it correctly.
+        run: python pipeline/fetch_corporate_actions.py --symbols @data/all_symbols.txt --max-age-hours 336 --limit 800 --sleep 0.2
+        continue-on-error: true
       - name: Record when each set of results was ANNOUNCED
         # Drives the quarter-coloured EPS bars and result markers on the charts,
         # and - more importantly - lets the ratio bands step earnings in on the day

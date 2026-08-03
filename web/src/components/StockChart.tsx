@@ -202,6 +202,32 @@ export type Quarter = {
   q: number;      // Indian fiscal quarter — Apr-Jun is 1
 };
 
+/** A dividend, bonus, split, rights issue or the like, on its EX-DATE - the day
+ *  the price adjusts and the day by which the share had to be held. */
+export type CorpAction = {
+  date: string;
+  kind: string;          // dividend | bonus | split | rights | buyback | other
+  detail?: string | null;
+  subject?: string | null;
+};
+
+/** Chosen well clear of the quarter palette, which is muted blue/green/red/amber,
+ *  so the two overlays never read as the same thing. Corporate actions draw SOLID;
+ *  quarterly result dates stay dashed. */
+const CA_COLOUR: Record<string, string> = {
+  dividend: "var(--ca-div)",
+  bonus: "var(--ca-bon)",
+  split: "var(--ca-spl)",
+  rights: "var(--ca-rgt)",
+  buyback: "var(--ca-buy)",
+  other: "var(--ca-oth)",
+};
+const CA_ORDER = ["dividend", "bonus", "split", "rights", "buyback", "other"];
+const CA_LABEL: Record<string, string> = {
+  dividend: "Dividend", bonus: "Bonus", split: "Split",
+  rights: "Rights", buyback: "Buyback", other: "Other",
+};
+
 /** Fixed colour per fiscal quarter, repeating every year, so the same quarter is
  *  always the same colour. Q3 is red by request; it does NOT mean a loss. */
 const Q_COLOUR: Record<number, string> = {
@@ -212,7 +238,7 @@ const Q_COLOUR: Record<number, string> = {
 };
 const Q_LABEL: Record<number, string> = { 1: "Q1 Apr–Jun", 2: "Q2 Jul–Sep", 3: "Q3 Oct–Dec", 4: "Q4 Jan–Mar" };
 
-export default function StockChart({ prices, peBand, evBand, pbBand, psBand, trendQ, livePrice, quarters, symbol, peers }: {
+export default function StockChart({ prices, peBand, evBand, pbBand, psBand, trendQ, livePrice, quarters, actions, symbol, peers }: {
   prices: ChartPrices;
   peBand?: ChartBand;
   evBand?: ChartBand;
@@ -221,6 +247,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   trendQ?: ChartTrendQ;
   livePrice: number | null;
   quarters?: Quarter[] | null;
+  actions?: CorpAction[] | null;
   symbol?: string;
   peers?: { symbol?: unknown; name?: unknown }[];
 }) {
@@ -233,6 +260,11 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   // listed answers a different and equally fair question - "of the two I was
   // choosing between, did I pick the better one" - and those two need not be
   // peers at all. Peers are offered directly; everything else is one click away.
+  const [showCA, setShowCA] = useState(false);
+  // Dividends recur yearly and would fence a long chart; bonuses and splits are
+  // rare and worth always seeing. So the types switch independently, and each
+  // carries how many fall inside the range currently on screen.
+  const [caOn, setCaOn] = useState<Record<string, boolean>>({ dividend: true });
   const [pickAny, setPickAny] = useState(false);
   const [anyQ, setAnyQ] = useState("");
   const [allCos, setAllCos] = useState<{ symbol: string; name: string; mcap: number }[]>([]);
@@ -557,6 +589,13 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   // a value axis with price or a ratio — the magnitudes are unrelated, and sharing
   // one would flatten whichever series is smaller into nothing.
   const qShown = (quarters ?? []).filter((q) => toT(q.end) >= t0 && toT(q.start) <= t1);
+  const caShown = (actions ?? []).filter((a) => toT(a.date) >= t0 && toT(a.date) <= t1);
+  const caCount: Record<string, number> = {};
+  for (const a of caShown) {
+    const k = CA_COLOUR[a.kind] ? a.kind : "other";
+    caCount[k] = (caCount[k] ?? 0) + 1;
+  }
+  const caIsOn = (k: string) => caOn[k] ?? false;
 
   const primary = visible.find((s) => s.kind !== "bars" && s.kind !== "dashed") ?? visible[0];
   const activeBand: ChartBand =
@@ -651,6 +690,36 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
               ));
             })()}
           </div>
+        </div>
+      )}
+      {(actions?.length ?? 0) > 0 && (
+        <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
+          <button
+            onClick={() => setShowCA(!showCA)}
+            title="Mark dividends, bonuses, splits and rights issues on their ex-date"
+            className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium border ${
+              showCA
+                ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
+                : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
+            }`}
+          >
+            {showCA ? "\u2713 " : ""}Corporate actions
+          </button>
+          {showCA && CA_ORDER.filter((k) => caCount[k]).map((k) => (
+            <label key={k} className="inline-flex items-center gap-1.5 cursor-pointer text-[var(--ink2)]">
+              <input
+                type="checkbox"
+                checked={caIsOn(k)}
+                onChange={() => setCaOn({ ...caOn, [k]: !caIsOn(k) })}
+                className="accent-[var(--accent)] cursor-pointer"
+              />
+              <i className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: CA_COLOUR[k] }} />
+              {CA_LABEL[k]} <span className="text-[var(--ink3)]">({caCount[k]})</span>
+            </label>
+          ))}
+          {showCA && caShown.length === 0 && (
+            <span className="text-[var(--ink3)]">none in this range</span>
+          )}
         </div>
       )}
       {(quarters?.length ?? 0) > 0 && (
@@ -762,6 +831,23 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             <text key={tk.t} x={x(tk.t)} y={H - 8} fontSize={FS} fill="var(--chart-axis)" textAnchor="middle">{tk.label}</text>
           ))}
 
+          {showCA && caShown.map((a, i) => {
+            const k = CA_COLOUR[a.kind] ? a.kind : "other";
+            if (!caIsOn(k)) return null;
+            const cx = x(toT(a.date));
+            const col = CA_COLOUR[k];
+            const text = a.detail ? `${CA_LABEL[k]} ${a.detail}` : CA_LABEL[k];
+            return (
+              <g key={`ca${i}`}>
+                <line x1={cx} x2={cx} y1={MT + 10} y2={MT + plotH} stroke={col} strokeWidth="1.5" opacity="0.95" />
+                <circle cx={cx} cy={MT + 10} r="3.2" fill={col} />
+                <text x={cx} y={MT + 4} textAnchor="middle" fontSize={FS - (isMobile ? 5 : 1)} fill={col}>
+                  {text}
+                </text>
+                <title>{`${a.subject ?? text} \u00b7 ex-date ${a.date}`}</title>
+              </g>
+            );
+          })}
           {showQ && showDates && qShown.map((q, i) => (
             q.announced && toT(q.announced) >= t0 && toT(q.announced) <= t1 ? (
               <g key={`ql${i}`}>

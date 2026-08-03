@@ -133,6 +133,25 @@ def quarter_blocks(con: sqlite3.Connection) -> dict[str, list[dict]]:
     return out
 
 
+def corporate_actions(con: sqlite3.Connection) -> dict[str, list[dict]]:
+    """{symbol: [{date, kind, detail, subject}]} - dividends, bonuses and the rest.
+
+    Keyed on the EX-DATE, which is the day the price adjusts and the day by which
+    the share had to be held. That is the date worth drawing on a chart; the
+    announcement and record dates are not what the price responds to.
+    """
+    if not _table_exists(con, "corporate_actions"):
+        return {}
+    out: dict[str, list[dict]] = {}
+    for sym, ex, kind, detail, subject in con.execute(
+        "SELECT symbol, ex_date, kind, detail, subject FROM corporate_actions ORDER BY ex_date"
+    ):
+        if ex:
+            out.setdefault(sym, []).append(
+                {"date": ex, "kind": kind, "detail": detail, "subject": subject})
+    return out
+
+
 def _table_exists(con: sqlite3.Connection, name: str) -> bool:
     return bool(con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone())
 
@@ -207,6 +226,7 @@ def main() -> None:
     }
     netdebt_by_symbol = net_debt_series(con)
     quarters_by_symbol = quarter_blocks(con)
+    actions_by_symbol = corporate_actions(con)
     trends = build_trends(con, shares_by_symbol, only)
     bands = ratio_bands(con, shares_by_symbol, netdebt_by_symbol, only)
     prices_by_symbol: dict[str, dict] = {}
@@ -283,6 +303,7 @@ def main() -> None:
             "pb_band": bands.get(sym, {}).get("pb"),
             "ps_band": bands.get(sym, {}).get("ps"),
             "quarters": quarters_by_symbol.get(sym),
+            "actions": actions_by_symbol.get(sym),
         }
         if sym in has_statements:
             stmts = pd.read_sql("SELECT * FROM statements WHERE symbol = ?", con, params=(sym,))
