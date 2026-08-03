@@ -10,7 +10,7 @@ import { loadNote, loadWatchlist, pushRecent, saveNote, toggleWatch } from "@/li
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
-type Stmt = { periods: string[]; items: { label: string; values: (number | null)[] }[] };
+type Stmt = { periods: string[]; items: { label: string; values: (number | null)[] }[]; declared?: (string | null)[] };
 type AnnualReport = { from: string; to: string; url: string };
 type AnnDoc = { date: string; title: string; url: string };
 type Trend = {
@@ -87,6 +87,14 @@ function periodLabel(p: string): string {
   return new Date(p).toLocaleDateString("en-IN", { month: "short", year: "numeric" });
 }
 
+/** "Mar 2026" is when the quarter ended; the number only became public on the
+ *  day it was declared, which for MTAR Tech was nearly seven months later. The
+ *  table states both so the reader is never guessing which they are looking at. */
+function declaredLabel(d: string | null | undefined): string | null {
+  if (!d) return null;
+  return new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
+}
+
 function StatementTable({ title, stmt, subtitle, boldRows }: { title: string; stmt: Stmt; subtitle?: string; boldRows?: string[] }) {
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
@@ -99,9 +107,15 @@ function StatementTable({ title, stmt, subtitle, boldRows }: { title: string; st
           <thead>
             <tr className="text-xs text-[var(--ink3)] border-y border-[var(--line)]">
               <th className="px-3 py-2 text-left font-medium sticky left-0 bg-[var(--card)]"> </th>
-              {stmt.periods.map((p) => (
-                <th key={p} className="px-3 py-2 text-right font-medium whitespace-nowrap">{periodLabel(p)}</th>
-              ))}
+              {stmt.periods.map((p, i) => {
+                const dec = declaredLabel(stmt.declared?.[i]);
+                return (
+                  <th key={p} className="px-3 py-2 text-right font-medium whitespace-nowrap">
+                    {periodLabel(p)}
+                    {dec && <span className="block font-normal text-[10px] text-[var(--ink3)]">({dec})</span>}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>

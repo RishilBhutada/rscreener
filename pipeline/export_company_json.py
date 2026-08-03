@@ -137,7 +137,7 @@ def _table_exists(con: sqlite3.Connection, name: str) -> bool:
     return bool(con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone())
 
 
-def asfiled_table(trend: dict | None) -> dict | None:
+def asfiled_table(trend: dict | None, announced: dict | None = None) -> dict | None:
     """A results table built from the AS-FILED NSE figures, quarterly or annual.
 
     Both sources were being exported and the page rendered the wrong one. Yahoo
@@ -159,6 +159,7 @@ def asfiled_table(trend: dict | None) -> dict | None:
     if not trend or not trend.get("periods"):
         return None
     per = trend["periods"]
+    declared = [(announced or {}).get(p) for p in per]
     rows = [
         ("Revenue", trend.get("revenue")),
         ("Expenses", trend.get("expenses")),
@@ -171,7 +172,12 @@ def asfiled_table(trend: dict | None) -> dict | None:
     ]
     items = [{"label": lab, "values": vals} for lab, vals in rows
              if vals and any(v is not None for v in vals)]
-    return {"periods": per, "items": items} if items else None
+    if not items:
+        return None
+    out = {"periods": per, "items": items}
+    if any(declared):
+        out["declared"] = declared   # shown in brackets after each period
+    return out
 
 
 def main() -> None:
@@ -294,7 +300,8 @@ def main() -> None:
         # what put Yahoo's owners-only profit on screen next to the filed figure.
         for key, tkey, yf_key in (("quarterly_results", "quarterly", "_yf_quarterly"),
                                   ("annual_pnl", "annual", "_yf_annual")):
-            asf = asfiled_table((trends.get(sym) or {}).get(tkey))
+            asf = asfiled_table((trends.get(sym) or {}).get(tkey),
+                                {q["end"]: q.get("announced") for q in (quarters_by_symbol.get(sym) or [])})
             fallback = payload["statements"].pop(yf_key, None)
             chosen = asf or fallback
             if chosen:

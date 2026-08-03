@@ -228,6 +228,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const [range, setRange] = useState("5Yr");
   const [peWin, setPeWin] = useState("ttm");
   const [showQ, setShowQ] = useState(false);
+  const [showDates, setShowDates] = useState(true);   // result lines, separately switchable
   // A valuation is never absolute. "Is 30x expensive?" only means something
   // against the company's own history AND against someone else's 30x, so any
   // second company can be laid over the same view.
@@ -589,6 +590,19 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
           >
             {showQ ? "✓ " : ""}Quarterly results
           </button>
+          {showQ && (
+            <button
+              onClick={() => setShowDates(!showDates)}
+              title="Show or hide the dashed line marking the day each quarter's results were declared"
+              className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium border ${
+                showDates
+                  ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
+                  : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
+              }`}
+            >
+              {showDates ? "✓ " : ""}Result dates
+            </button>
+          )}
           {showQ && view === "pe" && peBand?.alt && (
             <div className="flex items-center gap-1 flex-wrap">
               <span className="text-[var(--ink3)] mr-0.5">Earnings</span>
@@ -616,14 +630,45 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                   {Q_LABEL[n]}
                 </span>
               ))}
-              <span className="inline-flex items-center gap-1">
-                <i className="inline-block w-4 border-t-2 border-dashed border-[var(--ink3)]" />
-                declared
-              </span>
+              {showDates && (
+                <span className="inline-flex items-center gap-1">
+                  <i className="inline-block w-4 border-t-2 border-dashed border-[var(--ink3)]" />
+                  declared
+                </span>
+              )}
             </div>
           )}
         </div>
       )}
+      {(() => {
+        // A ratio line that starts years after the price line is not a property of
+        // the company - it is the depth of earnings we have fetched. 1,994 of 2,236
+        // companies hold 20 quarters or fewer because the full-depth pass runs at a
+        // bounded rate, so silence here would have the reader inferring something
+        // about the business from a gap in our own coverage.
+        if (view === "price" || !primary?.data?.length) return null;
+        const priceStart = (prices.monthly?.[0] ?? prices.weekly?.[0])?.[0];
+        if (!priceStart) return null;
+        const gapYears = (primary.data[0].t - toT(priceStart)) / (365.25 * 86400000);
+        if (gapYears < 1.5) return null;
+        return (
+          <p className="text-xs text-[var(--ink3)] mb-2 leading-relaxed">
+            This ratio starts{" "}
+            <span className="text-[var(--ink2)]">
+              {new Date(primary.data[0].t).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}
+            </span>{" "}
+            though the price goes back to{" "}
+            <span className="text-[var(--ink2)]">
+              {new Date(toT(priceStart)).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}
+            </span>
+            . Earlier earnings for this company have not been fetched yet, so the ratio cannot be
+            computed that far back &mdash; it is missing data, not a gap in the business.{" "}
+            <a href={`${CHART_BASE}/status`} className="underline hover:text-[var(--ink2)]">
+              see what is still being fetched
+            </a>
+          </p>
+        );
+      })()}
       <div className="relative">
         <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full touch-none select-none"
           onPointerMove={onMove} onPointerDown={onMove} onPointerLeave={() => setHover(null)}>
@@ -641,7 +686,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             <text key={tk.t} x={x(tk.t)} y={H - 8} fontSize={FS} fill="var(--chart-axis)" textAnchor="middle">{tk.label}</text>
           ))}
 
-          {showQ && qShown.map((q, i) => (
+          {showQ && showDates && qShown.map((q, i) => (
             q.announced && toT(q.announced) >= t0 && toT(q.announced) <= t1 ? (
               <g key={`ql${i}`}>
                 <line x1={x(toT(q.announced))} x2={x(toT(q.announced))} y1={MT} y2={MT + plotH}

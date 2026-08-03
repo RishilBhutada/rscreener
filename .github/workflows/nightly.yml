@@ -82,7 +82,11 @@ jobs:
         run: python pipeline/fetch_filing_dates.py --symbols @data/all_symbols.txt --max-age-hours 168 --limit 900 --sleep 0.2
         continue-on-error: true
       - name: Deepen as-filed P&L history (bounded rotation, full ~20yr depth)
-        run: python pipeline/fetch_results_history.py --symbols @data/all_symbols.txt --max-age-hours 4320 --limit 60 --quarters-back 0 --sleep 0.3
+        # 60 a night meant 2,000 companies would take 33 nights to gain full depth,
+        # which is why 1,994 of them hold 20 quarters or fewer and CEMPRO's ratio
+        # charts start in 2023 while its price starts in 2002. 200 costs roughly
+        # 50 minutes and clears the backlog in ten nights instead.
+        run: python pipeline/fetch_results_history.py --symbols @data/all_symbols.txt --max-age-hours 4320 --limit 200 --quarters-back 0 --sleep 0.3
         continue-on-error: true
       - name: Refresh IPOs (official NSE issues + live subscription)
         run: python pipeline/fetch_ipos.py
