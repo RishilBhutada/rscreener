@@ -534,6 +534,10 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None,
             "eps": [round(v, 2) if v is not None else None for v in eps],
             "expenses": [_cr(v) for v in exp],
             "ebitda": [_cr(v) for v in ebitda],
+            # carried so the quarterly table can show the same rows screener does
+            # without falling back to a second source for them
+            "interest": [_cr(periods[p2].get("finance_cost")) for p2 in ordered],
+            "depreciation": [_cr(periods[p2].get("depreciation")) for p2 in ordered],
             "book_value": [round(e / sh, 2) if (pd.notna(e) and sh) else None for e in equity],
             "opm": [pct(ebitda[i], rev[i]) for i in range(len(ordered))],
             "gpm": [pct(gp[i], rev[i]) for i in range(len(ordered))],

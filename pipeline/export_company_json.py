@@ -137,6 +137,38 @@ def _table_exists(con: sqlite3.Connection, name: str) -> bool:
     return bool(con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone())
 
 
+def asfiled_quarterly(trend: dict | None) -> dict | None:
+    """The quarterly results table, built from the AS-FILED NSE figures.
+
+    Both sources were being exported and the page rendered the wrong one. Yahoo
+    reports "Net Income" as profit attributable to owners, net of minority
+    interest; the filing reports total net profit. For Dixon Technologies those
+    differ by 15-25% every quarter - Dec-2024 filed at Rs 216cr showed as Rs 171cr
+    - so the number on screen came from a real source, just not the one the
+    company filed. Yahoo was also missing two of the eight quarters outright.
+
+    The as-filed series is authoritative, matches screener.in to the decimal, and
+    runs deeper. It wins; Yahoo is only a fallback for companies with no filings
+    parsed yet.
+    """
+    if not trend or not trend.get("periods"):
+        return None
+    per = trend["periods"]
+    rows = [
+        ("Revenue", trend.get("revenue")),
+        ("Expenses", trend.get("expenses")),
+        ("Operating Profit", trend.get("ebitda")),
+        ("OPM %", trend.get("opm")),
+        ("Interest", trend.get("interest")),
+        ("Depreciation", trend.get("depreciation")),
+        ("Net Profit", trend.get("pat")),
+        ("EPS (Rs)", trend.get("eps")),
+    ]
+    items = [{"label": lab, "values": vals} for lab, vals in rows
+             if vals and any(v is not None for v in vals)]
+    return {"periods": per, "items": items} if items else None
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbols", help="comma list, or @path - rebuild only these "
@@ -244,7 +276,7 @@ def main() -> None:
         if sym in has_statements:
             stmts = pd.read_sql("SELECT * FROM statements WHERE symbol = ?", con, params=(sym,))
             for key, stmt_type, period_type in [
-                ("quarterly_results", "income", "quarterly"),
+                ("_yf_quarterly", "income", "quarterly"),
                 ("annual_pnl", "income", "annual"),
                 ("balance_sheet", "balance", "annual"),
                 ("cash_flow", "cashflow", "annual"),
@@ -252,6 +284,15 @@ def main() -> None:
                 built = build_statement(stmts, stmt_type, period_type)
                 if built:
                     payload["statements"][key] = built
+        # As-filed wins for the quarterly table; Yahoo only stands in where no
+        # filings have been parsed. Exporting both and letting the page pick is
+        # what put Yahoo's owners-only profit on screen next to the filed figure.
+        asf = asfiled_quarterly((trends.get(sym) or {}).get("quarterly"))
+        yf_q = payload["statements"].pop("_yf_quarterly", None)
+        chosen = asf or yf_q
+        if chosen:
+            payload["statements"]["quarterly_results"] = chosen
+            payload["quarterly_source"] = "as-filed (NSE)" if asf else "Yahoo Finance"
         if payload["statements"]:
             n_with += 1
         else:
