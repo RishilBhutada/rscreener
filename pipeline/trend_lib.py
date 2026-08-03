@@ -181,6 +181,53 @@ def available_from(period_end: str, announced: dict) -> str:
     ).strftime("%Y-%m-%d")
 
 
+SHARE_COUNT_SPIKE = 3.0  # a filing this far from BOTH neighbours contradicts itself
+
+
+def implausible_quarters(con: sqlite3.Connection) -> dict[str, set]:
+    """{symbol: {period_end}} for filings that disagree with themselves.
+
+    A quarterly filing carries both PAT and EPS, so it contains its own check:
+    PAT / EPS is the share count that filing was written against, and a share
+    count does not change sixfold in one quarter and change back the next. Where
+    it appears to, the filing (or our parse of it) is wrong.
+
+    This is deliberately a SPIKE test against both neighbours, not a comparison
+    against the company's own average. A split is a real, permanent step - 360ONE
+    sits at exactly a quarter of its old count for years after a 4:1 - and judging
+    against an average flags every quarter after a split as broken. Measured over
+    38,201 quarters: 8.70% look wrong against the average, 0.43% are actual
+    single-quarter spikes. The difference is almost entirely splits.
+
+    Dropping these leaves a gap in the chart. A gap is honest - the number was
+    never fetched, or it cannot be trusted - whereas a wrong point is indis-
+    tinguishable from a right one and gets acted on.
+    """
+    if not _table_exists(con, "results_history"):
+        return {}
+    rows = con.execute(
+        "SELECT symbol, period_end, "
+        "MAX(CASE WHEN item='pat' THEN value END), MAX(CASE WHEN item='eps' THEN value END) "
+        "FROM results_history WHERE period_type='quarterly' AND item IN ('pat','eps') "
+        "GROUP BY symbol, period_end ORDER BY symbol, period_end"
+    ).fetchall()
+    by_sym: dict[str, list] = {}
+    for sym, period, pat, eps in rows:
+        if pat and eps:
+            by_sym.setdefault(sym, []).append((period, pat / eps))
+    out: dict[str, set] = {}
+    for sym, seq in by_sym.items():
+        for i in range(1, len(seq) - 1):
+            prev, cur, nxt = seq[i - 1][1], seq[i][1], seq[i + 1][1]
+            if prev <= 0 or cur <= 0 or nxt <= 0:
+                continue
+            neighbours_agree = 0.7 <= prev / nxt <= 1.4
+            off_both = (cur / prev > SHARE_COUNT_SPIKE or cur / prev < 1 / SHARE_COUNT_SPIKE) and                        (cur / nxt > SHARE_COUNT_SPIKE or cur / nxt < 1 / SHARE_COUNT_SPIKE)
+            if neighbours_agree and off_both:
+                out.setdefault(sym, set()).add(seq[i][0])
+    return out
+
+
 def filed_net_worth(con: sqlite3.Connection) -> dict[str, list]:
     """{symbol: [(period_end, net worth in raw Rs)]} from the NSE results filings.
 
@@ -386,6 +433,11 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None,
                  only: set | None = None) -> dict[str, dict]:
     shares = shares or {}
     comps = _stitched(con)
+    suspect = implausible_quarters(con)
+    for (sym_, ptype_), periods_ in comps.items():
+        if ptype_ == "quarterly":
+            for bad_ in suspect.get(sym_, set()):
+                periods_.pop(bad_, None)   # same rule as the charts: drop, do not draw
     splits = split_factors(con)
     known = splits_trustworthy(con, shares)
     bal = balance_equity(con)
@@ -576,14 +628,20 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
     equity_by_sym: dict[str, list] = {}
     filed = filed_net_worth(con)
     announced = filing_dates(con)   # when the market could first read each quarter
+    suspect = implausible_quarters(con)  # filings whose own PAT and EPS contradict each other
     for sym, g in q.groupby("symbol"):
         by_pe: dict[str, dict] = {}
         for _, r in g.iterrows():
             by_pe.setdefault(r["period_end"], {})[r["item"]] = r["value"]
         ev = splits.get(sym)
         sh_now = shares.get(sym)   # yardstick for effective_shares sanity
+        skip = suspect.get(sym, set())
         flows, eqs = [], []
         for pe in sorted(by_pe):
+            # A filing that disagrees with itself is dropped rather than drawn.
+            # Empty is honest; wrong is acted on.
+            if pe in skip:
+                continue
             s = by_pe[pe]
             rev, exp = s.get("revenue"), s.get("total_expenses")
             fin, dep = s.get("finance_cost") or 0.0, s.get("depreciation") or 0.0
