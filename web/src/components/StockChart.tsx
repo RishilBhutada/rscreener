@@ -229,6 +229,13 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const [peWin, setPeWin] = useState("ttm");
   const [showQ, setShowQ] = useState(false);
   const [showDates, setShowDates] = useState(true);   // result lines, separately switchable
+  // Peers answer "is this expensive for its industry". Comparing against anything
+  // listed answers a different and equally fair question - "of the two I was
+  // choosing between, did I pick the better one" - and those two need not be
+  // peers at all. Peers are offered directly; everything else is one click away.
+  const [pickAny, setPickAny] = useState(false);
+  const [anyQ, setAnyQ] = useState("");
+  const [allCos, setAllCos] = useState<{ symbol: string; name: string; mcap: number }[]>([]);
   // A valuation is never absolute. "Is 30x expensive?" only means something
   // against the company's own history AND against someone else's 30x, so any
   // second company can be laid over the same view.
@@ -269,6 +276,16 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const years = RANGES.find(([r]) => r === range)?.[1] ?? 5;
   const now = Date.now();
   const cutoff = years >= 999 ? 0 : now - years * 365.25 * 86400000;
+
+  useEffect(() => {
+    if (!pickAny || allCos.length) return;
+    fetch(`${CHART_BASE}/data.json`)
+      .then((r) => r.json())
+      .then((d) => setAllCos((d.rows as Record<string, unknown>[]).map((r) => ({
+        symbol: String(r.symbol), name: String(r.name ?? ""), mcap: (r.mcap as number) ?? 0,
+      }))))
+      .catch(() => { /* the peer list still works without it */ });
+  }, [pickAny, allCos.length]);
 
   const model = useMemo(() => {
     const daily: Pt[] = prices.daily ?? [];
@@ -556,8 +573,13 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
         <span className="text-[var(--ink3)]">Compare with</span>
         <select
-          value={cmpSym ?? ""}
-          onChange={(e) => { setCmpSym(e.target.value || null); setHover(null); }}
+          value={pickAny ? "__any__" : (cmpSym ?? "")}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "__any__") { setPickAny(true); return; }
+            setPickAny(false); setAnyQ("");
+            setCmpSym(v || null); setHover(null);
+          }}
           className="rounded-lg border border-[var(--line)] bg-[var(--card2)] text-[var(--ink2)] px-2 py-1.5 sm:py-1 max-w-[52vw] sm:max-w-none"
         >
           <option value="">nothing</option>
@@ -567,6 +589,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             .map((p) => (
               <option key={p.sym} value={p.sym}>{p.nm} ({p.sym})</option>
             ))}
+          <option value="__any__">Others - search all companies...</option>
         </select>
         {cmp && (
           <span className="inline-flex items-center gap-1.5 text-[var(--ink3)]">
@@ -577,6 +600,59 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         )}
         {cmpErr && <span className="text-[var(--neg)]">{cmpErr}</span>}
       </div>
+      {pickAny && (
+        <div className="mb-2 rounded-xl border border-[var(--line2)] bg-[var(--card2)] p-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-[var(--ink3)]">Compare against any listed company</span>
+            <button
+              onClick={() => { setPickAny(false); setAnyQ(""); }}
+              className="text-xs text-[var(--ink3)] hover:text-[var(--ink)]"
+            >
+              close
+            </button>
+          </div>
+          <input
+            autoFocus
+            value={anyQ}
+            onChange={(e) => setAnyQ(e.target.value)}
+            placeholder="Search by name or symbol"
+            className="mt-2 w-full rounded-lg border border-[var(--line)] bg-[var(--card)] px-3 py-2 text-sm
+                       text-[var(--ink)] placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)]"
+          />
+          <div className="mt-2 max-h-52 overflow-y-auto">
+            {(() => {
+              const q = anyQ.trim().toLowerCase();
+              if (q.length < 1) {
+                return <p className="text-xs text-[var(--ink3)] px-1 py-2">
+                  Type to search all {allCos.length ? allCos.length.toLocaleString("en-IN") : ""} companies.
+                </p>;
+              }
+              const hits = allCos
+                .map((c) => {
+                  const s = c.symbol.toLowerCase(), n = c.name.toLowerCase();
+                  const sc = s.startsWith(q) ? 0 : n.startsWith(q) ? 1 : n.includes(` ${q}`) ? 2
+                    : s.includes(q) || n.includes(q) ? 3 : 9;
+                  return [sc, c] as const;
+                })
+                .filter(([sc, c]) => sc < 9 && c.symbol !== symbol)
+                .sort((a, b) => a[0] - b[0] || b[1].mcap - a[1].mcap)
+                .slice(0, 12)
+                .map(([, c]) => c);
+              if (!hits.length) return <p className="text-xs text-[var(--ink3)] px-1 py-2">No match.</p>;
+              return hits.map((c) => (
+                <button
+                  key={c.symbol}
+                  onClick={() => { setCmpSym(c.symbol); setPickAny(false); setAnyQ(""); setHover(null); }}
+                  className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-[var(--card)] flex items-baseline justify-between gap-3"
+                >
+                  <span className="text-sm text-[var(--ink)] truncate">{c.name || c.symbol}</span>
+                  <span className="text-xs text-[var(--ink3)] shrink-0">{c.symbol}</span>
+                </button>
+              ));
+            })()}
+          </div>
+        </div>
+      )}
       {(quarters?.length ?? 0) > 0 && (
         <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
           <button

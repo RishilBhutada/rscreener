@@ -260,8 +260,103 @@ function ProsCons({ row }: { row: Row | null }) {
   );
 }
 
+/** What each figure is, where it comes from, and what it does and does not tell
+ *  you. Written about THIS pipeline rather than as textbook definitions - the
+ *  point is that a number here can be traced, and its weaknesses stated. */
+const METRIC_INFO: Record<string, { how: string; means: string; watch?: string }> = {
+  "Market Cap": {
+    how: "Latest close multiplied by shares outstanding. The share count is derived as market cap divided by price from the same snapshot, so the two always reconcile - the build refuses to publish if they ever stop agreeing.",
+    means: "What the whole company costs at today's price. This is the figure to compare against profit, sales or net worth. The share price alone means nothing without it.",
+  },
+  "Current Price": {
+    how: "The most recent daily close from the exchange feed. Every price carries the trading date it belongs to, and the build blocks any release where prices are more than six trading days old.",
+    means: "The last traded price. Checked against Zerodha's official exchange data on a 240-company sample spanning large, mid and small caps: 212 of 212 matched exactly.",
+    watch: "End of day, not a live tick. During market hours this is the previous close.",
+  },
+  "High / Low": {
+    how: "Highest and lowest traded price over the last 52 weeks, from the daily price series.",
+    means: "The range the market has actually paid this year. How far today sits below the high usually tells you more than the high itself.",
+  },
+  "Stock P/E": {
+    how: "Price divided by earnings per share over the trailing four quarters, taken from the company's own NSE filings rather than a data vendor.",
+    means: "Years of current profit you are paying for. Comparable against this company's own history and against genuine peers - never across industries.",
+    watch: "Meaningless when profit is near zero or negative. One loss-making quarter inside a profitable year still leaves it positive.",
+  },
+  "Book Value": {
+    how: "Shareholders' funds divided by shares outstanding, from the filed balance sheet.",
+    means: "What the accounts say each share owns once every debt is paid. Useful for banks and asset-heavy businesses, nearly meaningless for software or brands whose value never appears on a balance sheet.",
+  },
+  "Dividend Yield": {
+    how: "Dividend per share over the last year divided by the current price.",
+    means: "The cash return at today's price, before any capital gain.",
+    watch: "A high yield is as often a collapsed price as a generous dividend.",
+  },
+  "ROCE": {
+    how: "Operating profit divided by capital employed - total assets less current liabilities - from the filed annual statements.",
+    means: "How hard the money inside the business works, regardless of how it was funded. The single most useful quality measure for an operating company.",
+  },
+  "ROE": {
+    how: "Net profit divided by shareholders' funds.",
+    means: "Return on the owners' money specifically.",
+    watch: "Unlike ROCE it flatters companies that borrow heavily, because borrowing shrinks the denominator. Read the two together.",
+  },
+  "Sales growth 5Y": {
+    how: "Compound annual growth in revenue across five years of filed annual results.",
+    means: "Whether the business is genuinely bigger than it was, not merely more profitable. Considerably harder to manufacture than profit growth.",
+  },
+  "Profit growth 5Y": {
+    how: "Compound annual growth in net profit across five years of filed annual results.",
+    means: "The rate earnings have compounded. Compare against sales growth - profit rising far faster than sales is margin expansion, which eventually runs out.",
+  },
+  "Debt / Equity": {
+    how: "Total borrowings divided by shareholders' funds, from the filed balance sheet.",
+    means: "How much of the business is funded by lenders rather than owners. Above 1 means creditors have more at stake than shareholders do.",
+    watch: "Normal and uninformative for banks and financial companies, whose business is borrowing.",
+  },
+  "Promoter holding": {
+    how: "The promoter group's stake from the latest shareholding pattern filed with the exchange.",
+    means: "How much the founders still own. A stake falling steadily over several quarters is worth understanding; a rising one is usually a good sign.",
+  },
+  "Volatility 1Y": {
+    how: "Annualised Yang-Zhang volatility over roughly 250 trading days. Yang-Zhang uses each day's open, high, low and close rather than closes alone, so it captures overnight gaps and the intraday range and is far less noisy than the textbook close-to-close measure. Companies without OHLC history fall back to close-to-close, and the method used is recorded per company.",
+    means: "How violently the price has actually moved, stated per year. Under 20% is calm, over 55% is wild. It sizes the swings you would have had to sit through.",
+    watch: "This is REALISED volatility - what already happened. It is not implied volatility and contains no forecast. Computed from Yahoo daily prices and not yet verified against exchange data, unlike the closing price itself.",
+  },
+  "Volatility 30D": {
+    how: "The same Yang-Zhang calculation over the last 30 trading days.",
+    means: "Recent turbulence. Read it against the 1-year figure: much higher means something is happening now, much lower means it has gone quiet.",
+    watch: "Thirty days is a small sample, so this number jumps around. Realised, not implied.",
+  },
+};
+
+function InfoDot({ label, onOpen }: { label: string; onOpen: (l: string) => void }) {
+  if (!METRIC_INFO[label]) return null;
+  return (
+    <button
+      onClick={() => onOpen(label)}
+      aria-label={`How ${label} is calculated`}
+      title={`How ${label} is calculated`}
+      className="ml-1 align-middle text-[var(--ink3)] hover:text-[var(--accent-ink)]"
+    >
+      <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 inline-block" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" />
+        <circle cx="12" cy="12" r="2.6" />
+      </svg>
+    </button>
+  );
+}
+
 function RatioGrid({ snapshot, row }: { snapshot: Row; row: Row | null }) {
+  const [open, setOpen] = useState<string | null>(null);
   const g = (k: string) => num(row, k) ?? num(snapshot, k);
+  const method = String((row?.["vol_method"] ?? snapshot["vol_method"]) ?? "");
+  const vol = (k: string) => {
+    const v = g(k);
+    return v === null ? "—" : `${v.toFixed(1)} %`;
+  };
+  // Volatility now sits in the list at the same weight as everything else. It was
+  // a large separate card, which gave it an importance out of proportion to market
+  // cap, price or P/E.
   const cells: [string, string][] = [
     ["Market Cap", `₹ ${fmtNum(g("mcap"), 0)} Cr`],
     ["Current Price", `₹ ${fmtNum(g("price"))}`],
@@ -275,62 +370,57 @@ function RatioGrid({ snapshot, row }: { snapshot: Row; row: Row | null }) {
     ["Profit growth 5Y", `${fmtNum(g("profit_cagr_5y"))} %`],
     ["Debt / Equity", fmtNum(g("de"))],
     ["Promoter holding", `${fmtNum(g("promoter_holding"))} %`],
+    ["Volatility 1Y", vol("volatility_1y")],
+    ["Volatility 30D", vol("volatility_30d")],
   ];
+  const info = open ? METRIC_INFO[open] : null;
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
       <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-2.5">
         {cells.map(([label, value]) => (
           <div key={label} className="flex items-baseline justify-between border-b border-[var(--line)] pb-2">
-            <span className="text-sm text-[var(--ink3)]">{label}</span>
+            <span className="text-sm text-[var(--ink3)]">
+              {label}
+              <InfoDot label={label} onOpen={setOpen} />
+            </span>
             <span className="text-sm font-semibold text-[var(--ink)] tabular-nums">{value}</span>
           </div>
         ))}
       </div>
-    </section>
-  );
-}
 
-function VolatilityCard({ snapshot, row }: { snapshot: Row; row: Row | null }) {
-  const g = (k: string) => num(row, k) ?? num(snapshot, k);
-  const v1 = g("volatility_1y"), v30 = g("volatility_30d");
-  if (v1 === null && v30 === null) return null;
-  const method = String((row?.["vol_method"] ?? snapshot["vol_method"]) ?? "");
-  const band = (v: number | null) =>
-    v === null ? { t: "—", c: "var(--ink3)" }
-      : v < 20 ? { t: "Low", c: "var(--pos)" }
-      : v < 35 ? { t: "Moderate", c: "var(--warn-ink)" }
-      : v < 55 ? { t: "High", c: "var(--neg)" }
-      : { t: "Very high", c: "var(--neg)" };
-  const cells: [string, number | null][] = [["1-Year", v1], ["30-Day", v30]];
-  return (
-    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
-      <div className="flex items-baseline justify-between mb-3">
-        <h2 className="text-base font-semibold text-[var(--ink)]">
-          Volatility <span className="text-xs font-normal text-[var(--ink3)]">· annualised</span>
-        </h2>
-        <span className="text-xs text-[var(--ink3)]">
-          {method === "yang-zhang" ? "Yang-Zhang (OHLC)" : "close-to-close"}
-        </span>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        {cells.map(([label, v]) => {
-          const b = band(v);
-          return (
-            <div key={label} className="rounded-lg bg-[var(--card2)] p-3">
-              <div className="text-xs text-[var(--ink3)]">{label}</div>
-              <div className="text-2xl font-bold text-[var(--ink)] tabular-nums leading-tight">
-                {v === null ? "—" : v.toFixed(1)}<span className="text-base font-medium text-[var(--ink3)]">%</span>
-              </div>
-              <div className="text-xs font-semibold mt-0.5" style={{ color: b.c }}>{b.t}</div>
+      {info && (
+        <div className="mt-4 rounded-xl border border-[var(--line2)] bg-[var(--card2)] p-4 relative">
+          <button
+            onClick={() => setOpen(null)}
+            aria-label="Close"
+            className="absolute top-3 right-3 text-[var(--ink3)] hover:text-[var(--ink)] text-lg leading-none"
+          >
+            &times;
+          </button>
+          <h3 className="text-sm font-semibold text-[var(--ink)] pr-6">{open}</h3>
+          <dl className="mt-2 space-y-2 text-xs leading-relaxed">
+            <div>
+              <dt className="text-[var(--ink3)] uppercase tracking-wide text-[10px]">How it is worked out</dt>
+              <dd className="text-[var(--ink2)] mt-0.5">{info.how}</dd>
             </div>
-          );
-        })}
-      </div>
-      <p className="text-xs text-[var(--ink3)] mt-3 leading-relaxed">
-        Realised (historical) volatility — the annualised standard deviation of daily returns. Yang-Zhang uses each
-        day&apos;s open/high/low/close for a less-noisy estimate than close-to-close. Computed from Yahoo daily prices;
-        unverified against exchange data. Not implied volatility.
-      </p>
+            <div>
+              <dt className="text-[var(--ink3)] uppercase tracking-wide text-[10px]">What it tells you</dt>
+              <dd className="text-[var(--ink2)] mt-0.5">{info.means}</dd>
+            </div>
+            {info.watch && (
+              <div>
+                <dt className="text-[var(--ink3)] uppercase tracking-wide text-[10px]">Where it misleads</dt>
+                <dd className="text-[var(--ink2)] mt-0.5">{info.watch}</dd>
+              </div>
+            )}
+            {open?.startsWith("Volatility") && method && (
+              <p className="text-[var(--ink3)]">
+                Method used for this company: {method === "yang-zhang" ? "Yang-Zhang (OHLC)" : "close-to-close"}.
+              </p>
+            )}
+          </dl>
+        </div>
+      )}
     </section>
   );
 }
@@ -493,7 +583,6 @@ function CompanyView() {
       </div>
 
       <div id="analysis" className="scroll-mt-32 space-y-4">
-        <VolatilityCard snapshot={s} row={fullRow} />
         <ProsCons row={fullRow} />
       </div>
 
