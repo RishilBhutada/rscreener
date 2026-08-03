@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import TopNav from "@/components/TopNav";
+import RefreshPanel from "@/components/RefreshPanel";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -96,24 +97,7 @@ export default function StatusPage() {
               ))}
             </div>
 
-            <div className="bg-[var(--card)] border border-[var(--line)] rounded-xl px-4 py-3 flex items-start justify-between gap-4 flex-wrap">
-              <div>
-                <p className="text-sm font-semibold text-[var(--ink)]">Refresh now</p>
-                <p className="text-xs text-[var(--ink3)] mt-0.5 max-w-xl leading-relaxed">
-                  You don&rsquo;t need to — the refresh runs by itself every night and each source below
-                  shows when it reaches 100%. Use this only to pull data in sooner. It opens GitHub,
-                  where you press <span className="font-medium text-[var(--ink2)]">Run workflow</span>;
-                  a refresh takes roughly 30&ndash;60 minutes and the site updates itself when it finishes.
-                </p>
-              </div>
-              <a
-                href="https://github.com/RishilBhutada/rscreener/actions/workflows/nightly.yml"
-                target="_blank" rel="noopener noreferrer"
-                className="shrink-0 rounded-lg px-3 py-2 text-sm font-medium bg-[var(--accent-soft)] text-[var(--accent-ink)] border border-[var(--accent-line)] hover:opacity-90"
-              >
-                Run refresh →
-              </a>
-            </div>
+            <RefreshPanel />
 
             <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
               {s.sources.map((src, i) => {

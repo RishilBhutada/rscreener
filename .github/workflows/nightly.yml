@@ -5,6 +5,28 @@ on:
     # 22:00 IST daily - after NSE close and Yahoo's EOD settlement
     - cron: "30 16 * * *"
   workflow_dispatch:
+    # A scheduled run does everything. A hand-started one can be aimed: chasing a
+    # single company's missing history should not mean waiting out a full crawl,
+    # and re-publishing after a code change should not re-fetch anything at all.
+    inputs:
+      scope:
+        description: "What to refresh"
+        type: choice
+        default: everything
+        options:
+          - everything
+          - prices and snapshot only
+          - earnings and results only
+          - corporate actions only
+          - rebuild and publish only (no fetching)
+      symbols:
+        description: "Limit to these symbols, comma separated (blank = whole universe)"
+        type: string
+        default: ""
+      deep:
+        description: "Fetch FULL history depth for the symbols above, not just recent quarters"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -12,7 +34,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  # Its own group, so a push cannot cancel a refresh that is already hours in.
+  group: nightly-refresh
   cancel-in-progress: false
 
 jobs:
@@ -35,32 +58,63 @@ jobs:
           else
             echo "no data-db release yet - starting from empty DB (historical depth will be missing)"
           fi
+      - name: Work out what this run should do
+        id: plan
+        run: |
+          SCOPE="${{ inputs.scope }}"; [ -z "$SCOPE" ] && SCOPE="everything"
+          SYMS="${{ inputs.symbols }}"
+          echo "scope=$SCOPE"                                   >> "$GITHUB_OUTPUT"
+          case "$SCOPE" in
+            everything)                    P=1; E=1; C=1 ;;
+            "prices and snapshot only")    P=1; E=0; C=0 ;;
+            "earnings and results only")   P=0; E=1; C=0 ;;
+            "corporate actions only")      P=0; E=0; C=1 ;;
+            *)                             P=0; E=0; C=0 ;;
+          esac
+          echo "prices=$P"   >> "$GITHUB_OUTPUT"
+          echo "earnings=$E" >> "$GITHUB_OUTPUT"
+          echo "actions=$C"  >> "$GITHUB_OUTPUT"
+          if [ -n "$SYMS" ]; then
+            echo "target=$SYMS" >> "$GITHUB_OUTPUT"
+            echo "targeted=1"   >> "$GITHUB_OUTPUT"
+          else
+            echo "target=@data/all_symbols.txt" >> "$GITHUB_OUTPUT"
+            echo "targeted=0"                   >> "$GITHUB_OUTPUT"
+          fi
+          echo "qb=${{ inputs.deep == true && '0' || '8' }}" >> "$GITHUB_OUTPUT"
+          echo "Run plan: scope=$SCOPE symbols=${SYMS:-all}"
       - run: python pipeline/fetch_universe.py
       - name: Write the full-universe symbol list every fetcher works from
         run: |
           python -c "import sqlite3;from pathlib import Path;c=sqlite3.connect('data/rscreener.db',timeout=180);s=[r[0] for r in c.execute('SELECT symbol FROM universe ORDER BY symbol')];Path('data/all_symbols.txt').write_text(','.join(s));print(len(s),'symbols')"
       - name: Refresh snapshot fundamentals (prices, ratios) for the full universe
+        if: steps.plan.outputs.prices == '1'
         run: python pipeline/fetch_fundamentals.py --all --snapshot-only --max-age-hours 20 --sleep 0.5
       - name: Refresh upcoming events calendar
+        if: steps.plan.outputs.prices == '1'
         run: python pipeline/fetch_events.py
       - name: Refresh shareholding patterns (whole universe, rotating)
+        if: steps.plan.outputs.earnings == '1'
         # Was @data/top500.txt, so the other 1,857 companies were unreachable: 432
         # had never been fetched at all and never would be. A rotation that cannot
         # reach part of its own universe is not a rotation, it is a permanent hole.
         run: python pipeline/fetch_shareholding.py --symbols @data/all_symbols.txt --max-age-hours 336 --limit 700 --sleep 0.3
         continue-on-error: true
       - name: Refresh price-chart history (whole universe, rotating)
+        if: steps.plan.outputs.prices == '1'
         # Same fault: only the top 500 were ever revisited, so every other chart
         # slowly aged out. --max-age-hours 168 makes each symbol come up weekly;
         # --limit 600 keeps one night inside the Actions job timeout.
-        run: python pipeline/fetch_prices.py --symbols @data/all_symbols.txt --max-age-hours 168 --limit 600 --sleep 0.4
+        run: python pipeline/fetch_prices.py --symbols ${{ steps.plan.outputs.target }} --max-age-hours 168 --limit 600 --sleep 0.4
         continue-on-error: true
       - name: Refresh concall/rating documents (whole universe, rotating)
+        if: steps.plan.outputs.earnings == '1'
         # 480 of 2,357 companies covered, and capped at the top 500 it would have
         # stayed that way permanently.
         run: python pipeline/fetch_announcement_docs.py --symbols @data/all_symbols.txt --max-age-hours 336 --limit 500 --sleep 0.35
         continue-on-error: true
       - name: Keep as-filed earnings CURRENT across the whole universe
+        if: steps.plan.outputs.earnings == '1'
         # This was `--symbols @data/top500.txt --limit 25`: 25 names a night out of
         # 500. At that rate the other 1,800 symbols were never revisited at all -
         # 1,430 of them sat on earnings that stopped at Dec-2024, so their P/E
@@ -70,25 +124,28 @@ jobs:
         # --limit 800 keeps one night inside the Actions job timeout. Three nights
         # clear the backlog; after that --max-age-hours 168 means each symbol comes
         # up weekly, so steady state is ~340 a night and the cap never binds.
-        run: python pipeline/fetch_results_history.py --symbols @data/all_symbols.txt --max-age-hours 168 --limit 800 --quarters-back 8 --sleep 0.25
+        run: python pipeline/fetch_results_history.py --symbols ${{ steps.plan.outputs.target }} --max-age-hours 168 --limit 800 --quarters-back ${{ steps.plan.outputs.qb }} --sleep 0.25
         continue-on-error: true
       - name: Refresh corporate actions (dividends, bonuses, splits, rights)
+        if: steps.plan.outputs.actions == '1'
         # One index call per symbol against the same NSE host as the filing dates,
         # so it rides the same rate budget. Corrects an existing error too: the
         # Yahoo splits table files Reliance's Oct-2024 one-for-one BONUS as a
         # "2:1 split", and NSE labels it correctly.
-        run: python pipeline/fetch_corporate_actions.py --symbols @data/all_symbols.txt --max-age-hours 336 --limit 800 --sleep 0.2
+        run: python pipeline/fetch_corporate_actions.py --symbols ${{ steps.plan.outputs.target }} --max-age-hours 336 --limit 800 --sleep 0.2
         continue-on-error: true
       - name: Record when each set of results was ANNOUNCED
+        if: steps.plan.outputs.earnings == '1'
         # Drives the quarter-coloured EPS bars and result markers on the charts,
         # and - more importantly - lets the ratio bands step earnings in on the day
         # the market could read them rather than the day the quarter ended. TCS
         # publishes 9-12 days after quarter end, MTAR Technologies 29-42, and MTAR
         # published nothing at all between 29-Jan and 29-Jul 2026. One index call
         # per symbol, so this is cheap next to a results re-fetch.
-        run: python pipeline/fetch_filing_dates.py --symbols @data/all_symbols.txt --max-age-hours 168 --limit 900 --sleep 0.2
+        run: python pipeline/fetch_filing_dates.py --symbols ${{ steps.plan.outputs.target }} --max-age-hours 168 --limit 900 --sleep 0.2
         continue-on-error: true
       - name: Deepen as-filed P&L history (bounded rotation, full ~20yr depth)
+        if: steps.plan.outputs.earnings == '1'
         # 60 a night meant 2,000 companies would take 33 nights to gain full depth,
         # which is why 1,994 of them hold 20 quarters or fewer and CEMPRO's ratio
         # charts start in 2023 while its price starts in 2002. 200 costs roughly
@@ -96,8 +153,10 @@ jobs:
         run: python pipeline/fetch_results_history.py --symbols @data/all_symbols.txt --max-age-hours 4320 --limit 200 --quarters-back 0 --sleep 0.3
         continue-on-error: true
       - name: Refresh IPOs (official NSE issues + live subscription)
+        if: steps.plan.outputs.prices == '1'
         run: python pipeline/fetch_ipos.py
       - name: Snapshot grey-market premium (unofficial; builds the accuracy record)
+        if: steps.plan.outputs.prices == '1'
         run: python pipeline/fetch_gmp.py
       - run: python pipeline/export_json.py
       - run: python pipeline/export_company_json.py

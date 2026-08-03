@@ -11,7 +11,14 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  # NOT the same group as the nightly refresh. They shared "pages", and this one
+  # cancels in progress - so every push killed a running nightly. Five runs in a
+  # row were cancelled that way on 3-Aug-2026 and the data stopped refreshing
+  # entirely, silently, while each individual push looked fine.
+  # Superseding an older DEPLOY is still right, hence cancel-in-progress here.
+  # The two jobs can safely overlap: both publish through the github-pages
+  # environment, which serialises deployments on its own.
+  group: pages-deploy
   cancel-in-progress: true
 
 jobs:
