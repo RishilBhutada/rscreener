@@ -803,7 +803,7 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
         # as the 4-quarter TTM and can be read against it: 1Q x4, 2Q x2, 3Q x4/3.
         # They react to an earnings turn far sooner than TTM, at the cost of
         # carrying that quarter's seasonality and one-offs undiluted.
-        pe_alt: dict[str, list] = {"q1": [], "q2": [], "q3": []}
+        pe_alt: dict[str, list] = {"q1": []}   # 2Q and 3Q dropped - see PE_WINDOWS
         fi = 0  # pointer into `flows` (both it and the price series are date-sorted)
         avail = announced.get(sym, {})
         for date, close in zip(g["date"], g["close"]):
@@ -834,7 +834,7 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                     pe_p.append([round(close, 2), round(ttm_eps, 2),
                                  [f[0] for f in recent]])   # price, TTM EPS, the four quarters
                     # aligned by index with pe_s, so only the values travel
-                    for key, n, mult in (("q1", 1, 4.0), ("q2", 2, 2.0), ("q3", 3, 4.0 / 3.0)):
+                    for key, n, mult in (("q1", 1, 4.0),):
                         tail = [f[1] for f in recent[-n:]]
                         ann = sum(tail) * mult if all(v is not None for v in tail) else None
                         pe_alt[key].append(round(close / ann, 1) if (ann and ann > 0) else None)

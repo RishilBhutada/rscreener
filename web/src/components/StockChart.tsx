@@ -58,10 +58,12 @@ function workingFor(view: View, band: ChartBand, idx: number, qs?: Quarter[] | n
 
 /** earnings window behind the PE line; each is annualised onto the TTM scale */
 const PE_WINDOWS: [string, string, string][] = [
-  ["ttm", "TTM", "Trailing 4 quarters — the standard PE"],
+  ["ttm", "TTM", "Trailing 4 quarters — the standard PE. Negative only if all four together net to a loss"],
   ["q1", "1Q×4", "Latest quarter annualised (×4) — fastest to react, but carries that quarter's seasonality and one-offs"],
-  ["q2", "2Q×2", "Last two quarters annualised (×2)"],
-  ["q3", "3Q×⁴⁄₃", "Last three quarters annualised (×4/3)"],
+  // 2Q×2 and 3Q×⁴⁄₃ were removed at the owner's request: four ways of stating the
+  // same earnings invited mis-reading a chart that money gets decided on, and the
+  // two that survive are the only ones with a plain meaning - what it has earned
+  // over a year, and what the latest quarter implies if it repeated.
 ];
 export type ChartTrendQ = {
   periods: string[];
@@ -353,8 +355,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     if (view === "pe") {
       // earnings bars follow the selected window, annualised the same way the
       // PE line is, so the two always describe the same earnings
-      const nQ = peWin === "q1" ? 1 : peWin === "q2" ? 2 : peWin === "q3" ? 3 : 4;
-      const mult = peWin === "q1" ? 4 : peWin === "q2" ? 2 : peWin === "q3" ? 4 / 3 : 1;
+      const nQ = peWin === "q1" ? 1 : 4;
+      const mult = peWin === "q1" ? 4 : 1;
       const epsBars: XY[] = [];
       if (trendQ) {
         for (let i = nQ - 1; i < trendQ.periods.length; i++) {
@@ -383,11 +385,15 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             // width and colour all said Q1 while the number was four quarters
             // added together. The window selector still drives the P/E line,
             // which genuinely needs a trailing basis.
-            const windowed = (w as number[]).reduce((a, b) => a + b, 0) * mult;
-            const ownQuarter = trendQ.eps[i] as number;
+            // The bar always carries the SELECTED window's earnings, annualised
+            // exactly as the P/E line annualises them - 1Q x4, 2Q x2, 3Q x4/3,
+            // TTM as filed. The two must describe the same earnings or the chart
+            // is showing a ratio built from figures it is not displaying. The
+            // sign follows the window total, so a window that nets to a loss
+            // draws below the zero line.
             epsBars.push({
               t,
-              v: showQ ? ownQuarter : windowed,
+              v: (w as number[]).reduce((a, b) => a + b, 0) * mult,
               q: qi?.q ?? derivedQ,
               from: startT,
               to: toT(end) + 86400000,
@@ -411,8 +417,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         };
       }
       bandView(band, `PE${suffix}`, "Median PE", "plain", epsBars,
-        showQ ? "EPS (that quarter)"
-              : peWin === "ttm" ? "EPS (4 quarters added up)" : `EPS${suffix}`, "plain");
+        peWin === "ttm" ? "EPS (4 quarters added up)" : "EPS (latest quarter x4)", "plain");
     }
 
     if (view === "ev") bandView(evBand, "EV / EBITDA", "Median EV Multiple", "plain", ttmBars(trendQ?.ebitda), "EBITDA (TTM)", "cr");
