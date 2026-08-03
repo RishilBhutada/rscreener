@@ -1,34 +1,8 @@
 {
  "symbols": {
-  "ICICIBANK": {
-   "trend_quarters": {
-    "n": 85,
-    "start": "2005-03-31"
-   },
-   "pb_band": {
-    "n": 174,
-    "start": "2005-06-30"
-   },
-   "pe_band": {
-    "n": 238,
-    "start": "2005-12-31"
-   },
-   "ps_band": {
-    "n": 238,
-    "start": "2005-12-31"
-   }
-  },
   "INFY": {
-   "ev_band": {
-    "n": 40,
-    "start": "2023-03-31"
-   },
    "trend_quarters": {
     "n": 84,
-    "start": "2005-03-31"
-   },
-   "pb_band": {
-    "n": 204,
     "start": "2005-03-31"
    },
    "pe_band": {
@@ -38,20 +12,82 @@
    "ps_band": {
     "n": 238,
     "start": "2005-12-31"
-   }
-  },
-  "RELIANCE": {
+   },
+   "pb_band": {
+    "n": 204,
+    "start": "2005-03-31"
+   },
    "ev_band": {
     "n": 40,
     "start": "2023-03-31"
-   },
+   }
+  },
+  "ICICIBANK": {
    "trend_quarters": {
     "n": 85,
     "start": "2005-03-31"
    },
+   "pe_band": {
+    "n": 238,
+    "start": "2005-12-31"
+   },
+   "ps_band": {
+    "n": 238,
+    "start": "2005-12-31"
+   },
    "pb_band": {
-    "n": 134,
+    "n": 174,
+    "start": "2005-06-30"
+   }
+  },
+  "ITC": {
+   "trend_quarters": {
+    "n": 86,
+    "start": "2005-03-31"
+   },
+   "pe_band": {
+    "n": 226,
+    "start": "2006-02-28"
+   },
+   "ps_band": {
+    "n": 247,
+    "start": "2005-12-31"
+   },
+   "pb_band": {
+    "n": 138,
     "start": "2008-03-31"
+   },
+   "ev_band": {
+    "n": 40,
+    "start": "2023-03-31"
+   }
+  },
+  "HINDUNILVR": {
+   "trend_quarters": {
+    "n": 85,
+    "start": "2005-03-31"
+   },
+   "pe_band": {
+    "n": 217,
+    "start": "2005-12-31"
+   },
+   "ps_band": {
+    "n": 238,
+    "start": "2005-12-31"
+   },
+   "pb_band": {
+    "n": 115,
+    "start": "2007-12-31"
+   },
+   "ev_band": {
+    "n": 40,
+    "start": "2023-03-31"
+   }
+  },
+  "RELIANCE": {
+   "trend_quarters": {
+    "n": 85,
+    "start": "2005-03-31"
    },
    "pe_band": {
     "n": 223,
@@ -60,104 +96,20 @@
    "ps_band": {
     "n": 238,
     "start": "2005-12-31"
-   }
-  },
-  "HINDUNILVR": {
-   "ev_band": {
-    "n": 40,
-    "start": "2023-03-31"
-   },
-   "trend_quarters": {
-    "n": 85,
-    "start": "2005-03-31"
    },
    "pb_band": {
-    "n": 115,
-    "start": "2007-12-31"
-   },
-   "pe_band": {
-    "n": 217,
-    "start": "2005-12-31"
-   },
-   "ps_band": {
-    "n": 238,
-    "start": "2005-12-31"
-   }
-  },
-  "SBIN": {
-   "trend_quarters": {
-    "n": 82,
-    "start": "2005-03-31"
-   },
-   "pb_band": {
-    "n": 164,
-    "start": "2005-03-31"
-   },
-   "pe_band": {
-    "n": 220,
-    "start": "2005-12-31"
-   },
-   "ps_band": {
-    "n": 220,
-    "start": "2005-12-31"
-   }
-  },
-  "ITC": {
-   "ev_band": {
-    "n": 40,
-    "start": "2023-03-31"
-   },
-   "trend_quarters": {
-    "n": 86,
-    "start": "2005-03-31"
-   },
-   "pb_band": {
-    "n": 138,
+    "n": 134,
     "start": "2008-03-31"
    },
-   "pe_band": {
-    "n": 226,
-    "start": "2005-12-31"
-   },
-   "ps_band": {
-    "n": 247,
-    "start": "2005-12-31"
-   }
-  },
-  "BHARTIARTL": {
    "ev_band": {
     "n": 40,
     "start": "2023-03-31"
-   },
-   "trend_quarters": {
-    "n": 83,
-    "start": "2005-03-31"
-   },
-   "pb_band": {
-    "n": 198,
-    "start": "2005-09-30"
-   },
-   "pe_band": {
-    "n": 196,
-    "start": "2005-12-31"
-   },
-   "ps_band": {
-    "n": 238,
-    "start": "2005-12-31"
    }
   },
   "TCS": {
-   "ev_band": {
-    "n": 40,
-    "start": "2023-03-31"
-   },
    "trend_quarters": {
     "n": 80,
     "start": "2005-03-31"
-   },
-   "pb_band": {
-    "n": 122,
-    "start": "2009-03-31"
    },
    "pe_band": {
     "n": 175,
@@ -166,20 +118,20 @@
    "ps_band": {
     "n": 193,
     "start": "2005-12-31"
+   },
+   "pb_band": {
+    "n": 122,
+    "start": "2009-03-31"
+   },
+   "ev_band": {
+    "n": 40,
+    "start": "2023-03-31"
    }
   },
   "LT": {
-   "ev_band": {
-    "n": 31,
-    "start": "2023-03-31"
-   },
    "trend_quarters": {
     "n": 86,
     "start": "2005-03-31"
-   },
-   "pb_band": {
-    "n": 136,
-    "start": "2008-03-31"
    },
    "pe_band": {
     "n": 217,
@@ -188,16 +140,60 @@
    "ps_band": {
     "n": 238,
     "start": "2005-12-31"
+   },
+   "pb_band": {
+    "n": 136,
+    "start": "2008-03-31"
+   },
+   "ev_band": {
+    "n": 31,
+    "start": "2023-03-31"
+   }
+  },
+  "BHARTIARTL": {
+   "trend_quarters": {
+    "n": 83,
+    "start": "2005-03-31"
+   },
+   "pe_band": {
+    "n": 196,
+    "start": "2005-12-31"
+   },
+   "ps_band": {
+    "n": 238,
+    "start": "2005-12-31"
+   },
+   "pb_band": {
+    "n": 198,
+    "start": "2005-09-30"
+   },
+   "ev_band": {
+    "n": 40,
+    "start": "2023-03-31"
+   }
+  },
+  "SBIN": {
+   "trend_quarters": {
+    "n": 82,
+    "start": "2005-03-31"
+   },
+   "pe_band": {
+    "n": 220,
+    "start": "2005-12-31"
+   },
+   "ps_band": {
+    "n": 220,
+    "start": "2005-12-31"
+   },
+   "pb_band": {
+    "n": 164,
+    "start": "2005-03-31"
    }
   },
   "HDFCBANK": {
    "trend_quarters": {
     "n": 84,
     "start": "2005-03-31"
-   },
-   "pb_band": {
-    "n": 128,
-    "start": "2008-03-31"
    },
    "pe_band": {
     "n": 231,
@@ -206,12 +202,16 @@
    "ps_band": {
     "n": 231,
     "start": "2005-12-31"
+   },
+   "pb_band": {
+    "n": 128,
+    "start": "2008-03-31"
    }
   }
  },
  "totals": {
-  "pe_bands_reaching_pre_2012": 126,
-  "companies_with_pe_band": 1983
+  "companies_with_pe_band": 1983,
+  "pe_bands_reaching_pre_2012": 126
  },
- "updated_at": "2026-08-03 06:29 UTC"
+ "updated_at": "2026-08-03 06:49 UTC"
 }

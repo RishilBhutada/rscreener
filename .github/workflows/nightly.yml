@@ -99,6 +99,13 @@ jobs:
         # Failing here also stops the stale DB being re-uploaded below, so the
         # loop cannot feed itself.
         run: python pipeline/check_depth.py
+      - name: Refuse to publish a figure that is not the company's own filing
+        # Dixon Technologies showed Rs 171cr profit for Dec-2024 where the filing
+        # says Rs 216cr - Yahoo's owners-only net income published in place of the
+        # filed total. Neither number looks wrong on screen, which is why it needs
+        # checking here: 1,323 quarterly and 445 annual profit figures across the
+        # universe sit more than 5% apart between the two sources.
+        run: python pipeline/check_sources.py
       - name: Refuse to publish stale or inconsistent prices
         # Same class of failure, on the number everything else is derived from:
         # a snapshot that stopped refreshing kept HDFC Bank at Rs 824.95 for three

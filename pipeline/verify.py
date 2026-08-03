@@ -44,7 +44,8 @@ def main() -> None:
 
     print("running guards ...\n")
     failed: list[str] = []
-    for label, script in (("prices", "check_prices.py"), ("chart depth", "check_depth.py")):
+    for label, script in (("prices", "check_prices.py"), ("chart depth", "check_depth.py"),
+                          ("figures trace to filings", "check_sources.py")):
         ok, out = run(script)
         print(f"  {'PASS' if ok else 'FAIL'}  {label}")
         if not ok:

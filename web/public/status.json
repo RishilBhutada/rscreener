@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-08-02 20:23 UTC",
+ "generated_at": "2026-08-03 06:49 UTC",
  "universe": 2357,
  "sources": [
   {
@@ -17,7 +17,7 @@
    "pct": 100,
    "missing": 0,
    "nights_left": 1,
-   "eta": "2026-08-03"
+   "eta": "2026-08-04"
   },
   {
    "key": "snapshot",
@@ -34,41 +34,41 @@
    "pct": 98,
    "missing": 3,
    "nights_left": 1,
-   "eta": "2026-08-03"
+   "eta": "2026-08-04"
   },
   {
    "key": "results",
    "name": "Quarterly results (as filed)",
    "what": "Earnings straight from the NSE filings. Everything on the P/E chart rests on these.",
-   "covered": 2223,
+   "covered": 2236,
    "newest": "2026-06-30",
-   "behind": 228,
+   "behind": 42,
    "oldest": "2010-02-28",
    "cadence": "every night, 800 companies a night",
-   "current": 1995,
+   "current": 2194,
    "universe": 2357,
    "per_night": 800,
-   "pct": 85,
-   "missing": 134,
+   "pct": 93,
+   "missing": 121,
    "nights_left": 1,
-   "eta": "2026-08-03"
+   "eta": "2026-08-04"
   },
   {
    "key": "filing_dates",
    "name": "Result declaration dates",
    "what": "When each set of results was actually published, so ratios step on the day the market learned them.",
-   "covered": 24,
-   "newest": "2026-08-01",
-   "behind": 1,
-   "oldest": "2026-02-13",
+   "covered": 2244,
+   "newest": "2026-08-03",
+   "behind": 20,
+   "oldest": "2010-06-09",
    "cadence": "every night, 900 companies a night",
-   "current": 23,
+   "current": 2224,
    "universe": 2357,
    "per_night": 900,
-   "pct": 1,
-   "missing": 2333,
-   "nights_left": 3,
-   "eta": "2026-08-05"
+   "pct": 94,
+   "missing": 113,
+   "nights_left": 1,
+   "eta": "2026-08-04"
   },
   {
    "key": "shareholding",
@@ -85,7 +85,7 @@
    "pct": 81,
    "missing": 432,
    "nights_left": 1,
-   "eta": "2026-08-03"
+   "eta": "2026-08-04"
   },
   {
    "key": "statements",
@@ -102,7 +102,7 @@
    "pct": 94,
    "missing": 128,
    "nights_left": 1,
-   "eta": "2026-08-03"
+   "eta": "2026-08-04"
   },
   {
    "key": "ipos",
