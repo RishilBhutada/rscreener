@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ThemeControls from "@/components/ThemeControls";
+import AccountButton from "@/components/AccountButton";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -111,6 +112,7 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
         </nav>
 
         <div className="shrink-0 flex items-center gap-2">
+          <AccountButton />
           <ThemeControls />
           <button
             onClick={() => window.location.reload()}
