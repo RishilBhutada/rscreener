@@ -181,50 +181,92 @@ def available_from(period_end: str, announced: dict) -> str:
     ).strftime("%Y-%m-%d")
 
 
-SHARE_COUNT_SPIKE = 3.0  # a filing this far from BOTH neighbours contradicts itself
+SHARE_COUNT_SPIKE = 3.0   # a filing this far from BOTH neighbours contradicts itself
+REVENUE_SPIKE = 20.0      # a 20x one-quarter step that reverts is a unit or parse error
+
+
+def _spikes(seq: list, factor: float) -> set:
+    """Periods whose value disagrees with BOTH neighbours while they agree.
+
+    Deliberately a spike test, never a comparison against the series average. A
+    split, a merger or a genuine step change is a PERMANENT move and shows up as
+    a sustained level; only a value that jumps and comes straight back is an
+    error. Measured on share counts across 38,201 quarters: 8.70% look wrong
+    against the average, 0.43% are real spikes - almost the whole difference is
+    splits, which are correct data.
+    """
+    bad = set()
+    for i in range(1, len(seq) - 1):
+        prev, cur, nxt = seq[i - 1][1], seq[i][1], seq[i + 1][1]
+        if prev is None or cur is None or nxt is None or prev <= 0 or cur <= 0 or nxt <= 0:
+            continue
+        if not (0.5 <= prev / nxt <= 2.0):      # neighbours must agree with each other
+            continue
+        if (cur / prev > factor or cur / prev < 1 / factor) and            (cur / nxt > factor or cur / nxt < 1 / factor):
+            bad.add(seq[i][0])
+    return bad
 
 
 def implausible_quarters(con: sqlite3.Connection) -> dict[str, set]:
-    """{symbol: {period_end}} for filings that disagree with themselves.
+    """{symbol: {period_end}} for filings that cannot be right.
 
-    A quarterly filing carries both PAT and EPS, so it contains its own check:
-    PAT / EPS is the share count that filing was written against, and a share
-    count does not change sixfold in one quarter and change back the next. Where
-    it appears to, the filing (or our parse of it) is wrong.
+    Why any FILED figure is ever wrong, since a past quarter's profit never
+    changes: the numbers are not wrong at source. Reg-33 filings are correct. What
+    can be wrong is our READING of them. Every figure has to be interpreted -
+    which XBRL tag is net worth, is this sheet in lakhs or crores, is this the
+    standalone or consolidated column, is this the Indian line or the US-listed
+    one - across a machine-readable format whose tags changed with the taxonomy,
+    an older HTML format in three hand-built dialects, and a US aggregator that
+    sometimes serves a dollar figure. Staleness is not the problem; interpretation
+    is.
 
-    This is deliberately a SPIKE test against both neighbours, not a comparison
-    against the company's own average. A split is a real, permanent step - 360ONE
-    sits at exactly a quarter of its old count for years after a 4:1 - and judging
-    against an average flags every quarter after a split as broken. Measured over
-    38,201 quarters: 8.70% look wrong against the average, 0.43% are actual
-    single-quarter spikes. The difference is almost entirely splits.
+    So a figure is only trusted when something else can check it:
 
-    Dropping these leaves a gap in the chart. A gap is honest - the number was
-    never fetched, or it cannot be trusted - whereas a wrong point is indis-
-    tinguishable from a right one and gets acted on.
+      * PAT / EPS is the share count that filing was written against, and a share
+        count does not move sixfold in a quarter and back. Adani Enterprises
+        Dec-2013 reads 173cr shares between neighbours of 145cr and 173cr.
+      * Revenue is checked against its own neighbours, which catches a units
+        mix-up: Adani Energy Solutions Jun-2022 reads Rs 0.8cr between Rs 2,975cr
+        and Rs 3,252cr.
+      * Revenue below zero is not a figure any operating quarter produces.
+
+    Anything failing is DROPPED, not drawn. A gap is visibly missing and prompts
+    a look; a wrong point looks exactly like a right one and gets acted on.
+
+    What this cannot catch: a filing where two figures are wrong in the same
+    proportion, since then they still agree with each other. That needs a second
+    independent source, which exists for prices (the exchange) but not yet for
+    earnings.
     """
     if not _table_exists(con, "results_history"):
         return {}
     rows = con.execute(
         "SELECT symbol, period_end, "
-        "MAX(CASE WHEN item='pat' THEN value END), MAX(CASE WHEN item='eps' THEN value END) "
-        "FROM results_history WHERE period_type='quarterly' AND item IN ('pat','eps') "
+        "MAX(CASE WHEN item='pat' THEN value END), "
+        "MAX(CASE WHEN item='eps' THEN value END), "
+        "MAX(CASE WHEN item='revenue' THEN value END) "
+        "FROM results_history WHERE period_type='quarterly' "
+        "AND item IN ('pat','eps','revenue') "
         "GROUP BY symbol, period_end ORDER BY symbol, period_end"
     ).fetchall()
-    by_sym: dict[str, list] = {}
-    for sym, period, pat, eps in rows:
-        if pat and eps:
-            by_sym.setdefault(sym, []).append((period, pat / eps))
+    shares_seq: dict[str, list] = {}
+    rev_seq: dict[str, list] = {}
     out: dict[str, set] = {}
-    for sym, seq in by_sym.items():
-        for i in range(1, len(seq) - 1):
-            prev, cur, nxt = seq[i - 1][1], seq[i][1], seq[i + 1][1]
-            if prev <= 0 or cur <= 0 or nxt <= 0:
-                continue
-            neighbours_agree = 0.7 <= prev / nxt <= 1.4
-            off_both = (cur / prev > SHARE_COUNT_SPIKE or cur / prev < 1 / SHARE_COUNT_SPIKE) and                        (cur / nxt > SHARE_COUNT_SPIKE or cur / nxt < 1 / SHARE_COUNT_SPIKE)
-            if neighbours_agree and off_both:
-                out.setdefault(sym, set()).add(seq[i][0])
+    for sym, period, pat, eps, rev in rows:
+        if pat and eps:
+            shares_seq.setdefault(sym, []).append((period, pat / eps))
+        if rev is not None:
+            rev_seq.setdefault(sym, []).append((period, rev))
+            if rev < 0:
+                out.setdefault(sym, set()).add(period)
+    for sym, seq in shares_seq.items():
+        bad = _spikes(seq, SHARE_COUNT_SPIKE)
+        if bad:
+            out.setdefault(sym, set()).update(bad)
+    for sym, seq in rev_seq.items():
+        bad = _spikes(seq, REVENUE_SPIKE)
+        if bad:
+            out.setdefault(sym, set()).update(bad)
     return out
 
 
