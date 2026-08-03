@@ -376,9 +376,18 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             const derivedQ = ({ 6: 1, 9: 2, 12: 3, 3: 4 } as Record<number, number>)[m]
               ?? Math.floor((m - 1) / 3) + 1;
             const startT = qi ? toT(qi.start) : new Date(new Date(end).setMonth(new Date(end).getMonth() - 3) + 86400000).getTime();
+            // With the overlay on, the bar is drawn ACROSS one quarter and painted
+            // that quarter's colour, so its height has to be that quarter's own
+            // earnings. Leaving it as the rolling window made BHEL's Jun-2025 bar
+            // point UP at +0.83 while the quarter itself lost 1.31 - the label,
+            // width and colour all said Q1 while the number was four quarters
+            // added together. The window selector still drives the P/E line,
+            // which genuinely needs a trailing basis.
+            const windowed = (w as number[]).reduce((a, b) => a + b, 0) * mult;
+            const ownQuarter = trendQ.eps[i] as number;
             epsBars.push({
               t,
-              v: (w as number[]).reduce((a, b) => a + b, 0) * mult,
+              v: showQ ? ownQuarter : windowed,
               q: qi?.q ?? derivedQ,
               from: startT,
               to: toT(end) + 86400000,
@@ -402,7 +411,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         };
       }
       bandView(band, `PE${suffix}`, "Median PE", "plain", epsBars,
-        peWin === "ttm" ? "EPS (4 quarters added up)" : `EPS${suffix}`, "plain");
+        showQ ? "EPS (that quarter)"
+              : peWin === "ttm" ? "EPS (4 quarters added up)" : `EPS${suffix}`, "plain");
     }
 
     if (view === "ev") bandView(evBand, "EV / EBITDA", "Median EV Multiple", "plain", ttmBars(trendQ?.ebitda), "EBITDA (TTM)", "cr");
@@ -464,7 +474,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     }
 
     return defs;
-  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, cmp, symbol]);
+  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, showQ, quarters, cmp, symbol]);
 
   // With the quarterly-results overlay on, the per-quarter EPS bars are already
   // on screen. Keeping the summed TTM bars too puts two different quantities in
