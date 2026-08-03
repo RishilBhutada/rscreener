@@ -77,7 +77,12 @@ export type ChartTrendQ = {
 } | null;
 
 type View = "price" | "pe" | "sales" | "ev" | "pb" | "ps";
-type XY = { t: number; v: number };
+type XY = {
+  t: number; v: number;
+  /** set on the EPS bars: the quarter whose declaration produced this value, and
+   *  the period it covers, so one series can be coloured and drawn to width */
+  q?: number; from?: number; to?: number; announced?: string | null;
+};
 type FmtKind = "rupee" | "plain" | "pct" | "vol" | "cr";
 
 const CHART_BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -355,8 +360,30 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         for (let i = nQ - 1; i < trendQ.periods.length; i++) {
           const w = trendQ.eps.slice(i - nQ + 1, i + 1);
           if (w.length === nQ && w.every((v) => v !== null && v !== undefined)) {
-            const t = toT(trendQ.periods[i]);
-            if (t >= cutoff) epsBars.push({ t, v: (w as number[]).reduce((a, b) => a + b, 0) * mult });
+            const end = trendQ.periods[i];
+            const t = toT(end);
+            if (t < cutoff) continue;
+            // The bar is drawn across the NEWEST quarter in the window - the one
+            // whose declaration moved the number - and coloured by it. Drawing it
+            // across the whole window instead would make every bar overlap the
+            // next three, since consecutive TTM windows share three quarters.
+            const qi = quarters?.find((x) => x.end === end);
+            // Fall back to deriving the quarter from the period-end month when no
+            // filing record matched. Without this a handful of bars stayed grey
+            // among the coloured ones, which reads as a second series - the very
+            // thing this change exists to remove. Indian fiscal year: Apr-Jun = Q1.
+            const m = Number(end.slice(5, 7));
+            const derivedQ = ({ 6: 1, 9: 2, 12: 3, 3: 4 } as Record<number, number>)[m]
+              ?? Math.floor((m - 1) / 3) + 1;
+            const startT = qi ? toT(qi.start) : new Date(new Date(end).setMonth(new Date(end).getMonth() - 3) + 86400000).getTime();
+            epsBars.push({
+              t,
+              v: (w as number[]).reduce((a, b) => a + b, 0) * mult,
+              q: qi?.q ?? derivedQ,
+              from: startT,
+              to: toT(end) + 86400000,
+              announced: qi?.announced ?? null,
+            });
           }
         }
       }
@@ -374,7 +401,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
           median_5y: band.alt_median_5y?.[peWin] ?? band.median_5y,
         };
       }
-      bandView(band, `PE${suffix}`, "Median PE", "plain", epsBars, `EPS${suffix}`, "plain");
+      bandView(band, `PE${suffix}`, "Median PE", "plain", epsBars,
+        peWin === "ttm" ? "EPS (4 quarters added up)" : `EPS${suffix}`, "plain");
     }
 
     if (view === "ev") bandView(evBand, "EV / EBITDA", "Median EV Multiple", "plain", ttmBars(trendQ?.ebitda), "EBITDA (TTM)", "cr");
@@ -438,6 +466,9 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     return defs;
   }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, cmp, symbol]);
 
+  // With the quarterly-results overlay on, the per-quarter EPS bars are already
+  // on screen. Keeping the summed TTM bars too puts two different quantities in
+  // the same visual language, a quarter apart, both called EPS.
   const visible = model.filter((s) => isOn(s.key));
   if (!model.length || !model.some((s) => s.data.length > 1)) {
     return (
@@ -464,7 +495,12 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       // minimum. Only applied when the span is genuinely extreme.
       const pos = vals.filter((v) => v > 0);
       const minPos = pos.length ? Math.min(...pos) : 0;
-      lo = minPos > 0 && hi / minPos > 15 ? minPos * 0.85 : Math.min(0, lo);
+      const anyLoss = vals.some((v) => v < 0);
+      // Never lift the floor above zero when a loss is present. Doing so pushed
+      // the losing quarters off the bottom of the axis AND left the bar baseline
+      // at a positive value, so a small profit was drawn hanging downwards from
+      // it - which reads as a loss when it is nothing of the kind.
+      lo = !anyLoss && minPos > 0 && hi / minPos > 15 ? minPos * 0.85 : Math.min(0, lo);
     }
     const pad = (hi - lo) * 0.06 || Math.abs(hi) * 0.06 || 1;
     const ticks = niceTicks(lo, hi + pad, 5);
@@ -488,18 +524,6 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   // a value axis with price or a ratio — the magnitudes are unrelated, and sharing
   // one would flatten whichever series is smaller into nothing.
   const qShown = (quarters ?? []).filter((q) => toT(q.end) >= t0 && toT(q.start) <= t1);
-  const qStripH = plotH * 0.22;
-  const qFloor = MT + plotH;
-  // A loss has to read as a loss. Clamping at zero drew a loss-making quarter as
-  // no bar at all, so the worst quarters were the ones you could not see. The
-  // strip is split between the largest profit and the largest loss present, the
-  // zero line sits at the boundary, and bars grow up from it or down from it.
-  // With no losses in view the zero line is the floor and nothing moves.
-  const qPos = Math.max(0, ...qShown.map((q) => q.eps));
-  const qNeg = Math.max(0, ...qShown.map((q) => -q.eps));
-  const qSpan = qPos + qNeg || 1;
-  const qZero = qFloor - (qNeg / qSpan) * qStripH;
-  const qLen = (v: number) => (Math.abs(v) / qSpan) * qStripH;
 
   const primary = visible.find((s) => s.kind !== "bars" && s.kind !== "dashed") ?? visible[0];
   const activeBand: ChartBand =
@@ -513,30 +537,6 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     <ChartShell range={range} setRange={setRange} view={view} setView={setView}
       moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand }}
       onViewChange={() => setHover(null)}>
-      {view === "pe" && peBand?.alt && (
-        <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
-          <span className="text-[var(--ink3)]">Earnings window</span>
-          <div className="flex gap-1 flex-wrap">
-            {PE_WINDOWS.filter(([k]) => k === "ttm" || peBand.alt?.[k]).map(([k, label, tip]) => (
-              <button
-                key={k}
-                onClick={() => { setPeWin(k); setHover(null); }}
-                title={tip}
-                className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium ${
-                  peWin === k
-                    ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]"
-                    : "text-[var(--ink2)] hover:bg-[var(--card2)]"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <span className="text-[var(--ink3)] hidden sm:inline">
-            · shorter windows are annualised onto the TTM scale, so they can be read against it
-          </span>
-        </div>
-      )}
       <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
         <span className="text-[var(--ink3)]">Compare with</span>
         <select
@@ -565,7 +565,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
           <button
             onClick={() => setShowQ(!showQ)}
-            title="Colour each quarter's EPS and mark the day its results were declared"
+            title="Colour the EPS bars by quarter and mark the day each result was declared"
             className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium border ${
               showQ
                 ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
@@ -574,6 +574,25 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
           >
             {showQ ? "✓ " : ""}Quarterly results
           </button>
+          {showQ && view === "pe" && peBand?.alt && (
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-[var(--ink3)] mr-0.5">Earnings</span>
+              {PE_WINDOWS.filter(([k]) => k === "ttm" || peBand.alt?.[k]).map(([k, label, tip]) => (
+                <button
+                  key={k}
+                  onClick={() => { setPeWin(k); setHover(null); }}
+                  title={tip}
+                  className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium ${
+                    peWin === k
+                      ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]"
+                      : "text-[var(--ink2)] hover:bg-[var(--card2)]"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           {showQ && (
             <div className="flex items-center gap-2.5 flex-wrap text-[var(--ink3)]">
               {[1, 2, 3, 4].map((n) => (
@@ -607,34 +626,6 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             <text key={tk.t} x={x(tk.t)} y={H - 8} fontSize={FS} fill="var(--chart-axis)" textAnchor="middle">{tk.label}</text>
           ))}
 
-          {/* Quarter-coloured EPS bars, spanning the period each result actually
-              covers so consecutive quarters butt together with no gap, plus a
-              dropline on the day NSE broadcast them. The gap between a bar's
-              right edge and its own dropline IS the reporting lag - the weeks
-              where the market is still valuing the company on older earnings. */}
-          {showQ && qShown.length > 0 && (
-            <g>
-              {qShown.map((q, i) => {
-                // A quarter ends 30-Jun and the next starts 01-Jul, so plotting
-                // start->end leaves a one-day sliver between every pair. The bar
-                // runs to the END of its last day, which closes it exactly.
-                const x0 = x(toT(q.start)), x1v = x(toT(q.end) + 86400000);
-                const h = Math.max(1, qLen(q.eps));
-                const loss = q.eps < 0;
-                return (
-                  <rect key={`qb${i}`} x={Math.min(x0, x1v)} y={loss ? qZero : qZero - h}
-                    width={Math.max(1, Math.abs(x1v - x0))} height={h}
-                    fill={Q_COLOUR[q.q] ?? "var(--q1)"} opacity={loss ? 0.55 : 0.8}>
-                    <title>{`${Q_LABEL[q.q] ?? `Q${q.q}`} · EPS ₹${q.eps}${loss ? " (loss)" : ""}${q.announced ? ` · declared ${q.announced}` : ""}`}</title>
-                  </rect>
-                );
-              })}
-              {/* zero line — bars rise above it and hang below it */}
-              <line x1={ML} x2={W - MR} y1={qZero} y2={qZero}
-                stroke="var(--chart-axis)" strokeWidth={qNeg > 0 ? 1.2 : 1}
-                strokeDasharray={qNeg > 0 ? undefined : "0"} opacity={qNeg > 0 ? 0.9 : 0.5} />
-            </g>
-          )}
           {showQ && qShown.map((q, i) => (
             q.announced && toT(q.announced) >= t0 && toT(q.announced) <= t1 ? (
               <g key={`ql${i}`}>
@@ -651,12 +642,36 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             const ax = s.axis === "L" ? axL : axR;
             if (!ax) return null;
             const bw = barW(s);
-            const y0 = ax.scale(Math.max(0, ax.ticks[0] ?? 0));
+            // Bars grow from ZERO, not from whatever the axis happens to start at.
+            // Measuring from `ticks[0]` meant that when the axis floor sat above
+            // zero, every value below that floor was drawn hanging downwards -
+            // profits pointing down. Where zero is genuinely off-scale (all values
+            // positive, compressed axis) the bottom of the plot stands in for it,
+            // and every bar still points up.
+            const axFloor = Math.min(...ax.ticks, 0);
+            const y0 = axFloor < 0 || ax.ticks[0] <= 0 ? ax.scale(0) : MT + plotH;
             return (
               <g key={s.key}>
                 {s.data.map((d, i) => {
                   const yv = ax.scale(d.v);
-                  return <rect key={i} x={x(d.t) - bw / 2} y={Math.min(yv, y0)} width={bw} height={Math.max(1, Math.abs(y0 - yv))} rx={bw > 6 ? 2 : 0} fill={s.color} opacity="0.75" />;
+                  // With the earnings overlay on, an EPS bar is drawn across the
+                  // quarter it covers and painted that quarter's colour; the two
+                  // meet edge to edge because one quarter ends the day before the
+                  // next begins. Otherwise it stays a plain centred bar.
+                  const spanned = showQ && d.from !== undefined && d.to !== undefined;
+                  const bx = spanned ? x(d.from!) : x(d.t) - bw / 2;
+                  const bwid = spanned ? Math.max(1, x(d.to!) - x(d.from!)) : bw;
+                  const fill = showQ && d.q ? (Q_COLOUR[d.q] ?? s.color) : s.color;
+                  const loss = d.v < 0;
+                  return (
+                    <rect key={i} x={bx} y={Math.min(yv, y0)} width={bwid}
+                      height={Math.max(1, Math.abs(y0 - yv))}
+                      rx={!spanned && bw > 6 ? 2 : 0} fill={fill} opacity={loss ? 0.55 : 0.78}>
+                      {spanned && (
+                        <title>{`${Q_LABEL[d.q ?? 0] ?? ""} · ${s.label} ₹${d.v.toFixed(2)}${loss ? " (loss)" : ""}${d.announced ? ` · declared ${d.announced}` : ""}`}</title>
+                      )}
+                    </rect>
+                  );
                 })}
               </g>
             );
