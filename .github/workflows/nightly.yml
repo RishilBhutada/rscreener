@@ -158,6 +158,35 @@ jobs:
       - name: Snapshot grey-market premium (unofficial; builds the accuracy record)
         if: steps.plan.outputs.prices == '1'
         run: python pipeline/fetch_gmp.py
+      - name: Save the fetched data back to the data-db release
+        # Placed BEFORE the publish guards, deliberately. It used to sit after
+        # them, which deadlocked: a guard failure skipped the upload, so the next
+        # night restored the SAME stale database and failed in exactly the same
+        # way, forever. Run #24 tripped the depth guard on 1-Aug-2026 and the
+        # stored database stayed frozen at 31-Jul until it was replaced by hand.
+        #
+        # Fetching only ever ADDS rows, so a database that has just been fetched
+        # into is never worse than the one restored. The guards exist to stop a
+        # bad EXPORT reaching the site - they should not also be able to throw
+        # away a night of successful fetching.
+        #
+        # always() so a failed fetch step still preserves whatever did arrive.
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SIZE=$(stat -c%s data/rscreener.db 2>/dev/null || echo 0)
+          # Never overwrite a good release with an empty or half-restored file:
+          # that would destroy the only copy. 100 MB is far below a real database
+          # and far above anything a failed restore leaves behind.
+          if [ "$SIZE" -lt 100000000 ]; then
+            echo "database is only $SIZE bytes - refusing to overwrite the stored copy"; exit 0
+          fi
+          gzip -c data/rscreener.db > rscreener.db.gz
+          gh release upload data-db rscreener.db.gz --clobber || \
+          gh release create data-db rscreener.db.gz --title "Data DB" --notes "SQLite data snapshot used and refreshed by the nightly workflow."
+          echo "stored $(du -h rscreener.db.gz | cut -f1)"
+
       - run: python pipeline/export_json.py
       - run: python pipeline/export_company_json.py
       - run: python pipeline/export_ipos.py
@@ -182,13 +211,6 @@ jobs:
         # weeks against a real Rs 750. A wrong price looks exactly like a right
         # one on screen, so it has to be caught here rather than by eye.
         run: python pipeline/check_prices.py
-      - name: Upload the updated DB back to the data-db release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gzip -c data/rscreener.db > rscreener.db.gz
-          gh release upload data-db rscreener.db.gz --clobber || \
-          gh release create data-db rscreener.db.gz --title "Data DB" --notes "SQLite data snapshot used and refreshed by the nightly workflow."
       - uses: actions/setup-node@v4
         with:
           node-version: 22
