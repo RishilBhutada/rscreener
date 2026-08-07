@@ -68,6 +68,45 @@ def measure() -> dict:
     return out
 
 
+def why_missing(sym: str) -> str:
+    """Name the input that went absent, rather than only the output.
+
+    "RELIANCE.pe_band: missing" cost a night and a log dig to trace back to one
+    empty market_cap field. A guard that can see the export can also see the
+    database the export was built from, and the four inputs a band needs are
+    cheap to check. Diagnosis only runs when something has already failed.
+    """
+    db = Path(__file__).resolve().parents[1] / "data" / "rscreener.db"
+    if not db.exists():
+        return "no local database to diagnose against"
+    try:
+        import sqlite3
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        row = con.execute(
+            "SELECT price, market_cap, shares_out FROM fundamentals WHERE symbol=?", (sym,)
+        ).fetchone()
+        if row is None:
+            return "no fundamentals row at all"
+        price, mcap, sh_out = row
+        if not price:
+            return "no price"
+        if not mcap and not sh_out:
+            return "no share count - market_cap AND shares_out are both empty"
+        n_px = con.execute(
+            "SELECT COUNT(*) FROM prices WHERE symbol=? AND freq IN ('weekly','monthly')", (sym,)
+        ).fetchone()[0]
+        if not n_px:
+            return "no weekly or monthly price history"
+        n_f = con.execute(
+            "SELECT COUNT(*) FROM results_history WHERE symbol=? AND item IN ('pat','eps')", (sym,)
+        ).fetchone()[0]
+        if not n_f:
+            return "no filed earnings"
+        return f"inputs present ({n_px} price points, {n_f} filed figures) - the fault is in the band builder"
+    except Exception as e:  # noqa: BLE001 - a diagnosis must never mask the failure it explains
+        return f"could not diagnose ({e})"
+
+
 def compare(cur: dict, base: dict) -> list[str]:
     fails: list[str] = []
     for sym, metrics in base.get("symbols", {}).items():
@@ -78,7 +117,8 @@ def compare(cur: dict, base: dict) -> list[str]:
         for key, want in metrics.items():
             got = cm.get(key)
             if got is None:
-                fails.append(f"{sym}.{key}: missing (was {want['n']} pts from {want['start']})")
+                fails.append(f"{sym}.{key}: missing (was {want['n']} pts from "
+                             f"{want['start']}) - {why_missing(sym)}")
                 continue
             if got["n"] < want["n"] * TOLERANCE:
                 fails.append(

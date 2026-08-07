@@ -123,6 +123,13 @@ def main() -> None:
     ap.add_argument("--sleep", type=float, default=0.5)
     ap.add_argument("--max-age-hours", type=float, default=0)
     ap.add_argument("--refresh", action="store_true", help="re-fetch even if already done")
+    # The nightly workflow has passed --limit since it was written; this parser
+    # never accepted it, so every run since died with "unrecognized arguments"
+    # and exit 2. continue-on-error turned that into a green tick, and the price
+    # history simply stopped refreshing - unnoticed, because nothing said so.
+    # Same bounded-rotation meaning as every other fetcher: oldest first.
+    ap.add_argument("--limit", type=int, default=0,
+                    help="fetch at most this many symbols this run (0 = no cap)")
     args = ap.parse_args()
     raw = (ROOT / args.symbols[1:]).read_text(encoding="utf-8") if args.symbols.startswith("@") else args.symbols
     symbols = [s.strip().upper() for s in raw.split(",") if s.strip()]
@@ -143,6 +150,16 @@ def main() -> None:
     else:
         done = {r[0] for r in con.execute("SELECT symbol FROM prices_fetch_log WHERE error IS NULL").fetchall()}
     symbols = [s for s in symbols if s not in done]
+    if args.limit and len(symbols) > args.limit:
+        # Oldest first, never-fetched before ever-fetched, so a nightly cap
+        # rotates through the universe instead of re-reading the same head of
+        # the alphabet forever.
+        last = {r[0]: r[1] for r in con.execute(
+            "SELECT symbol, fetched_at FROM prices_fetch_log").fetchall()}
+        symbols.sort(key=lambda s: last.get(s) or "")
+        skipped = len(symbols) - args.limit
+        symbols = symbols[:args.limit]
+        print(f"  --limit {args.limit}: {skipped} symbols deferred to a later run")
     print(f"fetching prices for {len(symbols)} symbols...")
 
     session = requests.Session()

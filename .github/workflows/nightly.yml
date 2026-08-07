@@ -98,21 +98,18 @@ jobs:
         # Was @data/top500.txt, so the other 1,857 companies were unreachable: 432
         # had never been fetched at all and never would be. A rotation that cannot
         # reach part of its own universe is not a rotation, it is a permanent hole.
-        run: python pipeline/fetch_shareholding.py --symbols @data/all_symbols.txt --max-age-hours 336 --limit 700 --sleep 0.3
-        continue-on-error: true
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_shareholding.py --symbols @data/all_symbols.txt --max-age-hours 336 --limit 700 --sleep 0.3
       - name: Refresh price-chart history (whole universe, rotating)
         if: steps.plan.outputs.prices == '1'
         # Same fault: only the top 500 were ever revisited, so every other chart
         # slowly aged out. --max-age-hours 168 makes each symbol come up weekly;
         # --limit 600 keeps one night inside the Actions job timeout.
-        run: python pipeline/fetch_prices.py --symbols ${{ steps.plan.outputs.target }} --max-age-hours 168 --limit 600 --sleep 0.4
-        continue-on-error: true
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_prices.py --symbols ${{ steps.plan.outputs.target }} --max-age-hours 168 --limit 600 --sleep 0.4
       - name: Refresh concall/rating documents (whole universe, rotating)
         if: steps.plan.outputs.earnings == '1'
         # 480 of 2,357 companies covered, and capped at the top 500 it would have
         # stayed that way permanently.
-        run: python pipeline/fetch_announcement_docs.py --symbols @data/all_symbols.txt --max-age-hours 336 --limit 500 --sleep 0.35
-        continue-on-error: true
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_announcement_docs.py --symbols @data/all_symbols.txt --max-age-hours 336 --limit 500 --sleep 0.35
       - name: Keep as-filed earnings CURRENT across the whole universe
         if: steps.plan.outputs.earnings == '1'
         # This was `--symbols @data/top500.txt --limit 25`: 25 names a night out of
@@ -124,16 +121,14 @@ jobs:
         # --limit 800 keeps one night inside the Actions job timeout. Three nights
         # clear the backlog; after that --max-age-hours 168 means each symbol comes
         # up weekly, so steady state is ~340 a night and the cap never binds.
-        run: python pipeline/fetch_results_history.py --symbols ${{ steps.plan.outputs.target }} --max-age-hours 168 --limit 800 --quarters-back ${{ steps.plan.outputs.qb }} --sleep 0.25
-        continue-on-error: true
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols ${{ steps.plan.outputs.target }} --max-age-hours 168 --limit 800 --quarters-back ${{ steps.plan.outputs.qb }} --sleep 0.25
       - name: Refresh corporate actions (dividends, bonuses, splits, rights)
         if: steps.plan.outputs.actions == '1'
         # One index call per symbol against the same NSE host as the filing dates,
         # so it rides the same rate budget. Corrects an existing error too: the
         # Yahoo splits table files Reliance's Oct-2024 one-for-one BONUS as a
         # "2:1 split", and NSE labels it correctly.
-        run: python pipeline/fetch_corporate_actions.py --symbols ${{ steps.plan.outputs.target }} --max-age-hours 336 --limit 800 --sleep 0.2
-        continue-on-error: true
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_corporate_actions.py --symbols ${{ steps.plan.outputs.target }} --max-age-hours 336 --limit 800 --sleep 0.2
       - name: Record when each set of results was ANNOUNCED
         if: steps.plan.outputs.earnings == '1'
         # Drives the quarter-coloured EPS bars and result markers on the charts,
@@ -142,16 +137,14 @@ jobs:
         # publishes 9-12 days after quarter end, MTAR Technologies 29-42, and MTAR
         # published nothing at all between 29-Jan and 29-Jul 2026. One index call
         # per symbol, so this is cheap next to a results re-fetch.
-        run: python pipeline/fetch_filing_dates.py --symbols ${{ steps.plan.outputs.target }} --max-age-hours 168 --limit 900 --sleep 0.2
-        continue-on-error: true
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_filing_dates.py --symbols ${{ steps.plan.outputs.target }} --max-age-hours 168 --limit 900 --sleep 0.2
       - name: Deepen as-filed P&L history (bounded rotation, full ~20yr depth)
         if: steps.plan.outputs.earnings == '1'
         # 60 a night meant 2,000 companies would take 33 nights to gain full depth,
         # which is why 1,994 of them hold 20 quarters or fewer and CEMPRO's ratio
         # charts start in 2023 while its price starts in 2002. 200 costs roughly
         # 50 minutes and clears the backlog in ten nights instead.
-        run: python pipeline/fetch_results_history.py --symbols @data/all_symbols.txt --max-age-hours 4320 --limit 200 --quarters-back 0 --sleep 0.3
-        continue-on-error: true
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols @data/all_symbols.txt --max-age-hours 4320 --limit 200 --quarters-back 0 --sleep 0.3
       - name: Refresh IPOs (official NSE issues + live subscription)
         if: steps.plan.outputs.prices == '1'
         run: python pipeline/fetch_ipos.py
@@ -165,10 +158,22 @@ jobs:
         # way, forever. Run #24 tripped the depth guard on 1-Aug-2026 and the
         # stored database stayed frozen at 31-Jul until it was replaced by hand.
         #
-        # Fetching only ever ADDS rows, so a database that has just been fetched
-        # into is never worse than the one restored. The guards exist to stop a
-        # bad EXPORT reaching the site - they should not also be able to throw
-        # away a night of successful fetching.
+        # This comment used to claim "fetching only ever ADDS rows, so a
+        # database that has just been fetched into is never worse than the one
+        # restored". That was wrong, and saving unconditionally on the strength
+        # of it is how a bad night became permanent. The snapshot fetcher
+        # DELETEs a symbol's row before writing the new one, so a half-answered
+        # Yahoo response replaced RELIANCE's and TCS's market cap with nothing
+        # on 4-Aug-2026, and this step then wrote that loss into the release.
+        #
+        # What actually makes saving safe is the coalesce in
+        # fetch_fundamentals.keep_known_values: a field the source left blank
+        # can no longer overwrite a field we already knew. Rows can still be
+        # added and values still corrected - both wanted - but a fetch can no
+        # longer subtract knowledge, which is the property this step relies on.
+        #
+        # The guards exist to stop a bad EXPORT reaching the site. They should
+        # not also be able to throw away a night of successful fetching.
         #
         # always() so a failed fetch step still preserves whatever did arrive.
         if: always()

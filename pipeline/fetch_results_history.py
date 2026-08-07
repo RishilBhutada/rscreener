@@ -405,11 +405,27 @@ def main() -> None:
     con.execute(
         "CREATE TABLE IF NOT EXISTS results_history (symbol TEXT, basis TEXT, period_type TEXT, period_start TEXT, period_end TEXT, item TEXT, value REAL)"
     )
+    # Two passes run against this script every night and they are NOT the same
+    # job: the shallow one asks for the last 8 quarters of every symbol weekly,
+    # the deep one asks for the entire ~20-year history of a few symbols every
+    # 180 days. They shared one log keyed by symbol, so the shallow pass stamped
+    # every symbol as "just fetched" and the deep pass, asking who had not been
+    # fetched in 180 days, was answered "nobody" every single night since the
+    # workflow was written. It reported `fetching results history for 0 symbols`
+    # and exited green. The full backfill has therefore never run once, which is
+    # why chart depth never grew no matter how many nights passed.
+    #
+    # A log entry means "this symbol was fetched to THIS depth", so the depth
+    # belongs in the bookkeeping. Separate tables rather than a composite key:
+    # no migration of the existing table, and the deep log starting empty is
+    # exactly right - as far as the deep pass is concerned, nothing has been
+    # done yet, because nothing has.
+    log_table = "results_fetch_log_full" if args.quarters_back == 0 else "results_fetch_log"
     con.execute(
-        "CREATE TABLE IF NOT EXISTS results_fetch_log (symbol TEXT PRIMARY KEY, fetched_at TEXT, error TEXT, n_periods INTEGER)"
+        f"CREATE TABLE IF NOT EXISTS {log_table} (symbol TEXT PRIMARY KEY, fetched_at TEXT, error TEXT, n_periods INTEGER)"
     )
     # decide which symbols are due, oldest-first (a never-fetched symbol counts as oldest)
-    log = {r[0]: r[1] for r in con.execute("SELECT symbol, fetched_at FROM results_fetch_log WHERE error IS NULL").fetchall()}
+    log = {r[0]: r[1] for r in con.execute(f"SELECT symbol, fetched_at FROM {log_table} WHERE error IS NULL").fetchall()}
     if args.refresh:
         due = list(symbols)
     elif args.max_age_hours > 0:
@@ -472,7 +488,7 @@ def main() -> None:
                 n_periods += 1
                 time.sleep(0.15)
             db_retry(lambda: con.execute(
-                "INSERT OR REPLACE INTO results_fetch_log VALUES (?,?,?,?)",
+                f"INSERT OR REPLACE INTO {log_table} VALUES (?,?,?,?)",
                 (sym, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), None, n_periods),
             ))
             db_retry(con.commit)
@@ -483,7 +499,7 @@ def main() -> None:
             # should cost that symbol, not the hundreds still queued behind it
             try:
                 db_retry(lambda: con.execute(
-                    "INSERT OR REPLACE INTO results_fetch_log VALUES (?,?,?,?)",
+                    f"INSERT OR REPLACE INTO {log_table} VALUES (?,?,?,?)",
                     (sym, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), err, n_periods),
                 ))
                 db_retry(con.commit)

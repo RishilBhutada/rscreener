@@ -102,6 +102,18 @@ def fetch_one(symbol: str, snapshot_only: bool = False) -> tuple[dict, pd.DataFr
     row = {"symbol": symbol, "fetch_date": now_utc()}
     for src, dst in INFO_FIELDS.items():
         row[dst] = info.get(src)
+    # A quote carrying a price but no market cap is a half-built answer, not a
+    # company without a market cap. On 4-Aug-2026 exactly two symbols out of
+    # 2,367 came back that way - RELIANCE and TCS, both far into the sweep - and
+    # each cost its company four twenty-year charts. Ask once more before
+    # believing it; a second miss is then treated as genuinely unknown, and
+    # keep_known_values stops it overwriting whatever we already had.
+    if row.get("price") is not None and row.get("market_cap") is None:
+        time.sleep(1.5)
+        info = yf.Ticker(f"{symbol}.NS").info or {}
+        for src, dst in INFO_FIELDS.items():
+            if row.get(dst) is None:
+                row[dst] = info.get(src)
     if row.get("price") is None and row.get("market_cap") is None:
         raise ValueError("no data returned (symbol unknown to Yahoo or delisted)")
     if snapshot_only:
@@ -110,11 +122,61 @@ def fetch_one(symbol: str, snapshot_only: bool = False) -> tuple[dict, pd.DataFr
     return row, statements_long(tkr, symbol)
 
 
-def replace_symbol_rows(con: sqlite3.Connection, table: str, symbols: list[str], df: pd.DataFrame) -> None:
+def keep_known_values(con: sqlite3.Connection, table: str, df: pd.DataFrame) -> pd.DataFrame:
+    """Carry forward any field the new payload left blank.
+
+    Yahoo answers a quote request field by field, and a throttled or half-built
+    response omits fields rather than failing. Because the write below DELETEs
+    before it appends, an omitted field did not mean "unchanged" - it meant the
+    stored value was destroyed, while the fetch still printed `ok`.
+
+    On 4-Aug-2026 that emptied market_cap for RELIANCE and TCS. Share count is
+    derived as market_cap / price, and a symbol with no share count is skipped
+    outright by the band builder, so twenty years of P/E, P/B, P/S and EV/EBITDA
+    history disappeared from both charts and the publish guard stopped the whole
+    nightly run. Two absent numbers, four charts, one dead pipeline.
+
+    A blank field is the absence of an answer, not an answer of zero. Only a
+    different known value may overwrite a known value.
+    """
+    if df.empty or "symbol" not in df.columns:
+        return df
+    cols = ",".join(f'"{c}"' for c in df.columns)
+    qmarks = ",".join("?" * len(df))
+    stored = {
+        r[0]: dict(zip(df.columns, r))
+        for r in con.execute(
+            f"SELECT {cols} FROM {table} WHERE symbol IN ({qmarks})",
+            df["symbol"].tolist(),
+        ).fetchall()
+    }
+    if not stored:
+        return df
+    df = df.copy()
+    for i, sym in enumerate(df["symbol"]):
+        old = stored.get(sym)
+        if not old:
+            continue
+        for c in df.columns:
+            if c == "symbol":
+                continue
+            new = df.iloc[i][c]
+            if (new is None or (isinstance(new, float) and pd.isna(new))) and old.get(c) is not None:
+                df.iloc[i, df.columns.get_loc(c)] = old[c]
+    return df
+
+
+def replace_symbol_rows(con: sqlite3.Connection, table: str, symbols: list[str], df: pd.DataFrame,
+                        coalesce: bool = False) -> None:
     existing = con.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
     ).fetchone()
     if existing:
+        # coalesce only for one-row-per-symbol tables. `statements` holds many
+        # rows per symbol keyed by period and item, where a row absent from the
+        # new payload genuinely is a row that should go.
+        if coalesce:
+            df = keep_known_values(con, table, df)
         qmarks = ",".join("?" * len(symbols))
         con.execute(f"DELETE FROM {table} WHERE symbol IN ({qmarks})", symbols)
     if not df.empty:
@@ -172,11 +234,14 @@ def main() -> None:
         log_row = {"symbol": sym, "fetched_at": now_utc(), "error": None}
         try:
             snap, stmts = fetch_one(sym, snapshot_only=args.snapshot_only)
-            replace_symbol_rows(con, "fundamentals", [sym], pd.DataFrame([snap]))
+            replace_symbol_rows(con, "fundamentals", [sym], pd.DataFrame([snap]),
+                                coalesce=True)
             if not args.snapshot_only:
                 replace_symbol_rows(con, "statements", [sym], stmts)
             ok += 1
-            print(f"[{i}/{len(symbols)}] {sym}: ok ({len(stmts)} statement lines)")
+            missing = [k for k in ("price", "market_cap") if snap.get(k) is None]
+            note = f" [Yahoo omitted {', '.join(missing)}; kept the stored value]" if missing else ""
+            print(f"[{i}/{len(symbols)}] {sym}: ok ({len(stmts)} statement lines){note}")
         except Exception as e:  # noqa: BLE001 - one bad symbol must not kill the run
             log_row["error"] = str(e)[:300]
             err += 1

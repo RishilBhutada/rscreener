@@ -219,11 +219,39 @@ def main() -> None:
     has_statements = {
         r[0] for r in con.execute("SELECT DISTINCT symbol FROM statements").fetchall()
     }
-    shares_by_symbol = {
-        r["symbol"]: r["market_cap"] / r["price"]
-        for r in snaps.to_dict(orient="records")
-        if r.get("market_cap") and r.get("price")
-    }
+    # Share count, from whichever source actually has one. Every ratio band -
+    # P/E, P/B, P/S, EV/EBITDA - multiplies price by this to reach market cap,
+    # and `ratio_bands` skips a symbol outright when it is missing. So a single
+    # absent number silently deletes four twenty-year charts; on 4-Aug-2026 it
+    # deleted RELIANCE's and TCS's and stopped the nightly run dead.
+    #
+    # market_cap / price is primary. shares_out is a genuinely separate field
+    # Yahoo returns, and it agrees with market_cap / price within 2% on 2,227 of
+    # the 2,258 symbols that carry both - close enough to stand in, far enough
+    # from the primary source to survive a partial response that drops one.
+    #
+    # There is deliberately no third tier. A count implied from filed PAT / EPS
+    # is checkable only against a count we already have, so precisely when it is
+    # needed it cannot be checked: on the 17 symbols it would rescue it returns
+    # 420 trillion shares and a market cap of Rs 1.3 crore-crore. An absent
+    # chart is recoverable; a confidently wrong one is not.
+    shares_by_symbol, share_src = {}, {"market_cap": 0, "shares_out": 0}
+    for r in snaps.to_dict(orient="records"):
+        if r.get("market_cap") and r.get("price"):
+            shares_by_symbol[r["symbol"]] = r["market_cap"] / r["price"]
+            share_src["market_cap"] += 1
+        elif r.get("shares_out"):
+            shares_by_symbol[r["symbol"]] = r["shares_out"]
+            share_src["shares_out"] += 1
+    missing_shares = sorted(set(snaps["symbol"]) - set(shares_by_symbol))
+    if missing_shares:
+        # Named, not merely counted. This used to be invisible, which is why it
+        # took a failed publish and a log dig to find two missing numbers.
+        print(f"  no share count for {len(missing_shares)} symbols - their ratio "
+              f"bands are omitted: {', '.join(missing_shares[:8])}"
+              f"{' ...' if len(missing_shares) > 8 else ''}")
+    print(f"  share counts: {share_src['market_cap']} from market cap, "
+          f"{share_src['shares_out']} from shares outstanding")
     netdebt_by_symbol = net_debt_series(con)
     quarters_by_symbol = quarter_blocks(con)
     actions_by_symbol = corporate_actions(con)
