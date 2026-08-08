@@ -81,8 +81,54 @@ def _stitched(con: sqlite3.Connection) -> dict:
                 slot[r["item"]] = r["value"]
                 if src == "nse":
                     slot["_source"] = "nse"
-        out[(symbol, ptype)] = periods
+        out[(symbol, ptype)] = _drop_offscale_yf(periods)
     return out
+
+
+# A source-supplied period may differ from the filings beside it by this much
+# before it is treated as a different unit rather than a different year. Real
+# revenue does move a long way in one year - a cyclical can halve - but it does
+# not move by five times and then move back.
+YF_SCALE_LIMIT = 5.0
+
+
+def _drop_offscale_yf(periods: dict) -> dict:
+    """Discard a source-supplied period that is not on the same scale as the filings.
+
+    Infosys is the worked example. It is listed in New York as well as Mumbai,
+    so the fallback source reports its accounts in US dollars: FY2025 revenue
+    arrives as 1,927.7 against the 153,670 crore FILED for FY2024. Stored as
+    rupees and read as a year-on-year move, that is a company losing 99% of its
+    revenue, and the page duly reported Infosys's five-year sales growth as
+    -54% and its profit growth as -56%.
+
+    38 companies had a step of more than five times landing exactly on the
+    boundary where the source changes. Not all are currency - some are a
+    standalone figure following a consolidated one - but a jump of that size
+    that coincides with a change of source is a unit or a scope changing, never
+    a year of trading.
+
+    Only the fallback rows are ever dropped; an as-filed figure is what
+    everything else is checked against and is never discarded on suspicion. The
+    series simply ends where the trustworthy record ends, which is the honest
+    answer and the one the rest of this pipeline already gives.
+    """
+    filed = {p: s for p, s in periods.items() if s.get("_source") == "nse" and s.get("revenue")}
+    if not filed:
+        return periods                      # nothing to check against
+    ref_period = max(filed)
+    ref = filed[ref_period]["revenue"]
+    if not ref:
+        return periods
+    kept = {}
+    for p, slot in periods.items():
+        rev = slot.get("revenue")
+        if slot.get("_source") == "yf" and rev:
+            ratio = max(abs(ref) / abs(rev), abs(rev) / abs(ref))
+            if ratio > YF_SCALE_LIMIT:
+                continue                    # different unit or different entity, not a data point
+        kept[p] = slot
+    return kept
 
 
 def balance_equity(con: sqlite3.Connection) -> dict:
