@@ -298,6 +298,52 @@ def main() -> None:
         df[col] = (df[col] * 100).round(2)
     df["market_cap"] = (df["market_cap"] / 1e7).round(1)  # Rs -> Rs crore
     df["debt_to_equity"] = (df["debt_to_equity"] / 100).round(3)  # Yahoo's 36.65 -> 0.37 ratio, screener.in style
+
+    # Price-to-sales and EV/EBITDA divide a RUPEE market cap by a figure taken
+    # from the source's own statements, and those two are not always in the same
+    # currency. Infosys and HCL Technologies are listed in New York, so their
+    # revenue arrives in US DOLLARS - Infosys at 2,030 against the 153,670 crore
+    # it filed. Divided into a rupee market cap that produced a price-to-sales
+    # of 234 next to TCS's 3.2, which reads as Infosys being seventy times the
+    # more expensive company. 88 companies had a scale mismatch of some kind
+    # between the two sources.
+    #
+    # Both ratios are therefore rebuilt from the FILED figures, which are in
+    # rupees by construction and are the same numbers the charts and quarterly
+    # tables already show. Trailing twelve months where four quarters are on
+    # file, the latest full year otherwise. The source's own figure is kept only
+    # where nothing has been filed.
+    def filed_ttm(sym: str, field: str) -> float | None:
+        t = trends.get(sym) or {}
+        q = t.get("quarterly") or {}
+        vals = [v for v in (q.get(field) or [])[-4:] if v is not None]
+        if len(vals) == 4:
+            return sum(vals)
+        a = t.get("annual") or {}
+        for v in reversed(a.get(field) or []):
+            if v is not None:
+                return v
+        return None
+
+    rebuilt_ps = rebuilt_ev = 0
+    ps_new, ev_new = [], []
+    for sym, mc, ps_old, ev_old, debt, cash in zip(
+        df["symbol"], df["market_cap"], df["ps"], df["ev_ebitda"],
+        df["total_debt"], df["total_cash"]
+    ):
+        rev = filed_ttm(sym, "revenue")
+        eb = filed_ttm(sym, "ebitda")
+        if mc and rev and rev > 0:
+            ps_new.append(round(mc / rev, 2)); rebuilt_ps += 1
+        else:
+            ps_new.append(ps_old)
+        if mc and eb and eb > 0:
+            ev = mc + (debt or 0) / 1e7 - (cash or 0) / 1e7
+            ev_new.append(round(ev / eb, 2)); rebuilt_ev += 1
+        else:
+            ev_new.append(ev_old)
+    df["ps"], df["ev_ebitda"] = ps_new, ev_new
+    print(f"  rebuilt from filed figures: P/S {rebuilt_ps}, EV/EBITDA {rebuilt_ev}")
     df = df.rename(columns=RENAME)
 
     keep = [

@@ -391,6 +391,16 @@ def main() -> None:
     ap.add_argument("--quarters-back", type=int, default=40, help="max quarterly filings per symbol (0 = all available)")
     ap.add_argument("--max-age-hours", type=float, default=0.0, help="re-fetch a symbol whose last fetch is older than this (0 = only never-fetched symbols)")
     ap.add_argument("--sleep", type=float, default=0.35)
+    # A wall-clock budget, not just a symbol count. The full-depth pass
+    # downloads every filing a company has ever made - roughly a hundred
+    # documents each - so 200 symbols can run for hours, and on 8-Aug-2026 the
+    # first real deep run was still going after two. A GitHub job is killed at
+    # six hours, and a killed job never reaches the step that saves the
+    # database, so the entire night's fetching would have been thrown away with
+    # nothing to show for it. Stopping early keeps what was fetched and lets the
+    # rotation pick the rest up tomorrow.
+    ap.add_argument("--max-minutes", type=float, default=0,
+                    help="stop starting new symbols after this long (0 = no budget)")
     ap.add_argument("--refresh", action="store_true", help="re-fetch every listed symbol regardless of age")
     args = ap.parse_args()
 
@@ -446,7 +456,12 @@ def main() -> None:
     except Exception:
         pass
 
+    started = time.monotonic()
     for i, sym in enumerate(symbols, 1):
+        if args.max_minutes and (time.monotonic() - started) / 60 >= args.max_minutes:
+            print(f"time budget of {args.max_minutes:g} min reached - stopping after {i-1} "
+                  f"of {len(symbols)} symbols; the rest come up on a later run", flush=True)
+            break
         n_periods = skipped = 0
         err = None
         try:

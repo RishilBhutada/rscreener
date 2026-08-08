@@ -503,9 +503,27 @@ def _derive(slot: dict) -> dict:
     dep = slot.get("depreciation") or 0.0
     # Banks file operating profit outright ("Financing Profit" on screener.in);
     # for everyone else it is Revenue - Expenses + Interest + Depreciation.
-    ebitda = slot.get("op_profit_direct") or slot.get("ebitda_direct")
-    if ebitda is None and rev is not None and exp is not None:
-        ebitda = rev - exp + fin + dep
+    #
+    # A directly reported figure was preferred unconditionally, and that is how
+    # a currency got in. Infosys is listed in New York, so the fallback source
+    # reports its EBITDA in US DOLLARS while its revenue comes from the NSE
+    # filing in rupees. Both sat in the same period: EBITDA 131 against revenue
+    # 44,490, a margin of 0.3% for a company that runs at 24%. Divided into a
+    # rupee enterprise value that put Infosys on EV/EBITDA 40 beside TCS's 11.6.
+    #
+    # A direct figure now has to agree with what arithmetic gives from the filed
+    # revenue and expenses. Where both exist and they differ by more than five
+    # times, the computed one wins, because every number in it came from the
+    # filing this period belongs to. A direct figure is still used when there is
+    # nothing to check it against - banks file operating profit and no expense
+    # breakdown, which is why it is preferred in the first place.
+    computed = (rev - exp + fin + dep) if (rev is not None and exp is not None) else None
+    direct = slot.get("op_profit_direct") or slot.get("ebitda_direct")
+    if direct is not None and computed is not None and computed != 0:
+        ratio = abs(direct / computed)
+        ebitda = direct if 0.2 <= ratio <= 5.0 else computed
+    else:
+        ebitda = direct if direct is not None else computed
     gp = slot.get("gross_profit")  # some old sheets report Gross Profit outright
     if gp is None:
         cogs = slot.get("cogs_direct")

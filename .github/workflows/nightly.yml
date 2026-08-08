@@ -41,6 +41,11 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    # Below GitHub's 6-hour hard kill. A killed job never reaches the step
+    # that saves the database, so a night's fetching would be lost with
+    # nothing recorded; the fetchers carry their own time budgets to stay
+    # inside this, and this is the backstop for the case they do not.
+    timeout-minutes: 330
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -156,7 +161,7 @@ jobs:
         # which is why 1,994 of them hold 20 quarters or fewer and CEMPRO's ratio
         # charts start in 2023 while its price starts in 2002. 200 costs roughly
         # 50 minutes and clears the backlog in ten nights instead.
-        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols @data/all_symbols.txt --max-age-hours 4320 --limit 200 --quarters-back 0 --sleep 0.3
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols @data/all_symbols.txt --max-age-hours 4320 --limit 200 --quarters-back 0 --sleep 0.3 --max-minutes 75
       - name: Refresh IPOs (official NSE issues + live subscription)
         if: steps.plan.outputs.prices == '1'
         run: python pipeline/fetch_ipos.py
