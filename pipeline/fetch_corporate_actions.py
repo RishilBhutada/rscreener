@@ -21,6 +21,8 @@ from pathlib import Path
 
 import requests
 
+import nse_session
+
 from db_lib import retry as db_retry
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -119,7 +121,7 @@ def main() -> None:
     ok = err = 0
     for i, sym in enumerate(due, 1):
         try:
-            body = session.get(API.format(sym=sym), timeout=30).json()
+            body = nse_session.get(session, API.format(sym=sym), timeout=30).json()
             rows = body if isinstance(body, list) else (body.get("data") or [])
             out = []
             for r in rows:

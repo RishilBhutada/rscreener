@@ -15,6 +15,8 @@ from pathlib import Path
 
 import requests
 
+import nse_session
+
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
 API = "https://www.nseindia.com/api/corporate-announcements?index=equities&symbol={sym}"
@@ -81,8 +83,7 @@ def main() -> None:
     ok = err = 0
     for i, sym in enumerate(symbols, 1):
         try:
-            r = s.get(API.format(sym=sym), timeout=30)
-            r.raise_for_status()
+            r = nse_session.get(s, API.format(sym=sym), timeout=30)
             rows = r.json()
             buckets: dict[str, list] = {"concall": [], "rating": []}
             for a in rows:
