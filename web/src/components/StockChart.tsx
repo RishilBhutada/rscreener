@@ -528,12 +528,21 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       // when the range changed - a number that moves when you zoom is a number
       // nobody can trust.
       //
-      // Year-on-year compares a quarter with the same quarter a year earlier,
-      // four bars back. Sequential compares it with the quarter just gone.
-      // Quarterly earnings are seasonal - a December quarter is not a June
-      // quarter - so year-on-year is the honest default and the one every
-      // filing commentary uses; sequential is there for reading momentum.
-      const back = epsCmp === "yoy" ? (nQ === 1 ? 4 : 4) : 1;
+      // Four bars back for "year ago", one bar back for "previous" - in BOTH
+      // windows. What that MEANS differs, and the labels say which:
+      //
+      // 1Q x4   a bar is one quarter. Four back is the same quarter a year
+      //         earlier; one back is the quarter just gone.
+      // TTM     a bar is twelve months. Four back is the twelve months BEFORE
+      //         this twelve months, sharing no quarter with it. One back is the
+      //         twelve months ending a quarter earlier, which shares three of
+      //         its four quarters - so it moves by exactly one quarter's news
+      //         spread across a full year of earnings. A company whose newest
+      //         quarter doubled reads +25% there rather than +100%. That is a
+      //         real number and a deliberately smoothed one, which is the whole
+      //         point of a trailing measure. It is offered and labelled, rather
+      //         than hidden or silently swapped for something else.
+      const back = epsCmp === "yoy" ? 4 : 1;
       allEpsBars.forEach((b, i) => {
         b.chg = i >= back ? growth(b.v, allEpsBars[i - back].v) : { kind: "none" };
       });
@@ -849,8 +858,16 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
               </button>
               {showChg && (
                 <div className="flex items-center gap-0.5 rounded-lg border border-[var(--line)] p-0.5">
-                  {([["yoy", "vs year ago", "Compare each quarter with the SAME quarter a year earlier. Quarterly earnings are seasonal, so this is the comparison filings and analysts use."],
-                     ["prev", "vs previous", "Compare each quarter with the one immediately before it. Reads momentum, but mixes in seasonality - a December quarter is not a June quarter."]] as const).map(([k, label, tip]) => (
+                  {/* Same two choices in both windows, described in the terms of
+                      whichever window is showing - a bar means a quarter in one
+                      and twelve months in the other, so one wording cannot serve
+                      both without misleading in one of them. */}
+                  {(peWin === "ttm"
+                    ? ([["yoy", "vs year before", "Compare these twelve months with the TWELVE MONTHS BEFORE THEM. The two periods share no quarter, so it is a full year measured against a full year."],
+                        ["prev", "vs quarter earlier", "Compare these twelve months with the twelve months ending one quarter earlier. They share three of their four quarters, so the figure moves by one quarter's news spread across a whole year of earnings - smoother, and smaller, than the same news in the 1Q x4 view."]] as const)
+                    : ([["yoy", "vs year ago", "Compare each quarter with the SAME quarter a year earlier. Quarterly earnings are seasonal, so this is the comparison filings and analysts use."],
+                        ["prev", "vs previous", "Compare each quarter with the one immediately before it. Reads momentum, but mixes in seasonality - a December quarter is not a June quarter."]] as const)
+                  ).map(([k, label, tip]) => (
                     <button
                       key={k}
                       onClick={() => setEpsCmp(k)}
@@ -1061,7 +1078,12 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                         rx={!spanned && bw > 6 ? 2 : 0} fill={fill} opacity={loss ? 0.55 : 0.78}>
                         <title>{`${spanned ? `${Q_LABEL[d.q ?? 0] ?? ""} · ` : ""}${s.label} ₹${d.v.toFixed(2)}${loss ? " (loss)" : ""}${
                           d.chg && d.chg.kind !== "none"
-                            ? ` · ${growthText(d.chg, false)} ${epsCmp === "yoy" ? "vs the same quarter a year earlier" : "vs the previous quarter"}`
+                            ? ` · ${growthText(d.chg, false)} ${
+                                peWin === "ttm"
+                                  ? (epsCmp === "yoy" ? "vs the twelve months before these"
+                                                      : "vs the twelve months ending a quarter earlier")
+                                  : (epsCmp === "yoy" ? "vs the same quarter a year earlier"
+                                                      : "vs the previous quarter")}`
                             : ""
                         }${d.announced ? ` · declared ${d.announced}` : ""}`}</title>
                       </rect>
