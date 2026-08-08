@@ -1,21 +1,21 @@
 {
- "generated_at": "2026-08-08 22:39 UTC",
+ "generated_at": "2026-08-08 23:07 UTC",
  "universe": 5069,
  "sources": [
   {
    "key": "prices",
    "name": "Share prices",
    "what": "Daily closes from the exchange feed. Drives every price, market cap and ratio.",
-   "covered": 4731,
+   "covered": 4749,
    "newest": "2026-08-07",
    "behind": 21,
    "oldest": "2026-01-23",
    "cadence": "every night",
-   "current": 4710,
+   "current": 4728,
    "universe": 5069,
    "per_night": 2357,
    "pct": 93,
-   "missing": 338,
+   "missing": 320,
    "unavailable": 4,
    "nights_left": 1,
    "eta": "2026-08-09"
@@ -24,19 +24,19 @@
    "key": "snapshot",
    "name": "Company snapshot",
    "what": "P/E, book value, 52-week range and the rest of the screener columns.",
-   "covered": 4728,
+   "covered": 4746,
    "newest": "2026-08-08",
    "behind": 0,
    "oldest": "2026-08-08",
    "cadence": "every night",
-   "current": 4728,
+   "current": 4746,
    "universe": 5069,
    "per_night": 2357,
-   "pct": 93,
-   "missing": 341,
+   "pct": 94,
+   "missing": 323,
    "unavailable": 333,
-   "nights_left": 1,
-   "eta": "2026-08-09"
+   "nights_left": 0,
+   "eta": null
   },
   {
    "key": "results",
@@ -109,9 +109,9 @@
    "per_night": 2357,
    "pct": 44,
    "missing": 2840,
-   "unavailable": 2832,
-   "nights_left": 1,
-   "eta": "2026-08-09"
+   "unavailable": 2850,
+   "nights_left": 0,
+   "eta": null
   },
   {
    "key": "ipos",
