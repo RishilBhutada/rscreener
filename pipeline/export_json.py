@@ -222,6 +222,27 @@ def freshen_prices(con, df):
     fresh = max([d for d, _ in latest.values()], default=None)
     stale = [bool(fresh and d and d < fresh) for d in dates]
     df["price_date"], df["price_stale"] = dates, stale
+
+    # How many days this company actually TRADED in the last 30, straight from
+    # its daily bars - a bar exists only for a day on which a trade happened.
+    #
+    # It is the difference between a broken pipeline and an illiquid stock, and
+    # until BSE arrived they looked the same because every NSE company of any
+    # size trades daily. 0.1% of NSE companies lag the newest close; the BSE
+    # scrips lag at 7.4%, not because anything failed but because nobody traded
+    # them. Counted across 5,000 companies that alone would have pushed the
+    # staleness guard past its 2% limit and blocked every publish, for a reading
+    # that says nothing about whether the fetcher works.
+    try:
+        recent = con.execute(
+            "SELECT symbol, COUNT(DISTINCT date) FROM prices "
+            "WHERE freq='daily' AND date >= date(?, '-30 day') GROUP BY symbol",
+            (fresh,),
+        ).fetchall() if fresh else []
+    except Exception:  # noqa: BLE001
+        recent = []
+    bars = dict(recent)
+    df["bars30"] = [bars.get(s, 0) for s in df["symbol"]]
     undated = sum(1 for d in dates if not d)
     print(f"  price refresh: {moved} symbols moved onto the latest traded close "
           f"(as of {fresh}, {sum(stale)} behind it, {undated} undated)")
@@ -357,7 +378,7 @@ def main() -> None:
         "median_pe_5y", "avg_npm_5y",
         "ret_1m", "ret_3m", "ret_6m", "ret_1y", "ret_3y", "ret_5y", "off_52w_high",
         "volatility_1y", "volatility_30d", "vol_method",
-        "shares_out", "price_date",
+        "shares_out", "price_date", "bars30",
     ]
     df = df[keep]
     df = df.astype(object).where(pd.notna(df), None)

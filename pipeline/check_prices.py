@@ -25,7 +25,12 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "web" / "public" / "data.json"
 
 MAX_AGE_DAYS = 6        # covers a long weekend plus a public holiday
-MAX_STALE_PCT = 2.0     # % of companies allowed to lag the newest bar in the file
+MAX_STALE_PCT = 2.0
+# Trading days in the last 30 before a company is expected to have today's close.
+# 15 of ~21 sessions: traded on most days, so a missing close is not the market's
+# doing. Deliberately not higher - the point is to keep the guard sharp, not to
+# excuse companies out of it.
+MIN_BARS_30 = 15     # % of companies allowed to lag the newest bar in the file
 MAX_UNDATED_PCT = 20.0  # % with no price series at all (delisted/renamed tickers)
 MCAP_TOL = 0.02         # price x shares vs published mcap
 
@@ -70,15 +75,38 @@ def main() -> None:
     # 2. how many companies lag the newest close in the file, and how many are undated.
     # Derived here rather than trusted from a flag in the file - a guard that reads
     # the exporter's own opinion of its output cannot catch the exporter being wrong.
-    stale = [c for c in rows if c.get("price_date") and asof and c["price_date"] < asof]
+    # Measured over companies that ACTUALLY TRADE. A daily bar exists only for a
+    # day on which a trade happened, so a lagging price date means "nobody bought
+    # this" at least as often as it means "the fetcher is broken" - and until BSE
+    # was added those were indistinguishable, because every NSE company of any
+    # size trades daily. 0.1% of NSE companies lag the newest close against 7.4%
+    # of the BSE scrips, none of it a fetching failure. Judged together, 5,000
+    # companies would have sat permanently above the 2% limit and no export could
+    # ever have published again.
+    #
+    # A company that traded on most of the last 30 days and STILL has an old
+    # price is the real signal, and it is the one a broken fetcher trips: when
+    # the pipeline stops, the liquid names stop with it.
+    def liquid(c):
+        n = c.get("bars30")
+        return n is None or n >= MIN_BARS_30   # unknown -> judged, not excused
+
+    tradeable = [c for c in rows if liquid(c)]
+    thin = [c for c in rows if not liquid(c)]
+    stale = [c for c in tradeable if c.get("price_date") and asof and c["price_date"] < asof]
+    thin_stale = [c for c in thin if c.get("price_date") and asof and c["price_date"] < asof]
     undated = [c for c in rows if not c.get("price_date")]
-    pct = len(stale) / len(rows) * 100 if rows else 0
+    pct = len(stale) / len(tradeable) * 100 if tradeable else 0
     upct = len(undated) / len(rows) * 100 if rows else 0
-    print(f"behind the newest close: {len(stale)} of {len(rows)} ({pct:.1f}%)")
+    print(f"regularly traded:        {len(tradeable)} of {len(rows)} "
+          f"(>= {MIN_BARS_30} trading days in the last 30)")
+    print(f"behind the newest close: {len(stale)} of {len(tradeable)} ({pct:.1f}%) among them")
+    print(f"thinly traded and behind:{len(thin_stale)} of {len(thin)} - reported, not failed")
     print(f"no price series at all:  {len(undated)} of {len(rows)} ({upct:.1f}%)")
     if pct > MAX_STALE_PCT:
         worst = ", ".join(c.get("symbol", "?") for c in stale[:6])
-        fails.append(f"{pct:.1f}% of companies lag the newest close (limit {MAX_STALE_PCT}%): {worst} ...")
+        fails.append(f"{pct:.1f}% of REGULARLY TRADED companies lag the newest close "
+                     f"(limit {MAX_STALE_PCT}%): {worst} ...")
     if upct > MAX_UNDATED_PCT:
         fails.append(f"{upct:.1f}% of companies have no price series (limit {MAX_UNDATED_PCT}%) - fetch_prices.py is failing")
 
