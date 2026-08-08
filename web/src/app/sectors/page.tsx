@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
+import { titleCase } from "@/lib/names";
 import { Row } from "@/lib/query";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -150,7 +151,7 @@ function SectorsView() {
             {companies.slice(0, 400).map((r) => (
               <tr key={String(r.symbol)} className="border-t border-[var(--line)] hover:bg-[var(--accent-soft)]">
                 <td className="px-2 py-2 sm:px-3"><Link href={`/company?s=${r.symbol}`} className="font-semibold text-[var(--accent-ink)] hover:underline">{String(r.symbol)}</Link></td>
-                <td className="px-2 py-2 sm:px-3 max-w-56 truncate">{String(r.name ?? "—")}</td>
+                <td className="px-2 py-2 sm:px-3 max-w-56 truncate">{titleCase(String(r.name ?? "")) || "—"}</td>
                 <td className="px-2 py-2 sm:px-3 max-w-48 truncate">{String(r.industry ?? "—")}</td>
                 <td className="px-2 py-2 sm:px-3 text-right">{fmtNum(r.price as number)}</td>
                 <td className="px-2 py-2 sm:px-3 text-right">{fmtNum(r.mcap as number, 0)}</td>

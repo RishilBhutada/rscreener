@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
+import { titleCase } from "@/lib/names";
 import StockChart, { CorpAction, Quarter } from "@/components/StockChart";
 import { Row } from "@/lib/query";
 import { loadNote, pushRecent, saveNote } from "@/lib/store";
@@ -566,7 +567,7 @@ function CompanyView() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-[var(--ink)]">{String(s.name ?? symbol)} <span className="text-[var(--accent-ink)]">({symbol})</span></h1>
+          <h1 className="text-2xl font-bold text-[var(--ink)]">{titleCase(String(s.name ?? "")) || symbol} <span className="text-[var(--accent-ink)]">({symbol})</span></h1>
           <p className="text-sm text-[var(--ink3)]">
             {s.sector ? (
               <Link href={`/sectors?s=${encodeURIComponent(String(s.sector))}`} className="hover:text-[var(--accent-ink)] hover:underline">{String(s.sector)}</Link>
@@ -655,7 +656,7 @@ function CompanyView() {
                 </tr>
                 {peers.map((p) => (
                   <tr key={String(p.symbol)} className="border-b border-[var(--line)] hover:bg-[var(--card2)]">
-                    <td className="px-3 py-1.5"><Link className="font-medium text-[var(--accent-ink)] hover:underline" href={`/company?s=${p.symbol}`}>{String(p.name ?? p.symbol)}</Link></td>
+                    <td className="px-3 py-1.5"><Link className="font-medium text-[var(--accent-ink)] hover:underline" href={`/company?s=${p.symbol}`}>{titleCase(String(p.name ?? "")) || String(p.symbol)}</Link></td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.price as number)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.pe as number)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.mcap as number, 0)}</td>
