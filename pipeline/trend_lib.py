@@ -15,6 +15,7 @@ Money is converted to Rs crore here (eps and per-share book value stay in rupees
 import math
 import sqlite3
 from datetime import datetime, timedelta
+from statistics import median
 
 import pandas as pd
 
@@ -535,15 +536,112 @@ def _derive(slot: dict) -> dict:
     return {"ebitda": ebitda, "gross_profit": gp}
 
 
+# A filing and the second source may differ by this much before the pair is
+# examined. Consolidated against standalone, or a restatement, lands well inside
+# it; a decimal in the wrong place does not.
+CROSS_SOURCE_LIMIT = 5.0
+# Computed once per process: both the trend builder and the band builder ask for
+# it, and it is two full passes over the filings.
+_CROSS_CACHE: list = []
+# ...and once examined, the filing is only condemned if it is ALSO this far from
+# the rest of that company's own filed history.
+OWN_SERIES_LIMIT = 5.0
+
+
+def cross_source_outliers(con: sqlite3.Connection) -> dict[tuple[str, str], set]:
+    """Filings whose SCALE is contradicted by two independent signals at once.
+
+    The docstring on implausible_quarters says this cannot be done: "a filing
+    where two figures are wrong in the same proportion... needs a second
+    independent source, which exists for prices (the exchange) but not yet for
+    earnings." It does exist. The statements table is built from a different
+    provider by a different code path from the NSE XBRL parse, and the two can
+    be laid against each other period by period. Across 3,654 annual pairs they
+    agree with a median ratio of 1.0000 and land within 1% on 77% of them, which
+    is what makes a disagreement of five times worth acting on.
+
+    Disagreement alone is not enough, because it does not say WHICH side is
+    wrong, and the answer is genuinely both ways round:
+
+      SRF, FY2023      filed 21.6 cr,  other source 2,162.3 cr - exactly 100x.
+                       The filing is wrong; a units line was misread.
+      Infosys, FY2023  filed 24,108 cr, other source 298.1 cr - about 80x.
+                       The FILING is right; Infosys is listed in New York and
+                       the other source reports it in US dollars.
+
+    So a second, independent question decides it: is this figure also out of
+    line with the rest of THIS company's own filed history? SRF's neighbours are
+    in the thousands of crore, so 21.6 is an outlier twice over and goes.
+    Infosys's neighbours are also in the tens of thousands, so the filing is
+    consistent with itself and stays - the other source is the odd one there.
+
+    Only a figure accused by both is dropped. That is what stops this from
+    quietly deleting the honest half of every disagreement.
+    """
+    if _CROSS_CACHE:
+        return _CROSS_CACHE[0]          # two callers, two full table scans, one answer
+    out: dict[tuple[str, str], set] = {}
+    if not _table_exists(con, "results_history") or not _table_exists(con, "statements"):
+        _CROSS_CACHE.append(out)
+        return out
+    for ptype in ("annual", "quarterly"):
+        filed: dict[str, list] = {}
+        for s, p, v in con.execute(
+            "SELECT symbol, period_end, MAX(CASE WHEN item='pat' THEN value END) "
+            "FROM results_history WHERE period_type=? AND item='pat' "
+            "GROUP BY symbol, period_end ORDER BY symbol, period_end", (ptype,)
+        ):
+            if v is not None:
+                filed.setdefault(s, []).append((p, v))
+        second = {
+            (s, p): v for s, p, v in con.execute(
+                "SELECT symbol, period_end, value FROM statements "
+                "WHERE stmt_type='income' AND item='Net Income Common Stockholders' "
+                "AND period_type=? AND value IS NOT NULL", (ptype,)
+            )
+        }
+        for sym, seq in filed.items():
+            for i, (pe, fv) in enumerate(seq):
+                sv = second.get((sym, pe))
+                if not fv or not sv:
+                    continue
+                r = abs(sv / fv)
+                if 1 / CROSS_SOURCE_LIMIT <= r <= CROSS_SOURCE_LIMIT:
+                    continue                       # the two sources agree well enough
+                others = [abs(v) for j, (_, v) in enumerate(seq) if j != i and v]
+                if not others:
+                    continue                       # one period on file - nothing to weigh it against
+                med = median(others)
+                if not med:
+                    continue
+                own = abs(fv) / med
+                if own > OWN_SERIES_LIMIT or own < 1 / OWN_SERIES_LIMIT:
+                    out.setdefault((sym, ptype), set()).add(pe)
+    n = sum(len(v) for v in out.values())
+    if n:
+        print(f"  cross-source check: dropped {n} filed periods across "
+              f"{len({k[0] for k in out})} companies whose scale is contradicted by "
+              f"both a second source and their own history")
+    _CROSS_CACHE.append(out)
+    return out
+
+
 def build_trends(con: sqlite3.Connection, shares: dict | None = None,
                  only: set | None = None) -> dict[str, dict]:
     shares = shares or {}
     comps = _stitched(con)
     suspect = implausible_quarters(con)
+    # A second, independent accusation: the filing disagrees with another source
+    # AND with the company's own history. Annual periods are covered too, which
+    # implausible_quarters never reached - TNTELE's FY2023 and FY2024 were a
+    # thousand times their true size and nothing in the pipeline could see it.
+    cross = cross_source_outliers(con)
     for (sym_, ptype_), periods_ in comps.items():
         if ptype_ == "quarterly":
             for bad_ in suspect.get(sym_, set()):
                 periods_.pop(bad_, None)   # same rule as the charts: drop, do not draw
+        for bad_ in cross.get((sym_, ptype_), set()):
+            periods_.pop(bad_, None)
     splits = split_factors(con)
     known = splits_trustworthy(con, shares)
     bal = balance_equity(con)
@@ -739,13 +837,14 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
     filed = filed_net_worth(con)
     announced = filing_dates(con)   # when the market could first read each quarter
     suspect = implausible_quarters(con)  # filings whose own PAT and EPS contradict each other
+    cross_q = cross_source_outliers(con)  # ...and those a second source and their own history both accuse
     for sym, g in q.groupby("symbol"):
         by_pe: dict[str, dict] = {}
         for _, r in g.iterrows():
             by_pe.setdefault(r["period_end"], {})[r["item"]] = r["value"]
         ev = splits.get(sym)
         sh_now = shares.get(sym)   # yardstick for effective_shares sanity
-        skip = suspect.get(sym, set())
+        skip = suspect.get(sym, set()) | cross_q.get((sym, "quarterly"), set())
         flows, eqs = [], []
         for pe in sorted(by_pe):
             # A filing that disagrees with itself is dropped rather than drawn.
