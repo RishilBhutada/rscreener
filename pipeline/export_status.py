@@ -23,13 +23,28 @@ OUT = ROOT / "web" / "public" / "status.json"
 # values in .github/workflows/nightly.yml; if they drift, the finish dates the app
 # shows become a comforting fiction rather than arithmetic.
 PER_NIGHT = {
-    "prices": 600,
+    "prices": 2357,          # whole universe every night
     "snapshot": 2357,        # --all, no cap
     "results": 800,
     "filing_dates": 900,
     "shareholding": 700,
     "statements": 2357,      # refreshed with the snapshot
     "ipos": None,            # not a backlog - the whole list is rewritten nightly
+}
+
+# Where each source records that it has ASKED about a symbol. Without this the
+# page cannot tell a company still waiting its turn from one the source simply
+# has nothing for, and it counted both as work outstanding: "441 to do, 1 night
+# -> tomorrow" for a figure that would still read 81% a year later, because 328
+# of those companies file no shareholding pattern with NSE at all. A number that
+# promises to become 100% and never does is worse than a smaller honest one.
+ASK_LOG = {
+    "results": "results_fetch_log",
+    "filing_dates": "filing_dates_log",
+    "shareholding": "shp_fetch_log",
+    "statements": "fetch_log",
+    "snapshot": "fetch_log",
+    "prices": "prices_fetch_log",
 }
 
 
@@ -71,6 +86,7 @@ def main() -> None:
 
     sources.append({
         "key": "prices",
+            "_have_sql": "SELECT DISTINCT symbol FROM prices",
         "name": "Share prices",
         "what": "Daily closes from the exchange feed. Drives every price, market cap and ratio.",
         **_spread(con, "SELECT symbol, MAX(date) FROM prices WHERE freq='daily' GROUP BY symbol"),
@@ -79,15 +95,22 @@ def main() -> None:
 
     sources.append({
         "key": "snapshot",
+            "_have_sql": "SELECT symbol FROM fundamentals WHERE price IS NOT NULL",
         "name": "Company snapshot",
         "what": "P/E, book value, 52-week range and the rest of the screener columns.",
-        **_spread(con, "SELECT symbol, substr(fetch_date,1,10) FROM fundamentals"),
+        # Three days, not zero. The fetcher skips anything done within 20 hours,
+        # so a symbol carrying yesterday's date is working exactly as intended.
+        # At zero tolerance, re-fetching 49 symbols by hand made the other 2,313
+        # read as stale and the source dropped from 98% to 2% - the measurement
+        # moving, not the data.
+        **_spread(con, "SELECT symbol, substr(fetch_date,1,10) FROM fundamentals", 3),
         "cadence": "every night",
     })
 
     if _has(con, "results_history"):
         sources.append({
             "key": "results",
+            "_have_sql": "SELECT DISTINCT symbol FROM results_history WHERE period_type='quarterly'",
             "name": "Quarterly results (as filed)",
             "what": "Earnings straight from the NSE filings. Everything on the P/E chart rests on these.",
             **_spread(con, "SELECT symbol, MAX(period_end) FROM results_history "
@@ -98,6 +121,7 @@ def main() -> None:
     if _has(con, "filing_dates"):
         sources.append({
             "key": "filing_dates",
+            "_have_sql": "SELECT DISTINCT symbol FROM filing_dates",
             "name": "Result declaration dates",
             "what": "When each set of results was actually published, so ratios step on the day the market learned them.",
             **_spread(con, "SELECT symbol, MAX(announced_on) FROM filing_dates GROUP BY symbol", 120),
@@ -107,6 +131,7 @@ def main() -> None:
     if _has(con, "shareholding"):
         sources.append({
             "key": "shareholding",
+            "_have_sql": "SELECT DISTINCT symbol FROM shareholding",
             "name": "Shareholding pattern",
             "what": "Promoter, public and employee-trust holdings each quarter.",
             **_spread(con, "SELECT symbol, MAX(date) FROM shareholding GROUP BY symbol", 120),
@@ -116,6 +141,7 @@ def main() -> None:
     if _has(con, "statements"):
         sources.append({
             "key": "statements",
+            "_have_sql": "SELECT DISTINCT symbol FROM statements WHERE stmt_type='balance'",
             "name": "Balance sheet & cash flow",
             "what": "Annual statements behind Price/Book and EV/EBITDA.",
             **_spread(con, "SELECT symbol, MAX(period_end) FROM statements "
@@ -147,10 +173,23 @@ def main() -> None:
         denom = s["universe"] or 1
         s["pct"] = round(s["current"] / denom * 100)
         s["missing"] = max(0, denom - s["covered"])
-        # Nights to reach 100%, and the date that lands on. Stated as arithmetic
-        # the reader can check - outstanding work divided by throughput - rather
-        # than a progress bar that only ever says "soon".
-        todo = s["behind"] + s["missing"]
+
+        # Split the shortfall into the part that is still coming and the part
+        # that never will. A company NSE holds no shareholding pattern for has
+        # been asked about and answered; counting it as backlog turns an honest
+        # ceiling into a promise the page cannot keep.
+        s["unavailable"] = 0
+        log = ASK_LOG.get(s["key"])
+        if log and not s.get("own_population") and _has(con, log):
+            asked = {r[0] for r in con.execute(f"SELECT symbol FROM {log} WHERE error IS NULL")}
+            have = {r[0] for r in con.execute(s["_have_sql"])} if s.get("_have_sql") else set()
+            s["unavailable"] = len(asked - have)
+        s.pop("_have_sql", None)
+
+        # Nights to reach the ceiling, and the date that lands on. Stated as
+        # arithmetic the reader can check - outstanding work divided by
+        # throughput - rather than a progress bar that only ever says "soon".
+        todo = max(0, s["behind"] + s["missing"] - s["unavailable"])
         rate = s["per_night"]
         if todo == 0:
             s["nights_left"], s["eta"] = 0, None
@@ -172,7 +211,10 @@ def main() -> None:
     for s in sources:
         eta = "complete" if s["nights_left"] == 0 else (
             f"{s['nights_left']} night(s) -> {s['eta']}" if s["nights_left"] else "no schedule")
-        print(f"  {s['name']:30} {s['pct']:>3}%  {s['behind'] + s['missing']:>5} to do  {eta}")
+        gap = s["behind"] + s["missing"]
+        un = s.get("unavailable", 0)
+        note = f" ({un} the source has none for)" if un else ""
+        print(f"  {s['name']:30} {s['pct']:>3}%  {gap - un:>4} to fetch{note:<28} {eta}")
     con.close()
 
 

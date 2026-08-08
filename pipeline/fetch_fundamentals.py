@@ -96,9 +96,37 @@ def statements_long(tkr: yf.Ticker, symbol: str) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+def quote(symbol: str, tries: int = 3) -> dict:
+    """Ask for a quote, treating a throttle as a delay rather than an answer.
+
+    "Too Many Requests. Rate limited. Try after a while." was recorded as that
+    company's result and never asked again, because a symbol with a log entry is
+    a symbol already done. 46 of the 47 companies missing from the snapshot were
+    that message - not delisted, not unknown, just unlucky in the order the
+    sweep happened to reach them. The source itself says to try after a while,
+    and nothing was trying.
+    """
+    last: Exception | None = None
+    for attempt in range(tries):
+        try:
+            info = yf.Ticker(f"{symbol}.NS").info or {}
+            if info:
+                return info
+            last = ValueError("empty response")
+        except Exception as e:  # noqa: BLE001
+            last = e
+            if "rate limit" not in str(e).lower() and "too many" not in str(e).lower():
+                raise               # a real error about this symbol; retrying will not help
+        if attempt < tries - 1:
+            time.sleep(5.0 * (2 ** attempt))     # 5s, then 10s - the source asked us to wait
+    if last:
+        raise last
+    return {}
+
+
 def fetch_one(symbol: str, snapshot_only: bool = False) -> tuple[dict, pd.DataFrame]:
     tkr = yf.Ticker(f"{symbol}.NS")
-    info = tkr.info or {}
+    info = quote(symbol)
     row = {"symbol": symbol, "fetch_date": now_utc()}
     for src, dst in INFO_FIELDS.items():
         row[dst] = info.get(src)

@@ -14,6 +14,8 @@ from pathlib import Path
 
 import requests
 
+import nse_session
+
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
 API = "https://www.nseindia.com/api/corporate-share-holdings-master?index=equities&symbol={sym}"
@@ -76,18 +78,15 @@ def main() -> None:
         symbols = symbols[:args.limit]
     print(f"fetching shareholding for {len(symbols)} symbols...")
 
-    s = requests.Session()
-    s.headers.update(HEADERS)
-    try:
-        s.get("https://www.nseindia.com", timeout=20)
-    except Exception:
-        pass
+    s = nse_session.new_session()
 
     ok = err = 0
     for i, sym in enumerate(symbols, 1):
         try:
-            r = s.get(API.format(sym=sym), timeout=25)
-            r.raise_for_status()
+            # Three attempts with a fresh handshake between them. A single try
+            # recorded 301 companies as having no shareholding pattern when what
+            # they had was a dropped connection.
+            r = nse_session.get(s, API.format(sym=sym))
             rows = r.json()
             recs = []
             for row in rows:
