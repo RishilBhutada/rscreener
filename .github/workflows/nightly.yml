@@ -256,6 +256,23 @@ jobs:
         # weeks against a real Rs 750. A wrong price looks exactly like a right
         # one on screen, so it has to be caught here rather than by eye.
         run: python pipeline/check_prices.py
+      - name: Build the site from the LATEST code, not the checkout from hours ago
+        # This job checks out main and then spends two to four hours fetching. The
+        # code it builds at the end is therefore whatever main was when it STARTED,
+        # and it publishes the whole site - so a run that began before a fix
+        # quietly republishes the version without it. Run #52 did exactly that on
+        # 8-Aug-2026: it started at 7bc480ec, finished after the BSE work landed,
+        # and put the site back to 2,374 companies and the old page title. Nothing
+        # failed; the deploy was a success, of stale code.
+        #
+        # Data comes from THIS run and is already in the working tree. Only the
+        # source is moved forward, and only tracked files are touched, so the
+        # exported JSON the guards just approved is left exactly as it is.
+        run: |
+          git fetch origin main --depth=1
+          BEFORE=$(git rev-parse --short HEAD)
+          git checkout FETCH_HEAD -- web/src web/package.json web/package-lock.json web/next.config.ts 2>/dev/null || true
+          echo "built from $(git rev-parse --short FETCH_HEAD) (this job started at $BEFORE)"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
