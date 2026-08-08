@@ -263,7 +263,24 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # Two attempts, because the first one can fail for reasons that have
+      # nothing to do with this repository. Run #50 passed every guard, exported
+      # cleanly, and then lost the deployment to "Failed to get ID Token:
+      # Request timeout" - GitHub's own OIDC service not answering. The data was
+      # good, the run was marked failed, and the notification said the nightly
+      # had broken.
+      #
+      # A first attempt that is allowed to fail, then one retry after a pause.
+      # A genuine problem - wrong permissions, a bad artifact - fails both and
+      # still reports; a service that was briefly busy does not wake anyone.
       - id: deployment
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+      - name: Wait, then try the deployment once more
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 45
+      - id: retry
+        if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v4
 
   # A failed refresh is SILENT otherwise: the site keeps serving yesterday's data
@@ -283,4 +300,4 @@ jobs:
           if [ -z "$NTFY_TOPIC" ]; then
             echo "NTFY_TOPIC secret is not set - nothing to notify"; exit 0
           fi
-          curl -s --max-time 20             -H "Title: Rscreener nightly refresh failed"             -H "Priority: high"             -H "Tags: warning"             -d "The data did not update tonight. The site is still showing the last good data, not wrong data - the guards stop a bad release rather than publishing it. Open the run to see which step stopped: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"             "https://ntfy.sh/$NTFY_TOPIC" || echo "notification failed to send"
+          curl -s --max-time 20             -H "Title: Rscreener nightly refresh failed"             -H "Priority: high"             -H "Tags: warning"             -d "${{ needs.refresh.result == 'failure' && 'The data did not update tonight. The site is still showing the last good data, not wrong data - the guards stop a bad release rather than publishing it.' || 'The data was fetched and passed every guard, but publishing it failed. The site is still on the previous release; re-running the workflow should be enough.' }} Open the run to see which step stopped: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"             "https://ntfy.sh/$NTFY_TOPIC" || echo "notification failed to send"
