@@ -41,6 +41,12 @@ def main() -> None:
     ap.add_argument("--symbols", required=True)
     ap.add_argument("--sleep", type=float, default=0.4)
     ap.add_argument("--max-age-hours", type=float, default=0)
+    # The nightly has always passed --limit to this script and this parser has
+    # never accepted it, so every run died on argparse with exit 2 and the whole
+    # source silently stopped refreshing. Found 8-Aug-2026 when guarded_fetch.sh
+    # started failing the run on a bad invocation instead of shrugging at it.
+    ap.add_argument("--limit", type=int, default=0,
+                    help="fetch at most this many symbols this run (0 = no cap)")
     args = ap.parse_args()
     raw = (ROOT / args.symbols[1:]).read_text(encoding="utf-8") if args.symbols.startswith("@") else args.symbols
     symbols = [s.strip().upper() for s in raw.split(",") if s.strip()]
@@ -60,6 +66,14 @@ def main() -> None:
     else:
         done = {r[0] for r in con.execute("SELECT symbol FROM shp_fetch_log WHERE error IS NULL").fetchall()}
     symbols = [s for s in symbols if s not in done]
+    if args.limit and len(symbols) > args.limit:
+        # oldest first, never-fetched ahead of ever-fetched, so a nightly cap
+        # rotates through the universe instead of re-reading the same names
+        last = {r[0]: r[1] for r in con.execute(
+            "SELECT symbol, fetched_at FROM shp_fetch_log").fetchall()}
+        symbols.sort(key=lambda s: last.get(s) or "")
+        print(f"  --limit {args.limit}: {len(symbols) - args.limit} symbols deferred to a later run")
+        symbols = symbols[:args.limit]
     print(f"fetching shareholding for {len(symbols)} symbols...")
 
     s = requests.Session()
