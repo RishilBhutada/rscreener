@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-08-07 23:20 UTC",
+ "generated_at": "2026-08-08 13:31 UTC",
  "universe": 2357,
  "sources": [
   {
@@ -7,17 +7,17 @@
    "name": "Share prices",
    "what": "Daily closes from the exchange feed. Drives every price, market cap and ratio.",
    "covered": 2357,
-   "newest": "2026-08-06",
-   "behind": 2354,
+   "newest": "2026-08-07",
+   "behind": 6,
    "oldest": "2026-07-15",
    "cadence": "every night",
-   "current": 3,
+   "current": 2351,
    "universe": 2357,
    "per_night": 600,
-   "pct": 0,
+   "pct": 100,
    "missing": 0,
-   "nights_left": 4,
-   "eta": "2026-08-11"
+   "nights_left": 1,
+   "eta": "2026-08-09"
   },
   {
    "key": "snapshot",
@@ -34,7 +34,7 @@
    "pct": 98,
    "missing": 3,
    "nights_left": 1,
-   "eta": "2026-08-08"
+   "eta": "2026-08-09"
   },
   {
    "key": "results",
@@ -51,7 +51,7 @@
    "pct": 93,
    "missing": 121,
    "nights_left": 1,
-   "eta": "2026-08-08"
+   "eta": "2026-08-09"
   },
   {
    "key": "filing_dates",
@@ -68,7 +68,7 @@
    "pct": 94,
    "missing": 113,
    "nights_left": 1,
-   "eta": "2026-08-08"
+   "eta": "2026-08-09"
   },
   {
    "key": "shareholding",
@@ -85,7 +85,7 @@
    "pct": 81,
    "missing": 432,
    "nights_left": 1,
-   "eta": "2026-08-08"
+   "eta": "2026-08-09"
   },
   {
    "key": "statements",
@@ -102,7 +102,7 @@
    "pct": 94,
    "missing": 128,
    "nights_left": 1,
-   "eta": "2026-08-08"
+   "eta": "2026-08-09"
   },
   {
    "key": "ipos",
