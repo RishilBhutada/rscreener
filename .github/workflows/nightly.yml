@@ -101,10 +101,22 @@ jobs:
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_shareholding.py --symbols @data/all_symbols.txt --max-age-hours 336 --limit 700 --sleep 0.3
       - name: Refresh price-chart history (whole universe, rotating)
         if: steps.plan.outputs.prices == '1'
-        # Same fault: only the top 500 were ever revisited, so every other chart
-        # slowly aged out. --max-age-hours 168 makes each symbol come up weekly;
-        # --limit 600 keeps one night inside the Actions job timeout.
-        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_prices.py --symbols ${{ steps.plan.outputs.target }} --max-age-hours 168 --limit 600 --sleep 0.4
+        # The WHOLE universe, every night - deliberately not a rotation.
+        #
+        # It used to be --max-age-hours 168 --limit 600, so each symbol's chart
+        # was revisited about weekly. That is defensible for a shareholding
+        # pattern filed once a quarter. It is not defensible for a price, which
+        # every ratio on the site divides by: with 2,357 companies and 600 a
+        # night, three quarters of the site would always be showing a close from
+        # earlier in the week, and check_prices - which fails the build when more
+        # than 2% of companies lag the newest close - could never once pass.
+        # A rotation that guarantees the guard fails is not a rotation, it is a
+        # standing outage.
+        #
+        # --max-age-hours 20 means "anything not already fetched today", so a
+        # re-run the same night costs nothing. About 20 minutes for the full
+        # universe at this sleep, against a 6-hour job limit.
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_prices.py --symbols ${{ steps.plan.outputs.target }} --max-age-hours 20 --sleep 0.25
       - name: Refresh concall/rating documents (whole universe, rotating)
         if: steps.plan.outputs.earnings == '1'
         # 480 of 2,357 companies covered, and capped at the top 500 it would have
