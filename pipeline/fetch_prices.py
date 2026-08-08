@@ -17,7 +17,7 @@ import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
-CHART = "https://query2.finance.yahoo.com/v8/finance/chart/{sym}.NS?range={rng}&interval={itv}&events=split"
+CHART = "https://query2.finance.yahoo.com/v8/finance/chart/{sym}?range={rng}&interval={itv}&events=split"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     "Accept": "*/*",
@@ -117,6 +117,18 @@ def series(session: requests.Session, sym: str, rng: str, itv: str) -> list[tupl
     return out
 
 
+
+# Which ticker each company answers to at the price source. Held in the universe
+# table rather than hardcoded, because ".NS" as a literal is a decision that the
+# project only ever covers NSE - and 2,700 companies are listed on BSE alone.
+def yf_symbols(con) -> dict:
+    try:
+        rows = con.execute("SELECT SYMBOL, YF_SYMBOL FROM universe").fetchall()
+    except Exception:  # noqa: BLE001 - a database written before the column existed
+        return {}
+    return {s: y for s, y in rows if y}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbols", required=True)
@@ -160,6 +172,7 @@ def main() -> None:
         skipped = len(symbols) - args.limit
         symbols = symbols[:args.limit]
         print(f"  --limit {args.limit}: {skipped} symbols deferred to a later run")
+    tickers = yf_symbols(con)
     print(f"fetching prices for {len(symbols)} symbols...")
 
     session = requests.Session()
@@ -169,9 +182,10 @@ def main() -> None:
         try:
             # NOTE: Yahoo silently downgrades 1wk to monthly bars when range=max,
             # so weekly is requested with an explicit span.
-            monthly, _sp = drop_spikes(series(session, sym, "max", "1mo"))  # ~30y, drives Max + bands
-            weekly, _ = drop_spikes(series(session, sym, "5y", "1wk"))   # 3Yr/5Yr density
-            daily = series(session, sym, "2y", "1d")       # 1M/6M/1Yr + DMA + volatility
+            tick = tickers.get(sym, f"{sym}.NS")
+            monthly, _sp = drop_spikes(series(session, tick, "max", "1mo"))  # ~30y, drives Max + bands
+            weekly, _ = drop_spikes(series(session, tick, "5y", "1wk"))   # 3Yr/5Yr density
+            daily = series(session, tick, "2y", "1d")       # 1M/6M/1Yr + DMA + volatility
             if not monthly and not weekly and not daily:
                 raise ValueError("no price history returned")
             con.execute("DELETE FROM prices WHERE symbol=?", (sym,))
@@ -181,7 +195,7 @@ def main() -> None:
                 + [(sym, "weekly", d, o, h, l, c, v) for d, o, h, l, c, v in weekly]
                 + [(sym, "daily", d, o, h, l, c, v) for d, o, h, l, c, v in daily],
             )
-            sp = splits_of(session, sym)
+            sp = splits_of(session, tick)
             if sp:
                 con.execute("DELETE FROM splits WHERE symbol=?", (sym,))
                 con.executemany("INSERT OR REPLACE INTO splits VALUES (?,?,?)", [(sym, d, r) for d, r in sp])

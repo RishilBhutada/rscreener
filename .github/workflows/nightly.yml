@@ -80,18 +80,41 @@ jobs:
           echo "earnings=$E" >> "$GITHUB_OUTPUT"
           echo "actions=$C"  >> "$GITHUB_OUTPUT"
           if [ -n "$SYMS" ]; then
-            echo "target=$SYMS" >> "$GITHUB_OUTPUT"
-            echo "targeted=1"   >> "$GITHUB_OUTPUT"
+            echo "target=$SYMS"     >> "$GITHUB_OUTPUT"
+            echo "nse_target=$SYMS" >> "$GITHUB_OUTPUT"
+            echo "targeted=1"       >> "$GITHUB_OUTPUT"
           else
-            echo "target=@data/all_symbols.txt" >> "$GITHUB_OUTPUT"
-            echo "targeted=0"                   >> "$GITHUB_OUTPUT"
+            # Yahoo answers for both exchanges; the NSE filing endpoints do not.
+            echo "target=@data/all_symbols.txt"     >> "$GITHUB_OUTPUT"
+            echo "nse_target=@data/nse_symbols.txt" >> "$GITHUB_OUTPUT"
+            echo "targeted=0"                       >> "$GITHUB_OUTPUT"
           fi
           echo "qb=${{ inputs.deep == true && '0' || '8' }}" >> "$GITHUB_OUTPUT"
           echo "Run plan: scope=$SCOPE symbols=${SYMS:-all}"
       - run: python pipeline/fetch_universe.py
-      - name: Write the full-universe symbol list every fetcher works from
+      - name: Write the symbol lists every fetcher works from
+        # TWO lists, because the sources do not cover the same companies.
+        # Yahoo answers for both exchanges once the universe carries the right
+        # ticker suffix, so prices and the snapshot run over everything. The NSE
+        # filing endpoints know nothing about a BSE-only company - asking would
+        # spend 2,700 requests to be told so, every night, and write 2,700 error
+        # rows that look exactly like a coverage gap.
         run: |
-          python -c "import sqlite3;from pathlib import Path;c=sqlite3.connect('data/rscreener.db',timeout=180);s=[r[0] for r in c.execute('SELECT symbol FROM universe ORDER BY symbol')];Path('data/all_symbols.txt').write_text(','.join(s));print(len(s),'symbols')"
+          python - <<'PY'
+          import sqlite3
+          from pathlib import Path
+          c = sqlite3.connect('data/rscreener.db', timeout=180)
+          cols = {r[1] for r in c.execute('PRAGMA table_info(universe)')}
+          allsym = [r[0] for r in c.execute('SELECT SYMBOL FROM universe ORDER BY SYMBOL')]
+          if 'EXCHANGE' in cols:
+              nse = [r[0] for r in c.execute(
+                  "SELECT SYMBOL FROM universe WHERE EXCHANGE='NSE' OR EXCHANGE IS NULL ORDER BY SYMBOL")]
+          else:
+              nse = allsym
+          Path('data/all_symbols.txt').write_text(','.join(allsym))
+          Path('data/nse_symbols.txt').write_text(','.join(nse))
+          print(f"{len(allsym)} companies, {len(nse)} of them on NSE")
+          PY
       - name: Refresh snapshot fundamentals (prices, ratios) for the full universe
         if: steps.plan.outputs.prices == '1'
         run: python pipeline/fetch_fundamentals.py --all --snapshot-only --max-age-hours 20 --sleep 0.5
@@ -103,7 +126,7 @@ jobs:
         # Was @data/top500.txt, so the other 1,857 companies were unreachable: 432
         # had never been fetched at all and never would be. A rotation that cannot
         # reach part of its own universe is not a rotation, it is a permanent hole.
-        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_shareholding.py --symbols @data/all_symbols.txt --max-age-hours 336 --limit 700 --sleep 0.3
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_shareholding.py --symbols @data/nse_symbols.txt --max-age-hours 336 --limit 700 --sleep 0.3
       - name: Refresh price-chart history (whole universe, rotating)
         if: steps.plan.outputs.prices == '1'
         # The WHOLE universe, every night - deliberately not a rotation.
@@ -126,7 +149,7 @@ jobs:
         if: steps.plan.outputs.earnings == '1'
         # 480 of 2,357 companies covered, and capped at the top 500 it would have
         # stayed that way permanently.
-        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_announcement_docs.py --symbols @data/all_symbols.txt --max-age-hours 336 --limit 500 --sleep 0.35
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_announcement_docs.py --symbols @data/nse_symbols.txt --max-age-hours 336 --limit 500 --sleep 0.35
       - name: Keep as-filed earnings CURRENT across the whole universe
         if: steps.plan.outputs.earnings == '1'
         # This was `--symbols @data/top500.txt --limit 25`: 25 names a night out of
@@ -138,14 +161,14 @@ jobs:
         # --limit 800 keeps one night inside the Actions job timeout. Three nights
         # clear the backlog; after that --max-age-hours 168 means each symbol comes
         # up weekly, so steady state is ~340 a night and the cap never binds.
-        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols ${{ steps.plan.outputs.target }} --max-age-hours 168 --limit 800 --quarters-back ${{ steps.plan.outputs.qb }} --sleep 0.25
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols ${{ steps.plan.outputs.nse_target }} --max-age-hours 168 --limit 800 --quarters-back ${{ steps.plan.outputs.qb }} --sleep 0.25
       - name: Refresh corporate actions (dividends, bonuses, splits, rights)
         if: steps.plan.outputs.actions == '1'
         # One index call per symbol against the same NSE host as the filing dates,
         # so it rides the same rate budget. Corrects an existing error too: the
         # Yahoo splits table files Reliance's Oct-2024 one-for-one BONUS as a
         # "2:1 split", and NSE labels it correctly.
-        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_corporate_actions.py --symbols ${{ steps.plan.outputs.target }} --max-age-hours 336 --limit 800 --sleep 0.2
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_corporate_actions.py --symbols ${{ steps.plan.outputs.nse_target }} --max-age-hours 336 --limit 800 --sleep 0.2
       - name: Record when each set of results was ANNOUNCED
         if: steps.plan.outputs.earnings == '1'
         # Drives the quarter-coloured EPS bars and result markers on the charts,
@@ -154,14 +177,14 @@ jobs:
         # publishes 9-12 days after quarter end, MTAR Technologies 29-42, and MTAR
         # published nothing at all between 29-Jan and 29-Jul 2026. One index call
         # per symbol, so this is cheap next to a results re-fetch.
-        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_filing_dates.py --symbols ${{ steps.plan.outputs.target }} --max-age-hours 168 --limit 900 --sleep 0.2
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_filing_dates.py --symbols ${{ steps.plan.outputs.nse_target }} --max-age-hours 168 --limit 900 --sleep 0.2
       - name: Deepen as-filed P&L history (bounded rotation, full ~20yr depth)
         if: steps.plan.outputs.earnings == '1'
         # 60 a night meant 2,000 companies would take 33 nights to gain full depth,
         # which is why 1,994 of them hold 20 quarters or fewer and CEMPRO's ratio
         # charts start in 2023 while its price starts in 2002. 200 costs roughly
         # 50 minutes and clears the backlog in ten nights instead.
-        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols @data/all_symbols.txt --max-age-hours 4320 --limit 200 --quarters-back 0 --sleep 0.3 --max-minutes 75
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols @data/nse_symbols.txt --max-age-hours 4320 --limit 200 --quarters-back 0 --sleep 0.3 --max-minutes 75
       - name: Refresh IPOs (official NSE issues + live subscription)
         if: steps.plan.outputs.prices == '1'
         run: python pipeline/fetch_ipos.py

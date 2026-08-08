@@ -96,7 +96,7 @@ def statements_long(tkr: yf.Ticker, symbol: str) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def quote(symbol: str, tries: int = 3) -> dict:
+def quote(symbol: str, tries: int = 3, ticker: str | None = None) -> dict:
     """Ask for a quote, treating a throttle as a delay rather than an answer.
 
     "Too Many Requests. Rate limited. Try after a while." was recorded as that
@@ -109,7 +109,7 @@ def quote(symbol: str, tries: int = 3) -> dict:
     last: Exception | None = None
     for attempt in range(tries):
         try:
-            info = yf.Ticker(f"{symbol}.NS").info or {}
+            info = yf.Ticker(ticker or f"{symbol}.NS").info or {}
             if info:
                 return info
             last = ValueError("empty response")
@@ -124,9 +124,10 @@ def quote(symbol: str, tries: int = 3) -> dict:
     return {}
 
 
-def fetch_one(symbol: str, snapshot_only: bool = False) -> tuple[dict, pd.DataFrame]:
-    tkr = yf.Ticker(f"{symbol}.NS")
-    info = quote(symbol)
+def fetch_one(symbol: str, snapshot_only: bool = False,
+              ticker: str | None = None) -> tuple[dict, pd.DataFrame]:
+    tkr = yf.Ticker(ticker or f"{symbol}.NS")
+    info = quote(symbol, ticker=ticker)
     row = {"symbol": symbol, "fetch_date": now_utc()}
     for src, dst in INFO_FIELDS.items():
         row[dst] = info.get(src)
@@ -138,7 +139,7 @@ def fetch_one(symbol: str, snapshot_only: bool = False) -> tuple[dict, pd.DataFr
     # keep_known_values stops it overwriting whatever we already had.
     if row.get("price") is not None and row.get("market_cap") is None:
         time.sleep(1.5)
-        info = yf.Ticker(f"{symbol}.NS").info or {}
+        info = yf.Ticker(ticker or f"{symbol}.NS").info or {}
         for src, dst in INFO_FIELDS.items():
             if row.get(dst) is None:
                 row[dst] = info.get(src)
@@ -259,6 +260,18 @@ def already_done(con: sqlite3.Connection, max_age_hours: float = 0) -> set[str]:
     return done
 
 
+
+# Which ticker each company answers to at the price source. Held in the universe
+# table rather than hardcoded, because ".NS" as a literal is a decision that the
+# project only ever covers NSE - and 2,700 companies are listed on BSE alone.
+def yf_symbols(con) -> dict:
+    try:
+        rows = con.execute("SELECT SYMBOL, YF_SYMBOL FROM universe").fetchall()
+    except Exception:  # noqa: BLE001 - a database written before the column existed
+        return {}
+    return {s: y for s, y in rows if y}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     group = ap.add_mutually_exclusive_group(required=True)
@@ -287,13 +300,15 @@ def main() -> None:
     if not args.refresh:
         done = already_done(con, args.max_age_hours)
         symbols = [s for s in symbols if s not in done]
+    tickers = yf_symbols(con)
     print(f"fetching {len(symbols)} symbols...")
 
     ok = err = 0
     for i, sym in enumerate(symbols, 1):
         log_row = {"symbol": sym, "fetched_at": now_utc(), "error": None}
         try:
-            snap, stmts = fetch_one(sym, snapshot_only=args.snapshot_only)
+            snap, stmts = fetch_one(sym, snapshot_only=args.snapshot_only,
+                                    ticker=tickers.get(sym))
             replace_symbol_rows(con, "fundamentals", [sym], pd.DataFrame([snap]),
                                 coalesce=True)
             if not args.snapshot_only:
