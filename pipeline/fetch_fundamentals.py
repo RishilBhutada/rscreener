@@ -183,6 +183,11 @@ def replace_symbol_rows(con: sqlite3.Connection, table: str, symbols: list[str],
         df.to_sql(table, con, if_exists="append", index=False)
 
 
+def _table_exists(con: sqlite3.Connection, name: str) -> bool:
+    return bool(con.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone())
+
+
 def already_done(con: sqlite3.Connection, max_age_hours: float = 0) -> set[str]:
     existing = con.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='fetch_log'"
@@ -196,7 +201,34 @@ def already_done(con: sqlite3.Connection, max_age_hours: float = 0) -> set[str]:
         ).fetchall()
     else:
         rows = con.execute("SELECT symbol FROM fetch_log WHERE error IS NULL").fetchall()
-    return {r[0] for r in rows}
+    done = {r[0] for r in rows}
+
+    # A row that came back missing a core field is NOT done, whatever the log
+    # says. keep_known_values stops a blank overwriting a known value, but it
+    # cannot heal a value that is already blank - and a symbol logged as fetched
+    # is never revisited, so the blank becomes permanent.
+    #
+    # That is exactly what happened. Run #35 stored a null market cap for
+    # RELIANCE and TCS; every run afterwards skipped them as "fetched within the
+    # last 20 hours" and the null sat there. The share count is derived from
+    # market cap, so both companies lost every ratio band, and the publish guard
+    # stopped the nightly on 4-Aug and again on 8-Aug for the same two fields
+    # that nothing was ever going to come back and fill.
+    #
+    # Price and market cap only: these two are what everything else is built
+    # from, and a genuinely unknowable field - a company with no dividend has no
+    # dividend yield - must not put a symbol into a permanent retry loop.
+    if _table_exists(con, "fundamentals"):
+        incomplete = {
+            r[0] for r in con.execute(
+                "SELECT symbol FROM fundamentals WHERE price IS NULL OR market_cap IS NULL"
+            ).fetchall()
+        }
+        if incomplete & done:
+            print(f"  {len(incomplete & done)} symbols are logged as fetched but have no price or "
+                  f"market cap - fetching them again rather than leaving the gap")
+        done -= incomplete
+    return done
 
 
 def main() -> None:
