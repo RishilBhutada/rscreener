@@ -38,6 +38,14 @@ PER_NIGHT = {
 # -> tomorrow" for a figure that would still read 81% a year later, because 328
 # of those companies file no shareholding pattern with NSE at all. A number that
 # promises to become 100% and never does is worse than a smaller honest one.
+# Sources built on NSE's filing endpoints. They cannot cover a company that is
+# not listed on NSE, so scoring them against the whole 5,069-company universe
+# invents a hole 2,700 wide: "Quarterly results 43%" when the real figure is 93%
+# of every company the source is capable of reaching. A denominator that
+# includes companies the source can never see is not a coverage measure, it is
+# a measure of how many companies exist.
+NSE_ONLY = {"results", "filing_dates", "shareholding"}
+
 ASK_LOG = {
     "results": "results_fetch_log",
     "filing_dates": "filing_dates_log",
@@ -82,6 +90,12 @@ def _spread(con, sql: str, tolerance_days: int = 0) -> dict:
 def main() -> None:
     con = sqlite3.connect(DB, timeout=180)
     universe = con.execute("SELECT COUNT(*) FROM universe").fetchone()[0]
+    try:
+        nse_universe = con.execute(
+            "SELECT COUNT(*) FROM universe WHERE EXCHANGE='NSE' OR EXCHANGE IS NULL"
+        ).fetchone()[0]
+    except Exception:  # noqa: BLE001 - a database from before the column existed
+        nse_universe = universe
     sources = []
 
     sources.append({
@@ -163,7 +177,13 @@ def main() -> None:
 
     for s in sources:
         s["current"] = s["covered"] - s["behind"]
-        s["universe"] = s["covered"] if s.get("own_population") else int(universe)
+        if s.get("own_population"):
+            s["universe"] = s["covered"]
+        elif s["key"] in NSE_ONLY:
+            s["universe"] = nse_universe
+            s["scope"] = "NSE-listed companies"
+        else:
+            s["universe"] = int(universe)
         s["per_night"] = PER_NIGHT.get(s["key"])
         # Measured against the WHOLE universe, not against what happens to be
         # covered. Dividing by `covered` let a source with 23 companies fetched out
@@ -181,7 +201,11 @@ def main() -> None:
         s["unavailable"] = 0
         log = ASK_LOG.get(s["key"])
         if log and not s.get("own_population") and _has(con, log):
-            asked = {r[0] for r in con.execute(f"SELECT symbol FROM {log} WHERE error IS NULL")}
+            # Any symbol we have ASKED about, error or not. An error of
+            # "unknown to Yahoo or delisted" is an answer - 328 BSE scrips are
+            # dormant shells with no quote at all - and counting them as backlog
+            # promises work that will never produce anything.
+            asked = {r[0] for r in con.execute(f"SELECT symbol FROM {log}")}
             have = {r[0] for r in con.execute(s["_have_sql"])} if s.get("_have_sql") else set()
             s["unavailable"] = len(asked - have)
         s.pop("_have_sql", None)
