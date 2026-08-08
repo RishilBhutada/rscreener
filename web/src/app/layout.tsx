@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Rscreener — NSE stock screener",
+  title: "Rscreener — NSE & BSE stock screener",
   description: "Personal zero-cost fundamentals screener for NSE-listed companies",
   manifest: `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/manifest.json`,
   icons: { icon: `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/icon-192.png` },

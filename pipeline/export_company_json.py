@@ -307,6 +307,13 @@ def main() -> None:
     netdebt_by_symbol = net_debt_series(con)
     quarters_by_symbol = quarter_blocks(con)
     coverage_by_symbol = coverage_notes(con)
+    # symbol -> (exchange, bse code). Older databases have no EXCHANGE column,
+    # in which case every company is what it always was: NSE.
+    try:
+        listing = {r[0]: (r[1] or "NSE", r[2])
+                   for r in con.execute("SELECT SYMBOL, EXCHANGE, BSE_CODE FROM universe")}
+    except Exception:  # noqa: BLE001
+        listing = {}
     actions_by_symbol = corporate_actions(con)
     trends = build_trends(con, shares_by_symbol, only)
     bands = ratio_bands(con, shares_by_symbol, netdebt_by_symbol, only)
@@ -386,6 +393,15 @@ def main() -> None:
             "quarters": quarters_by_symbol.get(sym),
             "actions": actions_by_symbol.get(sym),
             "coverage": coverage_by_symbol.get(sym),
+            # Which exchange this company is listed on, because it decides what
+            # can exist on the page. The as-filed quarterly table, the P/E band
+            # and the shareholding pattern are all built from NSE endpoints; a
+            # company listed only on BSE has none of them and never will from
+            # this source. Unsaid, its page is indistinguishable from an NSE
+            # company whose data has not been fetched yet, and the reader waits
+            # for something that is not coming.
+            "exchange": listing.get(sym, ("NSE", None))[0],
+            "bse_code": listing.get(sym, ("NSE", None))[1],
         }
         if sym in has_statements:
             stmts = pd.read_sql("SELECT * FROM statements WHERE symbol = ?", con, params=(sym,))

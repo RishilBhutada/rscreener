@@ -299,8 +299,9 @@ const Q_COLOUR: Record<number, string> = {
 };
 const Q_LABEL: Record<number, string> = { 1: "Q1 Apr–Jun", 2: "Q2 Jul–Sep", 3: "Q3 Oct–Dec", 4: "Q4 Jan–Mar" };
 
-export default function StockChart({ prices, peBand, evBand, pbBand, psBand, trendQ, livePrice, quarters, actions, symbol, peers, coverage }: {
+export default function StockChart({ prices, peBand, evBand, pbBand, psBand, trendQ, livePrice, quarters, actions, symbol, peers, coverage, exchange }: {
   prices: ChartPrices;
+  exchange?: string | null;
   peBand?: ChartBand;
   evBand?: ChartBand;
   pbBand?: ChartBand;
@@ -454,7 +455,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       if (!base.length) base = filt(monthly);
       const pricePts: XY[] = base.map((p) => ({ t: toT(p[0]), v: p[1] }));
       if (livePrice !== null && pricePts.length) pricePts.push({ t: now, v: livePrice });
-      defs.push({ key: "price", label: "Price on NSE", color: "var(--accent)", kind: "line", axis: "R", data: pricePts, fmt: "rupee" });
+      defs.push({ key: "price", label: `Price on ${exchange === "BSE" ? "BSE" : "NSE"}`, color: "var(--accent)", kind: "line", axis: "R", data: pricePts, fmt: "rupee" });
 
       if (src.length >= w200 + 5) {
         const closes = src.map((p) => p[1]);

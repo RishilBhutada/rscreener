@@ -55,6 +55,8 @@ type Company = {
   quarters?: Quarter[] | null;
   actions?: CorpAction[] | null;
   coverage?: Coverage | null;
+  exchange?: string | null;
+  bse_code?: number | string | null;
 };
 
 /** What the filings behind this company actually cover. */
@@ -617,8 +619,22 @@ function CompanyView() {
       <div id="chart" className="scroll-mt-32">
         {company.prices && (company.prices.monthly?.length || company.prices.weekly?.length) ? (
           <>
-            <StockChart prices={company.prices} peBand={company.pe_band} evBand={company.ev_band} pbBand={company.pb_band} psBand={company.ps_band} trendQ={company.trend?.quarterly} livePrice={price} quarters={company.quarters} actions={company.actions} symbol={symbol} peers={peers} coverage={company.coverage} />
-            <CoverageNote cov={company.coverage} bandFrom={company.pe_band?.series?.[0]?.[0] ?? null} />
+            <StockChart prices={company.prices} peBand={company.pe_band} evBand={company.ev_band} pbBand={company.pb_band} psBand={company.ps_band} trendQ={company.trend?.quarterly} livePrice={price} quarters={company.quarters} actions={company.actions} symbol={symbol} peers={peers} coverage={company.coverage} exchange={company.exchange} />
+            {company.exchange === "BSE" ? (
+              /* Said plainly, once, where the missing tables are. Without it a
+                 BSE-only company looks like an NSE company whose data has not
+                 arrived - the reader waits for something that is not coming. */
+              <p className="mt-3 text-[13px] leading-relaxed text-[var(--ink3)] border border-[var(--line)] rounded-xl p-3 bg-[var(--card2)]">
+                <span className="font-semibold text-[var(--ink2)]">Listed on BSE only{company.bse_code ? ` — scrip code ${company.bse_code}` : ""}.</span>{" "}
+                Price, market cap and the chart come from the exchange feed and are current.
+                The as-filed quarterly table, the valuation bands and the shareholding
+                pattern are built from NSE&rsquo;s filing archive, which does not carry
+                companies that are not listed there — so those sections are absent rather
+                than pending.
+              </p>
+            ) : (
+              <CoverageNote cov={company.coverage} bandFrom={company.pe_band?.series?.[0]?.[0] ?? null} />
+            )}
           </>
         ) : null}
       </div>
