@@ -84,7 +84,68 @@ type XY = {
   /** set on the EPS bars: the quarter whose declaration produced this value, and
    *  the period it covers, so one series can be coloured and drawn to width */
   q?: number; from?: number; to?: number; announced?: string | null;
+  /** growth on the comparison bar, carried on the point so the label, the
+   *  tooltip and the legend cannot disagree about it */
+  chg?: Growth;
 };
+
+/** How this bar's earnings compare with the bar being compared against.
+ *
+ *  A percentage is only meaningful when both numbers are positive. Going from a
+ *  loss of 2 to a profit of 1 is not "+150%" - it is not a percentage at all,
+ *  and printing one would be the kind of confidently wrong number this project
+ *  refuses to publish. Those cases get named instead: loss to profit, profit to
+ *  loss, or a loss that deepened or narrowed.
+ */
+type Growth =
+  | { kind: "pct"; pct: number }
+  | { kind: "toProfit" | "toLoss" | "worseLoss" | "betterLoss" }
+  | { kind: "none" };
+
+function growth(cur: number, prev: number | undefined): Growth {
+  if (prev === undefined || prev === null || !isFinite(prev) || prev === 0) return { kind: "none" };
+  if (prev > 0 && cur > 0) return { kind: "pct", pct: ((cur - prev) / prev) * 100 };
+  if (prev > 0 && cur <= 0) return { kind: "toLoss" };
+  if (prev < 0 && cur > 0) return { kind: "toProfit" };
+  // both negative: a smaller loss is an improvement, and "-40%" would read as
+  // the opposite of what happened
+  return cur > prev ? { kind: "betterLoss" } : { kind: "worseLoss" };
+}
+
+function growthText(g: Growth | undefined, short = true): string {
+  if (!g) return "";
+  switch (g.kind) {
+    case "pct": {
+      const v = g.pct;
+      // Beyond a certain point the exact figure stops carrying information and
+      // starts costing width. A quarter that went from 0.01 to 4.00 is "huge",
+      // not "+39,900%". Every form here is at most five characters, because the
+      // widest label in a series decides whether ANY of them can be drawn.
+      if (Math.abs(v) >= 1000) return v > 0 ? "999+%" : "-999%";
+      const dp = Math.abs(v) < 10 ? 1 : 0;
+      return `${v >= 0 ? "+" : ""}${v.toFixed(dp)}%`;
+    }
+    // Short forms are three characters, not seven. "→profit" is clearer read on
+    // its own, but one of them in a series pushed the widest label to seven
+    // characters and suppressed every "+21%" on the chart with it. The words
+    // are still there in full on hover.
+    case "toProfit": return short ? "L→P" : "loss → profit";
+    case "toLoss": return short ? "P→L" : "profit → loss";
+    case "betterLoss": return short ? "L↓" : "loss narrowed";
+    case "worseLoss": return short ? "L↑" : "loss deepened";
+    default: return "";
+  }
+}
+
+/** Colour: better is green, worse is red - including the two loss cases, where
+ *  the sign of the number and the direction of the news point opposite ways. */
+function growthColour(g: Growth | undefined): string {
+  if (!g) return "var(--ink3)";
+  if (g.kind === "pct") return g.pct >= 0 ? "var(--chart-pos)" : "var(--chart-neg)";
+  if (g.kind === "toProfit" || g.kind === "betterLoss") return "var(--chart-pos)";
+  if (g.kind === "toLoss" || g.kind === "worseLoss") return "var(--chart-neg)";
+  return "var(--ink3)";
+}
 type FmtKind = "rupee" | "plain" | "pct" | "vol" | "cr";
 
 const CHART_BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -238,7 +299,7 @@ const Q_COLOUR: Record<number, string> = {
 };
 const Q_LABEL: Record<number, string> = { 1: "Q1 Apr–Jun", 2: "Q2 Jul–Sep", 3: "Q3 Oct–Dec", 4: "Q4 Jan–Mar" };
 
-export default function StockChart({ prices, peBand, evBand, pbBand, psBand, trendQ, livePrice, quarters, actions, symbol, peers }: {
+export default function StockChart({ prices, peBand, evBand, pbBand, psBand, trendQ, livePrice, quarters, actions, symbol, peers, coverage }: {
   prices: ChartPrices;
   peBand?: ChartBand;
   evBand?: ChartBand;
@@ -250,12 +311,22 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   actions?: CorpAction[] | null;
   symbol?: string;
   peers?: { symbol?: unknown; name?: unknown }[];
+  /** What the filing record actually holds, so the short-history note can give
+   *  the real reason instead of assuming one. Without it the note blamed our own
+   *  fetching every time, which stopped being true the moment the full-depth
+   *  backfill ran and left the page contradicting the coverage panel below it. */
+  coverage?: { quarters: number; from?: string | null; gaps?: string[]; gap_count?: number } | null;
 }) {
   const [view, setView] = useState<View>("price");
   const [range, setRange] = useState("5Yr");
   const [peWin, setPeWin] = useState("ttm");
   const [showQ, setShowQ] = useState(false);
   const [showDates, setShowDates] = useState(true);   // result lines, separately switchable
+  // Growth printed above each earnings bar. Year-on-year by default because a
+  // December quarter compared with the September before it mostly measures the
+  // calendar, not the business.
+  const [epsCmp, setEpsCmp] = useState<"yoy" | "prev">("yoy");
+  const [showChg, setShowChg] = useState(true);
   // Peers answer "is this expensive for its industry". Comparing against anything
   // listed answers a different and equally fair question - "of the two I was
   // choosing between, did I pick the better one" - and those two need not be
@@ -407,14 +478,13 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       // PE line is, so the two always describe the same earnings
       const nQ = peWin === "q1" ? 1 : 4;
       const mult = peWin === "q1" ? 4 : 1;
-      const epsBars: XY[] = [];
+      const allEpsBars: XY[] = [];
       if (trendQ) {
         for (let i = nQ - 1; i < trendQ.periods.length; i++) {
           const w = trendQ.eps.slice(i - nQ + 1, i + 1);
           if (w.length === nQ && w.every((v) => v !== null && v !== undefined)) {
             const end = trendQ.periods[i];
             const t = toT(end);
-            if (t < cutoff) continue;
             // The bar is drawn across the NEWEST quarter in the window - the one
             // whose declaration moved the number - and coloured by it. Drawing it
             // across the whole window instead would make every bar overlap the
@@ -441,7 +511,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             // is showing a ratio built from figures it is not displaying. The
             // sign follows the window total, so a window that nets to a loss
             // draws below the zero line.
-            epsBars.push({
+            allEpsBars.push({
               t,
               v: (w as number[]).reduce((a, b) => a + b, 0) * mult,
               q: qi?.q ?? derivedQ,
@@ -452,6 +522,22 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
           }
         }
       }
+      // Growth is computed over the WHOLE series and only then trimmed to the
+      // visible range. Computing it after the trim would make the first bar on
+      // screen permanently blank, and every other bar's figure would change
+      // when the range changed - a number that moves when you zoom is a number
+      // nobody can trust.
+      //
+      // Year-on-year compares a quarter with the same quarter a year earlier,
+      // four bars back. Sequential compares it with the quarter just gone.
+      // Quarterly earnings are seasonal - a December quarter is not a June
+      // quarter - so year-on-year is the honest default and the one every
+      // filing commentary uses; sequential is there for reading momentum.
+      const back = epsCmp === "yoy" ? (nQ === 1 ? 4 : 4) : 1;
+      allEpsBars.forEach((b, i) => {
+        b.chg = i >= back ? growth(b.v, allEpsBars[i - back].v) : { kind: "none" };
+      });
+      const epsBars = allEpsBars.filter((b) => b.t >= cutoff);
       const win = PE_WINDOWS.find(([k]) => k === peWin);
       const suffix = peWin === "ttm" ? "" : ` (${win?.[1]})`;
       // swap in the selected window's values; they align index-for-index
@@ -529,7 +615,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     }
 
     return defs;
-  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, showQ, quarters, cmp, symbol]);
+  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, showQ, epsCmp, quarters, cmp, symbol]);
 
   // With the quarterly-results overlay on, the per-quarter EPS bars are already
   // on screen. Keeping the summed TTM bars too puts two different quantities in
@@ -748,6 +834,40 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
               {showDates ? "✓ " : ""}Result dates
             </button>
           )}
+          {view === "pe" && (
+            <div className="flex items-center gap-1 flex-wrap">
+              <button
+                onClick={() => setShowChg(!showChg)}
+                title="Print each bar's earnings growth above it"
+                className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium border ${
+                  showChg
+                    ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
+                    : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
+                }`}
+              >
+                {showChg ? "✓ " : ""}Growth %
+              </button>
+              {showChg && (
+                <div className="flex items-center gap-0.5 rounded-lg border border-[var(--line)] p-0.5">
+                  {([["yoy", "vs year ago", "Compare each quarter with the SAME quarter a year earlier. Quarterly earnings are seasonal, so this is the comparison filings and analysts use."],
+                     ["prev", "vs previous", "Compare each quarter with the one immediately before it. Reads momentum, but mixes in seasonality - a December quarter is not a June quarter."]] as const).map(([k, label, tip]) => (
+                    <button
+                      key={k}
+                      onClick={() => setEpsCmp(k)}
+                      title={tip}
+                      className={`rounded-md px-2 py-1 sm:py-0.5 font-medium ${
+                        epsCmp === k
+                          ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]"
+                          : "text-[var(--ink2)] hover:bg-[var(--card2)]"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {showQ && view === "pe" && peBand?.alt && (
             <div className="flex items-center gap-1 flex-wrap">
               <span className="text-[var(--ink3)] mr-0.5">Earnings</span>
@@ -806,11 +926,33 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             <span className="text-[var(--ink2)]">
               {new Date(toT(priceStart)).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}
             </span>
-            . Earlier earnings for this company have not been fetched yet, so the ratio cannot be
-            computed that far back &mdash; it is missing data, not a gap in the business.{" "}
-            <a href={`${CHART_BASE}/status`} className="underline hover:text-[var(--ink2)]">
-              see what is still being fetched
-            </a>
+            .{" "}
+            {coverage?.from ? (
+              // The record is known, so say what it actually contains. Blaming
+              // our own fetching when the filings are already in hand is not a
+              // softer answer, it is a wrong one - and it contradicted the
+              // coverage panel further down the same page.
+              <>
+                Earnings on record begin{" "}
+                <span className="text-[var(--ink2)]">
+                  {new Date(coverage.from + "T00:00:00").toLocaleDateString("en-IN", { month: "short", year: "numeric" })}
+                </span>
+                {(coverage.gap_count ?? coverage.gaps?.length ?? 0) > 0 && (
+                  <> with {coverage.gap_count ?? coverage.gaps?.length} quarter
+                    {(coverage.gap_count ?? coverage.gaps?.length ?? 0) === 1 ? "" : "s"} missing</>
+                )}
+                , and a trailing-twelve-month figure needs four consecutive quarters.{" "}
+                <span className="text-[var(--ink2)]">Details below the chart.</span>
+              </>
+            ) : (
+              <>
+                Earlier earnings for this company have not been fetched yet, so the ratio cannot be
+                computed that far back &mdash; it is missing data, not a gap in the business.{" "}
+                <a href={`${CHART_BASE}/status`} className="underline hover:text-[var(--ink2)]">
+                  see what is still being fetched
+                </a>
+              </>
+            )}
           </p>
         );
       })()}
@@ -872,6 +1014,26 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             // and every bar still points up.
             const axFloor = Math.min(...ax.ticks, 0);
             const y0 = axFloor < 0 || ax.ticks[0] <= 0 ? ax.scale(0) : MT + plotH;
+            // Growth labels are sized to the bars, not the other way round, and
+            // the decision is made ONCE for the whole series. Deciding per bar
+            // meant "+21%" printed and "+120%" next to it did not, purely
+            // because it is one character wider - which reads as missing data
+            // rather than as a layout limit. All or none, at whichever of three
+            // sizes fits; below that the tooltip still carries every figure.
+            const widest = Math.max(0, ...s.data.map((d) => (d.chg ? growthText(d.chg).length : 0)));
+            const narrowest = Math.min(...s.data.map((d) =>
+              showQ && d.from !== undefined && d.to !== undefined
+                ? Math.max(1, x(d.to!) - x(d.from!))
+                : bw));
+            let chgFont = widest === 0 ? 0
+              : [9.5, 8.5, 7.5].find((f) => widest * f * 0.58 + 2 <= narrowest) ?? 0;
+            // When one row will not fit, two will: alternate bars sit a line
+            // higher, which doubles the space each label has without shrinking
+            // it further. Ten years of quarterly bars is ~20px each - too tight
+            // for "+9.3%" on one row, comfortable across two.
+            const stagger = chgFont === 0 && widest > 0
+              && widest * 7.5 * 0.58 + 2 <= narrowest * 2;
+            if (stagger) chgFont = 7.5;
             return (
               <g key={s.key}>
                 {s.data.map((d, i) => {
@@ -885,14 +1047,30 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                   const bwid = spanned ? Math.max(1, x(d.to!) - x(d.from!)) : bw;
                   const fill = showQ && d.q ? (Q_COLOUR[d.q] ?? s.color) : s.color;
                   const loss = d.v < 0;
+                  const chgTxt = d.chg ? growthText(d.chg) : "";
+                  const labelFits = showChg && chgTxt !== "" && chgFont > 0;
+                  const lx = bx + bwid / 2;
+                  // Above the top for a profit bar, below the bottom for a loss
+                  // bar - always on the outside, so it never sits on the fill.
+                  const lift = stagger && i % 2 === 1 ? 9 : 0;
+                  const ly = loss ? Math.max(yv, y0) + 11 + lift : Math.min(yv, y0) - 4 - lift;
                   return (
-                    <rect key={i} x={bx} y={Math.min(yv, y0)} width={bwid}
-                      height={Math.max(1, Math.abs(y0 - yv))}
-                      rx={!spanned && bw > 6 ? 2 : 0} fill={fill} opacity={loss ? 0.55 : 0.78}>
-                      {spanned && (
-                        <title>{`${Q_LABEL[d.q ?? 0] ?? ""} · ${s.label} ₹${d.v.toFixed(2)}${loss ? " (loss)" : ""}${d.announced ? ` · declared ${d.announced}` : ""}`}</title>
+                    <g key={i}>
+                      <rect x={bx} y={Math.min(yv, y0)} width={bwid}
+                        height={Math.max(1, Math.abs(y0 - yv))}
+                        rx={!spanned && bw > 6 ? 2 : 0} fill={fill} opacity={loss ? 0.55 : 0.78}>
+                        <title>{`${spanned ? `${Q_LABEL[d.q ?? 0] ?? ""} · ` : ""}${s.label} ₹${d.v.toFixed(2)}${loss ? " (loss)" : ""}${
+                          d.chg && d.chg.kind !== "none"
+                            ? ` · ${growthText(d.chg, false)} ${epsCmp === "yoy" ? "vs the same quarter a year earlier" : "vs the previous quarter"}`
+                            : ""
+                        }${d.announced ? ` · declared ${d.announced}` : ""}`}</title>
+                      </rect>
+                      {labelFits && ly > MT + 2 && ly < MT + plotH - 1 && (
+                        <text x={lx} y={ly} textAnchor="middle" fontSize={chgFont}
+                          fontWeight="600" fill={growthColour(d.chg)}
+                          style={{ pointerEvents: "none" }}>{chgTxt}</text>
                       )}
-                    </rect>
+                    </g>
                   );
                 })}
               </g>

@@ -90,6 +90,58 @@ def build_statement(df: pd.DataFrame, stmt_type: str, period_type: str) -> dict 
     return {"periods": periods, "items": items}
 
 
+def coverage_notes(con: sqlite3.Connection) -> dict[str, dict]:
+    """Why each company's history starts where it starts.
+
+    A chart that begins in 2023 next to one that begins in 2005 looks like a
+    fault in the site. Usually it is not: the filings behind it simply do not
+    exist, or a quarter is missing in the middle and a trailing-twelve-month
+    figure cannot be assembled across a hole. Cemindia Projects (CEMPRO) is the
+    worked example - NSE's index lists its 2005-2017 results, every one of those
+    archive links returns 404, and three later quarters (Dec-2018, Sep-2021,
+    Dec-2021) were never filed at all. The same index links resolve perfectly
+    for RELIANCE, TCS and INDIACEM, so this is that company's record, not a bug.
+
+    Showing the reason costs one small block of text and replaces a silent
+    absence with a checkable statement. Nothing here is inferred from a model -
+    every field is counted from the filings actually in the database.
+    """
+    out: dict[str, dict] = {}
+    rows = con.execute(
+        """SELECT symbol, period_end FROM results_history
+           WHERE period_type='quarterly' AND item='pat'
+           GROUP BY symbol, period_end ORDER BY symbol, period_end"""
+    ).fetchall()
+    by_sym: dict[str, list[str]] = {}
+    for sym, pe in rows:
+        by_sym.setdefault(sym, []).append(pe)
+
+    def qkey(d: str) -> int:
+        """Quarters as a running integer so gaps are countable, not eyeballed."""
+        y, m = int(d[:4]), int(d[5:7])
+        return y * 4 + (m - 1) // 3
+
+    for sym, periods in by_sym.items():
+        if len(periods) < 2:
+            out[sym] = {"quarters": len(periods), "from": periods[0] if periods else None, "gaps": []}
+            continue
+        keys = [qkey(p) for p in periods]
+        gaps: list[str] = []
+        for a, b in zip(keys, keys[1:]):
+            for k in range(a + 1, b):
+                y, q = divmod(k, 4)
+                gaps.append(f"{y}-{['Mar','Jun','Sep','Dec'][q]}")
+        out[sym] = {
+            "quarters": len(periods),
+            "from": periods[0],
+            "to": periods[-1],
+            # Capped: a company with forty holes needs the count, not the list.
+            "gaps": gaps[:12],
+            "gap_count": len(gaps),
+        }
+    return out
+
+
 def quarter_blocks(con: sqlite3.Connection) -> dict[str, list[dict]]:
     """{symbol: [{start, end, eps, announced, q}]} - one block per filed quarter.
 
@@ -254,6 +306,7 @@ def main() -> None:
           f"{share_src['shares_out']} from shares outstanding")
     netdebt_by_symbol = net_debt_series(con)
     quarters_by_symbol = quarter_blocks(con)
+    coverage_by_symbol = coverage_notes(con)
     actions_by_symbol = corporate_actions(con)
     trends = build_trends(con, shares_by_symbol, only)
     bands = ratio_bands(con, shares_by_symbol, netdebt_by_symbol, only)
@@ -332,6 +385,7 @@ def main() -> None:
             "ps_band": bands.get(sym, {}).get("ps"),
             "quarters": quarters_by_symbol.get(sym),
             "actions": actions_by_symbol.get(sym),
+            "coverage": coverage_by_symbol.get(sym),
         }
         if sym in has_statements:
             stmts = pd.read_sql("SELECT * FROM statements WHERE symbol = ?", con, params=(sym,))

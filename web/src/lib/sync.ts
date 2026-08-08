@@ -11,9 +11,11 @@
  *  second, which is the sort of loss you only notice weeks later.
  */
 import { getFirebase } from "./firebase";
+import { WatchState, mergeStates } from "./watchlists";
 
 /** localStorage keys that represent the person, not the machine. */
 export const SYNCED_KEYS = [
+  "rscreener_watchlists",
   "rscreener_watchlist",
   "rscreener_notes",
   "rscreener_portfolio",
@@ -54,6 +56,14 @@ function merge(local: Profile, remote: Profile): Profile {
     const l = local[k], r = remote[k];
     if (r === undefined) continue;
     if (l === undefined) { out[k] = r; continue; }
+    // Named watchlists are an object of lists, and the generic object branch
+    // below lets this device's copy win outright - which would delete a list
+    // created on the phone the first time the laptop signed in. Lists are
+    // matched by id and their symbols unioned instead.
+    if (k === "rscreener_watchlists") {
+      out[k] = mergeStates(l as WatchState, r as WatchState);
+      continue;
+    }
     if (Array.isArray(l) && Array.isArray(r)) {
       const seen = new Set<string>();
       out[k] = [...l, ...r].filter((x) => {

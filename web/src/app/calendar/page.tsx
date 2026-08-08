@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
-import { loadWatchlist } from "@/lib/store";
+import { allWatched } from "@/lib/watchlists";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -26,7 +26,7 @@ export default function CalendarPage() {
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then(setCal)
       .catch((e) => setError(String(e.message ?? e)));
-    setWatch(loadWatchlist());
+    setWatch(allWatched());
   }, []);
 
   const grouped = useMemo(() => {

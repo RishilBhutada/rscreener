@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { compile, isValidRatioName, QueryError, Row } from "@/lib/query";
-import { loadWatchlist, toggleWatch } from "@/lib/store";
+import { allWatched, toggleActive } from "@/lib/watchlists";
 import { FIELD_CATALOG, FIELD_GROUPS } from "@/lib/fields";
 import QueryBuilder from "@/components/QueryBuilder";
 import TopNav from "@/components/TopNav";
@@ -96,7 +96,7 @@ export default function Home() {
     try {
       setRatios(JSON.parse(localStorage.getItem("rscreener_ratios") ?? "[]"));
     } catch { /* corrupted storage - start fresh */ }
-    setWatch(loadWatchlist());
+    setWatch(allWatched());
   }, []);
 
   const ratiosMap = useMemo(
@@ -387,7 +387,7 @@ export default function Home() {
                     if (!r) return null;
                     return (
                       <tr key={sym} className="border-t border-[var(--line)] hover:bg-[var(--accent-soft)]">
-                        <td className="px-2 py-2 sm:px-3"><button onClick={() => setWatch(toggleWatch(sym))} aria-label={`remove ${sym} from watchlist`} className="text-[var(--accent)] hover:text-[var(--line2)]">★</button></td>
+                        <td className="px-2 py-2 sm:px-3"><button onClick={() => setWatch(allWatched(toggleActive(sym)))} aria-label={`remove ${sym} from watchlist`} className="text-[var(--accent)] hover:text-[var(--line2)]">★</button></td>
                         <td className="px-2 py-2 sm:px-3"><Link href={`/company?s=${sym}`} className="font-semibold text-[var(--accent-ink)] hover:underline">{sym}</Link></td>
                         <td className="px-2 py-2 sm:px-3 max-w-56 truncate">{String(r.name ?? "—")}</td>
                         <td className="px-2 py-2 sm:px-3 text-right">{fmt("price", r.price ?? null)}</td>
@@ -432,7 +432,7 @@ export default function Home() {
                     <tr key={String(r.symbol)} className="border-t border-[var(--line)] hover:bg-[var(--accent-soft)]">
                       <td className="px-2 py-2 sm:px-3">
                         <button
-                          onClick={() => setWatch(toggleWatch(String(r.symbol)))}
+                          onClick={() => setWatch(allWatched(toggleActive(String(r.symbol))))}
                           aria-label={`toggle ${r.symbol} on watchlist`}
                           className={watch.includes(String(r.symbol)) ? "text-[var(--accent)]" : "text-[var(--line2)] hover:text-[var(--accent)]"}
                         >

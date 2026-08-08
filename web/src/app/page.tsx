@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
-import { loadRecent, loadWatchlist } from "@/lib/store";
+import { loadRecent } from "@/lib/store";
+import { allWatched, loadLists } from "@/lib/watchlists";
+import { shortName } from "@/lib/names";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -16,37 +18,26 @@ const SUGGESTED = [
   "LT", "MARUTI", "SUNPHARMA", "TITAN", "ASIANPAINT", "COALINDIA",
 ];
 
-/** "Sun Pharmaceutical Industries Limited" is a legal name, not a company name.
- *  Twelve of them wrap into a grey wall that is hard to scan; the short form is
- *  what a person would actually say out loud. */
-function shortName(name: string, symbol: string): string {
-  const s = name
-    .replace(/\s*\(Formerly[^)]*\)\s*/gi, " ")
-    // "India" is NOT a suffix to strip: State Bank of India, Coal India and Bank
-    // of India all carry it in the actual name, and dropping it produced the
-    // headline "State Bank of".
-    .replace(/\b(Limited|Ltd\.?|Corporation|Corp\.?|Company|Industries|Enterprises)\b/gi, " ")
-    .replace(/[.,]\s*$/, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-  // A name left dangling on a joining word means the trim cut into it
-  const dangling = /\b(of|and|the|&|for|de)$/i.test(s);
-  return s.length >= 3 && !dangling ? s : (name || symbol);
-}
-
 export default function Home() {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<Lite[]>([]);
   const [hi, setHi] = useState(0);
   const [watch, setWatch] = useState<string[]>([]);
+  // How many named lists those symbols came from. The heading says "Your
+  // watchlist" for one and "Across your 3 watchlists" for several, because with
+  // several the chips below are a union and it would otherwise look like one
+  // list that has silently grown.
+  const [lists, setLists] = useState(0);
   const [recent, setRecent] = useState<string[]>([]);
   const [asof, setAsof] = useState<string | null>(null);
   const [covered, setCovered] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setWatch(loadWatchlist());
+    const st = loadLists();
+    setWatch(allWatched(st));
+    setLists(st.lists.filter((l) => l.symbols.length > 0).length);
     setRecent(loadRecent());
     fetch(`${BASE}/data.json`)
       .then((r) => r.json())
@@ -81,10 +72,22 @@ export default function Home() {
     return hit ? shortName(hit.name, sym) : sym;
   };
 
-  const Chips = ({ title, syms }: { title: string; syms: string[] }) =>
+  const Chips = ({ title, syms, more }: {
+    title: string;
+    syms: string[];
+    /** optional link on the right of the heading, e.g. "Manage lists" */
+    more?: { href: string; label: string };
+  }) =>
     syms.length === 0 ? null : (
       <div className="mt-6">
-        <p className="text-xs uppercase tracking-wide text-[var(--ink3)]">{title}</p>
+        <div className="flex items-baseline justify-between gap-3">
+          <p className="text-xs uppercase tracking-wide text-[var(--ink3)]">{title}</p>
+          {more && (
+            <Link href={more.href} className="text-xs text-[var(--accent-ink)] hover:underline shrink-0">
+              {more.label}
+            </Link>
+          )}
+        </div>
         <div className="flex flex-wrap gap-2 mt-2">
           {syms.slice(0, 12).map((sym) => (
             <Link
@@ -156,10 +159,15 @@ export default function Home() {
         </div>
 
         <Chips title="Recently viewed" syms={recent} />
-        <Chips title={watch.length ? "Your watchlist" : "Or start with"} syms={watch.length ? watch : SUGGESTED} />
+        <Chips
+          title={watch.length ? (lists > 1 ? `Across your ${lists} watchlists` : "Your watchlist") : "Or start with"}
+          syms={watch.length ? watch : SUGGESTED}
+          more={watch.length ? { href: "/watchlists", label: "Manage lists" } : undefined}
+        />
 
         <div className="mt-10 grid grid-cols-2 sm:grid-cols-3 gap-2">
           {[
+            ["Watchlists", "/watchlists", "Lists you keep"],
             ["Other screens", "/screens", "Query 40+ ratios"],
             ["Sectors", "/sectors", "Browse by industry"],
             ["IPO", "/ipo", "Open and upcoming"],

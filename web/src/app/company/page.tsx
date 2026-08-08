@@ -6,7 +6,8 @@ import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import StockChart, { CorpAction, Quarter } from "@/components/StockChart";
 import { Row } from "@/lib/query";
-import { loadNote, loadWatchlist, pushRecent, saveNote, toggleWatch } from "@/lib/store";
+import { loadNote, pushRecent, saveNote } from "@/lib/store";
+import WatchStar from "@/components/WatchStar";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -52,7 +53,51 @@ type Company = {
   ps_band?: PeBand | null;
   quarters?: Quarter[] | null;
   actions?: CorpAction[] | null;
+  coverage?: Coverage | null;
 };
+
+/** What the filings behind this company actually cover. */
+type Coverage = { quarters: number; from?: string | null; to?: string | null; gaps?: string[]; gap_count?: number };
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function monthYear(iso?: string | null): string {
+  if (!iso || iso.length < 7) return "—";
+  return `${MONTHS[Number(iso.slice(5, 7)) - 1] ?? ""} ${iso.slice(0, 4)}`;
+}
+
+/** Says why the history starts where it starts, instead of leaving a short chart
+ *  to look like a fault in the site.
+ *
+ *  Cemindia Projects is the case that prompted it: NSE's index lists its
+ *  2005-2017 results and every one of those archive links returns 404, while
+ *  three later quarters were never filed at all. A ratio needs four CONSECUTIVE
+ *  quarters, so a single hole pushes the line forward a year - which is
+ *  completely invisible unless the page says so.
+ */
+function CoverageNote({ cov, bandFrom }: { cov?: Coverage | null; bandFrom?: string | null }) {
+  if (!cov || !cov.from) return null;
+  const gaps = cov.gaps ?? [];
+  const nGaps = cov.gap_count ?? gaps.length;
+  // Nothing worth saying about a company with a full, unbroken record that
+  // already reaches back further than the chart's own range.
+  if (nGaps === 0 && cov.from <= "2008-12-31") return null;
+  return (
+    <div className="mt-3 text-xs text-[var(--ink2)] bg-[var(--card2)] border border-[var(--line)] rounded-xl px-3 py-2">
+      <span className="font-semibold text-[var(--ink)]">Why the history starts where it does. </span>
+      Filings on record for this company begin <strong>{monthYear(cov.from)}</strong> ({cov.quarters} quarters).
+      {nGaps > 0 && (
+        <>
+          {" "}
+          {nGaps === 1 ? "One quarter is" : `${nGaps} quarters are`} missing from those records
+          {gaps.length > 0 && <> — {gaps.slice(0, 6).join(", ")}{nGaps > gaps.slice(0, 6).length ? " and others" : ""}</>}.
+          {" "}A trailing-twelve-month figure needs four consecutive quarters, so each gap moves the ratio lines forward by a year.
+        </>
+      )}
+      {bandFrom && <> The valuation lines therefore begin <strong>{monthYear(bandFrom)}</strong>.</>}
+      {" "}Nothing here is estimated: a quarter that was never filed is left out rather than filled in.
+    </div>
+  );
+}
 
 
 function trendToStmt(t: Trend): Stmt {
@@ -433,12 +478,10 @@ function CompanyView() {
   const [peers, setPeers] = useState<Row[]>([]);
   const [fullRow, setFullRow] = useState<Row | null>(null);
   const [error, setError] = useState("");
-  const [watched, setWatched] = useState(false);
   const [note, setNote] = useState("");
 
   useEffect(() => {
     if (!symbol) return;
-    setWatched(loadWatchlist().includes(symbol));
     pushRecent(symbol);
     setNote(loadNote(symbol));
   }, [symbol]);
@@ -538,14 +581,7 @@ function CompanyView() {
           >
             Export CSV
           </button>
-          <button
-            onClick={() => { toggleWatch(symbol); setWatched(!watched); }}
-            aria-label={watched ? "remove from watchlist" : "add to watchlist"}
-            title={watched ? "On your watchlist — tap to remove" : "Add to watchlist"}
-            className={`text-2xl leading-none ${watched ? "text-[var(--accent)]" : "text-[var(--line2)] hover:text-[var(--accent)]"}`}
-          >
-            ★
-          </button>
+          <WatchStar symbol={symbol} />
         </div>
       </div>
 
@@ -579,7 +615,10 @@ function CompanyView() {
 
       <div id="chart" className="scroll-mt-32">
         {company.prices && (company.prices.monthly?.length || company.prices.weekly?.length) ? (
-          <StockChart prices={company.prices} peBand={company.pe_band} evBand={company.ev_band} pbBand={company.pb_band} psBand={company.ps_band} trendQ={company.trend?.quarterly} livePrice={price} quarters={company.quarters} actions={company.actions} symbol={symbol} peers={peers} />
+          <>
+            <StockChart prices={company.prices} peBand={company.pe_band} evBand={company.ev_band} pbBand={company.pb_band} psBand={company.ps_band} trendQ={company.trend?.quarterly} livePrice={price} quarters={company.quarters} actions={company.actions} symbol={symbol} peers={peers} coverage={company.coverage} />
+            <CoverageNote cov={company.coverage} bandFrom={company.pe_band?.series?.[0]?.[0] ?? null} />
+          </>
         ) : null}
       </div>
 
