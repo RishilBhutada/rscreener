@@ -45,11 +45,21 @@ function fmtDate(d: string | null): string {
   return new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
-/** Green at 95%+, amber from 70, red below — the same thresholds the build guards use. */
+/** Green at 95%+, amber from 70, red below — the same thresholds the build guards use.
+ *
+ *  Every label completes the sentence "<pct>% ___", so all three must describe
+ *  the SAME quantity: the share that is current. "behind" did not — it read as
+ *  the share that is late, so a source with nothing current rendered as
+ *  "0% behind", which states the exact opposite of the truth. Share prices
+ *  showed that on 8-Aug-2026 while 2,354 of 2,357 companies were out of date.
+ */
 function tone(pct: number): { bar: string; text: string; label: string } {
+  //  The number is always "% up to date"; the colour, not the wording, says
+  //  whether that is good. Green, amber and red on the same sentence cannot be
+  //  misread the way three different sentences could.
   if (pct >= 95) return { bar: "var(--pos)", text: "text-[var(--pos)]", label: "up to date" };
-  if (pct >= 70) return { bar: "var(--warn, #d97706)", text: "text-[var(--ink2)]", label: "catching up" };
-  return { bar: "var(--neg)", text: "text-[var(--neg)]", label: "behind" };
+  if (pct >= 70) return { bar: "var(--warn, #d97706)", text: "text-[var(--ink2)]", label: "up to date" };
+  return { bar: "var(--neg)", text: "text-[var(--neg)]", label: "up to date" };
 }
 
 export default function StatusPage() {

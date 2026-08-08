@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from ratios_lib import compute_ratios, latest_annual_items, latest_promoter
+from ratios_lib import compute_ratios, derived_roe, latest_annual_items, latest_promoter
 from trend_lib import avg_npm_5y, build_trends, cagr_pct, ratio_bands
 
 
@@ -244,6 +244,7 @@ def main() -> None:
     pe_by_symbol = {s: b["pe"] for s, b in ratio_bands(con, shares_by_symbol).items() if "pe" in b}
     returns_by_symbol = price_returns(con)
     vol_by_symbol = volatility_fields(con)
+    roe_calc = derived_roe(con)
     con.close()
 
     # computed ratios need RAW rupee values - run before any unit conversion
@@ -279,6 +280,19 @@ def main() -> None:
     df["sales_cagr_10y"] = df["symbol"].map(lambda s: growth(s, "revenue", 10))
     df["profit_cagr_5y"] = df["symbol"].map(lambda s: growth(s, "pat", 5))
     df["profit_cagr_10y"] = df["symbol"].map(lambda s: growth(s, "pat", 10))
+
+    # Fill ROE where the source omitted it, from the company's own statements.
+    # Runs while roe is still a fraction, so it lands in the same units as every
+    # published value and converts with them on the next line.
+    if roe_calc:
+        before = int(df["roe"].notna().sum())
+        df["roe"] = [
+            v if v is not None and v == v else roe_calc.get(s)
+            for s, v in zip(df["symbol"], df["roe"])
+        ]
+        after = int(df["roe"].notna().sum())
+        print(f"  ROE: {before} published by the source, {after - before} worked out from "
+              f"the filings, {len(df) - after} still unknown")
 
     for col in FRACTION_TO_PCT:
         df[col] = (df[col] * 100).round(2)

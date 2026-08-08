@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import { allWatched } from "@/lib/watchlists";
+import { shortName } from "@/lib/names";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -66,7 +67,15 @@ export default function CalendarPage() {
             <ul>
               {evs.map((e, i) => (
                 <li key={`${e.symbol}-${i}`} className="px-4 py-3 sm:py-2.5 border-t border-[var(--line)] flex flex-col gap-1 sm:flex-row sm:gap-3 sm:items-baseline sm:flex-wrap">
-                  <Link href={`/company?s=${e.symbol}`} className="font-semibold text-[var(--accent-ink)] hover:underline shrink-0">{e.symbol}</Link>
+                  {/* The company name was already in this data and went unused,
+                      so a page listing who reports this week read as a column of
+                      tickers - ANANTRAJ, ARE&M, BOSCHLTD - that you have to know
+                      by heart. The name leads; the ticker stays beside it for
+                      anyone who thinks in tickers. */}
+                  <Link href={`/company?s=${e.symbol}`} className="font-semibold text-[var(--accent-ink)] hover:underline shrink-0">
+                    {shortName(e.company ?? "", e.symbol)}
+                    <span className="ml-1.5 text-xs font-normal text-[var(--ink3)]">{e.symbol}</span>
+                  </Link>
                   <span className="text-xs font-semibold text-[var(--ink3)] shrink-0">{e.purpose}</span>
                   <span className="text-xs text-[var(--ink3)] truncate max-w-full">{e.desc}</span>
                 </li>

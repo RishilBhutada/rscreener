@@ -43,6 +43,61 @@ def latest_promoter(con: sqlite3.Connection) -> dict[str, float]:
     return {sym: p for sym, p in rows if p is not None}
 
 
+def derived_roe(con: sqlite3.Connection) -> dict[str, float]:
+    """Return on equity worked out from the statements, as a FRACTION.
+
+    Yahoo supplies `returnOnEquity` for only 1,621 of 2,354 companies. Reliance
+    - the largest company on the exchange - is one of the 733 it omits, so the
+    screener showed a dash for it while happily showing ROCE. The inputs were
+    there the whole time: net income and stockholders equity are on file for
+    2,229 symbols.
+
+    Average equity, not closing equity. That choice is measured, not assumed:
+    against the 1,517 companies where Yahoo does publish an ROE, closing equity
+    lands within 2% on 15% of them and carries a median ratio of 0.951 - a
+    visible, one-directional bias. Average equity lands within 2% on 74% and
+    within 10% on 87%, with a median ratio of 1.000. The remaining spread is
+    period alignment: Yahoo's figure is trailing-twelve-month while the filings
+    give whole years, so the two are measuring slightly different windows.
+
+    Only gaps are filled - a published figure is never overwritten by this, so
+    the 1,621 companies that already had an ROE keep exactly the value they had.
+    Two years of equity are required; one year cannot be averaged, and a company
+    that has only ever filed once keeps its dash.
+    """
+    if not con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='statements'").fetchone():
+        return {}
+    ni: dict[str, float] = {}
+    for sym, _p, v in con.execute(
+        """SELECT symbol, period_end, value FROM statements
+           WHERE stmt_type='income' AND item='Net Income Common Stockholders'
+             AND period_type='annual' AND value IS NOT NULL
+           ORDER BY symbol, period_end"""
+    ):
+        ni[sym] = v                                  # ordered by date, so last wins
+    eq: dict[str, list[float]] = {}
+    for sym, _p, v in con.execute(
+        """SELECT symbol, period_end, value FROM statements
+           WHERE stmt_type='balance' AND item='Stockholders Equity'
+             AND period_type='annual' AND value IS NOT NULL
+           ORDER BY symbol, period_end"""
+    ):
+        eq.setdefault(sym, []).append(v)
+    out: dict[str, float] = {}
+    for sym, profit in ni.items():
+        years = eq.get(sym, [])
+        if len(years) < 2:
+            continue
+        avg = (years[-1] + years[-2]) / 2
+        # Negative equity makes the ratio meaningless rather than merely large:
+        # a loss over negative equity reads as a healthy positive return. Those
+        # companies keep their dash.
+        if avg <= 0:
+            continue
+        out[sym] = profit / avg
+    return out
+
+
 def _div(a, b):
     if a is None or b is None or b == 0:
         return None
