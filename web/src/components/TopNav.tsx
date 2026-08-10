@@ -8,7 +8,7 @@ import AccountButton from "@/components/AccountButton";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
-type Lite = { symbol: string; name: string; mcap: number };
+type Lite = { symbol: string; name: string; mcap: number; exchange?: string };
 let cache: Lite[] | null = null;
 
 export default function TopNav({ active }: { active?: "home" | "screens" | "sectors" | "calendar" | "portfolio" | "watchlists" | "ipo" | "status" }) {
@@ -26,6 +26,7 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
         symbol: String(r.symbol),
         name: String(r.name ?? ""),
         mcap: (r.mcap as number) ?? 0,
+        exchange: r.exchange as string | undefined,
       }));
       setRows(cache);
     } catch { /* search silently unavailable */ }
@@ -94,6 +95,12 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
                 >
                   <span className="font-semibold text-[var(--ink)]">{m.name || m.symbol}</span>
                   <span className="text-[var(--ink3)] ml-2 text-xs">{m.symbol}</span>
+                  {/* Half the companies here are BSE-only now. Saying which is
+                      the difference between "this page has no filings yet" and
+                      "this company files nowhere this app can read". */}
+                  {m.exchange === "BSE" && (
+                    <span className="ml-1.5 text-[10px] rounded px-1 py-0.5 bg-[var(--card2)] text-[var(--ink3)]">BSE</span>
+                  )}
                 </button>
               ))}
             </div>
