@@ -243,6 +243,12 @@ def freshen_prices(con, df):
         recent = []
     bars = dict(recent)
     df["bars30"] = [bars.get(s, 0) for s in df["symbol"]]
+
+    try:
+        ex = {r[0]: r[1] for r in con.execute("SELECT SYMBOL, EXCHANGE FROM universe")}
+    except Exception:  # noqa: BLE001 - a database from before the column existed
+        ex = {}
+    df["exchange"] = [ex.get(s) or "NSE" for s in df["symbol"]]
     undated = sum(1 for d in dates if not d)
     print(f"  price refresh: {moved} symbols moved onto the latest traded close "
           f"(as of {fresh}, {sum(stale)} behind it, {undated} undated)")
@@ -378,7 +384,7 @@ def main() -> None:
         "median_pe_5y", "avg_npm_5y",
         "ret_1m", "ret_3m", "ret_6m", "ret_1y", "ret_3y", "ret_5y", "off_52w_high",
         "volatility_1y", "volatility_30d", "vol_method",
-        "shares_out", "price_date", "bars30",
+        "shares_out", "price_date", "bars30", "exchange",
     ]
     df = df[keep]
     df = df.astype(object).where(pd.notna(df), None)

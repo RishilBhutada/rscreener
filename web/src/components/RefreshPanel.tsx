@@ -2,6 +2,54 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+
+const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
+type Pick = { symbol: string; name: string; mcap: number; exchange?: string };
+let INDEX: Pick[] | null = null;
+
+/** Rank matches so what you meant comes first.
+ *
+ *  Typing "cem" has to reach Cemindia Projects, whose SYMBOL is CEMPRO and whose
+ *  NAME starts with the letters typed - two different kinds of match. A plain
+ *  substring filter returns them in file order, which puts a company with "cem"
+ *  buried mid-name above the one actually called that. So: symbol prefix first,
+ *  then name prefix, then a word inside the name, then anything containing it,
+ *  and market cap breaks ties - the company someone means is usually the bigger
+ *  one.
+ */
+function rank(rows: Pick[], q: string): Pick[] {
+  const s = q.trim().toLowerCase();
+  if (s.length < 2) return [];
+  return rows
+    .map((r) => {
+      const sym = r.symbol.toLowerCase(), nm = r.name.toLowerCase();
+      const score =
+        sym === s ? 0 :
+        sym.startsWith(s) ? 1 :
+        nm.startsWith(s) ? 2 :
+        nm.includes(` ${s}`) ? 3 :
+        sym.includes(s) || nm.includes(s) ? 4 : 9;
+      return [score, r] as const;
+    })
+    .filter(([sc]) => sc < 9)
+    .sort((a, b) => a[0] - b[0] || b[1].mcap - a[1].mcap)
+    .slice(0, 8)
+    .map(([, r]) => r);
+}
+
+async function loadIndex(): Promise<Pick[]> {
+  if (INDEX) return INDEX;
+  const d = await (await fetch(`${BASE}/data.json`)).json();
+  INDEX = (d.rows as Record<string, unknown>[]).map((r) => ({
+    symbol: String(r.symbol),
+    name: String(r.name ?? ""),
+    mcap: (r.mcap as number) ?? 0,
+    exchange: r.exchange as string | undefined,
+  }));
+  return INDEX;
+}
+
 const REPO = "RishilBhutada/rscreener";
 const WORKFLOW = "nightly.yml";
 const RUNS_API = `https://api.github.com/repos/${REPO}/actions/workflows/311180536/runs?per_page=5`;
@@ -114,7 +162,11 @@ export default function RefreshPanel() {
   const [token, setToken] = useState("");
   const [tokenInput, setTokenInput] = useState("");
   const [scope, setScope] = useState("everything");
-  const [syms, setSyms] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
+  const [symQ, setSymQ] = useState("");
+  const [symRows, setSymRows] = useState<Pick[]>([]);
+  const [symHi, setSymHi] = useState(0);
+  const syms = picked.join(",");
   const [deep, setDeep] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendMsg, setSendMsg] = useState<string | null>(null);
@@ -215,18 +267,82 @@ export default function RefreshPanel() {
                 </span>
               </label>
 
-              <label className="block">
+              {/* Search and pick, not type-the-exact-ticker. Aiming a refresh at
+                  one company meant knowing its symbol by heart: Cemindia Projects
+                  is CEMPRO, which nobody guesses. Typing what you know finds it. */}
+              <div className="block">
                 <span className="text-xs text-[var(--ink3)]">
-                  Only these companies <span className="opacity-70">(comma separated, blank = all)</span>
+                  Only these companies <span className="opacity-70">(blank = all {picked.length ? "" : "5,069"})</span>
                 </span>
-                <input
-                  value={syms}
-                  onChange={(e) => setSyms(e.target.value)}
-                  placeholder="CEMPRO, DIXON"
-                  className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--card2)] text-[var(--ink)]
-                             px-2.5 py-2 text-sm placeholder:text-[var(--ink3)]"
-                />
-              </label>
+                {picked.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {picked.map((s) => (
+                      <span key={s} className="inline-flex items-center gap-1 rounded-full bg-[var(--accent-soft)]
+                                               text-[var(--accent-ink)] text-xs font-semibold pl-2.5 pr-1 py-1">
+                        {s}
+                        <button
+                          onClick={() => setPicked(picked.filter((x) => x !== s))}
+                          aria-label={`Remove ${s}`}
+                          className="w-4 h-4 leading-none rounded-full hover:bg-[var(--card)] text-[var(--ink2)]"
+                        >×</button>
+                      </span>
+                    ))}
+                    <button onClick={() => setPicked([])}
+                      className="text-xs text-[var(--ink3)] underline underline-offset-2 px-1">clear</button>
+                  </div>
+                )}
+                <div className="relative mt-1">
+                  <input
+                    value={symQ}
+                    onFocus={() => { loadIndex().then((rows) => setSymRows(rank(rows, symQ))).catch(() => {}); }}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setSymQ(v); setSymHi(0);
+                      loadIndex().then((rows) => setSymRows(rank(rows, v))).catch(() => {});
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "ArrowDown") { e.preventDefault(); setSymHi(Math.min(symHi + 1, symRows.length - 1)); }
+                      else if (e.key === "ArrowUp") { e.preventDefault(); setSymHi(Math.max(symHi - 1, 0)); }
+                      else if (e.key === "Enter") {
+                        e.preventDefault();
+                        // A typed-out symbol still works - someone who knows it
+                        // should not be forced through a menu to use it.
+                        const hit = symRows[symHi]?.symbol ?? symQ.trim().toUpperCase();
+                        if (hit && !picked.includes(hit)) setPicked([...picked, hit]);
+                        setSymQ(""); setSymRows([]);
+                      } else if (e.key === "Backspace" && !symQ && picked.length) {
+                        setPicked(picked.slice(0, -1));
+                      } else if (e.key === "Escape") { setSymQ(""); setSymRows([]); }
+                    }}
+                    placeholder="Type a name or symbol — e.g. cem"
+                    className="w-full rounded-lg border border-[var(--line)] bg-[var(--card2)] text-[var(--ink)]
+                               px-2.5 py-2 text-sm placeholder:text-[var(--ink3)]"
+                  />
+                  {symRows.length > 0 && (
+                    <div className="absolute z-30 mt-1 w-full max-h-64 overflow-y-auto rounded-xl border
+                                    border-[var(--line)] bg-[var(--card)] shadow-xl">
+                      {symRows.map((r, i) => (
+                        <button
+                          key={r.symbol}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            if (!picked.includes(r.symbol)) setPicked([...picked, r.symbol]);
+                            setSymQ(""); setSymRows([]);
+                          }}
+                          onMouseEnter={() => setSymHi(i)}
+                          className={`block w-full text-left px-3 py-2 text-sm ${i === symHi ? "bg-[var(--accent-soft)]" : ""}`}
+                        >
+                          <span className="font-semibold text-[var(--ink)]">{r.name || r.symbol}</span>
+                          <span className="text-[var(--ink3)] ml-2 text-xs">{r.symbol}</span>
+                          {r.exchange === "BSE" && (
+                            <span className="ml-1.5 text-[10px] rounded px-1 py-0.5 bg-[var(--card2)] text-[var(--ink3)]">BSE</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
 
               <label className="flex items-start gap-2 cursor-pointer">
                 <input type="checkbox" checked={deep} onChange={() => setDeep(!deep)}
