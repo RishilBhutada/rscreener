@@ -130,6 +130,20 @@ jobs:
       - name: Refresh snapshot fundamentals (prices, ratios) for the full universe
         if: steps.plan.outputs.prices == '1'
         run: python pipeline/fetch_fundamentals.py --all --snapshot-only --max-age-hours 20 --sleep 0.5
+      - name: Refresh annual and quarterly statements (rotating)
+        if: steps.plan.outputs.prices == '1'
+        # ROCE, the margins, book value and both growth figures are computed
+        # from these. The nightly only ever ran --snapshot-only, so they were
+        # never refreshed and a company added later received none at all: every
+        # one of the 2,700 BSE companies had zero statement rows, which is why
+        # ROCE, promoter holding and the growth figures read exactly 0.0% across
+        # half the universe.
+        #
+        # Its own log, deliberately. Gated on the snapshot's log - stamped for
+        # every symbol nightly - this pass would be told "nobody is due" forever,
+        # the same fault that stopped the deep backfill running even once.
+        # Monthly per company, 500 a night, inside the run's shared deadline.
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_fundamentals.py --symbols ${{ steps.plan.outputs.target }} --statements --max-age-hours 720 --limit 500 --sleep 0.4
       - name: Refresh upcoming events calendar
         if: steps.plan.outputs.prices == '1'
         run: python pipeline/fetch_events.py

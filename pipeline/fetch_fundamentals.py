@@ -219,19 +219,20 @@ def _table_exists(con: sqlite3.Connection, name: str) -> bool:
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone())
 
 
-def already_done(con: sqlite3.Connection, max_age_hours: float = 0) -> set[str]:
+def already_done(con: sqlite3.Connection, max_age_hours: float = 0,
+                 log_table: str = "fetch_log") -> set[str]:
     existing = con.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='fetch_log'"
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (log_table,)
     ).fetchone()
     if not existing:
         return set()
     if max_age_hours > 0:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)).strftime("%Y-%m-%d %H:%M:%S")
         rows = con.execute(
-            "SELECT symbol FROM fetch_log WHERE error IS NULL AND fetched_at >= ?", (cutoff,)
+            f"SELECT symbol FROM {log_table} WHERE error IS NULL AND fetched_at >= ?", (cutoff,)
         ).fetchall()
     else:
-        rows = con.execute("SELECT symbol FROM fetch_log WHERE error IS NULL").fetchall()
+        rows = con.execute(f"SELECT symbol FROM {log_table} WHERE error IS NULL").fetchall()
     done = {r[0] for r in rows}
 
     # A row that came back missing a core field is NOT done, whatever the log
@@ -249,7 +250,7 @@ def already_done(con: sqlite3.Connection, max_age_hours: float = 0) -> set[str]:
     # Price and market cap only: these two are what everything else is built
     # from, and a genuinely unknowable field - a company with no dividend has no
     # dividend yield - must not put a symbol into a permanent retry loop.
-    if _table_exists(con, "fundamentals"):
+    if log_table == "fetch_log" and _table_exists(con, "fundamentals"):
         incomplete = {
             r[0] for r in con.execute(
                 "SELECT symbol FROM fundamentals WHERE price IS NULL OR market_cap IS NULL"
@@ -283,6 +284,21 @@ def main() -> None:
     ap.add_argument("--refresh", action="store_true", help="re-fetch even if already done")
     ap.add_argument("--sleep", type=float, default=0.8, help="seconds between symbols")
     ap.add_argument("--snapshot-only", action="store_true", help="skip statements (faster; enough for screening)")
+    # Statements - the annual and quarterly income, balance sheet and cash flow -
+    # are what ROCE, the margins, book value and the growth figures are computed
+    # from. The nightly only ever ran --snapshot-only, so nothing refreshed them
+    # and no NEW company ever received them: all 2,700 BSE companies had zero
+    # statement rows, which is why ROCE, promoter holding and both growth
+    # figures read exactly 0.0% for every one of them.
+    #
+    # It needs its OWN log. Gated on fetch_log, which the nightly snapshot
+    # stamps for every symbol each night, a statements pass would be told
+    # "nobody is due" forever - the identical fault that stopped the deep
+    # backfill from running a single time since it was written.
+    ap.add_argument("--statements", action="store_true",
+                    help="refresh statements, tracked separately from the snapshot")
+    ap.add_argument("--limit", type=int, default=0,
+                    help="fetch at most this many symbols this run (0 = no cap)")
     ap.add_argument("--max-age-hours", type=float, default=0,
                     help="re-fetch symbols last fetched more than this many hours ago (0 = skip all previously-fetched)")
     args = ap.parse_args()
@@ -299,11 +315,19 @@ def main() -> None:
         symbols = universe["SYMBOL"].tolist()
 
     con = sqlite3.connect(DB, timeout=180)
+    log_table = "stmt_fetch_log" if args.statements else "fetch_log"
+    con.execute(f"CREATE TABLE IF NOT EXISTS {log_table} "
+                "(symbol TEXT, fetched_at TEXT, error TEXT)")
     if not args.refresh:
-        done = already_done(con, args.max_age_hours)
+        done = already_done(con, args.max_age_hours, log_table)
         symbols = [s for s in symbols if s not in done]
+    if args.limit and len(symbols) > args.limit:
+        last = {r[0]: r[1] for r in con.execute(f"SELECT symbol, fetched_at FROM {log_table}").fetchall()}
+        symbols.sort(key=lambda s: last.get(s) or "")     # oldest and never-fetched first
+        print(f"  --limit {args.limit}: {len(symbols) - args.limit} deferred to a later run")
+        symbols = symbols[:args.limit]
     tickers = yf_symbols(con)
-    print(f"fetching {len(symbols)} symbols...")
+    print(f"fetching {len(symbols)} symbols{' (statements)' if args.statements else ''}...")
 
     ok = err = 0
     for i, sym in enumerate(symbols, 1):
@@ -311,11 +335,11 @@ def main() -> None:
             break
         log_row = {"symbol": sym, "fetched_at": now_utc(), "error": None}
         try:
-            snap, stmts = fetch_one(sym, snapshot_only=args.snapshot_only,
+            snap, stmts = fetch_one(sym, snapshot_only=args.snapshot_only and not args.statements,
                                     ticker=tickers.get(sym))
             replace_symbol_rows(con, "fundamentals", [sym], pd.DataFrame([snap]),
                                 coalesce=True)
-            if not args.snapshot_only:
+            if not args.snapshot_only or args.statements:
                 replace_symbol_rows(con, "statements", [sym], stmts)
             ok += 1
             missing = [k for k in ("price", "market_cap") if snap.get(k) is None]
@@ -325,7 +349,7 @@ def main() -> None:
             log_row["error"] = str(e)[:300]
             err += 1
             print(f"[{i}/{len(symbols)}] {sym}: ERROR {e}")
-        replace_symbol_rows(con, "fetch_log", [sym], pd.DataFrame([log_row]))
+        replace_symbol_rows(con, log_table, [sym], pd.DataFrame([log_row]))
         con.commit()
         time.sleep(args.sleep)
 
