@@ -140,6 +140,34 @@ def price_returns(con: sqlite3.Connection) -> dict[str, dict]:
     return out
 
 
+def withhold_on_dead_equity(df, col: str) -> int:
+    """Blank a ratio whose company has no net worth left; returns how many.
+
+    260 companies published a NEGATIVE price-to-book, because accumulated losses
+    have wiped out their equity. A positive price over a negative book gives
+    something like -0.20, which sorts to the TOP of a cheapest-by-P/B screen and
+    reads as a bargain - the same trap the screens page already names for P/E:
+    "a negative P/E is a loss, not a cheap share". ROE has the identical problem
+    from the identical cause: -8,399% for SML, -4,016% for McLeod Russel, both
+    produced by dividing into an equity that is not there.
+
+    The BOOK VALUE itself keeps being published. It is real, and it is the
+    point - net worth per share is negative, and a reader should see that rather
+    than a ratio built on top of it.
+    """
+    if col not in df.columns:
+        return 0
+    bv = pd.to_numeric(df["book_value"], errors="coerce")
+    vals, n = [], 0
+    for v, b in zip(df[col], bv):
+        if v is not None and v == v and pd.notna(b) and b <= 0:
+            vals.append(None); n += 1
+        else:
+            vals.append(v)
+    df[col] = vals
+    return n
+
+
 def freshen_prices(con, df):
     """Replace the snapshot price with the newest close we actually hold, and
     stamp every row with the date that price belongs to.
@@ -249,6 +277,48 @@ def freshen_prices(con, df):
     except Exception:  # noqa: BLE001 - a database from before the column existed
         ex = {}
     df["exchange"] = [ex.get(s) or "NSE" for s in df["symbol"]]
+
+    # The company's NAME, from the exchange when the market-data provider has
+    # none. 478 companies shipped with a blank name and rendered as their ticker
+    # - "MAXESTATES (MAXESTATES)" for Max Estates Limited, "AADHARHFC" for Aadhar
+    # Housing Finance - and every one of them had a perfectly good name sitting
+    # in the universe table the whole time, because that is where the exchange's
+    # own listing file was loaded. The page was reading one source and ignoring
+    # the other.
+    try:
+        listed = {r[0]: (r[1] or "").strip()
+                  for r in con.execute('SELECT SYMBOL, "NAME OF COMPANY" FROM universe')}
+    except Exception:  # noqa: BLE001
+        listed = {}
+    filled = 0
+    names = []
+    for sym, nm in zip(df["symbol"], df["name"]):
+        if (nm is None or not str(nm).strip() or str(nm) == "nan") and listed.get(sym):
+            names.append(listed[sym]); filled += 1
+        else:
+            names.append(nm)
+    df["name"] = names
+    if filled:
+        print(f"  filled {filled} missing company names from the exchange listing")
+
+    # A ratio whose denominator is gone is not a ratio.
+    #
+    # 260 companies published a NEGATIVE price-to-book, because their net worth
+    # is negative - accumulated losses have wiped the equity out. Dividing a
+    # positive price by it produces something like -0.20, which sorts to the top
+    # of a "cheapest by P/B" screen and reads as a bargain. It is the same trap
+    # the screens page already names for P/E: "a negative P/E is a loss, not a
+    # cheap share". ROE has the identical problem from the identical cause -
+    # -8,399% for SML, -4,016% for McLeod Russel - a number produced by dividing
+    # by an equity that is not there.
+    #
+    # The BOOK VALUE itself keeps being published. It is real and it is the
+    # point: net worth per share is negative, and the reader should see that
+    # rather than a ratio built on it. Only the ratios go.
+    n_pb = withhold_on_dead_equity(df, "pb")
+    if n_pb:
+        print(f"  withheld {n_pb} price-to-book figures whose company has negative "
+              f"net worth - a negative P/B sorts to the top of a cheapest-first screen")
     undated = sum(1 for d in dates if not d)
     print(f"  price refresh: {moved} symbols moved onto the latest traded close "
           f"(as of {fresh}, {sum(stale)} behind it, {undated} undated)")
@@ -320,6 +390,15 @@ def main() -> None:
         after = int(df["roe"].notna().sum())
         print(f"  ROE: {before} published by the source, {after - before} worked out from "
               f"the filings, {len(df) - after} still unknown")
+
+    # AFTER the fill, deliberately. Done before it, the fill puts the figure
+    # straight back: McLeod Russel kept its -4,016% through the first attempt at
+    # this, because nulling a value earlier in the pipeline than the step that
+    # populates it changes nothing at all.
+    n_roe = withhold_on_dead_equity(df, "roe")
+    if n_roe:
+        print(f"  withheld {n_roe} ROE figures whose company has negative net worth - "
+              f"dividing by an equity that is gone produces -4,016%, not a return")
 
     for col in FRACTION_TO_PCT:
         df[col] = (df[col] * 100).round(2)
