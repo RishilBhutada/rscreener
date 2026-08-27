@@ -21,6 +21,8 @@ from pathlib import Path
 
 import requests
 
+import budget
+
 import nse_session
 
 from db_lib import retry as db_retry
@@ -120,6 +122,8 @@ def main() -> None:
     import time
     ok = err = 0
     for i, sym in enumerate(due, 1):
+        if budget.stop(i - 1, len(due)):
+            break
         try:
             body = nse_session.get(session, API.format(sym=sym), timeout=30).json()
             rows = body if isinstance(body, list) else (body.get("data") or [])

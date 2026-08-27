@@ -41,11 +41,15 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    # Below GitHub's 6-hour hard kill. A killed job never reaches the step
-    # that saves the database, so a night's fetching would be lost with
-    # nothing recorded; the fetchers carry their own time budgets to stay
-    # inside this, and this is the backstop for the case they do not.
-    timeout-minutes: 330
+    # Below GitHub's 6-hour hard kill, and ABOVE the fetch deadline plus the
+    # time publishing needs. Fetching stops itself at 260 minutes; saving,
+    # exporting, checking and building take about 40 more. This is now a
+    # backstop for something going wrong, not the thing that ends the run.
+    #
+    # It used to be 330 with fetching that took 330, so the cap WAS the end of
+    # the run: every night the job was cancelled at step 16 of 31 and the save,
+    # the export and the publish never happened at all.
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -90,7 +94,15 @@ jobs:
             echo "targeted=0"                       >> "$GITHUB_OUTPUT"
           fi
           echo "qb=${{ inputs.deep == true && '0' || '8' }}" >> "$GITHUB_OUTPUT"
+          # ONE deadline for all fetching, leaving the rest of the job to save,
+          # export, check and publish. Fetching used to run until the job's own
+          # backstop killed it, which meant it never reached any of those - five
+          # and a half hours of work discarded nightly for two weeks. Whatever is
+          # fetched by this moment is what gets published; the rest comes up
+          # tomorrow. Partial data published beats complete data thrown away.
+          echo "RSCREENER_DEADLINE=$(( $(date -u +%s) + 260*60 ))" >> "$GITHUB_ENV"
           echo "Run plan: scope=$SCOPE symbols=${SYMS:-all}"
+          echo "Fetching stops at $(date -u -d '+260 minutes' '+%H:%M UTC'), leaving 90 minutes to publish."
       - run: python pipeline/fetch_universe.py
       - name: Write the symbol lists every fetcher works from
         # TWO lists, because the sources do not cover the same companies.

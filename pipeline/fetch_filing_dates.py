@@ -26,6 +26,8 @@ from pathlib import Path
 
 import requests
 
+import budget
+
 from db_lib import retry as db_retry
 from fetch_results_history import INDEX_API, INTEGRATED_API, get_retry
 
@@ -131,6 +133,8 @@ def main() -> None:
     import time
     ok = err = 0
     for i, sym in enumerate(due, 1):
+        if budget.stop(i - 1, len(due)):
+            break
         try:
             pairs = rows_from_integrated(session, sym)
             pairs += rows_from_legacy(session, sym)

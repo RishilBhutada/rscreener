@@ -14,6 +14,8 @@ from pathlib import Path
 
 import requests
 
+import budget
+
 import nse_session
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,6 +84,8 @@ def main() -> None:
 
     ok = err = 0
     for i, sym in enumerate(symbols, 1):
+        if budget.stop(i - 1, len(symbols)):
+            break
         try:
             # Three attempts with a fresh handshake between them. A single try
             # recorded 301 companies as having no shareholding pattern when what

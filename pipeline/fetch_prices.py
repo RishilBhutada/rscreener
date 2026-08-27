@@ -15,6 +15,8 @@ from pathlib import Path
 
 import requests
 
+import budget
+
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
 CHART = "https://query2.finance.yahoo.com/v8/finance/chart/{sym}?range={rng}&interval={itv}&events=split"
@@ -179,6 +181,8 @@ def main() -> None:
     session.headers.update(HEADERS)
     ok = err = 0
     for i, sym in enumerate(symbols, 1):
+        if budget.stop(i - 1, len(symbols)):
+            break
         try:
             # NOTE: Yahoo silently downgrades 1wk to monthly bars when range=max,
             # so weekly is requested with an explicit span.

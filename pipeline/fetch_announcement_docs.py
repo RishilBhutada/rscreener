@@ -15,6 +15,8 @@ from pathlib import Path
 
 import requests
 
+import budget
+
 import nse_session
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,6 +84,8 @@ def main() -> None:
 
     ok = err = 0
     for i, sym in enumerate(symbols, 1):
+        if budget.stop(i - 1, len(symbols)):
+            break
         try:
             r = nse_session.get(s, API.format(sym=sym), timeout=30)
             rows = r.json()

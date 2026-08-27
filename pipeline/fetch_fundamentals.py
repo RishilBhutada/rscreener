@@ -20,6 +20,8 @@ from pathlib import Path
 import pandas as pd
 import yfinance as yf
 
+import budget
+
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
 DB = DATA / "rscreener.db"
@@ -305,6 +307,8 @@ def main() -> None:
 
     ok = err = 0
     for i, sym in enumerate(symbols, 1):
+        if budget.stop(i - 1, len(symbols)):
+            break
         log_row = {"symbol": sym, "fetched_at": now_utc(), "error": None}
         try:
             snap, stmts = fetch_one(sym, snapshot_only=args.snapshot_only,

@@ -25,6 +25,8 @@ from pathlib import Path
 
 import requests
 
+import budget
+
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
 INDEX_API = "https://www.nseindia.com/api/corporates-financial-results?index=equities&symbol={sym}&period={period}"
@@ -458,6 +460,8 @@ def main() -> None:
 
     started = time.monotonic()
     for i, sym in enumerate(symbols, 1):
+        if budget.stop(i - 1, len(symbols)):
+            break
         if args.max_minutes and (time.monotonic() - started) / 60 >= args.max_minutes:
             print(f"time budget of {args.max_minutes:g} min reached - stopping after {i-1} "
                   f"of {len(symbols)} symbols; the rest come up on a later run", flush=True)
