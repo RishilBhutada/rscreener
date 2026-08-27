@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import TopNav from "@/components/TopNav";
 import RefreshPanel from "@/components/RefreshPanel";
+import Scorecard from "@/components/Scorecard";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -106,6 +107,8 @@ export default function StatusPage() {
                 </div>
               ))}
             </div>
+
+            <Scorecard />
 
             <RefreshPanel />
 

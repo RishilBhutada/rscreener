@@ -247,6 +247,14 @@ jobs:
       - run: python pipeline/export_json.py
       - run: python pipeline/export_company_json.py
       - run: python pipeline/export_ipos.py
+      - name: Score the data and record the score
+        # Runs every night, after the export and before the guards, so the score
+        # describes what is about to be published. Appending to a history file
+        # is the point: a change either moves this number or it did not do what
+        # it claimed. Never allowed to stop a publish - a broken scoreboard is
+        # not a reason to withhold good data.
+        continue-on-error: true
+        run: python pipeline/scorecard.py
       - name: Publish the data-freshness report the app shows on /status
         run: python pipeline/export_status.py
       - name: Refuse to publish if chart history went backwards

@@ -1,0 +1,75 @@
+{
+ "generated_at": "2026-08-27 19:30 UTC",
+ "overall": 62.7,
+ "parts": {
+  "complete": {
+   "score": 67.9,
+   "companies": 4746,
+   "fields": {
+    "Price": 100.0,
+    "Market cap": 96.9,
+    "P/E": 76.7,
+    "Book value": 96.8,
+    "ROE": 83.4,
+    "ROCE": 46.8,
+    "Debt / equity": 79.1,
+    "5-year sales growth": 30.6,
+    "5-year profit growth": 21.6,
+    "Promoter holding": 47.3
+   }
+  },
+  "correct": {
+   "score": 98.3,
+   "checks": {
+    "Filed profit vs the data provider": {
+     "measured": 3654,
+     "agree": 3454,
+     "pct": 94.5,
+     "what": "the same company-year from the NSE filing and from the market-data provider, within 25%"
+    },
+    "Price x shares = market cap": {
+     "measured": 4601,
+     "agree": 4590,
+     "pct": 99.8,
+     "what": "an arithmetic identity that must hold on every published row"
+    },
+    "Filed figures against their own history": {
+     "measured": 20023,
+     "agree": 19827,
+     "pct": 99.0,
+     "what": "each filed year within a sane multiple of that company's own median - catches a misread unit"
+    },
+    "Price / book value = published P/B": {
+     "measured": 4332,
+     "agree": 4332,
+     "pct": 100.0,
+     "what": "a second arithmetic identity, on a different pair of published fields"
+    }
+   }
+  },
+  "fresh": {
+   "as_of": "2026-08-07",
+   "regularly_traded": 4700,
+   "on_the_newest_close": 4697,
+   "days_old": 20,
+   "score": 0.0
+  },
+  "deep": {
+   "score": 15.0,
+   "companies_with_a_valuation_history": 1980,
+   "median_years_of_history": 3,
+   "reaching_before_2012": 126
+  }
+ },
+ "history": [
+  {
+   "at": "2026-08-27 19:30 UTC",
+   "overall": 62.7,
+   "complete": 67.9,
+   "correct": 98.3,
+   "fresh": 0.0,
+   "deep": 15.0,
+   "companies": 4746
+  }
+ ]
+}
