@@ -7,10 +7,14 @@ Usage:
 """
 import argparse
 import sqlite3
+from datetime import datetime, timedelta, timezone
 import time
 from pathlib import Path
 
 import requests
+
+import budget
+import nse_session
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
@@ -27,6 +31,15 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbols", required=True, help="comma list, or @path/to/file with comma list")
     ap.add_argument("--sleep", type=float, default=0.5)
+    # This script had no log, no cap and no schedule, so it was never put on the
+    # nightly at all: 19,087 annual-report links were fetched once for 1,824
+    # companies and never touched again. A company listed since gets no reports,
+    # and a company that has filed a new annual report keeps showing its old
+    # ones. 36% coverage, frozen. Its own log, like every other rotation - one
+    # shared with a nightly full sweep is a rotation that never runs.
+    ap.add_argument("--max-age-hours", type=float, default=0)
+    ap.add_argument("--limit", type=int, default=0,
+                    help="fetch at most this many symbols this run (0 = no cap)")
     args = ap.parse_args()
     if args.symbols.startswith("@"):
         raw = (ROOT / args.symbols[1:]).read_text(encoding="utf-8")
@@ -34,23 +47,31 @@ def main() -> None:
         raw = args.symbols
     symbols = [s.strip().upper() for s in raw.split(",") if s.strip()]
 
-    s = requests.Session()
-    s.headers.update(HEADERS)
-    # warm the session; a 403 here is fine, the cookies still help the API call
-    try:
-        s.get("https://www.nseindia.com", timeout=20)
-    except Exception:
-        pass
+    s = nse_session.new_session()
 
     con = sqlite3.connect(DB, timeout=180)
     con.execute(
         "CREATE TABLE IF NOT EXISTS documents (symbol TEXT, doc_type TEXT, from_yr TEXT, to_yr TEXT, url TEXT)"
     )
+    con.execute("CREATE TABLE IF NOT EXISTS docs_fetch_log "
+                "(symbol TEXT PRIMARY KEY, fetched_at TEXT, error TEXT)")
+    log = {r[0]: r[1] for r in con.execute(
+        "SELECT symbol, fetched_at FROM docs_fetch_log WHERE error IS NULL")}
+    if args.max_age_hours > 0:
+        cut = (datetime.now(timezone.utc)
+               - timedelta(hours=args.max_age_hours)).strftime("%Y-%m-%d %H:%M:%S")
+        symbols = [x for x in symbols if log.get(x, "") < cut]
+    if args.limit and len(symbols) > args.limit:
+        symbols.sort(key=lambda x: log.get(x) or "")     # oldest and never-fetched first
+        print(f"  --limit {args.limit}: {len(symbols) - args.limit} deferred to a later run")
+        symbols = symbols[:args.limit]
+    print(f"annual reports for {len(symbols)} symbols...")
     ok = err = 0
     for i, sym in enumerate(symbols, 1):
+        if budget.stop(i - 1, len(symbols)):
+            break
         try:
-            r = s.get(API.format(sym=sym), timeout=25)
-            r.raise_for_status()
+            r = nse_session.get(s, API.format(sym=sym))
             body = r.json()
             data = body.get("data", body if isinstance(body, list) else [])
             rows = [
@@ -62,9 +83,15 @@ def main() -> None:
             con.executemany("INSERT INTO documents VALUES (?,?,?,?,?)", rows)
             con.commit()
             ok += 1
+            con.execute("INSERT OR REPLACE INTO docs_fetch_log VALUES (?,?,?)",
+                        (sym, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), None))
+            con.commit()
             print(f"[{i}/{len(symbols)}] {sym}: {len(rows)} reports")
         except Exception as e:  # noqa: BLE001 - one bad symbol must not kill the run
             err += 1
+            con.execute("INSERT OR REPLACE INTO docs_fetch_log VALUES (?,?,?)",
+                        (sym, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), str(e)[:200]))
+            con.commit()
             print(f"[{i}/{len(symbols)}] {sym}: ERROR {e}")
         time.sleep(args.sleep)
     con.close()

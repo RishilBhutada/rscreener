@@ -176,6 +176,13 @@ jobs:
         # 480 of 2,357 companies covered, and capped at the top 500 it would have
         # stayed that way permanently.
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_announcement_docs.py --symbols @data/nse_symbols.txt --max-age-hours 336 --limit 500 --sleep 0.35
+      - name: Refresh annual-report links (rotating)
+        if: steps.plan.outputs.earnings == '1'
+        # Never ran on any schedule. 19,087 links were fetched once for 1,824
+        # companies and frozen there: 36% coverage, no new company ever getting
+        # reports and no company ever getting its newest one. Monthly per
+        # company, inside the run's shared deadline.
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_documents.py --symbols ${{ steps.plan.outputs.nse_target }} --max-age-hours 720 --limit 400 --sleep 0.35
       - name: Keep as-filed earnings CURRENT across the whole universe
         if: steps.plan.outputs.earnings == '1'
         # This was `--symbols @data/top500.txt --limit 25`: 25 names a night out of
