@@ -60,7 +60,22 @@ export default function CalendarPage() {
         </div>
         {error && <p className="text-[var(--neg)] text-sm">{error} — run the pipeline&apos;s fetch_events step first.</p>}
         {!cal && !error && <p className="text-[var(--ink3)] text-sm">Loading…</p>}
-        {cal && grouped.length === 0 && <p className="text-[var(--ink3)] text-sm">Nothing upcoming under the current filters.</p>}
+        {/* "Nothing upcoming" and "this file is seven weeks old" look identical on
+            screen, and for seven weeks it was the second one: every event in it
+            had already happened, so the page said there was nothing coming. Age
+            is checked before emptiness is reported. */}
+        {cal && grouped.length === 0 && (() => {
+          const days = Math.floor((Date.now() - Date.parse(cal.generated_at.replace(" UTC", "Z").replace(" ", "T"))) / 86400000);
+          return days > 3 ? (
+            <div className="text-sm rounded-xl border border-[var(--neg-line)] bg-[var(--neg-soft)] text-[var(--neg)] p-3">
+              <span className="font-semibold">This calendar is {days} days old.</span> It is empty because
+              every meeting in it has already happened, not because none are scheduled. The nightly
+              refresh has not published since {cal.generated_at}.
+            </div>
+          ) : (
+            <p className="text-[var(--ink3)] text-sm">Nothing upcoming under the current filters.</p>
+          );
+        })()}
         {grouped.map(([date, evs]) => (
           <section key={date} className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
             <h2 className="px-4 py-2.5 text-sm font-bold text-[var(--ink)] border-b border-[var(--line)]">{dateLabel(date)}</h2>
