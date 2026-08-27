@@ -218,12 +218,6 @@ jobs:
         # charts start in 2023 while its price starts in 2002. 200 costs roughly
         # 50 minutes and clears the backlog in ten nights instead.
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols @data/nse_symbols.txt --max-age-hours 4320 --limit 200 --quarters-back 0 --sleep 0.3 --max-minutes 75
-      - name: Refresh IPOs (official NSE issues + live subscription)
-        if: steps.plan.outputs.prices == '1'
-        run: python pipeline/fetch_ipos.py
-      - name: Snapshot grey-market premium (unofficial; builds the accuracy record)
-        if: steps.plan.outputs.prices == '1'
-        run: python pipeline/fetch_gmp.py
       - name: Save the fetched data back to the data-db release
         # Placed BEFORE the publish guards, deliberately. It used to sit after
         # them, which deadlocked: a guard failure skipped the upload, so the next
@@ -267,7 +261,6 @@ jobs:
 
       - run: python pipeline/export_json.py
       - run: python pipeline/export_company_json.py
-      - run: python pipeline/export_ipos.py
       - name: Score the data and record the score
         # Runs every night, after the export and before the guards, so the score
         # describes what is about to be published. Appending to a history file

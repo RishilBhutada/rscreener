@@ -29,7 +29,6 @@ PER_NIGHT = {
     "filing_dates": 900,
     "shareholding": 700,
     "statements": 2357,      # refreshed with the snapshot
-    "ipos": None,            # not a backlog - the whole list is rewritten nightly
 }
 
 # Where each source records that it has ASKED about a symbol. Without this the
@@ -163,17 +162,6 @@ def main() -> None:
             "cadence": "with the snapshot",
         })
 
-    if _has(con, "ipos"):
-        sources.append({
-            "key": "ipos",
-            "name": "IPOs",
-            "what": "Open, upcoming and recently listed issues.",
-            **_spread(con, "SELECT symbol, MAX(substr(updated_at,1,10)) FROM ipos GROUP BY symbol"),
-            "cadence": "every night",
-            # IPOs are their own population, not a subset of the listed universe -
-            # scoring 1,337 issues out of 2,357 companies would invent a 43% hole
-            "own_population": True,
-        })
 
     for s in sources:
         s["current"] = s["covered"] - s["behind"]
