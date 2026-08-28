@@ -66,7 +66,7 @@ export default function Home() {
     .slice(0, 8)
     .map(([, r]) => r);
 
-  const go = (sym: string) => router.push(`/company?s=${sym}`);
+  const go = (sym: string) => router.push(`/company?s=${encodeURIComponent(sym)}`);
   const nameOf = (sym: string) => {
     const hit = rows.find((r) => r.symbol === sym);
     return hit ? shortName(hit.name, sym) : sym;
@@ -92,7 +92,7 @@ export default function Home() {
           {syms.slice(0, 12).map((sym) => (
             <Link
               key={sym}
-              href={`/company?s=${sym}`}
+              href={`/company?s=${encodeURIComponent(sym)}`}
               className="text-sm rounded-lg border border-[var(--line)] bg-[var(--card)] px-2.5 py-1.5
                          text-[var(--ink2)] hover:border-[var(--line2)] hover:text-[var(--ink)]"
             >

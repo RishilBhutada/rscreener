@@ -168,7 +168,7 @@ export default function PortfolioPage() {
                       <tr key={h.symbol} className="border-t border-[var(--line)] hover:bg-[var(--accent-soft)]">
                         <td className="px-2 py-2 sm:px-3">
                           {h.matched ? (
-                            <Link href={`/company?s=${h.symbol}`} className="font-semibold text-[var(--accent-ink)] hover:underline">{h.symbol}</Link>
+                            <Link href={`/company?s=${encodeURIComponent(h.symbol)}`} className="font-semibold text-[var(--accent-ink)] hover:underline">{h.symbol}</Link>
                           ) : (
                             <span className="font-semibold text-[var(--ink3)]" title="not found in the NSE universe">{h.symbol}?</span>
                           )}

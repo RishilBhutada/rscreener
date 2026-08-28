@@ -47,7 +47,7 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
   const go = (sym: string) => {
     setQ("");
     (document.activeElement as HTMLElement | null)?.blur();
-    router.push(`/company?s=${sym}`);
+    router.push(`/company?s=${encodeURIComponent(sym)}`);
   };
 
   const links: [string, string, string][] = [

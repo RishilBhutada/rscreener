@@ -309,7 +309,7 @@ export default function WatchlistsPage() {
                     {rows.map(({ symbol, row }) => (
                       <tr key={symbol} className="border-t border-[var(--line)] hover:bg-[var(--card2)]">
                         <td className="px-3 py-2">
-                          <Link href={`/company?s=${symbol}`} className="font-medium text-[var(--ink)] hover:text-[var(--accent-ink)]">
+                          <Link href={`/company?s=${encodeURIComponent(symbol)}`} className="font-medium text-[var(--ink)] hover:text-[var(--accent-ink)]">
                             {row ? shortName(String(row.name ?? ""), symbol) : symbol}
                           </Link>
                           <span className="text-[var(--ink3)] text-xs ml-2">{symbol}</span>

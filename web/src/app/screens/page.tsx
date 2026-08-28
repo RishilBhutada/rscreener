@@ -389,7 +389,7 @@ export default function Home() {
                     return (
                       <tr key={sym} className="border-t border-[var(--line)] hover:bg-[var(--accent-soft)]">
                         <td className="px-2 py-2 sm:px-3"><button onClick={() => setWatch(allWatched(toggleActive(sym)))} aria-label={`remove ${sym} from watchlist`} className="text-[var(--accent)] hover:text-[var(--line2)]">★</button></td>
-                        <td className="px-2 py-2 sm:px-3"><Link href={`/company?s=${sym}`} className="font-semibold text-[var(--accent-ink)] hover:underline">{sym}</Link></td>
+                        <td className="px-2 py-2 sm:px-3"><Link href={`/company?s=${encodeURIComponent(sym)}`} className="font-semibold text-[var(--accent-ink)] hover:underline">{sym}</Link></td>
                         <td className="px-2 py-2 sm:px-3 max-w-56 truncate">{titleCase(String(r.name ?? "")) || "—"}</td>
                         <td className="px-2 py-2 sm:px-3 text-right">{fmt("price", r.price ?? null)}</td>
                         <td className="px-2 py-2 sm:px-3 text-right">{fmt("mcap", r.mcap ?? null)}</td>
@@ -443,7 +443,7 @@ export default function Home() {
                       {cols.map((c) => (
                         <td key={c} className={`px-3 py-2 whitespace-nowrap ${c === "name" ? "max-w-56 truncate" : ""}`}>
                           {c === "symbol" ? (
-                            <Link href={`/company?s=${r.symbol}`} className="font-semibold text-[var(--accent-ink)] hover:underline">
+                            <Link href={`/company?s=${encodeURIComponent(String(r.symbol))}`} className="font-semibold text-[var(--accent-ink)] hover:underline">
                               {String(r.symbol)}
                             </Link>
                           ) : c === "sector" && r.sector ? (

@@ -672,7 +672,7 @@ function CompanyView() {
                 </tr>
                 {peers.map((p) => (
                   <tr key={String(p.symbol)} className="border-b border-[var(--line)] hover:bg-[var(--card2)]">
-                    <td className="px-3 py-1.5"><Link className="font-medium text-[var(--accent-ink)] hover:underline" href={`/company?s=${p.symbol}`}>{titleCase(String(p.name ?? "")) || String(p.symbol)}</Link></td>
+                    <td className="px-3 py-1.5"><Link className="font-medium text-[var(--accent-ink)] hover:underline" href={`/company?s=${encodeURIComponent(String(p.symbol))}`}>{titleCase(String(p.name ?? "")) || String(p.symbol)}</Link></td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.price as number)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.pe as number)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.mcap as number, 0)}</td>

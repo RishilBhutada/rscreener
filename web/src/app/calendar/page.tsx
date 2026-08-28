@@ -87,7 +87,7 @@ export default function CalendarPage() {
                       tickers - ANANTRAJ, ARE&M, BOSCHLTD - that you have to know
                       by heart. The name leads; the ticker stays beside it for
                       anyone who thinks in tickers. */}
-                  <Link href={`/company?s=${e.symbol}`} className="font-semibold text-[var(--accent-ink)] hover:underline shrink-0">
+                  <Link href={`/company?s=${encodeURIComponent(e.symbol)}`} className="font-semibold text-[var(--accent-ink)] hover:underline shrink-0">
                     {shortName(e.company ?? "", e.symbol)}
                     <span className="ml-1.5 text-xs font-normal text-[var(--ink3)]">{e.symbol}</span>
                   </Link>
