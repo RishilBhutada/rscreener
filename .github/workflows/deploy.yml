@@ -1,52 +1,42 @@
-name: Deploy to GitHub Pages
+name: Publish after a code change
 
 on:
   push:
     branches: [main]
+    # Data files are published by the nightly, not from here. Without this a
+    # nightly's own state commit would trigger a deploy of the data it just
+    # replaced.
+    paths-ignore:
+      - "web/public/**"
+      - "pipeline/scorecard_history.json"
+      - "pipeline/depth_baseline.json"
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
+  actions: write
 
 concurrency:
-  # NOT the same group as the nightly refresh. They shared "pages", and this one
-  # cancels in progress - so every push killed a running nightly. Five runs in a
-  # row were cancelled that way on 3-Aug-2026 and the data stopped refreshing
-  # entirely, silently, while each individual push looked fine.
-  # Superseding an older DEPLOY is still right, hence cancel-in-progress here.
-  # The two jobs can safely overlap: both publish through the github-pages
-  # environment, which serialises deployments on its own.
-  group: pages-deploy
+  group: publish-after-push
   cancel-in-progress: true
 
 jobs:
-  build:
+  # This job used to BUILD AND PUBLISH THE SITE from the data committed in the
+  # repository. That data is not what the nightly publishes - the nightly
+  # exports fresh files and uploads them as a Pages artifact without ever
+  # committing them - so the two paths shipped different data and whichever ran
+  # last won. A code push therefore republished whatever data happened to be
+  # committed, silently reverting the site to an older dataset, and the price
+  # guard here ran against those same stale files and failed on every push.
+  #
+  # There is now ONE publisher. A code push asks the nightly to rebuild and
+  # republish with no fetching, which restores the current database, re-exports
+  # from it, runs the same guards and deploys - about ten minutes, with the code
+  # from this push and the data from the database.
+  request-republish:
     runs-on: ubuntu-latest
-    # Not secrets - a Firebase web config identifies the project and nothing more;
-    # the Firestore rules are what protect the data. Held as repository secrets
-    # only to keep the values in one place. Absent, the app builds with sign-in
-    # dormant and behaves exactly as it did before.
-    env:
-      NEXT_PUBLIC_BASE_PATH: /rscreener
-      NEXT_PUBLIC_FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
-      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN }}
-      NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-      NEXT_PUBLIC_FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Refuse to deploy stale prices or shallower charts
-        # The committed data files are what this job publishes, so a hand-run
-        # export from a local database lands here without ever touching the
-        # nightly job. That path is how a three-week-old price snapshot and a
-        # truncated ratio history both reached production. Same gates, both roads.
-        run: |
-          python pipeline/check_prices.py
-          python pipeline/check_depth.py
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -54,18 +44,16 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
         working-directory: web
+      # Build here purely to CHECK the push compiles. Nothing from it is
+      # published; a broken build must fail loudly before anything is asked to
+      # republish.
       - run: npm run build
         working-directory: web
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: web/out
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+        env:
+          NEXT_PUBLIC_BASE_PATH: /rscreener
+      - name: Ask the nightly to rebuild and publish with the current data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run nightly.yml -f scope="rebuild and publish only (no fetching)"             || { echo "could not start the publish run - start it from the Data page"; exit 1; }
+          echo "requested a rebuild-and-publish run; the site updates when it finishes"

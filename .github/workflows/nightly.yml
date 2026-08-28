@@ -271,6 +271,23 @@ jobs:
         run: python pipeline/scorecard.py
       - name: Publish the data-freshness report the app shows on /status
         run: python pipeline/export_status.py
+      - name: Keep the scoreboard and the depth ratchet across runs
+        # scorecard_history.json and depth_baseline.json are WRITTEN by the steps
+        # above and then discarded with the runner, so the trend the /status page
+        # draws could never accumulate past one point and the depth ratchet never
+        # rose. A scoreboard that forgets every night cannot show whether
+        # anything is improving, which is the only reason it exists.
+        if: always()
+        run: |
+          git config user.name  "rscreener-nightly"
+          git config user.email "actions@github.com"
+          git add pipeline/scorecard_history.json pipeline/depth_baseline.json 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "no change to the scoreboard or the ratchet"
+          else
+            git commit -m "Nightly: record the data-quality score and depth ratchet [skip ci]"
+            git push origin HEAD:main || echo "push failed - the run continues, the history waits for tomorrow"
+          fi
       - name: Refuse to publish if chart history went backwards
         # Guards the failure that shipped for weeks: a stale restored DB exports
         # ~7 years of ratio history in place of ~20, and deploys it silently.
@@ -364,7 +381,11 @@ jobs:
   # failed deploy all reach the phone.
   notify:
     needs: [refresh, deploy]
-    if: failure()
+    # failure() is FALSE for a CANCELLED run, and cancellation is exactly how
+    # this broke: 20 consecutive nights hit the job timeout, were marked
+    # cancelled, published nothing, and sent no alert. The one failure mode that
+    # had already cost two weeks was the one mode this could not report.
+    if: always() && (needs.refresh.result != 'success' || needs.deploy.result != 'success')
     runs-on: ubuntu-latest
     steps:
       - name: Push a failure notification
