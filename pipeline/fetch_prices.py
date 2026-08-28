@@ -192,13 +192,32 @@ def main() -> None:
             daily = series(session, tick, "2y", "1d")       # 1M/6M/1Yr + DMA + volatility
             if not monthly and not weekly and not daily:
                 raise ValueError("no price history returned")
-            con.execute("DELETE FROM prices WHERE symbol=?", (sym,))
-            con.executemany(
-                "INSERT INTO prices (symbol,freq,date,open,high,low,close,volume) VALUES (?,?,?,?,?,?,?,?)",
-                [(sym, "monthly", d, o, h, l, c, v) for d, o, h, l, c, v in monthly]
-                + [(sym, "weekly", d, o, h, l, c, v) for d, o, h, l, c, v in weekly]
-                + [(sym, "daily", d, o, h, l, c, v) for d, o, h, l, c, v in daily],
-            )
+            # Each frequency replaced ON ITS OWN.
+            #
+            # This deleted every row for the symbol and re-inserted whatever
+            # arrived, guarded only against ALL THREE series being empty. Yahoo
+            # answers the three requests separately and throttles them
+            # separately, so a response carrying daily but not monthly - the
+            # common shape under rate limiting - wiped thirty years of monthly
+            # closes and left two years of daily behind. The Max chart and every
+            # valuation band are built on that monthly series, so the company
+            # silently lost its entire history while the fetch reported success.
+            #
+            # Fourth time this shape has appeared: something absent from a
+            # response destroying something present in the database.
+            kept = []
+            for freq, rows_in in (("monthly", monthly), ("weekly", weekly), ("daily", daily)):
+                if not rows_in:
+                    if con.execute("SELECT 1 FROM prices WHERE symbol=? AND freq=? LIMIT 1",
+                                   (sym, freq)).fetchone():
+                        kept.append(freq)
+                    continue
+                con.execute("DELETE FROM prices WHERE symbol=? AND freq=?", (sym, freq))
+                con.executemany(
+                    "INSERT INTO prices (symbol,freq,date,open,high,low,close,volume) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    [(sym, freq, d, o, h, l, c, v) for d, o, h, l, c, v in rows_in],
+                )
             sp = splits_of(session, tick)
             if sp:
                 con.execute("DELETE FROM splits WHERE symbol=?", (sym,))
@@ -206,7 +225,8 @@ def main() -> None:
             con.execute("INSERT OR REPLACE INTO prices_fetch_log VALUES (?,?,?)", (sym, now_utc(), None))
             con.commit()
             ok += 1
-            print(f"[{i}/{len(symbols)}] {sym}: {len(monthly)}m + {len(weekly)}w + {len(daily)}d points")
+            note = f"  [kept stored {', '.join(kept)}; none returned]" if kept else ""
+            print(f"[{i}/{len(symbols)}] {sym}: {len(monthly)}m + {len(weekly)}w + {len(daily)}d points{note}")
         except Exception as e:  # noqa: BLE001
             err += 1
             con.execute("INSERT OR REPLACE INTO prices_fetch_log VALUES (?,?,?)", (sym, now_utc(), str(e)[:200]))

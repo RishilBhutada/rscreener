@@ -126,6 +126,23 @@ def main() -> None:
     keep["BSE_GROUP"] = None
 
     extra = bse_only(keep)
+    if not len(extra):
+        # BSE unreachable. The universe is written with if_exists="replace", so
+        # accepting an empty result would swap the 5,069-company universe for an
+        # NSE-only 2,369 - the site loses 2,372 companies for the night, every
+        # fetcher stops seeing them, and the export drops their pages. One
+        # unreachable API should not delist half the market.
+        #
+        # The stored BSE rows are carried forward instead. They are a list of
+        # listings, not a price; a day old is fine, absent is not.
+        try:
+            with sqlite3.connect(DB) as con:
+                prev = pd.read_sql("SELECT * FROM universe WHERE EXCHANGE='BSE'", con)
+            if len(prev):
+                extra = prev
+                print(f"  carried forward {len(prev)} BSE listings from the stored universe")
+        except Exception:  # noqa: BLE001 - first ever run has no table yet
+            pass
     universe = pd.concat([keep, extra], ignore_index=True) if len(extra) else keep
 
     # Which ticker each price source answers to. Fetchers used to hardcode
