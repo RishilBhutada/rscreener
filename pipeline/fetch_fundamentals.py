@@ -329,7 +329,7 @@ def main() -> None:
     tickers = yf_symbols(con)
     print(f"fetching {len(symbols)} symbols{' (statements)' if args.statements else ''}...")
 
-    ok = err = 0
+    ok = err = kept_stmts = 0
     for i, sym in enumerate(symbols, 1):
         if budget.stop(i - 1, len(symbols)):
             break
@@ -339,11 +339,29 @@ def main() -> None:
                                     ticker=tickers.get(sym))
             replace_symbol_rows(con, "fundamentals", [sym], pd.DataFrame([snap]),
                                 coalesce=True)
+            # An EMPTY payload must not delete a stored history.
+            #
+            # replace_symbol_rows DELETEs before it appends, and statements_long
+            # swallows a failure per statement type and returns an empty frame.
+            # So a throttled or half-answered fetch wiped every statement row
+            # that company had - the annual and quarterly P&L, balance sheet and
+            # cash flow behind its ROCE, margins, book value and growth - and
+            # printed "ok (0 statement lines)". Third time this exact shape has
+            # appeared: a blank from the source destroying something known.
+            #
+            # Nothing is a reason to keep what we have, not a reason to throw it
+            # away. A genuinely empty company simply keeps its empty history.
             if not args.snapshot_only or args.statements:
-                replace_symbol_rows(con, "statements", [sym], stmts)
+                if len(stmts):
+                    replace_symbol_rows(con, "statements", [sym], stmts)
+                elif con.execute("SELECT 1 FROM statements WHERE symbol=? LIMIT 1",
+                                 (sym,)).fetchone():
+                    kept_stmts += 1
             ok += 1
             missing = [k for k in ("price", "market_cap") if snap.get(k) is None]
             note = f" [Yahoo omitted {', '.join(missing)}; kept the stored value]" if missing else ""
+            if (not args.snapshot_only or args.statements) and not len(stmts):
+                note += " [no statements returned; kept the stored history]"
             print(f"[{i}/{len(symbols)}] {sym}: ok ({len(stmts)} statement lines){note}")
         except Exception as e:  # noqa: BLE001 - one bad symbol must not kill the run
             log_row["error"] = str(e)[:300]
@@ -354,7 +372,9 @@ def main() -> None:
         time.sleep(args.sleep)
 
     con.close()
-    print(f"done: {ok} ok, {err} errors")
+    print(f"done: {ok} ok, {err} errors"
+          + (f", {kept_stmts} kept their stored statements when the fetch came back empty"
+             if kept_stmts else ""))
 
 
 if __name__ == "__main__":
