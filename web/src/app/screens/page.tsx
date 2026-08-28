@@ -261,7 +261,12 @@ export default function Home() {
                 <button onClick={() => setShowFields(!showFields)} className="text-xs font-semibold text-[var(--accent-ink)] hover:underline">
                   {showFields ? "Hide field guide" : "Field guide"}
                 </button>
-                <span className="text-xs text-[var(--ink3)]">Ctrl+Enter runs · arithmetic works: <code className="font-mono">mcap / revenue &lt; 3</code></span>
+                {/* The old example here was `mcap / revenue < 3`, which is off by 1e7:
+                    mcap is in crore and revenue in rupees, so it evaluates to
+                    1.5e-7 and matched all 4,413 companies carrying both fields -
+                    a suggested screen that silently filtered nothing. Use fields
+                    that share a unit. */}
+                <span className="text-xs text-[var(--ink3)]">Ctrl+Enter runs · arithmetic works: <code className="font-mono">roce - de * 10 &gt; 15</code></span>
               </div>
               {showFields && (
                 <div className="border border-[var(--line)] rounded-lg p-3 space-y-2 max-h-64 overflow-auto">
@@ -410,7 +415,6 @@ export default function Home() {
               <span>
                 <strong className="text-[var(--ink)]">{applied.matches.length.toLocaleString("en-IN")}</strong> companies match
                 {applied.skipped > 0 && <span className="text-[var(--ink3)]"> · {applied.skipped.toLocaleString("en-IN")} skipped (missing a queried field)</span>}
-                {sorted.length > 300 && <span className="text-[var(--ink3)]"> · showing top 300 by current sort</span>}
               </span>
               <button onClick={exportCsv} className="text-xs font-semibold bg-[var(--card2)] hover:bg-[var(--accent-soft)] border border-[var(--line)] rounded-lg px-3 py-1.5">
                 Export CSV (Excel)

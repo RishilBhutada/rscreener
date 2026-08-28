@@ -49,11 +49,11 @@ export default function CalendarPage() {
           <h1 className="text-lg font-bold text-[var(--ink)]">Upcoming board meetings</h1>
           <div className="flex gap-2 text-xs">
             <button onClick={() => setResultsOnly(!resultsOnly)}
-              className={`rounded-full px-3.5 py-2 sm:py-1 border${resultsOnly ? "bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
+              className={`rounded-full px-3.5 py-2 sm:py-1 border ${resultsOnly ? "bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
               Results only
             </button>
             <button onClick={() => setWatchOnly(!watchOnly)}
-              className={`rounded-full px-3.5 py-2 sm:py-1 border${watchOnly ? "bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
+              className={`rounded-full px-3.5 py-2 sm:py-1 border ${watchOnly ? "bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
               ★ My watchlist
             </button>
           </div>

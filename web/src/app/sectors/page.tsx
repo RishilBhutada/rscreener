@@ -22,6 +22,11 @@ function SectorsView() {
   const sector = params.get("s") ?? "";
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState("");
+  // The table rendered companies.slice(0, 400) with nothing on screen saying so,
+  // while the heading above it stated the sector's full company count - so a
+  // 653-company sector showed 400 rows and claimed 653. A limit is fine; a
+  // silent one is not.
+  const [rowCap, setRowCap] = useState(400);
 
   useEffect(() => {
     fetch(`${BASE}/data.json`)
@@ -148,7 +153,7 @@ function SectorsView() {
             </tr>
           </thead>
           <tbody>
-            {companies.slice(0, 400).map((r) => (
+            {companies.slice(0, rowCap).map((r) => (
               <tr key={String(r.symbol)} className="border-t border-[var(--line)] hover:bg-[var(--accent-soft)]">
                 <td className="px-2 py-2 sm:px-3"><Link href={`/company?s=${encodeURIComponent(String(r.symbol))}`} className="font-semibold text-[var(--accent-ink)] hover:underline">{String(r.symbol)}</Link></td>
                 <td className="px-2 py-2 sm:px-3 max-w-56 truncate">{titleCase(String(r.name ?? "")) || "—"}</td>
@@ -162,6 +167,13 @@ function SectorsView() {
             ))}
           </tbody>
         </table>
+        {companies.length > rowCap && (
+          <div className="px-3 py-2 text-xs text-[var(--ink3)] border-t border-[var(--line)]">
+            Showing {rowCap.toLocaleString("en-IN")} of {companies.length.toLocaleString("en-IN")} companies in this sector
+            <button onClick={() => setRowCap(companies.length)}
+              className="ml-2 font-semibold text-[var(--accent-ink)] underline underline-offset-2">show all</button>
+          </div>
+        )}
       </div>
     </section>
   );
