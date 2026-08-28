@@ -129,6 +129,8 @@ jobs:
           PY
       - name: Refresh snapshot fundamentals (prices, ratios) for the full universe
         if: steps.plan.outputs.prices == '1'
+        env:
+          RSCREENER_STEP_MINUTES: "50"
         run: python pipeline/fetch_fundamentals.py --all --snapshot-only --max-age-hours 20 --sleep 0.5
       - name: Refresh annual and quarterly statements (rotating)
         if: steps.plan.outputs.prices == '1'
@@ -143,6 +145,8 @@ jobs:
         # every symbol nightly - this pass would be told "nobody is due" forever,
         # the same fault that stopped the deep backfill running even once.
         # Monthly per company, 500 a night, inside the run's shared deadline.
+        env:
+          RSCREENER_STEP_MINUTES: "20"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_fundamentals.py --symbols ${{ steps.plan.outputs.target }} --statements --max-age-hours 720 --limit 500 --sleep 0.4
       - name: Refresh upcoming events calendar
         if: steps.plan.outputs.prices == '1'
@@ -152,6 +156,8 @@ jobs:
         # Was @data/top500.txt, so the other 1,857 companies were unreachable: 432
         # had never been fetched at all and never would be. A rotation that cannot
         # reach part of its own universe is not a rotation, it is a permanent hole.
+        env:
+          RSCREENER_STEP_MINUTES: "18"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_shareholding.py --symbols @data/nse_symbols.txt --max-age-hours 336 --limit 700 --sleep 0.3
       - name: Refresh price-chart history (whole universe, rotating)
         if: steps.plan.outputs.prices == '1'
@@ -170,11 +176,15 @@ jobs:
         # --max-age-hours 20 means "anything not already fetched today", so a
         # re-run the same night costs nothing. About 20 minutes for the full
         # universe at this sleep, against a 6-hour job limit.
+        env:
+          RSCREENER_STEP_MINUTES: "45"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_prices.py --symbols ${{ steps.plan.outputs.target }} --max-age-hours 20 --sleep 0.25
       - name: Refresh concall/rating documents (whole universe, rotating)
         if: steps.plan.outputs.earnings == '1'
         # 480 of 2,357 companies covered, and capped at the top 500 it would have
         # stayed that way permanently.
+        env:
+          RSCREENER_STEP_MINUTES: "8"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_announcement_docs.py --symbols @data/nse_symbols.txt --max-age-hours 336 --limit 500 --sleep 0.35
       - name: Refresh annual-report links (rotating)
         if: steps.plan.outputs.earnings == '1'
@@ -182,6 +192,8 @@ jobs:
         # companies and frozen there: 36% coverage, no new company ever getting
         # reports and no company ever getting its newest one. Monthly per
         # company, inside the run's shared deadline.
+        env:
+          RSCREENER_STEP_MINUTES: "10"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_documents.py --symbols ${{ steps.plan.outputs.nse_target }} --max-age-hours 720 --limit 400 --sleep 0.35
       - name: Keep as-filed earnings CURRENT across the whole universe
         if: steps.plan.outputs.earnings == '1'
@@ -194,6 +206,8 @@ jobs:
         # --limit 800 keeps one night inside the Actions job timeout. Three nights
         # clear the backlog; after that --max-age-hours 168 means each symbol comes
         # up weekly, so steady state is ~340 a night and the cap never binds.
+        env:
+          RSCREENER_STEP_MINUTES: "40"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols ${{ steps.plan.outputs.nse_target }} --max-age-hours 168 --limit 800 --quarters-back ${{ steps.plan.outputs.qb }} --sleep 0.25
       - name: Refresh corporate actions (dividends, bonuses, splits, rights)
         if: steps.plan.outputs.actions == '1'
@@ -201,6 +215,8 @@ jobs:
         # so it rides the same rate budget. Corrects an existing error too: the
         # Yahoo splits table files Reliance's Oct-2024 one-for-one BONUS as a
         # "2:1 split", and NSE labels it correctly.
+        env:
+          RSCREENER_STEP_MINUTES: "9"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_corporate_actions.py --symbols ${{ steps.plan.outputs.nse_target }} --max-age-hours 336 --limit 800 --sleep 0.2
       - name: Record when each set of results was ANNOUNCED
         if: steps.plan.outputs.earnings == '1'
@@ -210,6 +226,8 @@ jobs:
         # publishes 9-12 days after quarter end, MTAR Technologies 29-42, and MTAR
         # published nothing at all between 29-Jan and 29-Jul 2026. One index call
         # per symbol, so this is cheap next to a results re-fetch.
+        env:
+          RSCREENER_STEP_MINUTES: "20"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_filing_dates.py --symbols ${{ steps.plan.outputs.nse_target }} --max-age-hours 168 --limit 900 --sleep 0.2
       - name: Deepen as-filed P&L history (bounded rotation, full ~20yr depth)
         if: steps.plan.outputs.earnings == '1'
@@ -217,6 +235,8 @@ jobs:
         # which is why 1,994 of them hold 20 quarters or fewer and CEMPRO's ratio
         # charts start in 2023 while its price starts in 2002. 200 costs roughly
         # 50 minutes and clears the backlog in ten nights instead.
+        env:
+          RSCREENER_STEP_MINUTES: "20"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols @data/nse_symbols.txt --max-age-hours 4320 --limit 200 --quarters-back 0 --sleep 0.3 --max-minutes 75
       - name: Save the fetched data back to the data-db release
         # Placed BEFORE the publish guards, deliberately. It used to sit after

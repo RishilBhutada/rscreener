@@ -28,6 +28,33 @@ import os
 import time
 
 
+_STEP_START = time.time()
+
+
+def step_deadline() -> float | None:
+    """When THIS step must stop, from its own share of the run.
+
+    A single global deadline is not enough. It stops the run overrunning, but it
+    allocates the time first-come-first-served, so whichever step runs first
+    takes what it wants and every step ordered after it gets whatever is left.
+    Measured on a real run: "Keep as-filed earnings CURRENT" took 232 of 273
+    minutes - 85% of the budget - and corporate actions, filing dates and the
+    deep backfill, all ordered after it, got nothing at all. Not once: EVERY
+    night, because the order is fixed. That converts "the whole run is
+    discarded" into "the same sources are starved forever", which is quieter
+    and just as fatal to converging.
+
+    Each step now carries its own share and stops at whichever comes first.
+    """
+    raw = os.environ.get("RSCREENER_STEP_MINUTES", "").strip()
+    if not raw:
+        return None
+    try:
+        return _STEP_START + float(raw) * 60
+    except ValueError:
+        return None
+
+
 def deadline() -> float | None:
     """The run's deadline as a unix timestamp, or None if unbounded."""
     raw = os.environ.get("RSCREENER_DEADLINE", "").strip()
@@ -43,13 +70,16 @@ def deadline() -> float | None:
 
 
 def expired() -> bool:
-    d = deadline()
-    return d is not None and time.time() >= d
+    now = time.time()
+    for d in (deadline(), step_deadline()):
+        if d is not None and now >= d:
+            return True
+    return False
 
 
 def remaining_minutes() -> float | None:
-    d = deadline()
-    return None if d is None else max(0.0, (d - time.time()) / 60)
+    ds = [d for d in (deadline(), step_deadline()) if d is not None]
+    return None if not ds else max(0.0, (min(ds) - time.time()) / 60)
 
 
 def stop(done: int, total: int, what: str = "symbols") -> bool:
