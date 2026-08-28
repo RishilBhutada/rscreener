@@ -36,5 +36,20 @@
    "fresh"
   ],
   "companies": 4927
+ },
+ {
+  "at": "2026-08-28 19:36 UTC",
+  "overall": 62.3,
+  "complete": 71.7,
+  "correct": 95.2,
+  "fresh": 0.0,
+  "deep": 15.0,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4746
  }
 ]
