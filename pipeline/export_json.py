@@ -421,6 +421,50 @@ def main() -> None:
     # straight back: McLeod Russel kept its -4,016% through the first attempt at
     # this, because nulling a value earlier in the pipeline than the step that
     # populates it changes nothing at all.
+    # A margin of exactly zero beside a material profit or loss is the source
+    # saying "I do not know", published as a number. Yahoo reports
+    # profitMargins 0.0 for BGR Energy while its net income is -1,247 crore on
+    # 227 crore of revenue - a real margin of -550%. 405 rows carried a 0.0
+    # margin, 151 of them with material income behind it, and on screen a 0%
+    # margin reads as "breaks even" rather than "unknown".
+    #
+    # Where net income and revenue are both known and revenue is positive, the
+    # margin is arithmetic and is computed. Where it is not, the field is blanked
+    # rather than left saying zero.
+    fixed_margin = blanked_margin = 0
+    if {"net_margin", "net_income", "revenue"} <= set(df.columns):
+        nm, ni, rev = [], df["net_income"], df["revenue"]
+        for v, inc, rv in zip(df["net_margin"], ni, rev):
+            material = inc is not None and inc == inc and abs(inc) > 1e7   # over Rs 1 crore
+            if v == 0 and material:
+                if rv is not None and rv == rv and rv > 0:
+                    nm.append(inc / rv); fixed_margin += 1        # still a fraction here
+                else:
+                    nm.append(None); blanked_margin += 1
+            else:
+                nm.append(v)
+        df["net_margin"] = nm
+    if fixed_margin or blanked_margin:
+        print(f"  net margin: {fixed_margin} recomputed from income and revenue, "
+              f"{blanked_margin} blanked where the source said 0 beside a real loss")
+
+    # Revenue that is not positive is not a denominator. 41 companies published
+    # negative revenue, which produced 27 NEGATIVE price-to-sales values - and a
+    # negative P/S sorts to the top of a cheapest-first screen, the same trap as
+    # the negative price-to-book.
+    n_ps = 0
+    if {"ps", "revenue"} <= set(df.columns):
+        vals = []
+        for v, rv in zip(df["ps"], df["revenue"]):
+            if v is not None and v == v and rv is not None and rv == rv and rv <= 0:
+                vals.append(None); n_ps += 1
+            else:
+                vals.append(v)
+        df["ps"] = vals
+    if n_ps:
+        print(f"  withheld {n_ps} price-to-sales figures whose company reports "
+              f"non-positive revenue")
+
     n_roe = withhold_on_dead_equity(df, "roe")
     if n_roe:
         print(f"  withheld {n_roe} ROE figures whose company has negative net worth - "
