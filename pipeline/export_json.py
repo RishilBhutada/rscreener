@@ -261,12 +261,19 @@ def freshen_prices(con, df):
     # them. Counted across 5,000 companies that alone would have pushed the
     # staleness guard past its 2% limit and blocked every publish, for a reading
     # that says nothing about whether the fetcher works.
+    #
+    # Counted from TODAY, not from the freshest row in the table. Anchored to
+    # `fresh` it inherits that row's outlier problem: one company re-fetched by
+    # hand carried a bar 19 days newer than everyone else, so every other
+    # company had too few bars inside the window, only ONE company qualified as
+    # regularly traded, and the freshness score was a median over a single
+    # stock reading a perfect 100. A window defined by the data it is measuring
+    # is not a window.
     try:
         recent = con.execute(
             "SELECT symbol, COUNT(DISTINCT date) FROM prices "
-            "WHERE freq='daily' AND date >= date(?, '-30 day') GROUP BY symbol",
-            (fresh,),
-        ).fetchall() if fresh else []
+            "WHERE freq='daily' AND date >= date('now', '-30 day') GROUP BY symbol"
+        ).fetchall()
     except Exception:  # noqa: BLE001
         recent = []
     bars = dict(recent)

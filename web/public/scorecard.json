@@ -1,18 +1,18 @@
 {
- "generated_at": "2026-08-27 19:30 UTC",
- "overall": 62.7,
+ "generated_at": "2026-08-28 05:49 UTC",
+ "overall": 79.3,
  "parts": {
   "complete": {
-   "score": 67.9,
+   "score": 70.7,
    "companies": 4746,
    "fields": {
     "Price": 100.0,
-    "Market cap": 96.9,
-    "P/E": 76.7,
-    "Book value": 96.8,
-    "ROE": 83.4,
-    "ROCE": 46.8,
-    "Debt / equity": 79.1,
+    "Market cap": 97.0,
+    "P/E": 77.4,
+    "Book value": 96.9,
+    "ROE": 87.4,
+    "ROCE": 70.0,
+    "Debt / equity": 79.2,
     "5-year sales growth": 30.6,
     "5-year profit growth": 21.6,
     "Promoter holding": 47.3
@@ -28,8 +28,8 @@
      "what": "the same company-year from the NSE filing and from the market-data provider, within 25%"
     },
     "Price x shares = market cap": {
-     "measured": 4601,
-     "agree": 4590,
+     "measured": 4605,
+     "agree": 4594,
      "pct": 99.8,
      "what": "an arithmetic identity that must hold on every published row"
     },
@@ -40,19 +40,17 @@
      "what": "each filed year within a sane multiple of that company's own median - catches a misread unit"
     },
     "Price / book value = published P/B": {
-     "measured": 4332,
-     "agree": 4332,
+     "measured": 4334,
+     "agree": 4334,
      "pct": 100.0,
      "what": "a second arithmetic identity, on a different pair of published fields"
     }
    }
   },
   "fresh": {
-   "as_of": "2026-08-07",
-   "regularly_traded": 4700,
-   "on_the_newest_close": 4697,
-   "days_old": 20,
-   "score": 0.0
+   "as_of": "2026-08-26",
+   "score": null,
+   "unmeasured_because": "only 1 of 4746 companies have enough recent trading days to judge"
   },
   "deep": {
    "score": 15.0,
@@ -69,6 +67,20 @@
    "correct": 98.3,
    "fresh": 0.0,
    "deep": 15.0,
+   "companies": 4746
+  },
+  {
+   "at": "2026-08-28 05:49 UTC",
+   "overall": 79.3,
+   "complete": 70.7,
+   "correct": 98.3,
+   "fresh": null,
+   "deep": 15.0,
+   "measured": [
+    "complete",
+    "correct",
+    "deep"
+   ],
    "companies": 4746
   }
  ]

@@ -167,20 +167,60 @@ def correctness(con: sqlite3.Connection, rows: list[dict]) -> dict:
     return {"score": round(sum(scored) / len(scored), 1) if scored else None, "checks": checks}
 
 
+def trading_days_old(d: str) -> int:
+    """Calendar age less weekends - Monday off Friday's close is 0 days old."""
+    try:
+        then = datetime.strptime(d[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return 999
+    n, cur = 0, then
+    today = datetime.now(timezone.utc).date()
+    while cur < today:
+        cur += timedelta(days=1)
+        if cur.weekday() < 5:
+            n += 1
+    return n
+
+
 def freshness(rows: list[dict], asof: str | None) -> dict:
-    """Does the newest figure describe now."""
+    """How old the published prices are, measured against today.
+
+    This scored 0.5 while the publish guards, on the same data in the same run,
+    reported a median price age of two trading days and exactly one company out
+    of 4,651 older than six. The guards were right. This asked whether each
+    company's price date exactly equalled the single newest date in the file, so
+    one symbol carrying a fresher bar made every other company count as stale -
+    the identical fault that had just been fixed in check_prices and was not
+    carried across to the thing built to measure quality.
+
+    A scoreboard that reproduces the bug it exists to catch is worse than no
+    scoreboard, because it hides the fix that worked: two weeks of cancelled
+    runs were repaired and the score for it moved 0.0 to 0.5.
+
+    Age against today, in trading days, and the median company carries the
+    score. A median cannot be moved by an outlier, and a partial refresh - the
+    normal state now that fetching stops at a deadline - sits comfortably inside
+    it.
+    """
     out: dict = {"as_of": asof}
     if not asof:
         return {"score": None, **out}
     liquid = [r for r in rows if (r.get("bars30") or 0) >= 15]
-    current = sum(1 for r in liquid if r.get("price_date") == asof)
+    ages = sorted(trading_days_old(r["price_date"]) for r in liquid if r.get("price_date"))
+    # A median over a handful of rows is not a measurement. When almost nothing
+    # qualifies, the right answer is "unmeasured", not a confident 100 taken
+    # over one company - which is exactly what this returned once.
+    if len(ages) < max(50, 0.2 * len(rows)):
+        out["score"] = None
+        out["unmeasured_because"] = (f"only {len(ages)} of {len(rows)} companies have enough "
+                                     f"recent trading days to judge")
+        return out
+    med = ages[len(ages) // 2]
     out["regularly_traded"] = len(liquid)
-    out["on_the_newest_close"] = current
-    age_days = (datetime.now(timezone.utc).date() - datetime.strptime(asof, "%Y-%m-%d").date()).days
-    out["days_old"] = age_days
-    # A price more than 4 days old is stale however complete it is.
-    age_score = 100.0 if age_days <= 4 else max(0.0, 100.0 - (age_days - 4) * 12)
-    out["score"] = round(min(pct(current, len(liquid)) or 0, age_score), 1)
+    out["median_age_trading_days"] = med
+    out["older_than_6_days"] = sum(1 for a in ages if a > 6)
+    # Full marks at 2 trading days or fresher; zero at a fortnight.
+    out["score"] = round(max(0.0, min(100.0, 100.0 - max(0, med - 2) * 10)), 1)
     return out
 
 
@@ -235,11 +275,23 @@ def main() -> None:
     weights = {"complete": 0.25, "correct": 0.45, "fresh": 0.20, "deep": 0.10}
     got = [(weights[k], v["score"]) for k, v in parts.items() if v.get("score") is not None]
     overall = round(sum(w * s for w, s in got) / sum(w for w, _ in got), 1) if got else None
+    # WHICH dimensions the overall covers, recorded with it.
+    #
+    # An unmeasured dimension drops out of the weighted average, so the total is
+    # renormalised over what remains - and that means BREAKING A MEASUREMENT
+    # RAISES THE SCORE. Freshness became unmeasurable and the headline went from
+    # 63.8 to 79.3, which would read as a large improvement on a run where
+    # nothing improved. A score whose movement can be caused by losing the
+    # ability to measure is not a score.
+    #
+    # So the set is carried alongside the number, and a delta is only printed
+    # between runs that measured the SAME things.
+    measured = sorted(k for k, v in parts.items() if v.get("score") is not None)
 
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     record = {"at": stamp, "overall": overall,
               **{k: v["score"] for k, v in parts.items()},
-              "companies": len(rows)}
+              "measured": measured, "companies": len(rows)}
 
     hist = []
     if HISTORY.exists():
@@ -262,8 +314,10 @@ def main() -> None:
         print(overall)
         return
 
+    comparable = bool(prev) and prev.get("measured") == measured
+
     def arrow(key: str) -> str:
-        if not prev or prev.get(key) is None or record.get(key) is None:
+        if not comparable or not prev or prev.get(key) is None or record.get(key) is None:
             return ""
         d = record[key] - prev[key]
         if abs(d) < 0.05:
@@ -271,7 +325,11 @@ def main() -> None:
         return f"  {d:+.1f}"
 
     print()
-    print(f"  DATA QUALITY  {overall}/100{arrow('overall')}        {len(rows)} companies, {stamp}")
+    note = "" if len(measured) == 4 else         f"   [{', '.join(k for k in parts if k not in measured)} unmeasured - not counted]"
+    print(f"  DATA QUALITY  {overall}/100{arrow('overall')}        {len(rows)} companies, {stamp}{note}")
+    if prev and not comparable:
+        print(f"  (no comparison with the previous run: it measured "
+              f"{', '.join(prev.get('measured') or []) or 'a different set'})")
     print(f"  {'-' * 64}")
     for key, label, note in (
         ("complete", "Complete", "is the figure there at all"),
@@ -296,8 +354,9 @@ def main() -> None:
     print(f"  Deep:  {d['companies_with_a_valuation_history']:,} companies have a valuation history, "
           f"median {d['median_years_of_history']} years, {d['reaching_before_2012']:,} reach before 2012")
     f = parts["fresh"]
-    print(f"  Fresh: {f.get('on_the_newest_close', 0):,} of {f.get('regularly_traded', 0):,} regularly traded "
-          f"companies on the newest close ({f.get('as_of')}, {f.get('days_old')} days old)")
+    print(f"  Fresh: median price is {f.get('median_age_trading_days')} trading day(s) old across "
+          f"{f.get('regularly_traded', 0):,} regularly traded companies; "
+          f"{f.get('older_than_6_days', 0):,} are older than six")
     print()
     if prev:
         print(f"  Previous run: {prev['overall']}/100 at {prev['at']}")
