@@ -188,11 +188,45 @@ function StatementTable({ title, stmt, subtitle, boldRows }: { title: string; st
   );
 }
 
-function cagr(values: (number | null)[], years: number): number | null {
-  const clean = values.filter((v): v is number => v !== null && v !== undefined);
-  if (clean.length < years + 1) return null;
-  const last = clean[clean.length - 1], start = clean[clean.length - 1 - years];
-  if (!last || !start || start <= 0 || last <= 0) return null;
+/** Compound growth over the years it says, found by DATE rather than by counting
+ *  array positions.
+ *
+ *  Counting positions assumes the annual series has no gaps. It does: 619 of the
+ *  2,253 companies with an annual trend are missing at least one year, and 390
+ *  of them are missing one inside the exact window this card renders. TCS has no
+ *  FY2018 at all, so its "10 years" was measured across FY2015-FY2026 - eleven
+ *  years of growth annualised as if it were ten, printing 10.9% where the truth
+ *  is 9.9%. Sayaji Hotels was worse: a "5 years" figure spanning thirteen, and
+ *  the sign flipped.
+ *
+ *  The start has to be the year that is actually `years` before the end. If that
+ *  year was never filed, there is no N-year figure to give and the card shows
+ *  nothing - better empty than a rate over a window nobody stated.
+ */
+function cagr(values: (number | null)[], years: number, periods?: string[]): number | null {
+  if (!periods || periods.length !== values.length) {
+    // No dates to anchor to: fall back to positions, but only when the series
+    // is dense enough that positions and years cannot disagree.
+    const clean = values.filter((v): v is number => v !== null && v !== undefined);
+    if (clean.length < years + 1) return null;
+    const last = clean[clean.length - 1], start = clean[clean.length - 1 - years];
+    if (!last || !start || start <= 0 || last <= 0) return null;
+    return Math.round((Math.pow(last / start, 1 / years) - 1) * 100);
+  }
+  let endIdx = -1;
+  for (let i = values.length - 1; i >= 0; i--) {
+    const v = values[i];
+    if (v !== null && v !== undefined && v > 0) { endIdx = i; break; }
+  }
+  if (endIdx < 0) return null;
+  const endYear = Number(String(periods[endIdx]).slice(0, 4));
+  const wantYear = endYear - years;
+  const startIdx = periods.findIndex((p, i) => {
+    const v = values[i];
+    return Number(String(p).slice(0, 4)) === wantYear && v !== null && v !== undefined && v > 0;
+  });
+  if (startIdx < 0) return null;          // that year was never filed
+  const last = values[endIdx] as number, start = values[startIdx] as number;
   return Math.round((Math.pow(last / start, 1 / years) - 1) * 100);
 }
 
@@ -227,8 +261,8 @@ function CompoundedGrowth({ trend, prices }: { trend?: { annual?: Trend }; price
     return Math.round((Math.pow(last / start, 12 / months) - 1) * 100);
   };
   const cards: [string, [string, number | null][]][] = [
-    ["Compounded sales growth", [["10 years", cagr(a.revenue, 10)], ["5 years", cagr(a.revenue, 5)], ["3 years", cagr(a.revenue, 3)], ["1 year", cagr(a.revenue, 1)]]],
-    ["Compounded profit growth", [["10 years", cagr(a.pat, 10)], ["5 years", cagr(a.pat, 5)], ["3 years", cagr(a.pat, 3)], ["1 year", cagr(a.pat, 1)]]],
+    ["Compounded sales growth", [["10 years", cagr(a.revenue, 10, a.periods)], ["5 years", cagr(a.revenue, 5, a.periods)], ["3 years", cagr(a.revenue, 3, a.periods)], ["1 year", cagr(a.revenue, 1, a.periods)]]],
+    ["Compounded profit growth", [["10 years", cagr(a.pat, 10, a.periods)], ["5 years", cagr(a.pat, 5, a.periods)], ["3 years", cagr(a.pat, 3, a.periods)], ["1 year", cagr(a.pat, 1, a.periods)]]],
     ["Stock price CAGR", [["10 years", stockCagr(120)], ["5 years", stockCagr(60)], ["3 years", stockCagr(36)], ["1 year", stockCagr(12)]]],
   ];
   return (
