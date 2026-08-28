@@ -108,18 +108,33 @@ def correctness(con: sqlite3.Connection, rows: list[dict]) -> dict:
         "what": "the same company-year from the NSE filing and from the market-data provider, within 25%",
     }
 
-    # 2. price x shares == published market cap, on the same row.
-    ident_n = ident_ok = 0
-    for r in rows:
-        p, m, sh = r.get("price"), r.get("mcap"), r.get("shares_out")
-        if not (p and m and sh):
-            continue
-        ident_n += 1
-        if abs(p * sh / 1e7 - m) / m <= 0.02:
-            ident_ok += 1
-    checks["Price x shares = market cap"] = {
-        "measured": ident_n, "agree": ident_ok, "pct": pct(ident_ok, ident_n),
-        "what": "an arithmetic identity that must hold on every published row",
+    # 2. Filed REVENUE against the provider's revenue - a second independent
+    #    pair, on a different line of the accounts from check 1.
+    #
+    #    This slot used to hold "price x shares = market cap", which scored
+    #    99.8% and could not have done otherwise: shares_out is DEFINED in the
+    #    export as market_cap / price, so the check was p x (m/p) = m. A
+    #    tautology dressed as corroboration, inflating the one score on this
+    #    page that claims to be measured rather than asserted.
+    filed_rev = {}
+    for s, pe, v in con.execute(
+        "SELECT symbol, period_end, MAX(CASE WHEN item='revenue' THEN value END) "
+        "FROM results_history WHERE period_type='annual' AND item='revenue' "
+        "GROUP BY symbol, period_end"
+    ):
+        if v:
+            filed_rev[(s, pe)] = v
+    prov_rev = {
+        (s, pe): v for s, pe, v in con.execute(
+            "SELECT symbol, period_end, value FROM statements WHERE stmt_type='income' "
+            "AND item='Total Revenue' AND period_type='annual' AND value IS NOT NULL"
+        ) if v
+    }
+    rboth = list(filed_rev.keys() & prov_rev.keys())
+    ragree = sum(1 for k in rboth if 0.8 <= abs(prov_rev[k] / filed_rev[k]) <= 1.25)
+    checks["Filed revenue vs the data provider"] = {
+        "measured": len(rboth), "agree": ragree, "pct": pct(ragree, len(rboth)),
+        "what": "the same company-year's revenue from the NSE filing and from the provider, within 25%",
     }
 
     # 3. A filed figure against that company's OWN neighbouring years - the test
@@ -158,13 +173,24 @@ def correctness(con: sqlite3.Connection, rows: list[dict]) -> dict:
         pe_n += 1
         if abs(p / bv - pb) / pb <= 0.05:
             pe_ok += 1
-    checks["Price / book value = published P/B"] = {
-        "measured": pe_n, "agree": pe_ok, "pct": pct(pe_ok, pe_n),
-        "what": "a second arithmetic identity, on a different pair of published fields",
+    internal = {
+        "Price / book value = published P/B": {
+            "measured": pe_n, "agree": pe_ok, "pct": pct(pe_ok, pe_n),
+            "what": "an internal identity - both sides come from the same provider, so it "
+                    "catches OUR rescaling mistakes but corroborates nothing",
+        }
     }
 
+    # Only CORROBORATION scores. An identity between two fields from the same
+    # source cannot tell you the source is right; it can only tell you this
+    # pipeline did not mangle it in transit. Both are worth knowing and they are
+    # not the same thing, so they are reported apart and only one is counted.
     scored = [c["pct"] for c in checks.values() if c["pct"] is not None]
-    return {"score": round(sum(scored) / len(scored), 1) if scored else None, "checks": checks}
+    return {
+        "score": round(sum(scored) / len(scored), 1) if scored else None,
+        "checks": checks,
+        "internal_consistency": internal,
+    }
 
 
 def trading_days_old(d: str) -> int:
@@ -341,9 +367,12 @@ def main() -> None:
         bar = "#" * int((s or 0) / 5) + "." * (20 - int((s or 0) / 5))
         print(f"  {label:9s} {str(s):>5}  {bar}{arrow(key):>7}   {note}")
     print()
-    print("  Correct is measured, not asserted:")
+    print("  Correct - each line compares two INDEPENDENTLY produced figures:")
     for name, c in parts["correct"]["checks"].items():
         print(f"    {str(c['pct']):>6}%  {name}")
+        print(f"             {c['agree']:,} of {c['measured']:,} - {c['what']}")
+    for name, c in (parts["correct"].get("internal_consistency") or {}).items():
+        print(f"    {str(c['pct']):>6}%  {name}   [not scored]")
         print(f"             {c['agree']:,} of {c['measured']:,} - {c['what']}")
     print()
     print("  Complete, by field:")

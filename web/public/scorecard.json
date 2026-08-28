@@ -1,17 +1,17 @@
 {
- "generated_at": "2026-08-28 05:49 UTC",
- "overall": 79.3,
+ "generated_at": "2026-08-28 18:41 UTC",
+ "overall": 62.3,
  "parts": {
   "complete": {
-   "score": 70.7,
+   "score": 71.7,
    "companies": 4746,
    "fields": {
     "Price": 100.0,
-    "Market cap": 97.0,
-    "P/E": 77.4,
+    "Market cap": 97.1,
+    "P/E": 77.7,
     "Book value": 96.9,
-    "ROE": 87.4,
-    "ROCE": 70.0,
+    "ROE": 88.8,
+    "ROCE": 77.9,
     "Debt / equity": 79.2,
     "5-year sales growth": 30.6,
     "5-year profit growth": 21.6,
@@ -19,7 +19,7 @@
    }
   },
   "correct": {
-   "score": 98.3,
+   "score": 95.2,
    "checks": {
     "Filed profit vs the data provider": {
      "measured": 3654,
@@ -27,30 +27,34 @@
      "pct": 94.5,
      "what": "the same company-year from the NSE filing and from the market-data provider, within 25%"
     },
-    "Price x shares = market cap": {
-     "measured": 4605,
-     "agree": 4594,
-     "pct": 99.8,
-     "what": "an arithmetic identity that must hold on every published row"
+    "Filed revenue vs the data provider": {
+     "measured": 3615,
+     "agree": 3325,
+     "pct": 92.0,
+     "what": "the same company-year's revenue from the NSE filing and from the provider, within 25%"
     },
     "Filed figures against their own history": {
      "measured": 20023,
      "agree": 19827,
      "pct": 99.0,
      "what": "each filed year within a sane multiple of that company's own median - catches a misread unit"
-    },
+    }
+   },
+   "internal_consistency": {
     "Price / book value = published P/B": {
-     "measured": 4334,
-     "agree": 4334,
+     "measured": 4336,
+     "agree": 4336,
      "pct": 100.0,
-     "what": "a second arithmetic identity, on a different pair of published fields"
+     "what": "an internal identity - both sides come from the same provider, so it catches OUR rescaling mistakes but corroborates nothing"
     }
    }
   },
   "fresh": {
    "as_of": "2026-08-26",
-   "score": null,
-   "unmeasured_because": "only 1 of 4746 companies have enough recent trading days to judge"
+   "regularly_traded": 4701,
+   "median_age_trading_days": 15,
+   "older_than_6_days": 4700,
+   "score": 0.0
   },
   "deep": {
    "score": 15.0,

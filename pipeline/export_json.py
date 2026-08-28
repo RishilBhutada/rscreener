@@ -269,10 +269,29 @@ def freshen_prices(con, df):
     # regularly traded, and the freshness score was a median over a single
     # stock reading a perfect 100. A window defined by the data it is measuring
     # is not a window.
+    #
+    # Counted over the 30 days ending at each company's OWN newest bar - not
+    # from today, and not from the freshest row anywhere.
+    #
+    # This distinguishes two things that kept getting confused. LIQUIDITY is a
+    # property of the stock: does it trade most days. STALENESS is a property of
+    # our fetch: how old its newest bar is. Anchoring the window to today
+    # collapses them, because a company we have not refreshed in three weeks has
+    # no recent bars and therefore looks illiquid - so check_prices dropped it
+    # from the population it was testing FOR staleness. Measured on the real
+    # export: 4,745 companies stale, 4,745 excluded, exactly ONE judged. The
+    # staler a company got, the less likely the guard was to look at it.
+    #
+    # Anchored to the company's own last bar, a regular trader still scores ~20
+    # however far behind we are, stays in the judged population, and its age is
+    # then tested against today - which is the test that catches us.
     try:
         recent = con.execute(
-            "SELECT symbol, COUNT(DISTINCT date) FROM prices "
-            "WHERE freq='daily' AND date >= date('now', '-30 day') GROUP BY symbol"
+            "SELECT p.symbol, COUNT(DISTINCT p.date) FROM prices p "
+            "JOIN (SELECT symbol, MAX(date) AS last FROM prices WHERE freq='daily' "
+            "      GROUP BY symbol) m ON m.symbol = p.symbol "
+            "WHERE p.freq='daily' AND p.date >= date(m.last, '-30 day') "
+            "GROUP BY p.symbol"
         ).fetchall()
     except Exception:  # noqa: BLE001
         recent = []
