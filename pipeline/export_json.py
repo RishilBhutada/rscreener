@@ -129,12 +129,36 @@ def price_returns(con: sqlite3.Connection) -> dict[str, dict]:
         return {}
     px = pd.read_sql("SELECT symbol, date, close FROM prices WHERE freq='monthly' ORDER BY date", con)
     out: dict[str, dict] = {}
+    # Anchored by DATE, not by counting back N positions.
+    #
+    # The monthly series ends on a PART-FORMED month - today's bar, dated
+    # whenever the export runs - so counting back one position gives "last
+    # month-end to today", which is a full month late in the month and three
+    # days early in it. Run on the 3rd, "1 month return" measured three days and
+    # said one month. The longer anchors carried the same error as a smaller
+    # fraction. Same fault as the growth cards: a period measured in array
+    # positions rather than in time.
+    #
+    # Each anchor now takes the bar CLOSEST to the date it wants, and is
+    # withheld when the nearest bar is more than 45 days off - a window that far
+    # from the label is not the period it claims to be.
     for sym, g in px.groupby("symbol"):
+        dates = [pd.Timestamp(x) for x in g["date"]]
         closes = list(g["close"])
+        if len(closes) < 2 or not closes[-1]:
+            continue
+        last_d, last_c = dates[-1], closes[-1]
         d = {}
-        for key, n in RETURN_ANCHORS.items():
-            if len(closes) > n and closes[-1 - n]:
-                d[key] = round((closes[-1] / closes[-1 - n] - 1) * 100, 1)
+        for key, months in RETURN_ANCHORS.items():
+            want = last_d - pd.DateOffset(months=months)
+            best_i, best_gap = None, None
+            for i, dt in enumerate(dates[:-1]):
+                gap = abs((dt - want).days)
+                if best_gap is None or gap < best_gap:
+                    best_i, best_gap = i, gap
+            if best_i is None or best_gap > 45 or not closes[best_i]:
+                continue
+            d[key] = round((last_c / closes[best_i] - 1) * 100, 1)
         if d:
             out[sym] = d
     return out
