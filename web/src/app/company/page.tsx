@@ -635,11 +635,24 @@ function CompanyView() {
       )}
 
       <nav className="static sm:sticky sm:top-14 z-20 -mx-4 px-4 bg-[var(--card)] border-y border-[var(--line)] flex gap-1 overflow-x-auto text-sm font-medium py-2 sm:py-1.5 [scrollbar-width:none]">
+        {/* Built from what this company ACTUALLY has. Five of these sections are
+            conditionally rendered - quarters, P&L, balance sheet, cash flow and
+            shareholding all depend on data that may not exist - while the nav
+            listed all ten regardless. On any of the 2,372 BSE-only companies,
+            which have no NSE filings at all, half these links pointed at
+            nothing: you tapped "Quarters" and the page did not move. Same on an
+            NSE company missing one statement type. A menu item that goes nowhere
+            is worse than an absent one, because it reads as a broken page. */}
         {([
-          ["summary", "Summary"], ["chart", "Chart"], ["analysis", "Analysis"], ["peers", "Peers"],
-          ["quarters", "Quarters"], ["profit-loss", "Profit & Loss"], ["balance-sheet", "Balance Sheet"],
-          ["cash-flows", "Cash Flow"], ["shareholding", "Investors"], ["documents", "Documents"],
-        ] as [string, string][]).map(([id, label]) => (
+          ["summary", "Summary", true], ["chart", "Chart", true],
+          ["analysis", "Analysis", true], ["peers", "Peers", true],
+          ["quarters", "Quarters", Boolean(quarterly)],
+          ["profit-loss", "Profit & Loss", Boolean(pnl)],
+          ["balance-sheet", "Balance Sheet", Boolean(balance)],
+          ["cash-flows", "Cash Flow", Boolean(cashflow)],
+          ["shareholding", "Investors", Boolean(company.shareholding)],
+          ["documents", "Documents", true],
+        ] as [string, string, boolean][]).filter(([, , show]) => show).map(([id, label]) => (
           <a key={id} href={`#${id}`} className="px-3 py-2.5 sm:py-1 rounded-lg whitespace-nowrap text-[var(--ink2)] hover:bg-[var(--card2)] hover:text-[var(--accent-ink)]">
             {label}
           </a>
