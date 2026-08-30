@@ -60,7 +60,7 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
     ["ipo", "IPO", "/ipo"],
     ["calendar", "Calendar", "/calendar"],
     ["portfolio", "Portfolio", "/portfolio"],
-    ["screens", "Other screens", "/screens"],
+    ["screens", "Screener", "/screens"],
     ["status", "Data", "/status"],
   ];
 
