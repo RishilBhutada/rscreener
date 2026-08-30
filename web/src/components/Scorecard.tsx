@@ -37,7 +37,7 @@ const DIMS: [string, string, string][] = [
 function tone(v: number | null | undefined) {
   if (v === null || v === undefined) return { fg: "var(--ink3)", bg: "var(--line)" };
   if (v < 50) return { fg: "var(--neg)", bg: "var(--neg)" };
-  if (v < 80) return { fg: "var(--warn, #b45309)", bg: "var(--warn, #b45309)" };
+  if (v < 80) return { fg: "var(--warn)", bg: "var(--warn)" };
   return { fg: "var(--pos)", bg: "var(--pos)" };
 }
 

@@ -59,7 +59,7 @@ function tone(pct: number): { bar: string; text: string; label: string } {
   //  whether that is good. Green, amber and red on the same sentence cannot be
   //  misread the way three different sentences could.
   if (pct >= 95) return { bar: "var(--pos)", text: "text-[var(--pos)]", label: "up to date" };
-  if (pct >= 70) return { bar: "var(--warn, #d97706)", text: "text-[var(--ink2)]", label: "up to date" };
+  if (pct >= 70) return { bar: "var(--warn)", text: "text-[var(--ink2)]", label: "up to date" };
   return { bar: "var(--neg)", text: "text-[var(--neg)]", label: "up to date" };
 }
 

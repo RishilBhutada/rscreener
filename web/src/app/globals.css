@@ -133,3 +133,30 @@ input, textarea, select, button {
 @media (max-width: 639px) {
   main { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
 }
+
+
+/* A FILLED accent button, readable on every accent in both themes.
+ *
+ * Five controls used `bg-[var(--accent)] text-white`, including "Run screen" -
+ * the screener's primary action. Measured against white text, six of the eight
+ * accent/theme combinations failed WCAG AA, and dark+amber came out at 1.67:1:
+ * white on pale amber, effectively invisible.
+ *
+ * The cause is that the dark theme deliberately uses LIGHTER accents, so text
+ * on them has to go dark rather than white. One pair of tokens, flipped per
+ * theme, instead of one hardcoded colour that can only ever suit half of them.
+ */
+:root, :root[data-theme="light"] { --accent-fill: var(--accent-strong); --accent-fill-ink: #ffffff; }
+:root[data-theme="dark"] { --accent-fill: var(--accent); --accent-fill-ink: #0b1017; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --accent-fill: var(--accent); --accent-fill-ink: #0b1017; }
+}
+
+/* Referenced in two places as var(--warn, #d97706) and var(--warn, #b45309) -
+ * two different guesses at the same tier, neither ever defined, and the first
+ * measured 2.84:1 on --card2. */
+:root, :root[data-theme="light"] { --warn: #b45309; }
+:root[data-theme="dark"] { --warn: #fbbf24; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --warn: #fbbf24; }
+}

@@ -254,7 +254,7 @@ export default function Home() {
                 <button
                   onClick={() => data && runQuery(query, data.rows)}
                   disabled={!data}
-                  className="bg-[var(--accent)] hover:bg-[var(--accent-strong)] disabled:opacity-40 text-white text-sm font-semibold px-5 py-2 rounded-lg"
+                  className="bg-[var(--accent-fill)] hover:opacity-90 disabled:opacity-40 text-[var(--accent-fill-ink)] text-sm font-semibold px-5 py-2 rounded-lg"
                 >
                   Run screen
                 </button>

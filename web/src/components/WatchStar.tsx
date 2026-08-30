@@ -84,7 +84,7 @@ export default function WatchStar({ symbol, size = "lg" }: { symbol: string; siz
                     not on. */}
                 <span aria-hidden className={`w-4 h-4 rounded border flex items-center justify-center text-[11px] ${
                   mine.has(l.id)
-                    ? "bg-[var(--accent)] border-[var(--accent)] text-white"
+                    ? "bg-[var(--accent-fill)] border-[var(--accent-fill)] text-[var(--accent-fill-ink)]"
                     : "border-[var(--line2)]"
                 }`}>{mine.has(l.id) ? "✓" : ""}</span>
                 <span className="flex-1 text-[var(--ink)]">{l.name}</span>

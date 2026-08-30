@@ -116,7 +116,7 @@ export default function PortfolioPage() {
               type="file"
               accept=".csv,.txt"
               onChange={(e) => onFile(e.target.files?.[0])}
-              className="block text-sm text-[var(--ink3)] file:mr-3 file:rounded-lg file:border-0 file:bg-[var(--accent)] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:opacity-90"
+              className="block text-sm text-[var(--ink3)] file:mr-3 file:rounded-lg file:border-0 file:bg-[var(--accent-fill)] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-[var(--accent-fill-ink)] hover:file:opacity-90"
             />
             <textarea
               value={pasteText}
@@ -126,7 +126,7 @@ export default function PortfolioPage() {
               className="w-full font-mono text-xs border border-[var(--line2)] rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
             />
             <div className="flex items-center gap-3">
-              <button onClick={() => doImport(pasteText)} disabled={!pasteText.trim()} className="bg-[var(--accent)] hover:bg-[var(--accent-strong)] disabled:opacity-40 text-white text-sm font-semibold px-5 py-2 rounded-lg">
+              <button onClick={() => doImport(pasteText)} disabled={!pasteText.trim()} className="bg-[var(--accent-fill)] hover:opacity-90 disabled:opacity-40 text-[var(--accent-fill-ink)] text-sm font-semibold px-5 py-2 rounded-lg">
                 Parse &amp; save
               </button>
               {importError && <p className="text-sm text-[var(--neg)]">{importError}</p>}
