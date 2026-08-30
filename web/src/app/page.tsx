@@ -1,16 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import { loadRecent } from "@/lib/store";
 import { allWatched, loadLists } from "@/lib/watchlists";
 import { shortName } from "@/lib/names";
+import { buildIndex, search, didYouMean, type SearchIndex, type SearchRow } from "@/lib/search";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
-type Lite = { symbol: string; name: string; mcap: number };
+type Lite = SearchRow & { price?: number; ret_1m?: number; exchange?: string };
 
 /** A spread across sectors, shown only until there is something of the user's own. */
 const SUGGESTED = [
@@ -46,6 +47,9 @@ export default function Home() {
           symbol: String(r.symbol),
           name: String(r.name ?? ""),
           mcap: (r.mcap as number) ?? 0,
+          price: r.price as number | undefined,
+          ret_1m: r.ret_1m as number | undefined,
+          exchange: r.exchange as string | undefined,
         })));
         setAsof(d.price_asof ?? null);
         setCovered(d.covered ?? null);
@@ -53,18 +57,20 @@ export default function Home() {
       .catch(() => { /* search degrades to nothing rather than an error wall */ });
   }, []);
 
-  const ql = q.trim().toLowerCase();
-  const matches = ql.length < 1 ? [] : rows
-    .map((r) => {
-      const sym = r.symbol.toLowerCase(), name = r.name.toLowerCase();
-      const score = sym.startsWith(ql) ? 0 : name.startsWith(ql) ? 1
-        : name.includes(` ${ql}`) ? 2 : sym.includes(ql) || name.includes(ql) ? 3 : 9;
-      return [score, r] as const;
-    })
-    .filter(([sc]) => sc < 9)
-    .sort((a, b) => a[0] - b[0] || b[1].mcap - a[1].mcap)
-    .slice(0, 8)
-    .map(([, r]) => r);
+  // The same matcher the top bar uses. This box had its own copy of the old
+  // scorer, so the two search fields on the same site behaved differently and
+  // multi-word queries died here too.
+  const index = useMemo<SearchIndex | null>(() => (rows.length ? buildIndex(rows) : null), [rows]);
+  const { hits: matches } = index ? search(index, q, 10) : { hits: [] as SearchRow[] };
+  const suggestion = index && q.trim().length >= 2 && matches.length === 0 ? didYouMean(index, q) : null;
+
+  // The user's own companies, joined to the prices already in memory. No extra
+  // fetch: data.json is loaded for search regardless.
+  const watchRows = useMemo(() => {
+    if (!watch.length || !rows.length) return [];
+    const by = new Map(rows.map((r) => [r.symbol, r]));
+    return watch.map((s) => by.get(s)).filter(Boolean).slice(0, 8) as Lite[];
+  }, [watch, rows]);
 
   const go = (sym: string) => router.push(`/company?s=${encodeURIComponent(sym)}`);
   const nameOf = (sym: string) => {
@@ -109,11 +115,14 @@ export default function Home() {
 
       <main className="max-w-2xl mx-auto px-4 pt-10 sm:pt-20 pb-12">
         <h1 className="text-center text-2xl sm:text-3xl font-bold tracking-tight">
-          Every NSE company, in one place
+          Every listed company, in one place
         </h1>
+        {/* Said "Every NSE company" while half the database is BSE-only - 2,372
+            of 4,746 companies the page was denying it had. */}
         <p className="text-center text-sm text-[var(--ink3)] mt-2">
           Twenty years of financials, valuation charts you can check line by line, and
-          a screener over {covered ? covered.toLocaleString("en-IN") : "2,000+"} companies.
+          a screener over {covered ? covered.toLocaleString("en-IN") : "4,700+"} companies
+          across the NSE and the BSE.
         </p>
 
         <div className="relative mt-7">
@@ -165,27 +174,49 @@ export default function Home() {
           more={watch.length ? { href: "/watchlists", label: "Manage lists" } : undefined}
         />
 
-        <div className="mt-10 grid grid-cols-2 sm:grid-cols-3 gap-2">
-          {[
-            ["Watchlists", "/watchlists", "Lists you keep"],
-            ["Other screens", "/screens", "Query 40+ ratios"],
-            ["Sectors", "/sectors", "Browse by industry"],
-            ["IPO", "/ipo", "Open and upcoming"],
-            ["Calendar", "/calendar", "Results and events"],
-            ["Portfolio", "/portfolio", "Your holdings"],
-            ["Data", "/status", "How fresh it is"],
-          ].map(([label, href, sub]) => (
-            <Link
-              key={href}
-              href={href}
-              className="rounded-xl border border-[var(--line)] bg-[var(--card)] px-3 py-2.5
-                         hover:border-[var(--line2)]"
-            >
-              <span className="block text-sm font-semibold text-[var(--ink)]">{label}</span>
-              <span className="block text-xs text-[var(--ink3)] mt-0.5">{sub}</span>
-            </Link>
-          ))}
-        </div>
+        {/* This was a grid of seven tiles - Watchlists, Screener, Sectors, IPO,
+            Calendar, Portfolio, Data - every one of them already a link in the
+            nav bar directly above. A landing page whose main content is a second
+            copy of its own navigation gives the reader nothing to read.
+            Replaced with the numbers he came to see: the companies he is
+            actually following, priced. */}
+        {watchRows.length > 0 && (
+          <section className="mt-9">
+            <div className="flex items-baseline justify-between mb-2">
+              <h2 className="text-sm font-semibold text-[var(--ink2)]">
+                {lists > 1 ? `Across your ${lists} watchlists` : "Your watchlist"}
+              </h2>
+              <Link href="/watchlists" className="text-xs font-semibold text-[var(--accent-ink)]">Manage</Link>
+            </div>
+            <div className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
+              {watchRows.map((r) => (
+                <Link
+                  key={r.symbol}
+                  href={`/company?s=${encodeURIComponent(r.symbol)}`}
+                  className="flex items-center gap-3 px-3.5 min-h-[52px] border-b border-[var(--line)] last:border-b-0 hover:bg-[var(--card2)]"
+                >
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-sm font-semibold text-[var(--ink)] truncate">
+                      {shortName(r.name) || r.symbol}
+                    </span>
+                    <span className="block text-[11px] text-[var(--ink3)]">{r.symbol}</span>
+                  </span>
+                  <span className="text-sm tabular-nums text-[var(--ink)] shrink-0">
+                    {r.price != null ? `₹${r.price.toLocaleString("en-IN")}` : "—"}
+                  </span>
+                  <span
+                    className="text-xs tabular-nums shrink-0 w-16 text-right"
+                    style={{ color: r.ret_1m == null ? "var(--ink3)" : r.ret_1m >= 0 ? "var(--pos)" : "var(--neg)" }}
+                    title="Change over the last month"
+                  >
+                    {r.ret_1m == null ? "—" : `${r.ret_1m >= 0 ? "+" : ""}${r.ret_1m.toFixed(1)}%`}
+                  </span>
+                </Link>
+              ))}
+            </div>
+            <p className="text-[11px] text-[var(--ink3)] mt-1.5">Change shown is over one month.</p>
+          </section>
+        )}
 
         {asof && (
           <p className="text-center text-xs text-[var(--ink3)] mt-8">
