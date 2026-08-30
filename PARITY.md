@@ -48,6 +48,13 @@ on the deployed site. "Better than" ideas go at the bottom, locked until parity.
   XBRL — that field is a `/-` placeholder). Verified live: PE/Max axis reads Jan 2006 → Jan 2026.
 - [ ] Backfill coverage: the ~20-year history is fetched per company (one-time; old filings never
   change). Top names done; the rest fill via the nightly rotation at full depth.
+- [ ] EV/EBITDA depth does NOT match the parity claim above, and that claim was wrong when written.
+  Measured on RELIANCE, 31-Aug-2026: P/E 224 months from 2006-02, MCap/Sales 238 from 2006-02,
+  Price-to-Book 170 from 2008-03 — but **EV/EBITDA 42 months from 2023-03**. The band needs net debt
+  at each date; `net_debt_series` takes it from the Yahoo balance sheets, which carry about four
+  years. Filed quarterly results contain no balance sheet, so this depth cannot come from the source
+  that gives the other three. Either source debt+cash from annual reports / BSE, or state the real
+  window — stated for now: the company page prints each band's own start month beside its percentile.
 - [ ] Banks: no OPM/GPM/EV-EBITDA on pre-2018 sheets — they don't report a comparable expenditure
   breakdown. screener.in omits EV/EBITDA for banks for the same reason; genuine data-shape limit.
 

@@ -499,7 +499,126 @@ function InfoDot({ label, onOpen }: { label: string; onOpen: (l: string) => void
   );
 }
 
-function RatioGrid({ snapshot, row }: { snapshot: Row; row: Row | null }) {
+/** Where today's valuation sits inside this company's OWN history.
+ *
+ *  The one thing a rival screener charges for and none of them show honestly:
+ *  Trendlyne puts "99% of time spent below current P/E" behind a subscription
+ *  and wraps it in a "Strong Sell Zone" verdict. The percentile is the useful
+ *  half and it is arithmetic on a series this app already publishes - no
+ *  opinion attached, and the count of months it was taken over is printed so
+ *  the reader can discount it.
+ *
+ *  A ratio is only comparable against its own history when there IS a history:
+ *  under three years of monthly points the percentile is noise, so it is
+ *  withheld rather than shown small.
+ */
+function ValuationHistory({ company }: { company: Company }) {
+  const bands: [string, PeBand | null | undefined, string][] = [
+    ["Price to earnings", company.pe_band, "P/E"],
+    ["Price to book", company.pb_band, "P/B"],
+    ["EV to EBITDA", company.ev_band, "EV/EBITDA"],
+    ["Market cap to sales", company.ps_band, "MCap/Sales"],
+  ];
+  const rows = bands.map(([label, band, short]) => {
+    const s = (band?.series ?? []).filter((p): p is [string, number] =>
+      Array.isArray(p) && typeof p[1] === "number" && Number.isFinite(p[1]));
+    if (s.length < 36) return null;
+    const now = s[s.length - 1];
+    const vals = s.map((p) => p[1]);
+    const below = vals.filter((v) => v < now[1]).length;
+    const sorted = [...vals].sort((a, b) => a - b);
+    const median = sorted.length % 2
+      ? sorted[(sorted.length - 1) / 2]
+      : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+    return {
+      label, short,
+      value: now[1], date: now[0], median,
+      pct: Math.round((below / vals.length) * 100),
+      n: vals.length, from: s[0][0].slice(0, 7),
+      lo: sorted[0], hi: sorted[sorted.length - 1],
+    };
+  }).filter(Boolean) as {
+    label: string; short: string; value: number; date: string; median: number;
+    pct: number; n: number; from: string; lo: number; hi: number;
+  }[];
+
+  if (rows.length === 0) return null;
+
+  return (
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
+      <h2 className="text-base font-semibold text-[var(--ink)]">Against its own history</h2>
+      <p className="text-xs text-[var(--ink3)] mt-0.5 mb-3">
+        Where today&rsquo;s valuation sits in this company&rsquo;s own record. Cheap and
+        expensive mean nothing across industries; against the same company&rsquo;s past
+        they mean something. Not a signal — a business can be worth more than it used to be.
+      </p>
+      <div className="space-y-3.5">
+        {rows.map((r) => {
+          // Position on the bar, clamped: the newest point IS the max or the
+          // min often enough that an unclamped marker sits half off the track.
+          const span = r.hi - r.lo;
+          const at = span > 0 ? Math.min(100, Math.max(0, ((r.value - r.lo) / span) * 100)) : 50;
+          return (
+            <div key={r.label}>
+              <div className="flex items-baseline justify-between gap-2 text-sm">
+                <span className="text-[var(--ink2)]">{r.label}</span>
+                <span className="font-semibold text-[var(--ink)] tabular-nums">{fmtNum(r.value)}</span>
+              </div>
+              <div className="relative h-1.5 rounded-full bg-[var(--card2)] mt-1.5 border border-[var(--line)]">
+                <div className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-[var(--accent)]"
+                     style={{ left: `calc(${at}% - 4px)` }} />
+              </div>
+              <div className="flex justify-between text-[10px] text-[var(--ink3)] mt-1 tabular-nums">
+                <span>low {fmtNum(r.lo)}</span>
+                {/* The window is stated, not just its length. These four
+                    series do NOT reach equally far back: P/E and MCap/Sales
+                    come from filed quarterly results to 2006, while EV/EBITDA
+                    needs debt and cash, which the balance sheets only give for
+                    about four years. "2% of 42 months" invites a conclusion
+                    that "42 months since 2023-03" does not. */}
+                <span>
+                  {r.short} was lower than this in <strong className="text-[var(--ink2)]">{r.pct}%</strong>{" "}
+                  of {r.n} months since {r.from} · median {fmtNum(r.median)}
+                </span>
+                <span>high {fmtNum(r.hi)}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-[11px] text-[var(--ink3)] mt-3">
+        Each series ends {rows[0].date}, the last month with a filed trailing figure — not today&rsquo;s price.
+      </p>
+    </section>
+  );
+}
+
+/** Every company in the same industry, plus where this one sits by size. */
+type Cohort = {
+  rows: Row[];
+  industry: string;
+  rank: number | null;
+  rankOf: number;
+  indRank: number | null;
+  indRankOf: number;
+};
+
+/** The median of one field across the industry, and how many companies it was
+ *  taken over. Median rather than mean: one company with a P/E of 900 - and
+ *  there are several - drags a mean somewhere no company actually is.
+ *  Withheld below five companies, where a "median" is just one firm's number
+ *  wearing a statistical hat. */
+function industryMedian(rows: Row[], field: string): { value: number; n: number } | null {
+  const vs = rows
+    .map((r) => r[field])
+    .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
+    .sort((a, b) => a - b);
+  if (vs.length < 5) return null;
+  const m = vs.length % 2 ? vs[(vs.length - 1) / 2] : (vs[vs.length / 2 - 1] + vs[vs.length / 2]) / 2;
+  return { value: m, n: vs.length };
+}
+
+function RatioGrid({ snapshot, row, cohort }: { snapshot: Row; row: Row | null; cohort: Cohort | null }) {
   const [open, setOpen] = useState<string | null>(null);
   const g = (k: string) => num(row, k) ?? num(snapshot, k);
   const method = String((row?.["vol_method"] ?? snapshot["vol_method"]) ?? "");
@@ -522,31 +641,57 @@ function RatioGrid({ snapshot, row }: { snapshot: Row; row: Row | null }) {
 
   // Grouped by the question each one answers. Fourteen numbers in one flat grid
   // is a list to read end to end; four short groups is a page to scan.
-  const groups: [string, [string, string][]][] = [
+  /** Third entry is the data.json field this row can be compared on, or "" for
+   *  the ones where an industry median would be nonsense: a book value per
+   *  share or a share price is a function of how many shares exist, so its
+   *  median across an industry compares nothing. */
+  const groups: [string, [string, string, string][]][] = [
     ["Size and price", [
-      ["Market Cap", money(g("mcap"), 0, " Cr")],
-      ["Current Price", money(g("price"))],
+      ["Market Cap", money(g("mcap"), 0, " Cr"), "mcap"],
+      ["Current Price", money(g("price")), ""],
       ["High / Low", g("wk52_high") == null && g("wk52_low") == null ? "—"
-        : `₹ ${fmtNum(g("wk52_high"), 0)} / ${fmtNum(g("wk52_low"), 0)}`],
+        : `₹ ${fmtNum(g("wk52_high"), 0)} / ${fmtNum(g("wk52_low"), 0)}`, ""],
     ]],
     ["What it costs", [
-      ["Stock P/E", plain(g("pe"))],
-      ["Book Value", money(g("book_value"))],
-      ["Dividend Yield", pct(g("div_yield"))],
+      ["Stock P/E", plain(g("pe")), "pe"],
+      ["Book Value", money(g("book_value")), ""],
+      ["Dividend Yield", pct(g("div_yield")), "div_yield"],
     ]],
     ["What it earns", [
-      ["ROCE", pct(g("roce"))],
-      ["ROE", pct(g("roe"))],
-      ["Sales growth 5Y", pct(g("sales_cagr_5y"))],
-      ["Profit growth 5Y", pct(g("profit_cagr_5y"))],
+      ["ROCE", pct(g("roce")), "roce"],
+      ["ROE", pct(g("roe")), "roe"],
+      ["Sales growth 5Y", pct(g("sales_cagr_5y")), "sales_cagr_5y"],
+      ["Profit growth 5Y", pct(g("profit_cagr_5y")), "profit_cagr_5y"],
     ]],
     ["Risk and ownership", [
-      ["Debt / Equity", plain(g("de"))],
-      ["Promoter holding", pct(g("promoter_holding"))],
-      ["Volatility 1Y", vol("volatility_1y")],
-      ["Volatility 30D", vol("volatility_30d")],
+      ["Debt / Equity", plain(g("de")), "de"],
+      ["Promoter holding", pct(g("promoter_holding")), "promoter_holding"],
+      ["Volatility 1Y", vol("volatility_1y"), "volatility_1y"],
+      ["Volatility 30D", vol("volatility_30d"), "volatility_30d"],
     ]],
   ];
+
+  /** The grey line under a figure: what the rest of the industry does. */
+  const context = (field: string) => {
+    if (!field || !cohort) return null;
+    if (field === "mcap") {
+      if (!cohort.rank) return null;
+      // The industry name is already printed under the company name at the top
+      // of the page; repeating it here wrapped this line onto three.
+      return `${cohort.rank.toLocaleString("en-IN")} of ${cohort.rankOf.toLocaleString("en-IN")} by size${
+        cohort.indRank ? ` · ${cohort.indRank} of ${cohort.indRankOf} in its industry` : ""}`;
+    }
+    const med = industryMedian(cohort.rows, field);
+    const mine = g(field);
+    if (!med) return null;
+    const shown = Math.abs(med.value) >= 100 ? fmtNum(med.value, 0) : fmtNum(med.value);
+    const side = mine === null ? "" : mine > med.value ? " · above" : mine < med.value ? " · below" : " · at";
+    // Say how many companies it was taken over when that number is small.
+    // NSDL sits in an industry of six: "industry median 40.27" reads like a
+    // fact about an industry, when it is the middle of five other companies.
+    const n = med.n < 15 ? ` (of ${med.n})` : "";
+    return `industry median ${shown}${n}${side}`;
+  };
   const info = open ? METRIC_INFO[open] : null;
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
@@ -556,15 +701,25 @@ function RatioGrid({ snapshot, row }: { snapshot: Row; row: Row | null }) {
             <h3 className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink3)] mb-1.5">
               {heading}
             </h3>
-            {cells.map(([label, value]) => (
-              <div key={label} className="flex items-baseline justify-between border-b border-[var(--line)] py-1.5">
-                <span className="text-sm text-[var(--ink3)]">
-                  {label}
-                  <InfoDot label={label} onOpen={setOpen} />
-                </span>
-                <span className="text-sm font-semibold text-[var(--ink)] tabular-nums">{value}</span>
-              </div>
-            ))}
+            {cells.map(([label, value, field]) => {
+              const ctx = context(field);
+              return (
+                <div key={label} className="border-b border-[var(--line)] py-1.5">
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-sm text-[var(--ink3)]">
+                      {label}
+                      <InfoDot label={label} onOpen={setOpen} />
+                    </span>
+                    <span className="text-sm font-semibold text-[var(--ink)] tabular-nums">{value}</span>
+                  </div>
+                  {/* Grey and unemphasised, and never green or red. Tickertape
+                      and Trendlyne both colour this line as good or bad news;
+                      a P/E above the industry median is neither, and this app
+                      does not hand out opinions it cannot defend. */}
+                  {ctx && <p className="text-[10px] text-[var(--ink3)] text-right tabular-nums">{ctx}</p>}
+                </div>
+              );
+            })}
           </div>
         ))}
       </div>
@@ -611,6 +766,7 @@ function CompanyView() {
   const symbol = (params.get("s") ?? "").toUpperCase();
   const [company, setCompany] = useState<Company | null>(null);
   const [peers, setPeers] = useState<Row[]>([]);
+  const [cohort, setCohort] = useState<Cohort | null>(null);
   const [fullRow, setFullRow] = useState<Row | null>(null);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
@@ -730,12 +886,34 @@ function CompanyView() {
         setFullRow(d.rows.find((r) => r.symbol === company.snapshot.symbol) ?? null);
         const ind = company.snapshot.industry;
         if (!ind) return;
+        const sameIndustry = d.rows.filter((r) => r.industry === ind);
         setPeers(
-          d.rows
-            .filter((r) => r.industry === ind && r.symbol !== company.snapshot.symbol)
+          sameIndustry
+            .filter((r) => r.symbol !== company.snapshot.symbol)
             .sort((a, b) => ((b.mcap as number) ?? 0) - ((a.mcap as number) ?? 0))
             .slice(0, 8)
         );
+        // Context, not a verdict. Every screener worth studying - Tickertape,
+        // Trendlyne - refuses to print a bare ratio: each one is labelled
+        // against its industry, because a P/E of 28 means nothing until you
+        // know the industry sits at 12 or at 60. Computed here from the rows
+        // already downloaded for peers, so it costs one pass over an array and
+        // covers all 4,746 companies at once rather than waiting on a pipeline
+        // run. Deliberately NOT coloured good or bad: above the median is not
+        // an opinion this app is entitled to have.
+        const withCap = d.rows.filter((r) => typeof r.mcap === "number");
+        const byCap = [...withCap].sort((a, b) => (b.mcap as number) - (a.mcap as number));
+        const rank = byCap.findIndex((r) => r.symbol === company.snapshot.symbol);
+        const indByCap = byCap.filter((r) => r.industry === ind);
+        const indRank = indByCap.findIndex((r) => r.symbol === company.snapshot.symbol);
+        setCohort({
+          rows: sameIndustry,
+          industry: String(ind),
+          rank: rank >= 0 ? rank + 1 : null,
+          rankOf: byCap.length,
+          indRank: indRank >= 0 ? indRank + 1 : null,
+          indRankOf: indByCap.length,
+        });
       })
       .catch(() => { /* peers are optional */ });
   }, [company]);
@@ -878,7 +1056,7 @@ function CompanyView() {
       <div ref={pager} className={mode === "swipe" ? "rs-pager" : "space-y-6"}>
 
       <div id="summary" className="scroll-mt-32">
-        <RatioGrid snapshot={s} row={fullRow} />
+        <RatioGrid snapshot={s} row={fullRow} cohort={cohort} />
       </div>
 
       <div id="chart" className="scroll-mt-32">
@@ -911,6 +1089,7 @@ function CompanyView() {
 
       <div id="analysis" className="scroll-mt-32 space-y-4">
         <ProsCons row={fullRow} />
+        <ValuationHistory company={company} />
       </div>
 
       {peers.length > 0 && (
