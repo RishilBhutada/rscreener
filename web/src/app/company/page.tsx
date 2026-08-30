@@ -273,31 +273,54 @@ function StatementTable({ title, stmt, subtitle, boldRows }: { title: string; st
  *  year was never filed, there is no N-year figure to give and the card shows
  *  nothing - better empty than a rate over a window nobody stated.
  */
+/** Compound annual growth over `years` CALENDAR years.
+ *
+ *  Deliberately the same rule as `cagr_pct` in pipeline/trend_lib.py, because
+ *  this page prints "Compounded profit growth 5 years" from the statements
+ *  while the tile above it prints "Profit growth 5Y" from the screener field,
+ *  and the two are the same concept. They did not agree: this one demanded an
+ *  exact calendar-year match and returned nothing when the year end had moved,
+ *  so ACC showed a growth rate in one place and a dash in the other.
+ *
+ *  Take the point nearest to `years` before the newest, divide by the span that
+ *  ACTUALLY separates them, and withhold when nothing sits within nine months
+ *  of the target rather than calling a six-year gap five years.
+ */
 function cagr(values: (number | null)[], years: number, periods?: string[]): number | null {
-  if (!periods || periods.length !== values.length) {
-    // No dates to anchor to: fall back to positions, but only when the series
-    // is dense enough that positions and years cannot disagree.
+  const yearsBetween = (a: string, b: string) =>
+    (Date.parse(String(b).slice(0, 10)) - Date.parse(String(a).slice(0, 10))) / (365.25 * 864e5);
+
+  const pairs: [string, number][] = [];
+  values.forEach((v, i) => {
+    if (v !== null && v !== undefined && Number.isFinite(v) && periods?.[i]) {
+      pairs.push([String(periods[i]), v]);
+    }
+  });
+
+  if (!periods || periods.length !== values.length || pairs.length < 2) {
+    // No usable dates: fall back to positions, and only when the series is
+    // dense enough that positions and years cannot disagree.
     const clean = values.filter((v): v is number => v !== null && v !== undefined);
     if (clean.length < years + 1) return null;
     const last = clean[clean.length - 1], start = clean[clean.length - 1 - years];
     if (!last || !start || start <= 0 || last <= 0) return null;
     return Math.round((Math.pow(last / start, 1 / years) - 1) * 100);
   }
-  let endIdx = -1;
-  for (let i = values.length - 1; i >= 0; i--) {
-    const v = values[i];
-    if (v !== null && v !== undefined && v > 0) { endIdx = i; break; }
+
+  const [endP, last] = pairs[pairs.length - 1];
+  let best: [string, number] | null = null;
+  let bestOff = Infinity;
+  for (const [p, v] of pairs.slice(0, -1)) {
+    const span = yearsBetween(p, endP);
+    if (!(span > 0)) continue;
+    const off = Math.abs(span - years);
+    if (off < bestOff) { bestOff = off; best = [p, v]; }
   }
-  if (endIdx < 0) return null;
-  const endYear = Number(String(periods[endIdx]).slice(0, 4));
-  const wantYear = endYear - years;
-  const startIdx = periods.findIndex((p, i) => {
-    const v = values[i];
-    return Number(String(p).slice(0, 4)) === wantYear && v !== null && v !== undefined && v > 0;
-  });
-  if (startIdx < 0) return null;          // that year was never filed
-  const last = values[endIdx] as number, start = values[startIdx] as number;
-  return Math.round((Math.pow(last / start, 1 / years) - 1) * 100);
+  if (!best || bestOff > 0.75) return null;
+  const span = yearsBetween(best[0], endP);
+  const start = best[1];
+  if (!last || !start || start <= 0 || last <= 0 || span <= 0) return null;
+  return Math.round((Math.pow(last / start, 1 / span) - 1) * 100);
 }
 
 function GrowthCard({ title, rows }: { title: string; rows: [string, number | null][] }) {

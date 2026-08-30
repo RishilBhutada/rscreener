@@ -1064,11 +1064,48 @@ def avg_npm_5y(trend_annual: dict | None) -> float | None:
 
 
 def cagr_pct(values: list, periods: list[str], years: int) -> float | None:
-    """CAGR over `years` intervals of the annual series; None when not computable."""
+    """Compound annual growth over `years` CALENDAR years; None when not computable.
+
+    It used to count backwards `years + 1` positions in the array and call the
+    gap five years. It is not five years whenever the annual series has a hole
+    or a changed year-end, and 128 of 3,942 companies have one: ACC's series
+    runs 2020-12-31 to 2026-03-31 in six entries because it moved its year end,
+    so a 5.25-year span was annualised as if it were 5, and 3PLAND's six entries
+    span seven years. Every one of those growth rates was overstated, and the
+    error is invisible on screen - an inflated CAGR looks exactly like a real
+    one. This is the same fault, in a different file, as the trailing returns
+    that were measured in array positions instead of time.
+
+    Now: take the point nearest to `years` before the newest one, and divide by
+    the span that ACTUALLY separates them. Nothing within nine months of the
+    target and the figure is withheld rather than stretched.
+    """
     pairs = [(p, v) for p, v in zip(periods, values) if v is not None]
-    if len(pairs) < years + 1:
+    if len(pairs) < 2:
         return None
-    last, start = pairs[-1][1], pairs[-(years + 1)][1]
+
+    def when(p) -> datetime | None:
+        s = str(p)[:10]
+        for fmt in ("%Y-%m-%d", "%Y-%m", "%Y"):
+            try:
+                return datetime.strptime(s[:len(datetime.now().strftime(fmt))], fmt)
+            except ValueError:
+                continue
+        return None
+
+    end_p, last = pairs[-1]
+    end = when(end_p)
+    if end is None:
+        return None
+    dated = [(when(p), v) for p, v in pairs[:-1]]
+    dated = [(d, v) for d, v in dated if d is not None and d < end]
+    if not dated:
+        return None
+    best = min(dated, key=lambda dv: abs((end - dv[0]).days / 365.25 - years))
+    span = (end - best[0]).days / 365.25
+    if abs(span - years) > 0.75 or span <= 0:
+        return None
+    start = best[1]
     if not start or not last or start <= 0 or last <= 0:
         return None
-    return round(((last / start) ** (1 / years) - 1) * 100, 2)
+    return round(((last / start) ** (1 / span) - 1) * 100, 2)
