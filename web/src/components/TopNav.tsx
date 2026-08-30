@@ -4,12 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ThemeControls from "@/components/ThemeControls";
+import { buildIndex, search, didYouMean, type SearchIndex, type SearchRow } from "@/lib/search";
 import AccountButton from "@/components/AccountButton";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
-type Lite = { symbol: string; name: string; mcap: number; exchange?: string };
+type Lite = SearchRow;
 let cache: Lite[] | null = null;
+let indexCache: SearchIndex | null = null;
 
 export default function TopNav({ active }: { active?: "home" | "screens" | "sectors" | "calendar" | "portfolio" | "watchlists" | "ipo" | "status" }) {
   const router = useRouter();
@@ -19,7 +21,7 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
   const boxRef = useRef<HTMLDivElement>(null);
 
   const ensureData = async () => {
-    if (cache) { if (rows.length === 0) setRows(cache); return; }
+    if (cache) { if (!indexCache) indexCache = buildIndex(cache); if (rows.length === 0) setRows(cache); return; }
     try {
       const d = await (await fetch(`${BASE}/data.json`)).json();
       cache = (d.rows as Record<string, unknown>[]).map((r) => ({
@@ -28,21 +30,22 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
         mcap: (r.mcap as number) ?? 0,
         exchange: r.exchange as string | undefined,
       }));
+      indexCache = buildIndex(cache);
       setRows(cache);
     } catch { /* search silently unavailable */ }
   };
 
-  const ql = q.trim().toLowerCase();
-  const matches = ql.length < 2 ? [] : rows
-    .map((r) => {
-      const sym = r.symbol.toLowerCase(), name = r.name.toLowerCase();
-      const score = sym.startsWith(ql) ? 0 : name.startsWith(ql) ? 1 : name.includes(` ${ql}`) ? 2 : sym.includes(ql) || name.includes(ql) ? 3 : 9;
-      return [score, r] as const;
-    })
-    .filter(([sc]) => sc < 9)
-    .sort((a, b) => a[0] - b[0] || b[1].mcap - a[1].mcap)
-    .slice(0, 8)
-    .map(([, r]) => r);
+  // One shared matcher, so this box and the home page agree. The old inline
+  // scorer compared the whole query against the symbol and the name as single
+  // strings, so anything with a space in it could only match when the name
+  // began with exactly those words: "bank baroda", "larsen toubro", "mahindra
+  // mahindra" and "oil natural gas" all returned nothing at all.
+  const ql = q.trim();
+  const idx = rows.length && indexCache ? indexCache : null;
+  const { hits: matches, total } = idx
+    ? search(idx, ql, 12)
+    : { hits: [] as SearchRow[], total: 0 };
+  const suggestion = idx && ql.length >= 2 && matches.length === 0 ? didYouMean(idx, ql) : null;
 
   const go = (sym: string) => {
     setQ("");
@@ -84,7 +87,7 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
             aria-label="Search for a company"
             className="w-full text-sm bg-[var(--card2)] border border-[var(--line)] rounded-full px-4 py-2.5 sm:py-1.5 focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:bg-[var(--card)]"
           />
-          {matches.length > 0 && (
+          {(matches.length > 0 || suggestion || (ql.trim().length >= 2 && idx)) && (
             <div className="absolute z-40 mt-1.5 w-full bg-[var(--card)] border border-[var(--line)] rounded-xl shadow-xl overflow-hidden hidden group-focus-within:block">
               {matches.map((m, i) => (
                 <button
@@ -99,10 +102,34 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
                       the difference between "this page has no filings yet" and
                       "this company files nowhere this app can read". */}
                   {m.exchange === "BSE" && (
-                    <span className="ml-1.5 text-[10px] rounded px-1 py-0.5 bg-[var(--card2)] text-[var(--ink3)]">BSE</span>
+                    <span className="ml-1.5 text-[11px] rounded px-1 py-0.5 bg-[var(--card2)] text-[var(--ink3)]">BSE</span>
                   )}
                 </button>
               ))}
+              {/* A blank panel reads as a broken app. When nothing matches, say
+                  so and offer the company he probably meant - "relaince"
+                  resolves to Reliance Industries. */}
+              {matches.length === 0 && (
+                <div className="px-4 py-2.5 text-sm">
+                  <p className="text-[var(--ink3)]">No company matches &ldquo;{ql.trim()}&rdquo;</p>
+                  {suggestion && (
+                    <button
+                      onMouseDown={(e) => { e.preventDefault(); go(suggestion.symbol); }}
+                      className="mt-1 text-left font-semibold text-[var(--accent-ink)]"
+                    >
+                      Did you mean {suggestion.name || suggestion.symbol}?
+                    </button>
+                  )}
+                </div>
+              )}
+              {/* The old box cut silently at eight. The sectors page already
+                  discloses its cap; the search box was the one place that did
+                  not. */}
+              {total > matches.length && (
+                <p className="px-4 py-1.5 text-[11px] text-[var(--ink3)] border-t border-[var(--line)]">
+                  {matches.length} of {total} companies match &mdash; keep typing to narrow it
+                </p>
+              )}
             </div>
           )}
         </div>

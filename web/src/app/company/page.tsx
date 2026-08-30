@@ -161,7 +161,7 @@ function StatementTable({ title, stmt, subtitle, boldRows }: { title: string; st
                 return (
                   <th key={p} className="px-3 py-2 text-right font-medium whitespace-nowrap">
                     {periodLabel(p)}
-                    {dec && <span className="block font-normal text-[10px] text-[var(--ink3)]">({dec})</span>}
+                    {dec && <span className="block font-normal text-[11px] text-[var(--ink3)]">({dec})</span>}
                   </th>
                 );
               })}
@@ -483,16 +483,16 @@ function RatioGrid({ snapshot, row }: { snapshot: Row; row: Row | null }) {
           <h3 className="text-sm font-semibold text-[var(--ink)] pr-6">{open}</h3>
           <dl className="mt-2 space-y-2 text-xs leading-relaxed">
             <div>
-              <dt className="text-[var(--ink3)] uppercase tracking-wide text-[10px]">How it is worked out</dt>
+              <dt className="text-[var(--ink3)] uppercase tracking-wide text-[11px]">How it is worked out</dt>
               <dd className="text-[var(--ink2)] mt-0.5">{info.how}</dd>
             </div>
             <div>
-              <dt className="text-[var(--ink3)] uppercase tracking-wide text-[10px]">What it tells you</dt>
+              <dt className="text-[var(--ink3)] uppercase tracking-wide text-[11px]">What it tells you</dt>
               <dd className="text-[var(--ink2)] mt-0.5">{info.means}</dd>
             </div>
             {info.watch && (
               <div>
-                <dt className="text-[var(--ink3)] uppercase tracking-wide text-[10px]">Where it misleads</dt>
+                <dt className="text-[var(--ink3)] uppercase tracking-wide text-[11px]">Where it misleads</dt>
                 <dd className="text-[var(--ink2)] mt-0.5">{info.watch}</dd>
               </div>
             )}

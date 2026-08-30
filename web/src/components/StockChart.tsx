@@ -1153,12 +1153,12 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
               if (!w) return null;
               return (
                 <div className="mt-1.5 pt-1.5 border-t border-[var(--line)] space-y-0.5">
-                  <p className="text-[10px] uppercase tracking-wide text-[var(--ink3)]">How this was worked out</p>
+                  <p className="text-[11px] uppercase tracking-wide text-[var(--ink3)]">How this was worked out</p>
                   {w.map((r, i) => (
                     <p key={i} className="tabular-nums flex items-baseline gap-2 whitespace-pre">
                       <span className="text-[var(--ink3)] flex-1">{r.label}</span>
                       <span className="font-medium text-[var(--ink)]">{r.value}</span>
-                      {r.note && <span className="text-[10px] text-[var(--ink3)]">{r.note}</span>}
+                      {r.note && <span className="text-[11px] text-[var(--ink3)]">{r.note}</span>}
                     </p>
                   ))}
                 </div>
@@ -1217,7 +1217,7 @@ function ChartShell({
           {moreItems.length > 0 && (
             <div className="relative">
               <button onClick={() => setMoreOpen(!moreOpen)} className={btn(!!activeMore)}>
-                {activeMore ? activeMore[1] : "More"} <span className="text-[10px]">▾</span>
+                {activeMore ? activeMore[1] : "More"} <span className="text-[11px]">▾</span>
               </button>
               {moreOpen && <div className="fixed inset-0 z-10" onClick={() => setMoreOpen(false)} />}
               {moreOpen && (

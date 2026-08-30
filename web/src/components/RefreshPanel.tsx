@@ -335,7 +335,7 @@ export default function RefreshPanel() {
                           <span className="font-semibold text-[var(--ink)]">{r.name || r.symbol}</span>
                           <span className="text-[var(--ink3)] ml-2 text-xs">{r.symbol}</span>
                           {r.exchange === "BSE" && (
-                            <span className="ml-1.5 text-[10px] rounded px-1 py-0.5 bg-[var(--card2)] text-[var(--ink3)]">BSE</span>
+                            <span className="ml-1.5 text-[11px] rounded px-1 py-0.5 bg-[var(--card2)] text-[var(--ink3)]">BSE</span>
                           )}
                         </button>
                       ))}

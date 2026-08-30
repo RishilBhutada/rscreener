@@ -82,7 +82,7 @@ export default function WatchStar({ symbol, size = "lg" }: { symbol: string; siz
                     and colouring it transparent looked identical and read as
                     "✓ Passed on" to a screen reader on a list the company is
                     not on. */}
-                <span aria-hidden className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] ${
+                <span aria-hidden className={`w-4 h-4 rounded border flex items-center justify-center text-[11px] ${
                   mine.has(l.id)
                     ? "bg-[var(--accent)] border-[var(--accent)] text-white"
                     : "border-[var(--line2)]"
