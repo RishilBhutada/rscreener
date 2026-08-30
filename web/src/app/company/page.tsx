@@ -55,8 +55,20 @@ type Company = {
   quarters?: Quarter[] | null;
   actions?: CorpAction[] | null;
   coverage?: Coverage | null;
+  ratios?: WcRatios | null;
   exchange?: string | null;
   bse_code?: number | string | null;
+};
+
+/** Working-capital ratios per year - how the business is actually financed. */
+type WcRatios = {
+  periods: string[];
+  debtor_days: (number | null)[];
+  inventory_days: (number | null)[];
+  days_payable: (number | null)[];
+  cash_conversion: (number | null)[];
+  working_capital_days: (number | null)[];
+  roce: (number | null)[];
 };
 
 /** What the filings behind this company actually cover. */
@@ -130,6 +142,58 @@ function fmtNum(v: number | string | null | undefined, dec = 2): string {
   if (v === null || v === undefined) return "—";
   if (typeof v === "string") return v;
   return v.toLocaleString("en-IN", { maximumFractionDigits: dec });
+}
+
+function RatiosTable({ r }: { r: WcRatios }) {
+  // The one section screener.in has that this app did not. Every figure is
+  // arithmetic on filed lines, and a year missing an input shows a dash rather
+  // than a zero - a nought-day cash conversion cycle is a remarkable business,
+  // not an absent number.
+  const ROWS: [string, keyof WcRatios, string][] = [
+    ["Debtor Days", "debtor_days", "How long customers take to pay"],
+    ["Inventory Days", "inventory_days", "How long stock sits before it sells"],
+    ["Days Payable", "days_payable", "How long the company takes to pay suppliers"],
+    ["Cash Conversion Cycle", "cash_conversion", "Debtor + inventory − payable. Negative means suppliers fund the business"],
+    ["Working Capital Days", "working_capital_days", "Working capital as days of sales"],
+    ["ROCE %", "roce", "Operating profit over capital employed"],
+  ];
+  return (
+    <section id="ratios" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
+      <div className="px-4 pt-3.5 pb-2">
+        <h2 className="text-base font-semibold text-[var(--ink)]">Ratios</h2>
+        <p className="text-xs text-[var(--ink3)] mt-0.5">
+          How the business is financed, year by year. Computed from the filed balance sheet
+          and income statement — nothing here is estimated.
+        </p>
+      </div>
+      <div className="overflow-x-auto" ref={(el) => { if (el) el.scrollLeft = el.scrollWidth; }}>
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="text-xs text-[var(--ink3)] border-y border-[var(--line)]">
+              <th className="px-3 py-2 text-left font-medium sticky left-0 bg-[var(--card)]"> </th>
+              {r.periods.map((p) => (
+                <th key={p} className="px-3 py-2 text-right font-medium whitespace-nowrap">{periodLabel(p)}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {ROWS.map(([label, key, help]) => (
+              <tr key={label} className="border-b border-[var(--line)] last:border-b-0">
+                <th title={help} className="px-3 py-2 text-left font-medium text-[var(--ink2)] whitespace-nowrap sticky left-0 bg-[var(--card)]">
+                  {label}
+                </th>
+                {(r[key] as (number | null)[]).map((v, i) => (
+                  <td key={i} className="px-3 py-2 text-right tabular-nums text-[var(--ink)]">
+                    {v === null || v === undefined ? "—" : v.toLocaleString("en-IN", { maximumFractionDigits: 1 })}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
 }
 
 function periodLabel(p: string): string {
@@ -682,6 +746,7 @@ function CompanyView() {
           ["profit-loss", "Profit & Loss", Boolean(pnl)],
           ["balance-sheet", "Balance Sheet", Boolean(balance)],
           ["cash-flows", "Cash Flow", Boolean(cashflow)],
+          ["ratios", "Ratios", Boolean(company.ratios)],
           ["shareholding", "Investors", Boolean(company.shareholding)],
           ["documents", "Documents", true],
         ] as [string, string, boolean][]).filter(([, , show]) => show).map(([id, label]) => (
@@ -788,6 +853,8 @@ function CompanyView() {
           Statements coverage grows as the pipeline runs.
         </div>
       )}
+
+      {company.ratios && <RatiosTable r={company.ratios} />}
 
       {company.shareholding && company.shareholding.dates.length > 0 && (
         <div id="shareholding" className="scroll-mt-32"><StatementTable

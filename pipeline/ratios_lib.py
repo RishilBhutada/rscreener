@@ -7,7 +7,10 @@ None-safe throughout: a missing input yields None, never a fake zero.
 import sqlite3
 
 ITEMS_NEEDED = {
-    "income": ["Operating Income", "Pretax Income", "Interest Expense", "EBITDA", "Total Revenue"],
+    # Cost Of Revenue is the denominator for inventory days; without it in this
+    # list the ratio silently became null for every company.
+    "income": ["Operating Income", "Pretax Income", "Interest Expense", "EBITDA",
+               "Total Revenue", "Cost Of Revenue"],
     "balance": ["Invested Capital", "Total Assets", "Current Liabilities", "Accounts Receivable", "Inventory"],
     "cashflow": ["Cash Dividends Paid"],
 }
@@ -127,6 +130,8 @@ def compute_ratios(snap: dict, items: dict[str, float]) -> dict[str, float | Non
     ebitda = items.get("EBITDA")
     receivables = items.get("Accounts Receivable")
     inventory = items.get("Inventory")
+    # Cost of goods, not revenue, is the denominator for the stock-turn ratios.
+    cogs = items.get("Cost Of Revenue")
     dividends = items.get("Cash Dividends Paid")  # negative in cash-flow terms
 
     ev = mcap + (debt or 0) - (cash or 0) if mcap is not None else None
@@ -145,5 +150,12 @@ def compute_ratios(snap: dict, items: dict[str, float]) -> dict[str, float | Non
         "div_payout": rnd(_div(-dividends if dividends is not None else None, net_income) * 100
                           if dividends is not None and net_income else None),
         "debtor_days": rnd(_div(receivables, revenue) * 365 if receivables is not None and revenue else None, 1),
-        "inventory_days": rnd(_div(inventory, revenue) * 365 if inventory is not None and revenue else None, 1),
+        # Inventory days divides by COST OF GOODS SOLD, not revenue. Dividing by
+        # revenue understates it by the gross margin - Reliance read 53.9 days
+        # against a true 77.4 - and it disagreed with the per-year ratios table,
+        # which follows the standard definition. Two numbers for one concept on
+        # one page is the fault this project keeps hunting. Where cost of revenue
+        # is not filed the figure is omitted rather than computed a second way
+        # under the same name.
+        "inventory_days": rnd(_div(inventory, cogs) * 365 if inventory is not None and cogs else None, 1),
     }

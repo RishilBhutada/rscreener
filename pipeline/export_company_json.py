@@ -142,6 +142,87 @@ def coverage_notes(con: sqlite3.Connection) -> dict[str, dict]:
     return out
 
 
+def working_capital_ratios(con: sqlite3.Connection) -> dict[str, dict]:
+    """Per-year working-capital ratios: the one section screener.in has that this
+    app did not.
+
+    Debtor days, inventory days, days payable, the cash conversion cycle and
+    working capital days say how a business actually runs - whether it is
+    financed by its suppliers or financing its customers - and none of it was
+    visible here. The screener carried debtor_days and inventory_days as a
+    single current value with no history, which is the least useful form: the
+    number only means something as a trend.
+
+    Every figure is arithmetic on filed balance-sheet and income lines, so
+    nothing here is an estimate. A year missing any input it needs is left out
+    rather than filled with a zero - a zero-day cash conversion cycle is a
+    remarkable business, not a missing number.
+
+        debtor days      receivables / revenue     x 365
+        inventory days   inventory    / cost of revenue x 365
+        days payable     payables     / cost of revenue x 365
+        cash conversion  debtor + inventory - payable
+        working capital  working capital / revenue x 365
+        ROCE             EBIT / (total assets - current liabilities)
+    """
+    if not _table_exists(con, "statements"):
+        return {}
+    WANT = ("Accounts Receivable", "Inventory", "Accounts Payable", "Working Capital",
+            "Total Revenue", "Cost Of Revenue", "Total Assets", "Current Liabilities",
+            "EBIT", "EBITDA", "Reconciled Depreciation")
+    rows = con.execute(
+        "SELECT symbol, period_end, item, value FROM statements "
+        "WHERE period_type='annual' AND item IN ({}) "
+        "ORDER BY symbol, period_end".format(",".join("?" * len(WANT))), WANT
+    ).fetchall()
+    by: dict[str, dict[str, dict]] = {}
+    for sym, pe, item, val in rows:
+        if val is None:
+            continue
+        by.setdefault(sym, {}).setdefault(pe, {})[item] = float(val)
+
+    def days(num, den):
+        if num is None or not den or den <= 0:
+            return None
+        d = num / den * 365
+        # A working-capital cycle beyond a few years is a parsing artefact, not
+        # a business. Left out rather than drawn.
+        return round(d, 1) if -2000 < d < 2000 else None
+
+    out: dict[str, dict] = {}
+    for sym, periods in by.items():
+        pers = sorted(periods)[-12:]
+        cols = {"debtor_days": [], "inventory_days": [], "days_payable": [],
+                "cash_conversion": [], "working_capital_days": [], "roce": []}
+        kept = []
+        for pe in pers:
+            s = periods[pe]
+            rev, cogs = s.get("Total Revenue"), s.get("Cost Of Revenue")
+            dd = days(s.get("Accounts Receivable"), rev)
+            idd = days(s.get("Inventory"), cogs)
+            dp = days(s.get("Accounts Payable"), cogs)
+            wc = days(s.get("Working Capital"), rev)
+            ebit = s.get("EBIT")
+            if ebit is None and s.get("EBITDA") is not None and s.get("Reconciled Depreciation") is not None:
+                ebit = s["EBITDA"] - s["Reconciled Depreciation"]
+            ta, cl = s.get("Total Assets"), s.get("Current Liabilities")
+            ce = (ta - cl) if (ta is not None and cl is not None) else None
+            roce = round(ebit / ce * 100, 1) if (ebit is not None and ce and ce > 0) else None
+            ccc = (dd + idd - dp) if None not in (dd, idd, dp) else None
+            if all(v is None for v in (dd, idd, dp, wc, roce)):
+                continue
+            kept.append(pe)
+            cols["debtor_days"].append(dd)
+            cols["inventory_days"].append(idd)
+            cols["days_payable"].append(dp)
+            cols["cash_conversion"].append(round(ccc, 1) if ccc is not None else None)
+            cols["working_capital_days"].append(wc)
+            cols["roce"].append(roce)
+        if len(kept) >= 2:
+            out[sym] = {"periods": kept, **cols}
+    return out
+
+
 def quarter_blocks(con: sqlite3.Connection) -> dict[str, list[dict]]:
     """{symbol: [{start, end, eps, announced, q}]} - one block per filed quarter.
 
@@ -306,6 +387,7 @@ def main() -> None:
           f"{share_src['shares_out']} from shares outstanding")
     netdebt_by_symbol = net_debt_series(con)
     quarters_by_symbol = quarter_blocks(con)
+    wc_ratios = working_capital_ratios(con)
     coverage_by_symbol = coverage_notes(con)
     # symbol -> (exchange, bse code). Older databases have no EXCHANGE column,
     # in which case every company is what it always was: NSE.
@@ -393,6 +475,7 @@ def main() -> None:
             "quarters": quarters_by_symbol.get(sym),
             "actions": actions_by_symbol.get(sym),
             "coverage": coverage_by_symbol.get(sym),
+            "ratios": wc_ratios.get(sym),
             # Which exchange this company is listed on, because it decides what
             # can exist on the page. The as-filed quarterly table, the P/E band
             # and the shareholding pattern are all built from NSE endpoints; a
