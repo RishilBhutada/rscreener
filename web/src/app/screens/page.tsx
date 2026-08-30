@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { compile, isValidRatioName, QueryError, Row } from "@/lib/query";
 import { allWatched, toggleActive } from "@/lib/watchlists";
@@ -63,10 +64,17 @@ function fmt(key: string, v: string | number | null): string {
   return v.toLocaleString("en-IN", { maximumFractionDigits: 2 });
 }
 
-export default function Home() {
+function ScreensInner() {
   const [data, setData] = useState<Data | null>(null);
   const [loadError, setLoadError] = useState("");
-  const [query, setQuery] = useState(EXAMPLES[0]);
+  // The query lives in the URL. A screen he built was previously unaddressable:
+  // he could not bookmark it, send it to himself, reload without losing it, or
+  // press Back after opening a company from the results. A screener whose whole
+  // output is a question is a page that should be a link.
+  const router = useRouter();
+  const params = useSearchParams();
+  const urlQuery = params.get("q");
+  const [query, setQuery] = useState(urlQuery || EXAMPLES[0]);
   const [qMode, setQMode] = useState<"builder" | "text">("builder");
   const [showFields, setShowFields] = useState(false);
   // a screen can match hundreds of rows; rendering them all at once was the main
@@ -74,6 +82,7 @@ export default function Home() {
   const [rowLimit, setRowLimit] = useState(25);
   const [applied, setApplied] = useState<{ matches: Row[]; skipped: number; fields: string[] } | null>(null);
   const [queryError, setQueryError] = useState("");
+  const [copied, setCopied] = useState(false);
   const [sortKey, setSortKey] = useState("mcap");
   const [sortDesc, setSortDesc] = useState(true);
   const [screens, setScreens] = useState<Screen[]>([]);
@@ -105,6 +114,25 @@ export default function Home() {
     [ratios]
   );
 
+  /** Run a screen AND make it the address, so Back, reload and a pasted link
+   *  all land on the same result. Replace rather than push when only re-running
+   *  the same query, or the history fills with identical entries. */
+  // Back and forward change the URL without a remount, so the results have to
+  // follow the address rather than the other way round.
+  useEffect(() => {
+    if (!data) return;
+    const q = urlQuery || EXAMPLES[0];
+    setQuery(q);
+    runQuery(q, data.rows);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlQuery, data, ratiosMap]);
+
+  const runAndAddress = useCallback((src: string, rows: Row[]) => {
+    runQuery(src, rows);
+    const next = `/screens?q=${encodeURIComponent(src)}`;
+    if (src !== urlQuery) router.push(next, { scroll: false });
+  }, [urlQuery, router]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   const runQuery = (src: string, rows: Row[]) => {
     try {
       const { run, fields } = compile(src, ratiosMap);
@@ -123,11 +151,6 @@ export default function Home() {
       else setQueryError(String(e));
     }
   };
-
-  useEffect(() => {
-    if (data) runQuery(query, data.rows);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, ratiosMap]);
 
   const addRatio = () => {
     const name = ratioName.trim().toLowerCase();
@@ -236,14 +259,14 @@ export default function Home() {
           </div>
 
           {qMode === "builder" ? (
-            <QueryBuilder onRun={(q) => { setQuery(q); if (data) runQuery(q, data.rows); }} />
+            <QueryBuilder onRun={(q) => { setQuery(q); if (data) runAndAddress(q, data.rows); }} />
           ) : (
             <>
               <textarea
                 id="q"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) data && runQuery(query, data.rows); }}
+                onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) data && runAndAddress(query, data.rows); }}
                 rows={2}
                 spellCheck={false}
                 className="w-full font-mono text-sm border border-[var(--line2)] bg-[var(--card)] text-[var(--ink)] rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
@@ -252,7 +275,7 @@ export default function Home() {
               {queryError && <p className="text-sm text-[var(--neg)]">{queryError}</p>}
               <div className="flex items-center gap-2 flex-wrap">
                 <button
-                  onClick={() => data && runQuery(query, data.rows)}
+                  onClick={() => data && runAndAddress(query, data.rows)}
                   disabled={!data}
                   className="bg-[var(--accent-fill)] hover:opacity-90 disabled:opacity-40 text-[var(--accent-fill-ink)] text-sm font-semibold px-5 py-2 rounded-lg"
                 >
@@ -288,7 +311,7 @@ export default function Home() {
               )}
               <div className="flex gap-2 flex-wrap">
                 {EXAMPLES.map((ex) => (
-                  <button key={ex} onClick={() => { setQuery(ex); data && runQuery(ex, data.rows); }}
+                  <button key={ex} onClick={() => { setQuery(ex); data && runAndAddress(ex, data.rows); }}
                     className="text-xs font-mono bg-[var(--card2)] hover:bg-[var(--accent-soft)] border border-[var(--line)] rounded-full px-3 py-1 text-[var(--ink2)]">
                     {ex}
                   </button>
@@ -321,7 +344,7 @@ export default function Home() {
             {screens.map((s) => (
               <span key={s.name} className="inline-flex items-center gap-1 text-xs bg-[var(--accent-soft)] border border-[var(--accent-line)] rounded-full px-3 py-1">
                 <button className="font-semibold text-[var(--accent-ink)]" title={s.query}
-                  onClick={() => { setQuery(s.query); data && runQuery(s.query, data.rows); }}>
+                  onClick={() => { setQuery(s.query); data && runAndAddress(s.query, data.rows); }}>
                   {s.name}
                 </button>
                 <button onClick={() => deleteScreen(s.name)} aria-label={`delete ${s.name}`} className="text-[var(--accent)] hover:text-[var(--neg)]">×</button>
@@ -416,6 +439,19 @@ export default function Home() {
                 <strong className="text-[var(--ink)]">{applied.matches.length.toLocaleString("en-IN")}</strong> companies match
                 {applied.skipped > 0 && <span className="text-[var(--ink3)]"> · {applied.skipped.toLocaleString("en-IN")} skipped (missing a queried field)</span>}
               </span>
+              <button
+                onClick={() => {
+                  const url = `${location.origin}${location.pathname}?q=${encodeURIComponent(query)}`;
+                  navigator.clipboard?.writeText(url).then(
+                    () => setCopied(true),
+                    () => setCopied(false),
+                  );
+                  setTimeout(() => setCopied(false), 1800);
+                }}
+                className="text-xs font-semibold bg-[var(--card2)] hover:bg-[var(--accent-soft)] border border-[var(--line)] rounded-lg px-3 py-1.5 mr-2"
+              >
+                {copied ? "Link copied" : "Copy link"}
+              </button>
               <button onClick={exportCsv} className="text-xs font-semibold bg-[var(--card2)] hover:bg-[var(--accent-soft)] border border-[var(--line)] rounded-lg px-3 py-1.5">
                 Export CSV (Excel)
               </button>
@@ -494,5 +530,14 @@ export default function Home() {
         </footer>
       </main>
     </div>
+  );
+}
+
+/** useSearchParams needs a Suspense boundary under static export. */
+export default function ScreensPage() {
+  return (
+    <Suspense fallback={null}>
+      <ScreensInner />
+    </Suspense>
   );
 }
