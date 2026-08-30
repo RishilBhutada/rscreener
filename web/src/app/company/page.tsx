@@ -444,33 +444,61 @@ function RatioGrid({ snapshot, row }: { snapshot: Row; row: Row | null }) {
   // Volatility now sits in the list at the same weight as everything else. It was
   // a large separate card, which gave it an importance out of proportion to market
   // cap, price or P/E.
-  const cells: [string, string][] = [
-    ["Market Cap", `₹ ${fmtNum(g("mcap"), 0)} Cr`],
-    ["Current Price", `₹ ${fmtNum(g("price"))}`],
-    ["High / Low", `₹ ${fmtNum(g("wk52_high"), 0)} / ${fmtNum(g("wk52_low"), 0)}`],
-    ["Stock P/E", fmtNum(g("pe"))],
-    ["Book Value", `₹ ${fmtNum(g("book_value"))}`],
-    ["Dividend Yield", `${fmtNum(g("div_yield"))} %`],
-    ["ROCE", `${fmtNum(g("roce"))} %`],
-    ["ROE", `${fmtNum(g("roe"))} %`],
-    ["Sales growth 5Y", `${fmtNum(g("sales_cagr_5y"))} %`],
-    ["Profit growth 5Y", `${fmtNum(g("profit_cagr_5y"))} %`],
-    ["Debt / Equity", fmtNum(g("de"))],
-    ["Promoter holding", `${fmtNum(g("promoter_holding"))} %`],
-    ["Volatility 1Y", vol("volatility_1y")],
-    ["Volatility 30D", vol("volatility_30d")],
+  // A missing value is shown as a bare dash, not "₹ — Cr". Wrapping a currency
+  // symbol and a unit around nothing dresses an absence up as a figure, which is
+  // the one thing this app is not supposed to do.
+  const money = (v: unknown, dec = 2, suffix = "") =>
+    v === null || v === undefined ? "—" : `₹ ${fmtNum(v as number, dec)}${suffix}`;
+  const pct = (v: unknown) =>
+    v === null || v === undefined ? "—" : `${fmtNum(v as number)} %`;
+  const plain = (v: unknown) =>
+    v === null || v === undefined ? "—" : fmtNum(v as number);
+
+  // Grouped by the question each one answers. Fourteen numbers in one flat grid
+  // is a list to read end to end; four short groups is a page to scan.
+  const groups: [string, [string, string][]][] = [
+    ["Size and price", [
+      ["Market Cap", money(g("mcap"), 0, " Cr")],
+      ["Current Price", money(g("price"))],
+      ["High / Low", g("wk52_high") == null && g("wk52_low") == null ? "—"
+        : `₹ ${fmtNum(g("wk52_high"), 0)} / ${fmtNum(g("wk52_low"), 0)}`],
+    ]],
+    ["What it costs", [
+      ["Stock P/E", plain(g("pe"))],
+      ["Book Value", money(g("book_value"))],
+      ["Dividend Yield", pct(g("div_yield"))],
+    ]],
+    ["What it earns", [
+      ["ROCE", pct(g("roce"))],
+      ["ROE", pct(g("roe"))],
+      ["Sales growth 5Y", pct(g("sales_cagr_5y"))],
+      ["Profit growth 5Y", pct(g("profit_cagr_5y"))],
+    ]],
+    ["Risk and ownership", [
+      ["Debt / Equity", plain(g("de"))],
+      ["Promoter holding", pct(g("promoter_holding"))],
+      ["Volatility 1Y", vol("volatility_1y")],
+      ["Volatility 30D", vol("volatility_30d")],
+    ]],
   ];
   const info = open ? METRIC_INFO[open] : null;
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
-      <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-2.5">
-        {cells.map(([label, value]) => (
-          <div key={label} className="flex items-baseline justify-between border-b border-[var(--line)] pb-2">
-            <span className="text-sm text-[var(--ink3)]">
-              {label}
-              <InfoDot label={label} onOpen={setOpen} />
-            </span>
-            <span className="text-sm font-semibold text-[var(--ink)] tabular-nums">{value}</span>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-5">
+        {groups.map(([heading, cells]) => (
+          <div key={heading}>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink3)] mb-1.5">
+              {heading}
+            </h3>
+            {cells.map(([label, value]) => (
+              <div key={label} className="flex items-baseline justify-between border-b border-[var(--line)] py-1.5">
+                <span className="text-sm text-[var(--ink3)]">
+                  {label}
+                  <InfoDot label={label} onOpen={setOpen} />
+                </span>
+                <span className="text-sm font-semibold text-[var(--ink)] tabular-nums">{value}</span>
+              </div>
+            ))}
           </div>
         ))}
       </div>
