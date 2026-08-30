@@ -94,12 +94,21 @@ export default function Home() {
             </Link>
           )}
         </div>
-        <div className="flex flex-wrap gap-2 mt-2">
-          {syms.slice(0, 12).map((sym) => (
+        {/* One line that scrolls sideways, not a block that wraps. Twelve chips
+            with real company names wrapped to three or four rows on a phone,
+            so "Recently viewed" and "Your watchlist" between them pushed
+            everything else off the first screen. A row you swipe costs one
+            line whatever it holds - and it can now hold more than twelve. */}
+        <div className="flex gap-2 mt-2 overflow-x-auto -mx-4 px-4 pb-1
+                        [scrollbar-width:none] [&::-webkit-scrollbar]:hidden
+                        [scroll-snap-type:x_proximity]">
+          {syms.slice(0, 20).map((sym) => (
             <Link
               key={sym}
               href={`/company?s=${encodeURIComponent(sym)}`}
-              className="text-sm rounded-lg border border-[var(--line)] bg-[var(--card)] px-2.5 py-1.5
+              className="text-sm rounded-lg border border-[var(--line)] bg-[var(--card)] px-2.5
+                         min-h-[44px] flex items-center whitespace-nowrap shrink-0
+                         [scroll-snap-align:start]
                          text-[var(--ink2)] hover:border-[var(--line2)] hover:text-[var(--ink)]"
             >
               {nameOf(sym)}

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import ThemeControls from "@/components/ThemeControls";
+import Settings from "@/components/Settings";
 import { buildIndex, search, didYouMean, type SearchIndex, type SearchRow } from "@/lib/search";
 import AccountButton from "@/components/AccountButton";
 
@@ -163,17 +163,17 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
           ))}
         </nav>
 
-        <div className="shrink-0 flex items-center gap-2">
+        {/* Top right. Theme, accent and reload used to sit out here as three
+            unlabelled glyphs competing with the search box for room on a
+            phone. They are settings and an action you use rarely; they belong
+            behind one gear, not in the permanent furniture of every page. */}
+        {/* ml-auto, or the gear does not end up in the top RIGHT corner on a
+            phone. The search box is `order-last w-full` there, so it drops to
+            its own row and this group lands beside the wordmark on the first -
+            hard against the logo on the left, which is where it sat. */}
+        <div className="shrink-0 ml-auto flex items-center gap-2">
           <AccountButton />
-          <ThemeControls />
-          <button
-            onClick={() => window.location.reload()}
-            title="Refresh"
-            aria-label="Refresh the app"
-            className="text-base leading-none rounded-full border border-[var(--line)] bg-[var(--card2)] w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-[var(--ink2)] hover:border-[var(--line2)] active:rotate-180 transition-transform"
-          >
-            ↻
-          </button>
+          <Settings />
         </div>
       </div>
 

@@ -160,3 +160,36 @@ input, textarea, select, button {
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) { --warn: #fbbf24; }
 }
+
+/* Company page, "swipe sideways" mode (Settings → Company page sections).
+ *
+ * The same children that stack vertically in scroll mode become full-width
+ * snap panes here. Doing it in CSS rather than in JSX means a section added to
+ * the page later joins the pager automatically, and neither mode has a
+ * separate copy of the markup that could drift from the other.
+ *
+ * Each pane scrolls vertically on its own, because some sections - a balance
+ * sheet, a 40-row ratios table - are taller than any phone. Locking the pane
+ * to the viewport and letting its content scroll inside keeps "one section at
+ * a time" true without hiding the bottom of the long ones.
+ */
+.rs-pager {
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  gap: 0;
+}
+.rs-pager::-webkit-scrollbar { display: none; }
+.rs-pager > * {
+  flex: 0 0 100%;
+  min-width: 100%;
+  scroll-snap-align: start;
+  max-height: calc(100dvh - 13rem);
+  overflow-y: auto;
+  padding-right: 2px; /* keeps a card's border off the next pane's edge */
+}
+/* Sticky headers inside a statement table stick to the pane, not the page. */
+.rs-pager > * > * { scroll-margin-top: 0; }

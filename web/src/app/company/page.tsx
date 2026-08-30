@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
@@ -9,6 +9,7 @@ import StockChart, { CorpAction, Quarter } from "@/components/StockChart";
 import { Row } from "@/lib/query";
 import { loadNote, pushRecent, saveNote } from "@/lib/store";
 import WatchStar from "@/components/WatchStar";
+import { loadSectionMode, SectionMode } from "@/components/Settings";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -614,6 +615,99 @@ function CompanyView() {
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
 
+  /** Scroll down the page, or swipe between sections one at a time. Set in
+   *  Settings; read here on mount and updated live when Settings changes it,
+   *  so you do not have to reload the company you are already looking at.
+   *  Starts at "scroll" on the server so the markup matches on hydration. */
+  const [mode, setMode] = useState<SectionMode>("scroll");
+  const pager = useRef<HTMLDivElement>(null);
+  const [page, setPage] = useState(0);
+  const [panes, setPanes] = useState(0);
+  // The id of each pane in order, so the section nav can highlight where you
+  // are. Read off the DOM rather than kept as a parallel list, which would go
+  // stale the first time a section is added or made conditional.
+  const [paneIds, setPaneIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    setMode(loadSectionMode());
+    const onMode = (e: Event) => setMode((e as CustomEvent).detail as SectionMode);
+    window.addEventListener("rs-sections", onMode);
+    return () => window.removeEventListener("rs-sections", onMode);
+  }, []);
+
+  // Which pane is in view, and how many there are. Counted from the DOM rather
+  // than from a list of section names, because half the sections are
+  // conditional - a BSE-only company has no quarters, P&L or shareholding, and
+  // a hardcoded count would tell you "section 3 of 12" on a page with 6.
+  useEffect(() => {
+    const el = pager.current;
+    if (!el || mode !== "swipe") { setPanes(0); return; }
+    const measure = () => {
+      setPanes(el.children.length);
+      setPaneIds(Array.from(el.children).map((c) => c.id));
+      setPage(el.clientWidth ? Math.round(el.scrollLeft / el.clientWidth) : 0);
+    };
+    measure();
+    el.addEventListener("scroll", measure, { passive: true });
+    window.addEventListener("resize", measure);
+    return () => { el.removeEventListener("scroll", measure); window.removeEventListener("resize", measure); };
+    // `company` is a dependency because the pager does not exist until the data
+    // arrives - the page renders "Loading…" first. Keyed on `mode` alone it
+    // measured an element that was still null and reported "section 1 of 0".
+  }, [mode, company]);
+
+  const step = useCallback((d: number) => {
+    const el = pager.current;
+    if (!el) return;
+    el.scrollBy({ left: d * el.clientWidth, behavior: "smooth" });
+  }, []);
+
+  /** Jump to a named section while in swipe mode.
+   *
+   *  A plain `#id` link cannot do this job here. The browser scrolls EVERY
+   *  ancestor scroll container to reveal the target - the pager sideways, and
+   *  the window downwards as well - and since the panes are height-capped the
+   *  document is short, so the window scroll left the header stranded above a
+   *  blank strip. Paging by index is exact: every pane is exactly one container
+   *  wide, so pane n sits at n × clientWidth, and the window stays put.
+   *
+   *  Returns false if the section is not inside the pager, in which case the
+   *  ordinary anchor is left to do its ordinary thing.
+   */
+  const goTo = useCallback((id: string) => {
+    const el = pager.current;
+    const target = document.getElementById(id);
+    if (!el || !target) return false;
+    const i = Array.from(el.children).findIndex((c) => c === target || c.contains(target));
+    if (i < 0) return false;
+    // Instant, not smooth. `scroll-snap-type: x mandatory` re-snaps to the
+    // NEAREST pane whenever a smooth scroll is interrupted - and the window
+    // scroll below interrupts it - so a tap on "Balance Sheet" would set off
+    // towards pane 6, get 88px in, and snap straight back to pane 0. Measured:
+    // scrollLeft settled at 0.079 of a pane every time. An instant jump has no
+    // flight for the snapper to interrupt. It is also the better behaviour for
+    // a menu tap: six panes of sideways animation is a long wait for a jump you
+    // asked for by name.
+    el.scrollLeft = i * el.clientWidth;
+    (el.children[i] as HTMLElement).scrollTop = 0;
+    const r = el.getBoundingClientRect();
+    if (Math.abs(r.top - 116) > 24) window.scrollBy({ top: r.top - 116, behavior: "smooth" });
+    return true;
+  }, []);
+
+  // Arrow keys page through it on a desktop, where there is nothing to swipe.
+  useEffect(() => {
+    if (mode !== "swipe") return;
+    const key = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (e.key === "ArrowRight") step(1);
+      if (e.key === "ArrowLeft") step(-1);
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [mode, step]);
+
   useEffect(() => {
     if (!symbol) return;
     pushRecent(symbol);
@@ -750,12 +844,38 @@ function CompanyView() {
           ["ratios", "Ratios", Boolean(company.ratios)],
           ["shareholding", "Investors", Boolean(company.shareholding)],
           ["documents", "Documents", true],
+          ["notes", "Notes", true],
         ] as [string, string, boolean][]).filter(([, , show]) => show).map(([id, label]) => (
-          <a key={id} href={`#${id}`} className="px-3 py-2.5 sm:py-1 rounded-lg whitespace-nowrap text-[var(--ink2)] hover:bg-[var(--card2)] hover:text-[var(--accent-ink)]">
+          <a
+            key={id}
+            href={`#${id}`}
+            onClick={(e) => { if (mode === "swipe" && goTo(id)) e.preventDefault(); }}
+            className={`px-3 py-2.5 sm:py-1 rounded-lg whitespace-nowrap hover:bg-[var(--card2)] hover:text-[var(--accent-ink)] ${
+              mode === "swipe" && panes > 0 && paneIds[page] === id
+                ? "text-[var(--accent-ink)] bg-[var(--accent-soft)] font-semibold"
+                : "text-[var(--ink2)]"}`}
+          >
             {label}
           </a>
         ))}
       </nav>
+
+      {mode === "swipe" && (
+        <div className="flex items-center justify-between gap-2 text-xs text-[var(--ink3)]">
+          <button onClick={() => step(-1)} aria-label="Previous section"
+            className="min-h-[44px] px-3 rounded-lg border border-[var(--line)] bg-[var(--card2)] font-semibold">←</button>
+          <span>Swipe sideways · section {page + 1} of {panes}</span>
+          <button onClick={() => step(1)} aria-label="Next section"
+            className="min-h-[44px] px-3 rounded-lg border border-[var(--line)] bg-[var(--card2)] font-semibold">→</button>
+        </div>
+      )}
+
+      {/* Every section below is a child of this one div, which is the whole
+          mechanism: in scroll mode it stacks them with a gap, in swipe mode CSS
+          turns the same children into full-width scroll-snap panes. Nothing
+          inside the sections knows which mode it is in, so a new section joins
+          the pager by existing. */}
+      <div ref={pager} className={mode === "swipe" ? "rs-pager" : "space-y-6"}>
 
       <div id="summary" className="scroll-mt-32">
         <RatioGrid snapshot={s} row={fullRow} />
@@ -937,7 +1057,9 @@ function CompanyView() {
         <p className="text-xs text-[var(--ink3)]">Use the cross-check link before trusting any number here — this app&apos;s data is unverified.</p>
       </section>
 
-      <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-2">
+      {/* Named, because in swipe mode an unnamed pane is only reachable by
+          swiping past every other one. */}
+      <section id="notes" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-2">
         <h2 className="text-sm font-bold text-[var(--ink)]">Your notes</h2>
         <textarea
           value={note}
@@ -947,6 +1069,8 @@ function CompanyView() {
           className="w-full text-sm border border-[var(--line2)] rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
         />
       </section>
+
+      </div>
 
       <footer className="text-xs text-[var(--ink3)] leading-relaxed pb-8">
         Data: Yahoo Finance via yfinance, as of {company.generated_at} — <strong>every number is unverified until checked against a company filing</strong>. This tool screens; it never recommends.
