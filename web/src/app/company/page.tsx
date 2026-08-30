@@ -151,7 +151,11 @@ function StatementTable({ title, stmt, subtitle, boldRows }: { title: string; st
         <h2 className="text-base font-semibold text-[var(--ink)]">{title}</h2>
         <p className="text-xs text-[var(--ink3)] mt-0.5">{subtitle ?? "Figures in ₹ Crores"}</p>
       </div>
-      <div className="overflow-x-auto">
+      {/* Opens on the NEWEST period. These tables carry up to twenty years of
+          columns oldest-first, so the page landed on 2005 and the reader had to
+          drag sideways every time to reach the year he was actually asking
+          about. The pinned label column stays put either way. */}
+      <div className="overflow-x-auto" ref={(el) => { if (el) el.scrollLeft = el.scrollWidth; }}>
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="text-xs text-[var(--ink3)] border-y border-[var(--line)]">
