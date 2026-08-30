@@ -358,6 +358,18 @@ jobs:
           BEFORE=$(git rev-parse --short HEAD)
           git checkout FETCH_HEAD -- web/src web/package.json web/package-lock.json web/next.config.ts 2>/dev/null || true
           echo "built from $(git rev-parse --short FETCH_HEAD) (this job started at $BEFORE)"
+          # Settings shows when the app last changed. HEAD here is still $BEFORE
+          # - only the source moved - so the stamp has to be told which commit
+          # it is actually building, or it would name the wrong one.
+          {
+            echo "RS_BUILD_COMMIT=$(git rev-parse --short FETCH_HEAD)"
+            # Delimiter form, not KEY=value: a subject is free text and mine
+            # routinely contain quotes and dollar signs, which inside an echo
+            # would either truncate the value or be expanded by the shell.
+            echo "RS_BUILD_SUBJECT<<RS_EOF"
+            git log -1 --format=%s FETCH_HEAD | cut -c1-120
+            echo "RS_EOF"
+          } >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
         with:
           node-version: 22

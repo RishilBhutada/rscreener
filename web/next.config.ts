@@ -6,9 +6,15 @@ import { execSync } from "node:child_process";
 function git(cmd: string): string {
   try { return execSync(cmd, { encoding: "utf8" }).trim(); } catch { return ""; }
 }
+// CI overrides these. The nightly checks out main, fetches for hours, and then
+// moves ONLY web/src and the build files forward to the newest commit - HEAD
+// stays at whatever main was when the run started. So `git rev-parse HEAD` on
+// the runner names a commit whose code is not the code being built, and
+// Settings would answer "when did the app last change" with the wrong change.
+// The workflow passes the commit it actually built from instead.
 const BUILD_TIME = new Date().toISOString();
-const BUILD_COMMIT = git("git rev-parse --short HEAD");
-const BUILD_SUBJECT = git("git log -1 --format=%s");
+const BUILD_COMMIT = process.env.RS_BUILD_COMMIT || git("git rev-parse --short HEAD");
+const BUILD_SUBJECT = process.env.RS_BUILD_SUBJECT || git("git log -1 --format=%s");
 
 import type { NextConfig } from "next";
 
