@@ -18,6 +18,7 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<Lite[]>([]);
   const [hi, setHi] = useState(0);
+  const [moreOpen, setMoreOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
 
   const ensureData = async () => {
@@ -52,6 +53,22 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
     (document.activeElement as HTMLElement | null)?.blur();
     router.push(`/company?s=${encodeURIComponent(sym)}`);
   };
+
+  // Five for the bar, three behind More. Split by whether it is somewhere you
+  // go mid-task: you jump to a company, your lists or the screener constantly;
+  // you check the calendar, an IPO or data freshness occasionally.
+  const PRIMARY: [string, string, string, string][] = [
+    ["home", "Home", "/", "⌂"],
+    ["watchlists", "Lists", "/watchlists", "★"],
+    ["screens", "Screener", "/screens", "≡"],
+    ["portfolio", "Portfolio", "/portfolio", "◑"],
+  ];
+  const SECONDARY: [string, string, string][] = [
+    ["sectors", "Sectors", "/sectors"],
+    ["calendar", "Calendar", "/calendar"],
+    ["ipo", "IPO", "/ipo"],
+    ["status", "Data", "/status"],
+  ];
 
   const links: [string, string, string][] = [
     ["home", "Home", "/"],
@@ -165,17 +182,66 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
           label then overflowed its cell and printed straight over "Data" sitting
           beside it. Any fixed grid breaks the moment a label or the link count
           changes; letting each item take its own width cannot. */}
-      <nav className="sm:hidden flex flex-wrap gap-x-1 gap-y-0.5 px-3 pb-2 text-[13px] font-medium">
-        {links.map(([key, label, href]) => (
+      {/* On a phone this was eight links wrapping into two rows at the top of
+          every page - roughly 80px of chrome above the content, scrolled away
+          the moment you started reading, and unreachable again without scrolling
+          all the way back up. Pages here run to eight screens.
+
+          It is now a fixed bar at the BOTTOM: five destinations, thumb-height,
+          always reachable. Five and not eight because a row of eight on a 375px
+          screen gives each one 47px including its label, which is a target you
+          miss. The three that did not make the cut - Calendar, IPO and Data -
+          are reachable from the More sheet, and none of them is somewhere you
+          go mid-task. */}
+      <nav className="sm:hidden fixed bottom-0 inset-x-0 z-40 grid grid-cols-5 border-t border-[var(--line)] bg-[var(--card)] pb-[env(safe-area-inset-bottom)]">
+        {PRIMARY.map(([key, label, href, icon]) => (
           <Link
             key={key}
             href={href}
-            className={`px-2.5 py-2 rounded-lg whitespace-nowrap ${active === key ? "text-[var(--accent-ink)] bg-[var(--accent-soft)] font-semibold" : "text-[var(--ink2)]"}`}
+            aria-current={active === key ? "page" : undefined}
+            className={`flex flex-col items-center justify-center gap-0.5 min-h-[56px] text-[11px] font-medium ${
+              active === key ? "text-[var(--accent-ink)]" : "text-[var(--ink3)]"}`}
           >
+            <span aria-hidden="true" className="text-base leading-none">{icon}</span>
             {label}
           </Link>
         ))}
+        <button
+          onClick={() => setMoreOpen(true)}
+          className="flex flex-col items-center justify-center gap-0.5 min-h-[56px] text-[11px] font-medium text-[var(--ink3)]"
+        >
+          <span aria-hidden="true" className="text-base leading-none">···</span>
+          More
+        </button>
       </nav>
+
+      {moreOpen && (
+        <div className="sm:hidden fixed inset-0 z-50" onClick={() => setMoreOpen(false)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div
+            className="absolute bottom-0 inset-x-0 bg-[var(--card)] rounded-t-2xl border-t border-[var(--line)] p-2 pb-[calc(env(safe-area-inset-bottom)+8px)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {SECONDARY.map(([key, label, href]) => (
+              <Link
+                key={key}
+                href={href}
+                onClick={() => setMoreOpen(false)}
+                className={`block px-4 min-h-[48px] flex items-center rounded-lg text-sm font-medium ${
+                  active === key ? "text-[var(--accent-ink)] bg-[var(--accent-soft)]" : "text-[var(--ink2)]"}`}
+              >
+                {label}
+              </Link>
+            ))}
+            <button
+              onClick={() => setMoreOpen(false)}
+              className="w-full px-4 min-h-[48px] text-sm font-semibold text-[var(--ink3)]"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </header>
   );
 }
