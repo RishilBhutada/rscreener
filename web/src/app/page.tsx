@@ -193,13 +193,17 @@ export default function Home() {
                 <Link
                   key={r.symbol}
                   href={`/company?s=${encodeURIComponent(r.symbol)}`}
-                  className="flex items-center gap-3 px-3.5 min-h-[52px] border-b border-[var(--line)] last:border-b-0 hover:bg-[var(--card2)]"
+                  className="flex items-center gap-3 px-3.5 min-h-[44px] border-b border-[var(--line)] last:border-b-0 hover:bg-[var(--card2)]"
                 >
-                  <span className="flex-1 min-w-0">
-                    <span className="block text-sm font-semibold text-[var(--ink)] truncate">
+                  {/* One line, not two. The name and ticker sat stacked, so eight
+                      companies cost sixteen lines of a phone screen. They now sit
+                      on a single line that scrolls sideways when a name is long,
+                      rather than wrapping or being cut off. */}
+                  <span className="flex-1 min-w-0 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    <span className="text-sm font-semibold text-[var(--ink)]">
                       {shortName(r.name) || r.symbol}
                     </span>
-                    <span className="block text-[11px] text-[var(--ink3)]">{r.symbol}</span>
+                    <span className="ml-2 text-[11px] text-[var(--ink3)]">{r.symbol}</span>
                   </span>
                   <span className="text-sm tabular-nums text-[var(--ink)] shrink-0">
                     {r.price != null ? `₹${r.price.toLocaleString("en-IN")}` : "—"}
