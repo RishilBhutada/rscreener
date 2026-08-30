@@ -34,9 +34,23 @@ permissions:
   id-token: write
 
 concurrency:
-  # Its own group, so a push cannot cancel a refresh that is already hours in.
-  group: nightly-refresh
-  cancel-in-progress: false
+  # TWO groups, because these are two different jobs wearing one name.
+  #
+  # A FETCHING run takes hours and must never be cancelled by a push - that was
+  # the original reason for this group. But publish-only runs were sharing it
+  # with cancel-in-progress:false, and GitHub keeps only ONE pending run per
+  # group: each new push cancelled the publish the previous push had queued.
+  # Runs 92, 93 and 94 were all cancelled that way on 30-Aug and the site sat on
+  # code from ten commits earlier while every workflow reported success.
+  #
+  # Publishing is idempotent and the newest code should always win, so
+  # publish-only runs get their own group where the newest cancels the rest.
+  # The two can overlap safely: they hold separate runner filesystems, and Pages
+  # serialises deployments through the github-pages environment.
+  group: >-
+    nightly-${{ inputs.scope == 'rebuild and publish only (no fetching)'
+      && 'publish' || 'refresh' }}
+  cancel-in-progress: ${{ inputs.scope == 'rebuild and publish only (no fetching)' }}
 
 jobs:
   refresh:
