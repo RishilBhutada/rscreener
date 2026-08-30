@@ -142,6 +142,57 @@ def coverage_notes(con: sqlite3.Connection) -> dict[str, dict]:
     return out
 
 
+def why_no_pe(con: sqlite3.Connection, listing: dict) -> dict[str, str]:
+    """Why a company has no valuation chart, in its own terms.
+
+    2,766 of 4,746 companies show no P/E band and the page said nothing about
+    any of them, so every one looked like a fault in the site. None of them is:
+    every case is the app declining to publish a P/E that would not mean
+    anything. But an unexplained absence is indistinguishable from a bug, and
+    this project's whole position is that a missing number should say why.
+
+        BSE-only          no NSE filings exist to build a TTM from
+        no quarters       nothing filed yet
+        1-3 quarters      a trailing-twelve-month figure needs four
+        loss-making       a negative P/E is a loss, not a cheap share
+        too few points    fewer than twelve profitable quarters to draw
+    """
+    eps: dict[str, list] = {}
+    for s, pe, v in con.execute(
+        "SELECT symbol, period_end, MAX(CASE WHEN item='eps' THEN value END) "
+        "FROM results_history WHERE period_type='quarterly' AND item='eps' "
+        "GROUP BY symbol, period_end ORDER BY symbol, period_end"
+    ):
+        if v is not None:
+            eps.setdefault(s, []).append(float(v))
+
+    out: dict[str, str] = {}
+    for sym, exch in listing.items():
+        e = eps.get(sym, [])
+        if exch == "BSE":
+            out[sym] = ("This company is listed only on the BSE. The valuation charts are built "
+                        "from NSE's filing archive, which does not carry it, so there is nothing "
+                        "to draw rather than something missing.")
+        elif not e:
+            out[sym] = ("No quarterly results have been filed for this company yet, and a "
+                        "price-to-earnings line needs earnings.")
+        elif len(e) < 4:
+            out[sym] = (f"Only {len(e)} quarter{'s' if len(e) > 1 else ''} of results have been "
+                        f"filed so far. A trailing-twelve-month figure needs four consecutive "
+                        f"quarters, so the P/E line starts once the fourth is published.")
+        else:
+            ttms = [sum(e[i - 4:i]) for i in range(4, len(e) + 1)]
+            pos = sum(1 for t in ttms if t > 0)
+            if pos == 0:
+                out[sym] = ("This company has not earned a profit over any twelve months on "
+                            "record. A negative P/E is a loss, not a cheap share, so the line "
+                            "is left out rather than drawn below zero.")
+            elif pos < 12:
+                out[sym] = (f"Only {pos} of the {len(ttms)} twelve-month periods on record were "
+                            f"profitable, which is too few points to draw a meaningful band.")
+    return out
+
+
 def working_capital_ratios(con: sqlite3.Connection) -> dict[str, dict]:
     """Per-year working-capital ratios: the one section screener.in has that this
     app did not.
@@ -396,6 +447,10 @@ def main() -> None:
                    for r in con.execute("SELECT SYMBOL, EXCHANGE, BSE_CODE FROM universe")}
     except Exception:  # noqa: BLE001
         listing = {}
+    # AFTER `listing` is built. Placed before it, this raised UnboundLocalError -
+    # the same ordering fault this codebase keeps producing: a computation
+    # written above the thing that populates its input.
+    no_pe = why_no_pe(con, {s: e for s, (e, _) in listing.items()})
     actions_by_symbol = corporate_actions(con)
     trends = build_trends(con, shares_by_symbol, only)
     bands = ratio_bands(con, shares_by_symbol, netdebt_by_symbol, only)
@@ -476,6 +531,7 @@ def main() -> None:
             "actions": actions_by_symbol.get(sym),
             "coverage": coverage_by_symbol.get(sym),
             "ratios": wc_ratios.get(sym),
+            "no_pe_reason": None if (bands.get(sym, {}) or {}).get("pe") else no_pe.get(sym),
             # Which exchange this company is listed on, because it decides what
             # can exist on the page. The as-filed quarterly table, the P/E band
             # and the shareholding pattern are all built from NSE endpoints; a

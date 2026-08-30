@@ -56,6 +56,7 @@ type Company = {
   actions?: CorpAction[] | null;
   coverage?: Coverage | null;
   ratios?: WcRatios | null;
+  no_pe_reason?: string | null;
   exchange?: string | null;
   bse_code?: number | string | null;
 };
@@ -852,6 +853,17 @@ function CompanyView() {
           Financial statements haven&apos;t been fetched for this company yet — showing the snapshot only.
           Statements coverage grows as the pipeline runs.
         </div>
+      )}
+
+      {/* 2,766 of 4,746 companies have no valuation chart and the page said
+          nothing about any of them, so every one looked like a fault. None is:
+          each is the app declining to publish a P/E that would not mean
+          anything. An unexplained absence is indistinguishable from a bug. */}
+      {company.no_pe_reason && (
+        <p className="text-[13px] leading-relaxed text-[var(--ink3)] border border-[var(--line)] rounded-xl p-3 bg-[var(--card2)]">
+          <span className="font-semibold text-[var(--ink2)]">No price-to-earnings chart for this company.</span>{" "}
+          {company.no_pe_reason}
+        </p>
       )}
 
       {company.ratios && <RatiosTable r={company.ratios} />}
