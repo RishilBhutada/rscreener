@@ -666,7 +666,7 @@ function CompanyView() {
         </div>
       )}
 
-      <nav className="static sm:sticky sm:top-14 z-20 -mx-4 px-4 bg-[var(--card)] border-y border-[var(--line)] flex gap-1 overflow-x-auto text-sm font-medium py-2 sm:py-1.5 [scrollbar-width:none]">
+      <nav className="sticky top-0 sm:top-14 z-20 -mx-4 px-4 bg-[var(--card)] border-y border-[var(--line)] flex gap-1 overflow-x-auto text-sm font-medium py-2 sm:py-1.5 [scrollbar-width:none]">
         {/* Built from what this company ACTUALLY has. Five of these sections are
             conditionally rendered - quarters, P&L, balance sheet, cash flow and
             shareholding all depend on data that may not exist - while the nav
