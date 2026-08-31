@@ -379,12 +379,27 @@ jobs:
           # - only the source moved - so the stamp has to be told which commit
           # it is actually building, or it would name the wrong one.
           {
-            echo "RS_BUILD_COMMIT=$(git rev-parse --short FETCH_HEAD)"
+            # The last commit that CHANGED THE APP, not the tip of main.
+            #
+            # This job commits scorecard_history.json and depth_baseline.json
+            # under [skip ci] and pushes them BEFORE the fetch below, so the tip
+            # is routinely the run's own housekeeping. Settings then answered
+            # "when did the app last change" with "Nightly: record the
+            # data-quality score and depth ratchet" - which is not a change to
+            # the app, and was what it said on the live site on 31-Aug.
+            #
+            # Its DATE, too. BUILD_TIME was the moment the site was rebuilt, and
+            # this site rebuilds every night whether anything changed or not, so
+            # "last changed" advanced daily on its own.
+            REF=$(git log -1 --format=%H --invert-grep --grep="\[skip ci\]" FETCH_HEAD || true)
+            REF=${REF:-$(git rev-parse FETCH_HEAD)}
+            echo "RS_BUILD_COMMIT=$(git rev-parse --short "$REF")"
+            echo "RS_BUILD_TIME=$(git log -1 --format=%cI "$REF")"
             # Delimiter form, not KEY=value: a subject is free text and mine
             # routinely contain quotes and dollar signs, which inside an echo
             # would either truncate the value or be expanded by the shell.
             echo "RS_BUILD_SUBJECT<<RS_EOF"
-            git log -1 --format=%s FETCH_HEAD | cut -c1-120
+            git log -1 --format=%s "$REF" | cut -c1-120
             echo "RS_EOF"
           } >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4

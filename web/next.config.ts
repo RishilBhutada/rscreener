@@ -12,7 +12,13 @@ function git(cmd: string): string {
 // the runner names a commit whose code is not the code being built, and
 // Settings would answer "when did the app last change" with the wrong change.
 // The workflow passes the commit it actually built from instead.
-const BUILD_TIME = new Date().toISOString();
+// When the CODE last changed, not when the site was last built. This site
+// rebuilds every night whether or not anything changed, so a build timestamp
+// made "Last changed" advance daily on its own - it read today's date every
+// day, which is the least useful answer to the question it claims to answer.
+// The workflow supplies the commit date of the last non-housekeeping commit;
+// a local build has no such notion and falls back to now.
+const BUILD_TIME = process.env.RS_BUILD_TIME || new Date().toISOString();
 const BUILD_COMMIT = process.env.RS_BUILD_COMMIT || git("git rev-parse --short HEAD");
 const BUILD_SUBJECT = process.env.RS_BUILD_SUBJECT || git("git log -1 --format=%s");
 
