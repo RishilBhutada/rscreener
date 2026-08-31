@@ -536,6 +536,81 @@ function InfoDot({ label, onOpen }: { label: string; onOpen: (l: string) => void
   );
 }
 
+/** What the shareholding table says, in a sentence.
+ *
+ *  Tickertape gets this right structurally and wrong editorially: it prints
+ *  "increasing promoter holding is considered good and reflects management's
+ *  positive view" beside the number. That is an opinion about a motive nobody
+ *  outside the company knows. The change itself is a fact, it is arithmetic on
+ *  a table already on this page, and a reader scanning twelve columns of
+ *  50.24 / 50.13 / 50.11 will not otherwise notice that the promoters have been
+ *  selling for eight quarters running.
+ *
+ *  So: the movement, over three windows, and nothing about what it means.
+ */
+function HoldingTrend({ s }: { s: Shareholding }) {
+  const p = s.promoter, d = s.dates;
+  const n = p.length;
+  if (n < 2) return null;
+
+  const q = (label: string, back: number) => {
+    const i = n - 1 - back;
+    if (i < 0) return null;
+    const from = p[i], to = p[n - 1];
+    if (typeof from !== "number" || typeof to !== "number") return null;
+    const diff = to - from;
+    // Below five hundredths of a point the exchange's own rounding is larger
+    // than the movement, so calling it a change would be reading noise.
+    const moved = Math.abs(diff) >= 0.05;
+    return {
+      label,
+      from: d[i],
+      text: moved
+        ? `${diff > 0 ? "rose" : "fell"} ${Math.abs(diff).toFixed(2)} points, ${from.toFixed(2)}% to ${to.toFixed(2)}%`
+        : `unchanged at ${to.toFixed(2)}%`,
+      up: moved ? diff > 0 : null,
+    };
+  };
+
+  const windows = [q("Last quarter", 1), q("Over a year", 4), q(`Since ${d[0]?.slice(0, 7)}`, n - 1)]
+    .filter(Boolean) as { label: string; from: string; text: string; up: boolean | null }[];
+
+  // A run of consecutive falls is the thing a table of near-identical numbers
+  // hides best, and the thing most worth noticing.
+  let streak = 0;
+  for (let i = n - 1; i > 0; i--) {
+    // The series is (number | null)[] - a quarter can be filed with the
+    // promoter line missing - so the two values are checked, not the result.
+    const a = p[i], b = p[i - 1];
+    if (typeof a !== "number" || typeof b !== "number") break;
+    if (a - b <= -0.05) streak++;
+    else break;
+  }
+
+  return (
+    <div className="px-4 pb-3.5 pt-1 space-y-1.5 border-t border-[var(--line)]">
+      <p className="text-xs font-semibold text-[var(--ink2)] pt-2.5">Promoter stake</p>
+      {windows.map((w) => (
+        <p key={w.label} className="text-[13px] text-[var(--ink3)]">
+          <span className="text-[var(--ink2)]">{w.label}:</span>{" "}
+          <span style={{ color: w.up === null ? undefined : w.up ? "var(--pos)" : "var(--neg)" }}>
+            {w.text}
+          </span>
+        </p>
+      ))}
+      {streak >= 3 && (
+        <p className="text-[13px] text-[var(--ink2)]">
+          Promoters have reduced their stake in {streak} consecutive quarters.
+        </p>
+      )}
+      <p className="text-[11px] text-[var(--ink3)] pt-0.5">
+        A movement is stated, never interpreted. Promoters sell and buy for reasons
+        no filing discloses — pledges, estate planning, an unrelated business.
+      </p>
+    </div>
+  );
+}
+
 /** The nine Piotroski tests, as written by the pipeline. `pass` is null for a
  *  test whose inputs are not in both filed years. */
 type FScoreData = {
@@ -1327,7 +1402,11 @@ function CompanyView() {
               { label: "Employee trusts %", values: company.shareholding.employee },
             ],
           }}
-        /></div>
+        />
+          <div className="bg-[var(--card)] rounded-b-xl border border-t-0 border-[var(--line)] -mt-px">
+            <HoldingTrend s={company.shareholding} />
+          </div>
+        </div>
       )}
 
       <section id="documents" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-3">
