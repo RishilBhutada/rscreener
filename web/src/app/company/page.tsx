@@ -58,6 +58,7 @@ type Company = {
   coverage?: Coverage | null;
   ratios?: WcRatios | null;
   no_pe_reason?: string | null;
+  fscore?: FScoreData | null;
   exchange?: string | null;
   bse_code?: number | string | null;
   /** Written by pipeline/export_company_json.py so this page need not download
@@ -532,6 +533,95 @@ function InfoDot({ label, onOpen }: { label: string; onOpen: (l: string) => void
         <circle cx="12" cy="12" r="2.6" />
       </svg>
     </button>
+  );
+}
+
+/** The nine Piotroski tests, as written by the pipeline. `pass` is null for a
+ *  test whose inputs are not in both filed years. */
+type FScoreData = {
+  score: number;
+  measured: number;
+  of: number;
+  years: [string, string] | string[];
+  checks: { name: string; test: string; pass: boolean | null; detail: string | null }[];
+};
+
+/** Piotroski F-score, with every one of its nine tests on screen.
+ *
+ *  The only composite score this app carries, and the condition is that the
+ *  total never appears without its workings. Trendlyne shows Durability,
+ *  Valuation and Momentum scores whose construction is not published, which
+ *  makes them impossible to argue with; Piotroski published his nine tests in
+ *  2000 and each is arithmetic on two consecutive years of filed accounts, so
+ *  every one can be checked and disagreed with individually.
+ *
+ *  It is not a recommendation and is not treated as one: a nine is a company
+ *  whose accounts improved on nine measures last year, which is a fact about
+ *  the past, not a view about the price.
+ */
+function FScore({ f }: { f: FScoreData }) {
+  const total = f.measured || 1;
+  // Green above two thirds, red below a third - the same reading Piotroski
+  // gave the score, stated on screen rather than left to a colour.
+  const tone = f.score / total >= 0.67 ? "var(--pos)"
+    : f.score / total <= 0.33 ? "var(--neg)" : "var(--warn)";
+  return (
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="text-base font-semibold text-[var(--ink)]">Nine tests on the accounts</h2>
+          <p className="text-xs text-[var(--ink3)] mt-0.5 max-w-xl">
+            The Piotroski F-score, comparing {f.years[1].slice(0, 4)} against{" "}
+            {f.years[0].slice(0, 4)}. Every test is arithmetic on two filed years, and
+            all nine are shown — a score whose workings are hidden cannot be argued with.
+          </p>
+        </div>
+        <div className="text-right shrink-0">
+          <div className="flex items-baseline gap-0.5">
+            <span className="text-3xl font-bold tabular-nums" style={{ color: tone }}>{f.score}</span>
+            <span className="text-sm text-[var(--ink3)]">/{f.measured}</span>
+          </div>
+          {f.measured < f.of && (
+            <p className="text-[11px] text-[var(--ink3)]">
+              {f.of - f.measured} of {f.of} not measurable
+            </p>
+          )}
+        </div>
+      </div>
+
+      <ul className="mt-3 divide-y divide-[var(--line)]">
+        {f.checks.map((c) => (
+          <li key={c.test} className="py-2 flex items-start gap-2.5">
+            <span
+              aria-hidden="true"
+              className="mt-0.5 shrink-0 w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold"
+              style={{
+                background: c.pass === null ? "var(--card2)" : c.pass ? "var(--pos)" : "var(--neg)",
+                color: c.pass === null ? "var(--ink3)" : "var(--card)",
+                border: c.pass === null ? "1px solid var(--line2)" : "none",
+              }}
+            >
+              {c.pass === null ? "?" : c.pass ? "\u2713" : "\u2715"}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="text-sm text-[var(--ink)]">{c.name}</span>
+              <span className="sr-only">
+                {c.pass === null ? " - not measurable" : c.pass ? " - passed" : " - failed"}
+              </span>
+              <span className="block text-[11px] text-[var(--ink3)]">
+                {c.test}
+                {c.detail ? ` — ${c.detail}` : " — not reported in both years, so not scored"}
+              </span>
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      <p className="text-[11px] text-[var(--ink3)] mt-3">
+        A test whose inputs are missing counts as neither a pass nor a fail. Scoring an
+        absent figure as zero would turn missing data into bad news, which is not what it is.
+      </p>
+    </section>
   );
 }
 
@@ -1146,6 +1236,7 @@ function CompanyView() {
 
       <div id="analysis" className="scroll-mt-32 space-y-4">
         <ProsCons row={fullRow} />
+        {company.fscore && <FScore f={company.fscore} />}
         <ValuationHistory company={company} />
       </div>
 

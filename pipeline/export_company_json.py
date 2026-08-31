@@ -193,6 +193,140 @@ def why_no_pe(con: sqlite3.Connection, listing: dict) -> dict[str, str]:
     return out
 
 
+def piotroski(con) -> dict[str, dict]:
+    """Piotroski F-score: nine pass/fail tests on the filed accounts, 0 to 9.
+
+    The one composite score worth carrying, and the reason is that it has no
+    hidden weights. Trendlyne shows a Durability, a Valuation and a Momentum
+    score whose construction is not published, which makes them impossible to
+    argue with - the opposite of what this app is for. Piotroski published his
+    nine tests in 2000 and every one is arithmetic on two consecutive years of
+    filed statements, so the whole thing can be shown check by check and
+    disagreed with line by line. That is the condition on which it ships here:
+    the total is never displayed without all nine.
+
+        Profitable      1 return on assets is positive
+                        2 operating cash flow is positive
+                        3 return on assets improved on last year
+                        4 operating cash flow exceeds net profit (earnings are cash)
+        Safer           5 long-term debt fell as a share of assets
+                        6 current ratio improved
+                        7 no new shares issued
+        More efficient  8 gross margin improved
+                        9 assets turned over faster
+
+    A test whose inputs are missing is UNMEASURED, never a fail. A company with
+    four passes out of nine measured is a different statement from one with four
+    out of nine tested, and scoring the missing years as zeros would quietly
+    turn absent data into bad news - the failure this codebase keeps hunting.
+    """
+    if not _table_exists(con, "statements"):
+        return {}
+    WANT = ("Net Income", "Total Revenue", "Gross Profit", "Operating Cash Flow",
+            "Total Assets", "Current Assets", "Current Liabilities",
+            "Long Term Debt", "Ordinary Shares Number")
+    rows = con.execute(
+        "SELECT symbol, period_end, item, value FROM statements "
+        "WHERE period_type='annual' AND item IN ({}) "
+        "ORDER BY symbol, period_end".format(",".join("?" * len(WANT))), WANT
+    ).fetchall()
+    by: dict[str, dict[str, dict]] = {}
+    for sym, pe, item, val in rows:
+        if val is not None:
+            by.setdefault(sym, {}).setdefault(pe, {})[item] = float(val)
+
+    def div(a, b):
+        if a is None or b is None or not b:
+            return None
+        return a / b
+
+    out: dict[str, dict] = {}
+    for sym, periods in by.items():
+        pers = sorted(periods)
+        if len(pers) < 2:
+            continue
+        cur, prev = periods[pers[-1]], periods[pers[-2]]
+
+        roa_c = div(cur.get("Net Income"), cur.get("Total Assets"))
+        roa_p = div(prev.get("Net Income"), prev.get("Total Assets"))
+        cfo_c = cur.get("Operating Cash Flow")
+        # A company with NO long-term debt has no such line on its balance
+        # sheet, and reading that absence as "cannot tell" left TCS - which
+        # carries none - unmeasured on the one test it most obviously passes.
+        # Absent means zero, but ONLY when the balance sheet itself is present
+        # for that year: without that guard an unparsed balance sheet would
+        # score a confident pass on debt it never reported either way.
+        def ltd(year):
+            if year.get("Total Assets") is None:
+                return None
+            return div(year.get("Long Term Debt") or 0.0, year.get("Total Assets"))
+        ltd_c, ltd_p = ltd(cur), ltd(prev)
+        cr_c = div(cur.get("Current Assets"), cur.get("Current Liabilities"))
+        cr_p = div(prev.get("Current Assets"), prev.get("Current Liabilities"))
+        sh_c, sh_p = cur.get("Ordinary Shares Number"), prev.get("Ordinary Shares Number")
+        gm_c = div(cur.get("Gross Profit"), cur.get("Total Revenue"))
+        gm_p = div(prev.get("Gross Profit"), prev.get("Total Revenue"))
+        at_c = div(cur.get("Total Revenue"), cur.get("Total Assets"))
+        at_p = div(prev.get("Total Revenue"), prev.get("Total Assets"))
+
+        tests = [
+            ("Profits are positive", "Return on assets above zero",
+             None if roa_c is None else roa_c > 0,
+             None if roa_c is None else "{:+.1f}% return on assets".format(roa_c * 100)),
+            ("Operations generate cash", "Operating cash flow above zero",
+             None if cfo_c is None else cfo_c > 0,
+             None if cfo_c is None else "Rs {:,.0f} crore from operations".format(cfo_c / 1e7)),
+            ("Returns improved", "Return on assets higher than last year",
+             None if (roa_c is None or roa_p is None) else roa_c > roa_p,
+             None if (roa_c is None or roa_p is None)
+             else "{:+.1f}% against {:+.1f}% last year".format(roa_c * 100, roa_p * 100)),
+            ("Profits are real cash", "Operating cash flow exceeds net profit",
+             None if (cfo_c is None or cur.get("Net Income") is None) else cfo_c > cur["Net Income"],
+             None if (cfo_c is None or cur.get("Net Income") is None)
+             else "Rs {:,.0f} crore cash against Rs {:,.0f} crore profit".format(
+                 cfo_c / 1e7, cur["Net Income"] / 1e7)),
+            ("Less reliant on debt", "Long-term debt fell as a share of assets",
+             None if (ltd_c is None or ltd_p is None) else ltd_c <= ltd_p,
+             None if (ltd_c is None or ltd_p is None)
+             else ("unchanged at {:.1f}% of assets".format(ltd_c * 100)
+                   if round(ltd_c * 100, 1) == round(ltd_p * 100, 1)
+                   else "{:.1f}% of assets against {:.1f}%".format(ltd_c * 100, ltd_p * 100))),
+            ("Better able to pay its bills", "Current ratio improved",
+             None if (cr_c is None or cr_p is None) else cr_c > cr_p,
+             None if (cr_c is None or cr_p is None)
+             else ("unchanged at {:.2f}".format(cr_c) if round(cr_c, 2) == round(cr_p, 2)
+                   else "{:.2f} against {:.2f}".format(cr_c, cr_p))),
+            ("Owners not diluted", "No new shares issued",
+             None if (sh_c is None or sh_p is None) else sh_c <= sh_p,
+             None if (sh_c is None or sh_p is None)
+             # "-0.0% shares outstanding" is a rounding artefact, not a figure.
+             else ("share count unchanged"
+                   if sh_c == sh_p or abs(sh_c / sh_p - 1) < 0.0005
+                   else "{:+.1f}% shares outstanding".format((sh_c / sh_p - 1) * 100))),
+            ("Keeping more of each sale", "Gross margin improved",
+             None if (gm_c is None or gm_p is None) else gm_c > gm_p,
+             None if (gm_c is None or gm_p is None)
+             else "{:.1f}% against {:.1f}%".format(gm_c * 100, gm_p * 100)),
+            ("Working its assets harder", "Revenue per rupee of assets improved",
+             None if (at_c is None or at_p is None) else at_c > at_p,
+             None if (at_c is None or at_p is None)
+             else ("unchanged at {:.2f}x".format(at_c) if round(at_c, 2) == round(at_p, 2)
+                   else "{:.2f}x against {:.2f}x".format(at_c, at_p))),
+        ]
+        measured = [t for t in tests if t[2] is not None]
+        if len(measured) < 5:
+            continue        # too little of it tested to mean anything
+        out[sym] = {
+            "score": sum(1 for t in measured if t[2]),
+            "measured": len(measured),
+            "of": len(tests),
+            "years": [pers[-2][:10], pers[-1][:10]],
+            "checks": [{"name": n, "test": d, "pass": p, "detail": det}
+                       for n, d, p, det in tests],
+        }
+    return out
+
+
 def working_capital_ratios(con: sqlite3.Connection) -> dict[str, dict]:
     """Per-year working-capital ratios: the one section screener.in has that this
     app did not.
@@ -520,6 +654,7 @@ def main() -> None:
     netdebt_by_symbol = net_debt_series(con)
     quarters_by_symbol = quarter_blocks(con)
     wc_ratios = working_capital_ratios(con)
+    fscores = piotroski(con)
     coverage_by_symbol = coverage_notes(con)
     # symbol -> (exchange, bse code). Older databases have no EXCHANGE column,
     # in which case every company is what it always was: NSE.
@@ -615,6 +750,7 @@ def main() -> None:
             "actions": actions_by_symbol.get(sym),
             "coverage": coverage_by_symbol.get(sym),
             "ratios": wc_ratios.get(sym),
+            "fscore": fscores.get(sym),
             "no_pe_reason": None if (bands.get(sym, {}) or {}).get("pe") else no_pe.get(sym),
             # Which exchange this company is listed on, because it decides what
             # can exist on the page. The as-filed quarterly table, the P/E band
