@@ -536,6 +536,129 @@ function InfoDot({ label, onOpen }: { label: string; onOpen: (l: string) => void
   );
 }
 
+/** Documents grouped by the financial year they belong to.
+ *
+ *  They were three flat lists by type: annual-report chips, the newest eight
+ *  concalls, the newest five rating updates. Two problems with that. The caps
+ *  threw away everything older without saying so - a company with forty filed
+ *  documents showed thirteen. And the shape answered the wrong question: a
+ *  reader looking at FY2024 wants that year's annual report next to that year's
+ *  four concalls, not to cross-reference three lists sorted three ways.
+ *
+ *  Tickertape has this right, and it is the one structural idea worth taking
+ *  from their documents section.
+ *
+ *  A financial year here is named for the year it ENDS, the Indian convention:
+ *  FY2026 runs April 2025 to March 2026, so a document dated July 2026 belongs
+ *  to FY2027.
+ */
+function fyOf(iso: string): number | null {
+  const m = /^(\d{4})-(\d{2})/.exec(String(iso));
+  if (!m) return null;
+  const y = Number(m[1]), mo = Number(m[2]);
+  return mo >= 4 ? y + 1 : y;
+}
+
+function DocumentsByYear({ docs }: { docs: NonNullable<Company["documents"]> }) {
+  const [openYears, setOpenYears] = useState<Set<number> | null>(null);
+
+  const years = useMemo(() => {
+    const bucket = new Map<number, { reports: AnnualReport[]; concalls: AnnDoc[]; ratings: AnnDoc[] }>();
+    const get = (y: number) => {
+      if (!bucket.has(y)) bucket.set(y, { reports: [], concalls: [], ratings: [] });
+      return bucket.get(y)!;
+    };
+    // An annual report is FOR a financial year, so it is filed by the year it
+    // covers rather than by the date the PDF appeared.
+    for (const r of docs.annual_reports ?? []) {
+      const y = Number(r.to);
+      if (Number.isFinite(y)) get(y).reports.push(r);
+    }
+    for (const d of docs.concalls ?? []) {
+      const y = fyOf(d.date);
+      if (y !== null) get(y).concalls.push(d);
+    }
+    for (const d of docs.ratings ?? []) {
+      const y = fyOf(d.date);
+      if (y !== null) get(y).ratings.push(d);
+    }
+    return [...bucket.entries()].sort((a, b) => b[0] - a[0]);
+  }, [docs]);
+
+  if (years.length === 0) return null;
+
+  // The two newest open, the rest collapsed but counted - so nothing is hidden
+  // without the reader being told how much.
+  const isOpen = (y: number) =>
+    openYears ? openYears.has(y) : years.findIndex(([yy]) => yy === y) < 2;
+  const toggle = (y: number) => {
+    const next = new Set(openYears ?? years.slice(0, 2).map(([yy]) => yy));
+    if (next.has(y)) next.delete(y); else next.add(y);
+    setOpenYears(next);
+  };
+
+  const Doc = ({ d }: { d: AnnDoc }) => (
+    <li className="text-sm">
+      <a href={d.url} target="_blank" rel="noopener noreferrer"
+         className="text-[var(--accent-ink)] hover:underline line-clamp-2 sm:truncate block">
+        <span className="text-[var(--ink3)] font-mono text-xs mr-2">{d.date}</span>
+        {d.title || "document"}
+      </a>
+    </li>
+  );
+
+  return (
+    <div className="space-y-1">
+      {years.map(([y, g]) => {
+        const n = g.reports.length + g.concalls.length + g.ratings.length;
+        const open = isOpen(y);
+        return (
+          <div key={y} className="border-t border-[var(--line)] pt-2">
+            <button
+              onClick={() => toggle(y)}
+              aria-expanded={open}
+              className="w-full flex items-baseline justify-between gap-3 min-h-[44px] sm:min-h-0 sm:py-1 text-left"
+            >
+              <span className="text-sm font-semibold text-[var(--ink)]">
+                FY{y}
+                <span className="text-[var(--ink3)] font-normal ml-2 text-xs">
+                  Apr {y - 1} – Mar {y}
+                </span>
+              </span>
+              <span className="text-xs text-[var(--ink3)] shrink-0">
+                {n} {n === 1 ? "document" : "documents"} {open ? "▾" : "▸"}
+              </span>
+            </button>
+            {open && (
+              <div className="pb-2 space-y-2">
+                {g.reports.length > 0 && (
+                  <div className="flex gap-2 flex-wrap">
+                    {g.reports.map((r) => (
+                      <a key={r.url} href={r.url} target="_blank" rel="noopener noreferrer"
+                         className="text-xs font-semibold bg-[var(--card2)] hover:bg-[var(--accent-soft)] border border-[var(--line)] rounded-full px-3 py-1.5">
+                        Annual report {r.from}–{String(r.to).slice(-2)} ↗
+                      </a>
+                    ))}
+                  </div>
+                )}
+                {g.concalls.length > 0 && (
+                  <ul className="space-y-1">{g.concalls.map((d) => <Doc key={d.url} d={d} />)}</ul>
+                )}
+                {g.ratings.length > 0 && (
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-[var(--ink3)] mb-0.5">Credit rating</p>
+                    <ul className="space-y-1">{g.ratings.map((d) => <Doc key={d.url} d={d} />)}</ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** What the shareholding table says, in a sentence.
  *
  *  Tickertape gets this right structurally and wrong editorially: it prints
@@ -1444,47 +1567,7 @@ function CompanyView() {
 
       <section id="documents" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-3">
         <h2 className="text-sm font-bold text-[var(--ink)]">Documents</h2>
-        {(company.documents?.annual_reports?.length ?? 0) > 0 && (
-          <div>
-            <p className="text-xs text-[var(--ink3)] mb-1.5">Annual reports (PDF, straight from NSE)</p>
-            <div className="flex gap-2 flex-wrap">
-              {company.documents!.annual_reports!.slice(0, 18).map((ar) => (
-                <a key={ar.url} href={ar.url} target="_blank" rel="noopener noreferrer"
-                  className="text-xs font-semibold bg-[var(--card2)] hover:bg-[var(--accent-soft)] border border-[var(--line)] rounded-full px-3 py-1">
-                  FY{ar.from}–{String(ar.to).slice(-2)}
-                </a>
-              ))}
-            </div>
-          </div>
-        )}
-        {(company.documents?.concalls?.length ?? 0) > 0 && (
-          <div>
-            <p className="text-xs text-[var(--ink3)] mb-1.5">Concalls, transcripts &amp; investor meets (newest first)</p>
-            <ul className="space-y-1">
-              {company.documents!.concalls!.slice(0, 8).map((d) => (
-                <li key={d.url} className="text-sm line-clamp-2 sm:truncate">
-                  <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-ink)] hover:underline">
-                    <span className="text-[var(--ink3)] font-mono text-xs mr-2">{d.date}</span>{d.title || "document"}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {(company.documents?.ratings?.length ?? 0) > 0 && (
-          <div>
-            <p className="text-xs text-[var(--ink3)] mb-1.5">Credit-rating updates</p>
-            <ul className="space-y-1">
-              {company.documents!.ratings!.slice(0, 5).map((d) => (
-                <li key={d.url} className="text-sm line-clamp-2 sm:truncate">
-                  <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-ink)] hover:underline">
-                    <span className="text-[var(--ink3)] font-mono text-xs mr-2">{d.date}</span>{d.title || "rating document"}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        {company.documents && <DocumentsByYear docs={company.documents} />}
         <div className="flex gap-4 flex-wrap text-sm">
           <a href={`https://www.nseindia.com/get-quotes/equity?symbol=${encodeURIComponent(symbol)}`} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-ink)] font-semibold hover:underline">
             All NSE filings &amp; announcements ↗
