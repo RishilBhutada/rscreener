@@ -77,6 +77,17 @@ def main() -> None:
         shown_was = "-" if was is None else f"{was}%"   # ASCII: the Windows console is cp1252
         print(f"  {name:32} {pct:>5}% {shown_was:>6}   {mark}")
 
+    # A source that VANISHES is the regression this loop could not see, because
+    # it walks what exists now and a disappeared source is not in that. Deleting
+    # a fetcher, renaming a key, or an exporter that stops emitting a section all
+    # produced the same output as a healthy run: no row, no change, ship it. The
+    # worst regression a coverage table can have is a line that is no longer
+    # there, and it was the one case that read as silence.
+    for name, was in prev_cov.items():
+        if name not in coverage:
+            print(f"  {name:32} {'GONE':>6} {str(was) + '%':>6}   missing")
+            regressions.append(f"{name}: {was}% -> the source is no longer reported at all")
+
     if failed or regressions:
         print("\nNOT READY TO SHIP")
         for f in failed:

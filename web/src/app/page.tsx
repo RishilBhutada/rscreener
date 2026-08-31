@@ -33,6 +33,7 @@ export default function Home() {
   const [lists, setLists] = useState(0);
   const [recent, setRecent] = useState<string[]>([]);
   const [asof, setAsof] = useState<string | null>(null);
+  const [asofN, setAsofN] = useState(0);
   const [covered, setCovered] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -46,7 +47,10 @@ export default function Home() {
     loadIndex()
       .then((d) => {
         setRows(d.rows);
-        setAsof(d.price_asof);
+        // The date most companies are on, not the newest one any single
+        // company reached - see pipeline/export_json.py.
+        setAsof(d.price_modal ?? d.price_asof);
+        setAsofN(d.price_modal_n ?? 0);
         setCovered(d.covered);
       })
       .catch(() => { /* search degrades to nothing rather than an error wall */ });
@@ -230,6 +234,7 @@ export default function Home() {
           <p className="text-center text-xs text-[var(--ink3)] mt-8">
             Prices at close of {new Date(asof + "T00:00:00").toLocaleDateString("en-IN",
               { day: "numeric", month: "short", year: "numeric" })}
+            {asofN > 0 && covered ? ` — ${asofN.toLocaleString("en-IN")} of ${covered.toLocaleString("en-IN")} companies` : ""}
             {" · "}
             <Link href="/status" className="hover:underline">what else is up to date</Link>
           </p>

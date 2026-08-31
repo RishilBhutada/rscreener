@@ -1,18 +1,15 @@
 {
- "at": "2026-08-08 22:38 UTC",
+ "at": "2026-08-31 restored by hand",
  "coverage": {
   "Share prices": 93,
   "Company snapshot": 93,
   "Quarterly results (as filed)": 93,
   "Result declaration dates": 94,
   "Shareholding pattern": 94,
-  "Balance sheet & cash flow": 44,
-  "IPOs": 100
+  "Balance sheet & cash flow": 44
  },
  "accepted_regressions": [
-  "Share prices: 100% -> 93%",
-  "Company snapshot: 98% -> 93%",
-  "Balance sheet & cash flow: 94% -> 44%"
+  "IPOs: 100% -> source retired"
  ],
- "reason": "Universe doubled from 2,369 NSE companies to 5,069 with BSE added, so three sources now have a lower ceiling against a larger denominator, not less data than before. Share prices 100->93%: 355 BSE companies still queued for a first fetch, filling nightly. Company snapshot 98->93%: 333 dormant BSE scrips have no quote at any source - counted as unavailable on the page, not as backlog. Balance sheet 94->44%: the provider carries annual statements for 2,832 fewer companies than are now listed, which is a fact about coverage of BSE microcaps rather than a loss. The NSE-only sources are unchanged or better against their own population: quarterly results 93% flat, shareholding 81->94%, declaration dates 1->94%. All three hard guards pass."
+ "reason": "The IPO page no longer shows IPO data - a grey-market premium has no filing to check it against, so the page links out to two sites that do it properly. web/public/ipos.json was removed, so the source correctly stops being reported. Recorded here so the vanished-source check does not flag it every run."
 }

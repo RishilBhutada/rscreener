@@ -3,7 +3,7 @@
 Writes a `documents` table: symbol, doc_type, from_yr, to_yr, url.
 Usage:
   python fetch_documents.py --symbols TCS,RELIANCE
-  python fetch_documents.py --symbols @data/top500.txt
+  python fetch_documents.py --symbols @data/nse_symbols.txt
 """
 import argparse
 import sqlite3

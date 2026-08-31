@@ -9,8 +9,17 @@ way to signal that, because a wrong price looks exactly like a right one.
 Three things are checked, each of which has actually broken:
   1. AGE      - the newest close in the export is older than MAX_AGE_DAYS.
   2. SPREAD   - too many companies are carrying a price older than the market.
-  3. IDENTITY - price x shares no longer equals the market cap we display, which
-                means one of the two was refreshed without the other.
+  3. ARITHMETIC - price x shares still equals the market cap we display.
+
+                NOT a staleness check, whatever it once claimed. shares_out is
+                DEFINED in the export as market_cap / price on the same row, so
+                a market cap left behind by a refreshed price reconciles
+                perfectly: p x (m/p) = m holds however stale either number is.
+                What it does catch is our own rescaling - a crore/rupee mix-up,
+                a row assembled from two different snapshots. Worth keeping,
+                and worth not being believed to do more than it does.
+                Staleness is caught by 1 and 2, which compare against the
+                calendar and against the other companies.
 
 Usage:
   python check_prices.py           # verify what is in web/public/data.json
@@ -134,7 +143,8 @@ def main() -> None:
     if upct > MAX_UNDATED_PCT:
         fails.append(f"{upct:.1f}% of companies have no price series (limit {MAX_UNDATED_PCT}%) - fetch_prices.py is failing")
 
-    # 3. price x shares must still reconcile with the market cap on the same row
+    # 3. price x shares must still reconcile with the market cap on the same row.
+    #    An identity, not a corroboration - see the note at the top of this file.
     broken = []
     for c in rows:
         p, m, sh = c.get("price"), c.get("mcap"), c.get("shares_out")
@@ -148,7 +158,7 @@ def main() -> None:
         fails.append(f"{len(broken)} rows where price x shares != market cap: {', '.join(broken[:6])} ...")
 
     if not fails:
-        print("\nprices OK - fresh, consistent, and reconciling with market cap")
+        print("\nprices OK - fresh, the spread is sane, and the export's own arithmetic reconciles")
         return
     print("\nPRICE CHECK FAILED:")
     for f in fails:

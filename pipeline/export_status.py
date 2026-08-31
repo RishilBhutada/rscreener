@@ -22,13 +22,25 @@ OUT = ROOT / "web" / "public" / "status.json"
 # Companies each source gets through per nightly run. These MUST track the --limit
 # values in .github/workflows/nightly.yml; if they drift, the finish dates the app
 # shows become a comforting fiction rather than arithmetic.
+# What one night can actually cover. These are read straight off the --limit
+# flags in .github/workflows/nightly.yml, and they had drifted: the file still
+# said 2,357 for the whole universe when the universe is 5,069 across two
+# exchanges, and claimed statements were refreshed with the snapshot when they
+# run 500 a night behind their own rotation. The /status page turns these into
+# a promise - "everything covered in N nights" - so a stale number here is a
+# promise the workflow was never going to keep.
+#
+# Keep in step with the workflow. If a --limit changes there, change it here.
 PER_NIGHT = {
-    "prices": 2357,          # whole universe every night
-    "snapshot": 2357,        # --all, no cap
-    "results": 800,
-    "filing_dates": 900,
-    "shareholding": 700,
-    "statements": 2357,      # refreshed with the snapshot
+    "prices": 5069,          # --symbols <target>, whole universe, no cap
+    "snapshot": 5069,        # --all --snapshot-only, no cap
+    "results": 800,          # --limit 800
+    "filing_dates": 900,     # --limit 900
+    "shareholding": 700,     # --limit 700, NSE symbols only
+    "statements": 500,       # --limit 500 - NOT refreshed with the snapshot
+    "documents": 400,        # --limit 400
+    "announcements": 500,    # --limit 500
+    "corporate_actions": 800,  # --limit 800
 }
 
 # Where each source records that it has ASKED about a symbol. Without this the

@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-08-10 07:35 UTC",
+ "generated_at": "2026-08-31 05:12 UTC",
  "universe": 5069,
  "sources": [
   {
@@ -7,36 +7,36 @@
    "name": "Share prices",
    "what": "Daily closes from the exchange feed. Drives every price, market cap and ratio.",
    "covered": 4749,
-   "newest": "2026-08-07",
-   "behind": 21,
+   "newest": "2026-08-27",
+   "behind": 4746,
    "oldest": "2026-01-23",
    "cadence": "every night",
-   "current": 4728,
+   "current": 3,
    "universe": 5069,
-   "per_night": 2357,
-   "pct": 93,
+   "per_night": 5069,
+   "pct": 0,
    "missing": 320,
    "unavailable": 4,
    "nights_left": 1,
-   "eta": "2026-08-11"
+   "eta": "2026-09-01"
   },
   {
    "key": "snapshot",
    "name": "Company snapshot",
    "what": "P/E, book value, 52-week range and the rest of the screener columns.",
    "covered": 4746,
-   "newest": "2026-08-08",
-   "behind": 0,
+   "newest": "2026-08-29",
+   "behind": 2996,
    "oldest": "2026-08-08",
    "cadence": "every night",
-   "current": 4746,
+   "current": 1750,
    "universe": 5069,
-   "per_night": 2357,
-   "pct": 94,
+   "per_night": 5069,
+   "pct": 35,
    "missing": 323,
    "unavailable": 333,
-   "nights_left": 0,
-   "eta": null
+   "nights_left": 1,
+   "eta": "2026-09-01"
   },
   {
    "key": "results",
@@ -55,7 +55,7 @@
    "missing": 133,
    "unavailable": 121,
    "nights_left": 1,
-   "eta": "2026-08-11"
+   "eta": "2026-09-01"
   },
   {
    "key": "filing_dates",
@@ -74,7 +74,7 @@
    "missing": 125,
    "unavailable": 113,
    "nights_left": 1,
-   "eta": "2026-08-11"
+   "eta": "2026-09-01"
   },
   {
    "key": "shareholding",
@@ -93,44 +93,25 @@
    "missing": 124,
    "unavailable": 112,
    "nights_left": 1,
-   "eta": "2026-08-11"
+   "eta": "2026-09-01"
   },
   {
    "key": "statements",
    "name": "Balance sheet & cash flow",
    "what": "Annual statements behind Price/Book and EV/EBITDA.",
-   "covered": 2229,
-   "newest": "2026-03-31",
-   "behind": 5,
-   "oldest": "2024-03-31",
+   "covered": 3916,
+   "newest": "2026-06-30",
+   "behind": 44,
+   "oldest": "2023-03-31",
    "cadence": "with the snapshot",
-   "current": 2224,
+   "current": 3872,
    "universe": 5069,
-   "per_night": 2357,
-   "pct": 44,
-   "missing": 2840,
-   "unavailable": 2850,
-   "nights_left": 0,
-   "eta": null
-  },
-  {
-   "key": "ipos",
-   "name": "IPOs",
-   "what": "Open, upcoming and recently listed issues.",
-   "covered": 1337,
-   "newest": "2026-07-27",
-   "behind": 0,
-   "oldest": "2026-07-27",
-   "cadence": "every night",
-   "own_population": true,
-   "current": 1337,
-   "universe": 1337,
-   "per_night": null,
-   "pct": 100,
-   "missing": 0,
-   "unavailable": 0,
-   "nights_left": 0,
-   "eta": null
+   "per_night": 500,
+   "pct": 76,
+   "missing": 1153,
+   "unavailable": 1163,
+   "nights_left": 1,
+   "eta": "2026-09-01"
   }
  ]
 }

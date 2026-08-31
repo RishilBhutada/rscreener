@@ -1,5 +1,4 @@
 data/*
-!data/top500.txt
 __pycache__/
 *.pyc
 node_modules/

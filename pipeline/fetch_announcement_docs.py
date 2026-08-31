@@ -4,7 +4,7 @@ One announcements-API call per symbol returns full filing history; we keep the
 newest N concall/transcript and credit-rating items with their PDF links.
 
 Usage:
-  python fetch_announcement_docs.py --symbols @data/top500.txt [--max-age-hours 156]
+  python fetch_announcement_docs.py --symbols @data/nse_symbols.txt [--max-age-hours 156]
 """
 import argparse
 import re

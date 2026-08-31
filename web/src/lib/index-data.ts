@@ -24,7 +24,11 @@ export type LiteRow = {
 
 export type LiteIndex = {
   rows: LiteRow[];
+  /** The newest close anywhere in the file. */
   price_asof: string | null;
+  /** The close MOST companies are actually on, and how many. */
+  price_modal: string | null;
+  price_modal_n: number;
   covered: number | null;
   generated_at: string | null;
 };
@@ -58,6 +62,8 @@ export function loadIndex(): Promise<LiteIndex> {
       cache = {
         rows,
         price_asof: d.price_asof ?? null,
+        price_modal: d.price_modal ?? null,
+        price_modal_n: d.price_modal_n ?? 0,
         covered: d.covered ?? null,
         generated_at: d.generated_at ?? null,
       };

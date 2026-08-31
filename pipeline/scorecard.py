@@ -102,7 +102,12 @@ def correctness(con: sqlite3.Connection, rows: list[dict]) -> dict:
         ) if v
     }
     both = [k for k in filed.keys() & other.keys()]
-    agree = sum(1 for k in both if 0.8 <= abs(other[k] / filed[k]) <= 1.25)
+    # The ratio is taken WITHOUT abs(). With it, a filed profit of +50 crore
+    # against a provider's -50 crore scored as agreement, which is the one
+    # disagreement that matters most: the two sources cannot even agree whether
+    # the company made money. 13 opposite-sign pairs exist in the overlap and 2
+    # of them were being counted as corroboration.
+    agree = sum(1 for k in both if 0.8 <= (other[k] / filed[k]) <= 1.25)
     checks["Filed profit vs the data provider"] = {
         "measured": len(both), "agree": agree, "pct": pct(agree, len(both)),
         "what": "the same company-year from the NSE filing and from the market-data provider, within 25%",
@@ -157,7 +162,13 @@ def correctness(con: sqlite3.Connection, rows: list[dict]) -> dict:
             continue
         for v in vals:
             scale_n += 1
-            if 0.02 <= v / med <= 50:
+            # 0.02x-50x was so wide that only a ~100x unit error could fail it.
+            # A single year misparsed 10x - a dropped decimal, thousands read as
+            # lakhs - sat at 10 and was counted as agreement, which is precisely
+            # the error this check exists to catch. A real company moving 20x
+            # against its own multi-year median in one year is rare; a 10x
+            # parse error is not.
+            if 0.05 <= v / med <= 20:
                 scale_ok += 1
     checks["Filed figures against their own history"] = {
         "measured": scale_n, "agree": scale_ok, "pct": pct(scale_ok, scale_n),

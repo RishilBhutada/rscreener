@@ -328,6 +328,32 @@ def freshen_prices(con, df):
         ex = {}
     df["exchange"] = [ex.get(s) or "NSE" for s in df["symbol"]]
 
+    # Fund units are not companies. 33 of them were published as if they were:
+    # "Nippon India Equity Savings Fund - Segregated Portfolio 2 - Direct Growth
+    # Plan", ETFs, index funds - all with no P/E, no ROE, no filings and no
+    # possibility of any, sitting in search results and screen output beside
+    # real businesses. One of them, 08AGG, is in this project owner's own
+    # recently-viewed list, which is how a screener wastes somebody's time.
+    #
+    # The exchange already classifies them and we already store the field: an
+    # Indian company's share carries an ISIN beginning INE, a mutual-fund or
+    # ETF unit one beginning INF. That is the issuer's own registration, not a
+    # guess from the name - which would have to catch "Mirae Asset Nifty India
+    # New Age Consumption ETF" and also "Mirae Asset Investment Managers (India)
+    # Pvt. Ltd.", and would sooner or later throw out an asset manager that IS a
+    # listed company.
+    try:
+        isin = {r[0]: (r[1] or "") for r in con.execute('SELECT SYMBOL, "ISIN NUMBER" FROM universe')}
+    except Exception:  # noqa: BLE001
+        isin = {}
+    if isin:
+        is_fund = [str(isin.get(s, "")).upper().startswith("INF") for s in df["symbol"]]
+        n_fund = sum(is_fund)
+        if n_fund:
+            df = df[[not f for f in is_fund]].reset_index(drop=True)
+            print(f"  excluded {n_fund} mutual-fund and ETF units - ISIN starting INF, "
+                  f"which is the exchange's own classification, not a guess from the name")
+
     # The company's NAME, from the exchange when the market-data provider has
     # none. 478 companies shipped with a blank name and rendered as their ticker
     # - "MAXESTATES (MAXESTATES)" for Max Estates Limited, "AADHARHFC" for Aadhar
@@ -630,15 +656,32 @@ def main() -> None:
     df = df[keep]
     df = df.astype(object).where(pd.notna(df), None)
 
+    # The date MOST companies are actually on, beside the newest one in the file.
+    # The banner says "prices at close of X" and read price_asof, which is the
+    # newest close any single company reached - so on a night when 719 companies
+    # updated and 4,044 did not, every page announced a date that four fifths of
+    # the table had not reached. Not the three-week lie it started as, but the
+    # same shape of claim, and the page can simply say both.
+    from collections import Counter
+    date_counts = Counter(r.get("price_date") for r in df.to_dict(orient="records")
+                          if r.get("price_date"))
+    modal_date, modal_n = (date_counts.most_common(1)[0] if date_counts else (None, 0))
+
     payload = {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "price_asof": price_asof,          # the newest close in this file; check_prices.py enforces it
+        "price_modal": modal_date,         # the close most companies are on
+        "price_modal_n": int(modal_n),
         "universe_size": int(n_universe),
         "covered": len(df),
         "rows": df.to_dict(orient="records"),
     }
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(clean_nan(payload), ensure_ascii=False, allow_nan=False), encoding="utf-8")
+    # Compact separators. The default `", "` and `": "` put one wasted byte
+    # after every comma and colon, which across 4,713 rows of fifty-odd fields
+    # was 12% of the file - a byte nobody reads, on every transfer.
+    OUT.write_text(json.dumps(clean_nan(payload), ensure_ascii=False, allow_nan=False,
+                              separators=(",", ":")), encoding="utf-8")
     kb = OUT.stat().st_size / 1024
     print(f"exported {len(df)}/{n_universe} symbols -> {OUT} ({kb:.0f} KB)")
 
@@ -658,6 +701,8 @@ def main() -> None:
     idx.write_text(json.dumps(clean_nan({
         "generated_at": payload["generated_at"],
         "price_asof": price_asof,
+        "price_modal": modal_date,
+        "price_modal_n": int(modal_n),
         "universe_size": int(n_universe),
         "covered": len(df),
         # mcap is here because search ranks matches by size, so "reliance"

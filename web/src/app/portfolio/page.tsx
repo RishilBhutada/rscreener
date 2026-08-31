@@ -62,9 +62,26 @@ export default function PortfolioPage() {
   }, [holdings, bySymbol]);
 
   const totals = useMemo(() => {
-    const invested = enriched.reduce((s, h) => s + h.invested, 0);
-    const current = enriched.reduce((s, h) => s + (h.current ?? h.invested), 0);
-    return { invested, current, pnl: current - invested, pnlPct: invested > 0 ? ((current - invested) / invested) * 100 : 0 };
+    // A holding with no price used to be counted AT COST here, while its own row
+    // showed a dash. That is a made-up valuation: the tile said "current value"
+    // and included a number that is not current, it made profit and loss look
+    // smaller than it is, and the weight-% column divided by the inflated total
+    // so every other holding's weight was understated too.
+    //
+    // Priced holdings only, on both sides of the comparison - a total that
+    // compares cost of everything against value of some of it is not a return.
+    // The count of what was left out is shown beside the tiles.
+    const priced = enriched.filter((h) => h.current !== null && h.current !== undefined);
+    const invested = priced.reduce((s, h) => s + h.invested, 0);
+    const current = priced.reduce((s, h) => s + (h.current as number), 0);
+    return {
+      invested, current,
+      pnl: current - invested,
+      pnlPct: invested > 0 ? ((current - invested) / invested) * 100 : 0,
+      unpriced: enriched.length - priced.length,
+      unpricedCost: enriched.filter((h) => h.current === null || h.current === undefined)
+                            .reduce((s, h) => s + h.invested, 0),
+    };
   }, [enriched]);
 
   const doImport = (text: string) => {
@@ -153,6 +170,17 @@ export default function PortfolioPage() {
                   <p className={`text-base font-semibold ${label.startsWith("P&L") ? (totals.pnl >= 0 ? "text-[var(--pos)]" : "text-[var(--neg)]") : "text-[var(--ink)]"}`}>{value}</p>
                 </div>
               ))}
+              {/* Said beside the tiles, not in a footnote further down: a total
+                  that quietly leaves something out is the same fault as one
+                  that quietly makes a number up. */}
+              {totals.unpriced > 0 && (
+                <p className="col-span-2 sm:col-span-4 text-[11px] text-[var(--ink3)]">
+                  These four figures cover the {enriched.length - totals.unpriced} holdings that have a
+                  price. {totals.unpriced} more, costing ₹{fmt(totals.unpricedCost, 0)}, are left out of
+                  all four rather than counted at what you paid — including them would report a
+                  &ldquo;current value&rdquo; that is not current.
+                </p>
+              )}
             </section>
 
             <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">

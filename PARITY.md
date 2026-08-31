@@ -74,10 +74,16 @@ on the deployed site. "Better than" ideas go at the bottom, locked until parity.
 - [ ] Community screens — impossible without users; permanent honest gap
 
 ## Data depth
-- [x] Full NSE universe snapshot (2,353) refreshed nightly
-- [x] Top-500: statements, track records, prices, shareholding, documents
-- [ ] Companies 501–1000 (expansion band running)
-- [ ] Companies 1001–2353 (queued bands)
+*(Corrected 31-Aug-2026: this section still described a 2,353-company NSE-only
+universe and a top-500 coverage band, both of which stopped being true when BSE
+was added and the rotations went universe-wide.)*
+- [x] Full universe snapshot refreshed nightly — **4,713 companies across NSE and BSE**
+      (5,069 listed, less 256 fund/ETF units and 100 with no usable snapshot)
+- [x] Statements, track records, prices, shareholding and documents run universe-wide
+      rotations, not a top-500 band: prices and snapshot uncapped, results 800/night,
+      filing dates 900, shareholding 700, statements 500, documents 400
+- [ ] The rotations have not yet reached every company — depth is uneven by design
+      while the bands catch up. `/status` reports what is covered per source.
 - [ ] Pre-2019 as-filed history — SCOPED 12-Jul: NSE routes DEAD (annual AND
       quarterly old-format XBRLs are placeholders). BSE guessed endpoints 404-ish;
       NEXT: discover real BSE API paths via browser network inspection on

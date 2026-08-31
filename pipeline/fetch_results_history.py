@@ -13,7 +13,7 @@ counted and reported, never silently dropped.
 
 Usage:
   python fetch_results_history.py --symbols TCS,INFY
-  python fetch_results_history.py --symbols @data/top500.txt --limit 100
+  python fetch_results_history.py --symbols @data/nse_symbols.txt --limit 100
 """
 import argparse
 import re

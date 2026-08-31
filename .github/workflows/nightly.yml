@@ -164,7 +164,10 @@ jobs:
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_fundamentals.py --symbols ${{ steps.plan.outputs.target }} --statements --max-age-hours 720 --limit 500 --sleep 0.4
       - name: Refresh upcoming events calendar
         if: steps.plan.outputs.prices == '1'
-        run: python pipeline/fetch_events.py
+        # Wrapped like every other fetcher. It was the only one running bare:
+        # no retry, no guard, so one dropped NSE response took the results
+        # calendar out for a night with the run still reported as a success.
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_events.py
       - name: Refresh shareholding patterns (whole universe, rotating)
         if: steps.plan.outputs.earnings == '1'
         # Was @data/top500.txt, so the other 1,857 companies were unreachable: 432
@@ -289,8 +292,22 @@ jobs:
             echo "database is only $SIZE bytes - refusing to overwrite the stored copy"; exit 0
           fi
           gzip -c data/rscreener.db > rscreener.db.gz
-          gh release upload data-db rscreener.db.gz --clobber || \
-          gh release create data-db rscreener.db.gz --title "Data DB" --notes "SQLite data snapshot used and refreshed by the nightly workflow."
+          # Retried. This is a single ~200 MB upload to one API, and a transient
+          # failure here loses BOTH the night's fetching and - because the next
+          # run restores whatever is stored - puts tomorrow back on today's
+          # starting database. Three attempts with a pause between them; a real
+          # problem still fails all three and still reports.
+          ok=0
+          for attempt in 1 2 3; do
+            if gh release upload data-db rscreener.db.gz --clobber \
+               || gh release create data-db rscreener.db.gz --title 'Data DB' \
+                  --notes 'SQLite data snapshot used and refreshed by the nightly workflow.'; then
+              ok=1; break
+            fi
+            echo "upload attempt $attempt failed; retrying in 30s"
+            sleep 30
+          done
+          [ "$ok" = 1 ] || { echo "could not store the database after three attempts"; exit 1; }
           echo "stored $(du -h rscreener.db.gz | cut -f1)"
 
       - run: python pipeline/export_json.py

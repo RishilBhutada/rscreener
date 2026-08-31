@@ -5,7 +5,7 @@ enough to embed in the company JSONs; the live snapshot price becomes the
 final chart point client-side).
 
 Usage:
-  python fetch_prices.py --symbols @data/top500.txt [--max-age-hours 156]
+  python fetch_prices.py --symbols @data/nse_symbols.txt [--max-age-hours 156]
 """
 import argparse
 import sqlite3
