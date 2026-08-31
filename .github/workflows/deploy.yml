@@ -12,6 +12,21 @@ on:
       - "pipeline/depth_baseline.json"
   workflow_dispatch:
 
+# A WARNING FOR WHOEVER WRITES THE NEXT COMMIT MESSAGE HERE.
+#
+# GitHub scans the whole head-commit message - subject AND body - for its
+# skip markers, and a commit carrying one is not built at all. So a commit
+# that merely EXPLAINS the marker, by quoting it in prose, silently disables
+# its own deploy.
+#
+# That is not hypothetical. The commit that fixed the build stamp on
+# 31-Aug-2026 described the nightly committing its scoreboard under that
+# marker, quoted it, and produced zero workflow runs. It sat on main looking
+# pushed and deployed and was neither, and it was only found by checking the
+# API for runs against its SHA.
+#
+# If you need to name the marker in a message, break it up so it cannot match.
+
 permissions:
   contents: read
   actions: write
