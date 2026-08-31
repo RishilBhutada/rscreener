@@ -10,6 +10,7 @@ import { Row } from "@/lib/query";
 import { loadNote, pushRecent, saveNote } from "@/lib/store";
 import WatchStar from "@/components/WatchStar";
 import { loadSectionMode, SectionMode } from "@/components/Settings";
+import { applyOrder, loadOrder } from "@/lib/order";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -1215,6 +1216,13 @@ function CompanyView() {
   // are. Read off the DOM rather than kept as a parallel list, which would go
   // stale the first time a section is added or made conditional.
   const [paneIds, setPaneIds] = useState<string[]>([]);
+  const [sectionOrder, setSectionOrder] = useState<string[]>([]);
+  useEffect(() => {
+    const read = () => setSectionOrder(loadOrder("sections"));
+    read();
+    window.addEventListener("rs-order", read);
+    return () => window.removeEventListener("rs-order", read);
+  }, []);
 
   useEffect(() => {
     setMode(loadSectionMode());
@@ -1232,7 +1240,11 @@ function CompanyView() {
     if (!el || mode !== "swipe") { setPanes(0); return; }
     const measure = () => {
       setPanes(el.children.length);
-      setPaneIds(Array.from(el.children).map((c) => c.id));
+      // VISUAL order, not DOM order. With the sections sequenced by CSS `order`
+      // the two differ, and every index derived from this list - which pane the
+      // menu highlights, which one a jump scrolls to - is an index into what
+      // the reader sees, never into the source.
+      setPaneIds(applyOrder(Array.from(el.children).map((c) => c.id), (id) => id, sectionOrder));
       setPage(el.clientWidth ? Math.round(el.scrollLeft / el.clientWidth) : 0);
     };
     measure();
@@ -1254,7 +1266,7 @@ function CompanyView() {
     // `company` is a dependency because the pager does not exist until the data
     // arrives - the page renders "Loading…" first. Keyed on `mode` alone it
     // measured an element that was still null and reported "section 1 of 0".
-  }, [mode, company]);
+  }, [mode, company, sectionOrder]);
 
   const step = useCallback((d: number) => {
     const el = pager.current;
@@ -1278,7 +1290,10 @@ function CompanyView() {
     const el = pager.current;
     const target = document.getElementById(id);
     if (!el || !target) return false;
-    const i = Array.from(el.children).findIndex((c) => c === target || c.contains(target));
+    const pane = Array.from(el.children).find((c) => c === target || c.contains(target));
+    if (!pane) return false;
+    const visual = applyOrder(Array.from(el.children).map((c) => c.id), (id) => id, sectionOrder);
+    const i = visual.indexOf(pane.id);
     if (i < 0) return false;
     // Instant, not smooth. `scroll-snap-type: x mandatory` re-snaps to the
     // NEAREST pane whenever a smooth scroll is interrupted - and the window
@@ -1297,11 +1312,11 @@ function CompanyView() {
     } else {
       target.scrollIntoView({ block: "nearest", inline: "start" });
     }
-    (el.children[i] as HTMLElement).scrollTop = 0;
+    (pane as HTMLElement).scrollTop = 0;
     const r = el.getBoundingClientRect();
     if (Math.abs(r.top - 116) > 24) window.scrollBy({ top: r.top - 116, behavior: "smooth" });
     return true;
-  }, []);
+  }, [sectionOrder]);
 
   // Arrow keys page through it on a desktop, where there is nothing to swipe.
   useEffect(() => {
@@ -1493,7 +1508,18 @@ function CompanyView() {
           ["shareholding", "Investors", Boolean(company.shareholding)],
           ["documents", "Documents", true],
           ["notes", "Notes", true],
-        ] as [string, string, boolean][]).filter(([, , show]) => show).map(([id, label]) => (
+        ] as [string, string, boolean][]).filter(([, , show]) => show)
+          // The menu reads in the same sequence as the page. A reader who moves
+          // Quarters above Chart and then finds the menu still listing Chart
+          // first has been given two different answers to the same question.
+          .sort((a, b) => {
+            const r = (id: string) => {
+              const i = sectionOrder.indexOf(id);
+              return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+            };
+            return r(a[0]) - r(b[0]);
+          })
+          .map(([id, label]) => (
           <a
             key={id}
             href={`#${id}`}
@@ -1513,13 +1539,22 @@ function CompanyView() {
           turns the same children into full-width scroll-snap panes. Nothing
           inside the sections knows which mode it is in, so a new section joins
           the pager by existing. */}
-      <div ref={pager} className={mode === "swipe" ? "rs-pager" : "space-y-6"}>
+      {/* The reader's chosen sequence, applied as CSS `order` rather than by
+          rearranging the elements. Reordering React's own children by hand is
+          a fight it wins on the next render; `order` is a layout property it
+          does not manage and cannot undo. Both modes are flex containers, so
+          one rule sequences the scrolled page and the swipe panes alike. */}
+      {sectionOrder.length > 0 && (
+        <style>{sectionOrder.map((id, i) => `.rs-pager > #${id},.rs-stack > #${id}{order:${i}}`).join("")}</style>
+      )}
+
+      <div ref={pager} className={mode === "swipe" ? "rs-pager" : "rs-stack"}>
 
       <div id="summary" className="scroll-mt-32">
         <RatioGrid snapshot={s} row={fullRow} cohort={cohort} />
       </div>
 
-      <div id="chart" className="scroll-mt-32">
+      <div id="chart" className="scroll-mt-32 space-y-4">
         {company.prices && (company.prices.monthly?.length || company.prices.weekly?.length) ? (
           <>
             <StockChart prices={company.prices} peBand={company.pe_band} evBand={company.ev_band} pbBand={company.pb_band} psBand={company.ps_band} trendQ={company.trend?.quarterly} livePrice={price} quarters={company.quarters} actions={company.actions} symbol={symbol} peers={peers} coverage={company.coverage} exchange={company.exchange} />
@@ -1528,8 +1563,6 @@ function CompanyView() {
             )}
           </>
         ) : null}
-      </div>
-
       {/* OUTSIDE the chart block, deliberately. This explanation used to sit
           inside `company.prices && ...`, so a BSE company with no price history
           would have shown a page of empty sections and no reason for any of
@@ -1546,6 +1579,8 @@ function CompanyView() {
           than pending.
         </p>
       )}
+
+      </div>
 
       {/* Three separate sections, not one. They were stacked inside a single
           "analysis" block, which in swipe mode made one pane three screens tall

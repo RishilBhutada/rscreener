@@ -201,3 +201,16 @@ input, textarea, select, button {
 }
 /* Sticky headers inside a statement table stick to the pane, not the page. */
 .rs-pager > * > * { scroll-margin-top: 0; }
+
+/* Company page, scroll mode. A flex column rather than a block stack, purely
+ * so the same CSS `order` that sequences the swipe panes also sequences the
+ * scrolled page - one mechanism, two modes, no chance of the reader's chosen
+ * order applying in one and not the other.
+ *
+ * Visually identical to the space-y-6 it replaces.
+ */
+.rs-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}

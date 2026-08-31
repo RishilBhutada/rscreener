@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Settings from "@/components/Settings";
 import { loadIndex } from "@/lib/index-data";
+import { DESTINATIONS, BAR_SLOTS } from "@/lib/destinations";
+import { applyOrder, loadOrder } from "@/lib/order";
 import { buildIndex, search, didYouMean, type SearchIndex, type SearchRow } from "@/lib/search";
 import AccountButton from "@/components/AccountButton";
 
@@ -20,6 +22,15 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
   const [rows, setRows] = useState<Lite[]>([]);
   const [hi, setHi] = useState(0);
   const [moreOpen, setMoreOpen] = useState(false);
+  // Read on mount and refreshed when Settings changes it, so the bar reorders
+  // under the panel rather than after the next page load.
+  const [navOrder, setNavOrder] = useState<string[]>([]);
+  useEffect(() => {
+    const read = () => setNavOrder(loadOrder("nav"));
+    read();
+    window.addEventListener("rs-order", read);
+    return () => window.removeEventListener("rs-order", read);
+  }, []);
   const boxRef = useRef<HTMLDivElement>(null);
 
   const ensureData = async () => {
@@ -57,21 +68,15 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
     router.push(`/company?s=${encodeURIComponent(sym)}`);
   };
 
-  // Five for the bar, three behind More. Split by whether it is somewhere you
-  // go mid-task: you jump to a company, your lists or the screener constantly;
-  // you check the calendar, an IPO or data freshness occasionally.
-  const PRIMARY: [string, string, string, string][] = [
-    ["home", "Home", "/", "⌂"],
-    ["watchlists", "Lists", "/watchlists", "★"],
-    ["screens", "Screener", "/screens", "≡"],
-    ["portfolio", "Portfolio", "/portfolio", "◑"],
-  ];
-  const SECONDARY: [string, string, string][] = [
-    ["sectors", "Sectors", "/sectors"],
-    ["calendar", "Calendar", "/calendar"],
-    ["ipo", "IPO", "/ipo"],
-    ["status", "Data", "/status"],
-  ];
+  // Which four sit in the bar is the reader's choice now, not a guess. The old
+  // split - Home, Lists, Screener, Portfolio in the bar; Sectors, Calendar, IPO
+  // and Data behind More - was a reasonable guess about what somebody reaches
+  // for mid-task, and a wrong one for anybody who never opens a portfolio and
+  // checks the results calendar every morning. Settings reorders one list; the
+  // first four land in the bar and the rest fall into More.
+  const ordered = applyOrder(DESTINATIONS, (d) => d.key, navOrder);
+  const PRIMARY = ordered.slice(0, BAR_SLOTS);
+  const SECONDARY = ordered.slice(BAR_SLOTS);
 
   const links: [string, string, string][] = [
     ["home", "Home", "/"],
@@ -197,7 +202,7 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
           are reachable from the More sheet, and none of them is somewhere you
           go mid-task. */}
       <nav className="sm:hidden fixed bottom-0 inset-x-0 z-40 grid grid-cols-5 border-t border-[var(--line)] bg-[var(--card)] pb-[env(safe-area-inset-bottom)]">
-        {PRIMARY.map(([key, label, href, icon]) => (
+        {PRIMARY.map(({ key, label, href, icon }) => (
           <Link
             key={key}
             href={href}
@@ -225,7 +230,7 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
             className="absolute bottom-0 inset-x-0 bg-[var(--card)] rounded-t-2xl border-t border-[var(--line)] p-2 pb-[calc(env(safe-area-inset-bottom)+8px)]"
             onClick={(e) => e.stopPropagation()}
           >
-            {SECONDARY.map(([key, label, href]) => (
+            {SECONDARY.map(({ key, label, href }) => (
               <Link
                 key={key}
                 href={href}
