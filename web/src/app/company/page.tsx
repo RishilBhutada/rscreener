@@ -1268,6 +1268,39 @@ function CompanyView() {
     // measured an element that was still null and reported "section 1 of 0".
   }, [mode, company, sectionOrder]);
 
+  const sectionNav = useRef<HTMLElement>(null);
+
+  // Swipe to a section and its NAME comes with you.
+  //
+  // The menu already highlighted the section you were on, which is no use when
+  // the highlighted item is off the end of the menu's own horizontal scroll:
+  // swipe to Balance Sheet and the menu still reads Summary … Peers, with the
+  // highlight somewhere past the right edge. You could see where you were only
+  // by scrolling a second thing.
+  //
+  // Scrolled by hand rather than with scrollIntoView, which reveals an element
+  // by scrolling EVERY ancestor that can scroll - here that is the pager and
+  // the window, so asking for a menu item would have dragged the section
+  // sideways underneath it. Measured off bounding rects rather than offsetLeft,
+  // which is relative to whichever ancestor happens to be positioned.
+  useEffect(() => {
+    if (mode !== "swipe") return;
+    const nav = sectionNav.current;
+    const id = paneIds[page];
+    if (!nav || !id) return;
+    const link = nav.querySelector<HTMLElement>(`a[href="#${CSS.escape(id)}"]`);
+    if (!link) return;
+    const nr = nav.getBoundingClientRect();
+    const lr = link.getBoundingClientRect();
+    // Centre it where there is room; the clamp inside scrollBy handles the ends.
+    const delta = (lr.left - nr.left) - (nav.clientWidth - lr.width) / 2;
+    if (Math.abs(delta) <= 4) return;
+    // Someone who has asked their device for less motion should not be given a
+    // sliding menu on every swipe; they get the same result, immediately.
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    nav.scrollBy({ left: delta, behavior: still ? "auto" : "smooth" });
+  }, [mode, page, paneIds]);
+
   const step = useCallback((d: number) => {
     const el = pager.current;
     if (!el) return;
@@ -1484,7 +1517,7 @@ function CompanyView() {
         </div>
       )}
 
-      <nav className="sticky top-0 sm:top-14 z-20 -mx-4 px-4 bg-[var(--card)] border-y border-[var(--line)] flex gap-1 overflow-x-auto text-sm font-medium py-2 sm:py-1.5 [scrollbar-width:none]">
+      <nav ref={sectionNav} className="sticky top-0 sm:top-14 z-20 -mx-4 px-4 bg-[var(--card)] border-y border-[var(--line)] flex gap-1 overflow-x-auto text-sm font-medium py-2 sm:py-1.5 [scrollbar-width:none]">
         {/* Built from what this company ACTUALLY has. Five of these sections are
             conditionally rendered - quarters, P&L, balance sheet, cash flow and
             shareholding all depend on data that may not exist - while the nav
