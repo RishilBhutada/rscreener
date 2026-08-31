@@ -1508,16 +1508,6 @@ function CompanyView() {
         ))}
       </nav>
 
-      {mode === "swipe" && (
-        <div className="flex items-center justify-between gap-2 text-xs text-[var(--ink3)]">
-          <button onClick={() => step(-1)} aria-label="Previous section"
-            className="min-h-[44px] px-3 rounded-lg border border-[var(--line)] bg-[var(--card2)] font-semibold">←</button>
-          <span>Swipe sideways · section {page + 1} of {panes}</span>
-          <button onClick={() => step(1)} aria-label="Next section"
-            className="min-h-[44px] px-3 rounded-lg border border-[var(--line)] bg-[var(--card2)] font-semibold">→</button>
-        </div>
-      )}
-
       {/* Every section below is a child of this one div, which is the whole
           mechanism: in scroll mode it stacks them with a gap, in swipe mode CSS
           turns the same children into full-width scroll-snap panes. Nothing

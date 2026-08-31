@@ -187,6 +187,14 @@ input, textarea, select, button {
   flex: 0 0 100%;
   min-width: 100%;
   scroll-snap-align: start;
+  /* One swipe moves exactly one section.
+   *
+   * `scroll-snap-type: mandatory` only decides WHERE a scroll comes to rest,
+   * not how far it may travel: a quick flick carried its momentum across three
+   * or four panes and landed on whichever one it happened to reach, so the
+   * gesture had no fixed meaning. `always` makes every pane a stop the scroll
+   * cannot pass, which is what this property exists for. */
+  scroll-snap-stop: always;
   max-height: calc(100dvh - 13rem);
   overflow-y: auto;
   padding-right: 2px; /* keeps a card's border off the next pane's edge */
