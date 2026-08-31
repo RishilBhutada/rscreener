@@ -84,8 +84,46 @@ Technicals · Shareholding · Deals · Corporate Actions · Alerts.
       Queued: we hold the prices; it is presentation only.
 - **"Is X worth buying?" vote poll.** Refused, obviously.
 
+## Finology Ticker (ticker.finology.in)
+
+- [x] **Enterprise value, total debt and cash as headline essentials.** They lead
+      with these and they are right to. "Debt / Equity 0.37" describes the shape
+      of the funding; "Rs 3,98,000 crore of debt against Rs 2,58,147 crore of
+      cash" describes the size of it, and the second is the one a reader can hold
+      against the profit. Both figures were already in our export and neither was
+      on the page. Shipped 31-Aug. Our EV lands within 1.4% of theirs, from
+      different debt definitions - theirs standalone, ours consolidated.
+- **FinStar rating.** Refused, same reason as the other composites.
+- [ ] **~100 user-addable ratio columns on the COMPANY page.** We have custom
+      ratios in the screener but not here. Queued.
+- [ ] **Standalone vs consolidated toggle.** We publish consolidated only, and
+      never say so on the page. screener.in has this too - a genuine parity gap.
+      Queued, and the honest interim is a label.
+- [ ] **Index membership** - "present in 62 indices", each listed and priced. No
+      other app scanned shows it, and index membership drives passive flows. Needs
+      an NSE constituents fetcher. Queued as real work.
+- **Brands owned by the company.** No source we have. Not queued.
+
+## Simply Wall St (simplywall.st)
+
+- **Snowflake score** (Valuation / Future Growth / Past Performance / Financial
+  Health / Dividends, each out of 6). Refused - another composite whose weights
+  are not published.
+- [x] **Price history and performance as one block.** 1M / 3M / 6M / 1Y / 3Y / 5Y
+      change, the 52-week range with today marked on it, and beta. Every one of
+      those figures was already published in data.json and NOT ONE was on the
+      company page - the returns existed only as screener columns, so you could
+      filter on a stock's three-year return but not read it on its own page.
+      Shipped 31-Aug. Our beta for Reliance is 0.16; theirs is 0.16, computed
+      independently.
+- [ ] **A sentence saying what the business actually does.** They open with
+      "engages in hydrocarbon exploration and production, petroleum refining...".
+      We show a sector and an industry tag and nothing else. Queued - needs a
+      business summary the pipeline does not currently store.
+- **Community fair values and narratives.** Not for this app.
+
 ## Still to scan
 
-Finology Ticker, StockEdge, MoneyControl, Value Research, Simply Wall St,
-Screener.in's own recent changes. PARITY.md tracks screener.in feature by feature
-and stays the authority for that one.
+StockEdge, MoneyControl, Value Research (its company URLs moved; the id-based
+path 404s), Screener.in's own recent changes. PARITY.md tracks screener.in
+feature by feature and stays the authority for that one.

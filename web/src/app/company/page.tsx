@@ -536,6 +536,80 @@ function InfoDot({ label, onOpen }: { label: string; onOpen: (l: string) => void
   );
 }
 
+/** Price history and performance, in one block.
+ *
+ *  Every figure here was already being published in data.json and none of it
+ *  was on the company page. The returns existed only as screener columns, so
+ *  you could filter on a stock's three-year return but not read it on its own
+ *  page; the 52-week range was two numbers in a corner with no sense of where
+ *  today sits between them. Simply Wall St puts the whole ladder in one table
+ *  and it is the right shape - a price means little without the path.
+ *
+ *  Nothing new is fetched. This is layout over numbers the app already had.
+ */
+function PriceHistory({ row, snapshot }: { row: Row | null; snapshot: Row }) {
+  const g = (k: string) => num(row, k) ?? num(snapshot, k);
+  const price = g("price"), hi = g("wk52_high"), lo = g("wk52_low");
+
+  const returns: [string, number | null][] = [
+    ["1 month", g("ret_1m")], ["3 months", g("ret_3m")], ["6 months", g("ret_6m")],
+    ["1 year", g("ret_1y")], ["3 years", g("ret_3y")], ["5 years", g("ret_5y")],
+  ];
+  const shown = returns.filter(([, v]) => v !== null && v !== undefined);
+  const at = price !== null && hi !== null && lo !== null && hi > lo
+    ? Math.min(100, Math.max(0, ((price - lo) / (hi - lo)) * 100))
+    : null;
+  const beta = g("beta");
+
+  if (shown.length === 0 && at === null) return null;
+
+  return (
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
+      <h2 className="text-base font-semibold text-[var(--ink)]">Price history</h2>
+      <p className="text-xs text-[var(--ink3)] mt-0.5">
+        Change in the share price alone. Dividends are not added back, so a high-yield
+        company has done better than these figures say.
+      </p>
+
+      {at !== null && (
+        <div className="mt-3">
+          <div className="relative h-2 rounded-full bg-[var(--card2)] border border-[var(--line)]">
+            <div className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-[var(--accent)]"
+                 style={{ left: `calc(${at}% - 5px)` }} />
+          </div>
+          <div className="flex justify-between text-[11px] text-[var(--ink3)] mt-1 tabular-nums">
+            <span>52w low ₹{fmtNum(lo, 0)}</span>
+            <span className="text-[var(--ink2)]">₹{fmtNum(price)} — {at.toFixed(0)}% up the range</span>
+            <span>52w high ₹{fmtNum(hi, 0)}</span>
+          </div>
+        </div>
+      )}
+
+      {shown.length > 0 && (
+        <div className="mt-3 grid grid-cols-3 sm:grid-cols-6 gap-x-3 gap-y-2">
+          {shown.map(([label, v]) => (
+            <div key={label}>
+              <p className="text-[11px] text-[var(--ink3)]">{label}</p>
+              <p className="text-sm font-semibold tabular-nums"
+                 style={{ color: (v as number) >= 0 ? "var(--pos)" : "var(--neg)" }}>
+                {(v as number) >= 0 ? "+" : ""}{fmtNum(v)}%
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {beta !== null && beta !== undefined && (
+        <p className="text-[11px] text-[var(--ink3)] mt-3">
+          Beta {fmtNum(beta)} — over the last year this share moved about{" "}
+          {Math.abs(beta) < 0.05 ? "independently of" : `${fmtNum(Math.abs(beta))}× as far as`} the market
+          on an average day. A number below 1 is not safety; it is only a smaller swing.
+        </p>
+      )}
+    </section>
+  );
+}
+
 /** Documents grouped by the financial year they belong to.
  *
  *  They were three flat lists by type: annual-report chips, the newest eight
@@ -995,6 +1069,16 @@ function RatioGrid({ snapshot, row, cohort }: { snapshot: Row; row: Row | null; 
       ["Profit growth 5Y", pct(g("profit_cagr_5y")), "profit_cagr_5y"],
     ]],
     ["Risk and ownership", [
+      // Absolute debt and cash, not only the ratio. Finology leads with these
+      // and it is right to: "Debt / Equity 0.37" tells you the shape of the
+      // funding, "Rs 2,31,381 crore of debt against Rs 1,08,179 crore of cash"
+      // tells you the size of it, and the second is the one a reader can hold
+      // against the profit. Both were already in the export and neither was on
+      // the page.
+      ["Enterprise value", g("mcap") === null ? "—"
+        : money((g("mcap") ?? 0) + ((g("total_debt") ?? 0) - (g("total_cash") ?? 0)) / 1e7, 0, " Cr"), ""],
+      ["Total debt", g("total_debt") === null ? "—" : money((g("total_debt") ?? 0) / 1e7, 0, " Cr"), ""],
+      ["Cash", g("total_cash") === null ? "—" : money((g("total_cash") ?? 0) / 1e7, 0, " Cr"), ""],
       ["Debt / Equity", plain(g("de")), "de"],
       ["Promoter holding", pct(g("promoter_holding")), "promoter_holding"],
       ["Volatility 1Y", vol("volatility_1y"), "volatility_1y"],
@@ -1379,6 +1463,7 @@ function CompanyView() {
             is worse than an absent one, because it reads as a broken page. */}
         {([
           ["summary", "Summary", true], ["chart", "Chart", true],
+          ["performance", "Price history", true],
           ["analysis", "Analysis", true],
           ["checks", "Nine checks", Boolean(company.fscore)],
           ["valuation", "Own history", Boolean(company.pe_band || company.pb_band || company.ps_band)],
@@ -1459,6 +1544,10 @@ function CompanyView() {
           "analysis" block, which in swipe mode made one pane three screens tall
           and in scroll mode gave the section menu one entry for three different
           questions. Each is now addressable by name. */}
+      <div id="performance" className="scroll-mt-32">
+        <PriceHistory row={fullRow} snapshot={s} />
+      </div>
+
       <div id="analysis" className="scroll-mt-32">
         <ProsCons row={fullRow} />
       </div>
