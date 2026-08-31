@@ -1014,7 +1014,19 @@ function CompanyView() {
     measure();
     el.addEventListener("scroll", measure, { passive: true });
     window.addEventListener("resize", measure);
-    return () => { el.removeEventListener("scroll", measure); window.removeEventListener("resize", measure); };
+    // Re-measure when the pane list itself changes. A one-shot count read 13
+    // where the DOM ended up with 14, because a conditional section can mount
+    // a tick after the effect runs, and the count then stayed wrong for the
+    // life of the page - "section 1 of 13" on a page with fourteen. Watching
+    // childList means the number corrects itself rather than depending on this
+    // effect happening to run last.
+    const mo = new MutationObserver(measure);
+    mo.observe(el, { childList: true });
+    return () => {
+      mo.disconnect();
+      el.removeEventListener("scroll", measure);
+      window.removeEventListener("resize", measure);
+    };
     // `company` is a dependency because the pager does not exist until the data
     // arrives - the page renders "Loading…" first. Keyed on `mode` alone it
     // measured an element that was still null and reported "section 1 of 0".
@@ -1052,7 +1064,15 @@ function CompanyView() {
     // flight for the snapper to interrupt. It is also the better behaviour for
     // a menu tap: six panes of sideways animation is a long wait for a jump you
     // asked for by name.
-    el.scrollLeft = i * el.clientWidth;
+    // Width can be zero when the page is laid out in a hidden container - a
+    // background tab, a collapsed pane, a print view. Paging by index would
+    // then compute 0 for every section and silently go nowhere, so fall back
+    // to letting the browser reveal the element the ordinary way.
+    if (el.clientWidth > 0) {
+      el.scrollLeft = i * el.clientWidth;
+    } else {
+      target.scrollIntoView({ block: "nearest", inline: "start" });
+    }
     (el.children[i] as HTMLElement).scrollTop = 0;
     const r = el.getBoundingClientRect();
     if (Math.abs(r.top - 116) > 24) window.scrollBy({ top: r.top - 116, behavior: "smooth" });
@@ -1236,7 +1256,10 @@ function CompanyView() {
             is worse than an absent one, because it reads as a broken page. */}
         {([
           ["summary", "Summary", true], ["chart", "Chart", true],
-          ["analysis", "Analysis", true], ["peers", "Peers", true],
+          ["analysis", "Analysis", true],
+          ["checks", "Nine checks", Boolean(company.fscore)],
+          ["valuation", "Own history", Boolean(company.pe_band || company.pb_band || company.ps_band)],
+          ["peers", "Peers", true],
           ["quarters", "Quarters", Boolean(quarterly)],
           ["profit-loss", "Profit & Loss", Boolean(pnl)],
           ["balance-sheet", "Balance Sheet", Boolean(balance)],
@@ -1309,9 +1332,19 @@ function CompanyView() {
         </p>
       )}
 
-      <div id="analysis" className="scroll-mt-32 space-y-4">
+      {/* Three separate sections, not one. They were stacked inside a single
+          "analysis" block, which in swipe mode made one pane three screens tall
+          and in scroll mode gave the section menu one entry for three different
+          questions. Each is now addressable by name. */}
+      <div id="analysis" className="scroll-mt-32">
         <ProsCons row={fullRow} />
-        {company.fscore && <FScore f={company.fscore} />}
+      </div>
+
+      {company.fscore && (
+        <div id="checks" className="scroll-mt-32"><FScore f={company.fscore} /></div>
+      )}
+
+      <div id="valuation" className="scroll-mt-32">
         <ValuationHistory company={company} />
       </div>
 
