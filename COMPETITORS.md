@@ -49,7 +49,7 @@ Events · News.
       each quarter's investor presentation under FY 2026, FY 2025, and so on. Ours
       is a flat newest-15 list. Queued: a real structural improvement.
 - [x] **Peer table with the same ratios as the company** — already had it.
-- [ ] **Promoter/FII/DII holding TREND stated in words** — "in the last 3 months,
+- [x] **Promoter holding TREND stated in words** — "in the last 3 months,
       foreign institutional holding decreased by 1.76%". We store the shareholding
       history and print it as a table; the sentence is arithmetic we already have.
       Queued, and it needs the FII/DII split that PARITY.md already tracks.
@@ -77,8 +77,9 @@ Technicals · Shareholding · Deals · Corporate Actions · Alerts.
   every band reached ~2005; that claim was wrong and is now corrected there.
 - **Piotroski F-score** — nine objective pass/fail checks on the financials, no
   hidden weights, publishable check by check.
-- [ ] Queued, as the one composite score worth having, and only if every one of
-      the nine checks is shown alongside it.
+- [x] **Shipped, on that condition.** All nine appear with the total, a test whose
+      inputs are missing counts as neither pass nor fail, and every check was
+      verified by recomputing it from the filed statements by hand.
 - [ ] **Price-range bars** (day / week / month / 52-week, with today marked).
       Queued: we hold the prices; it is presentation only.
 - **"Is X worth buying?" vote poll.** Refused, obviously.
