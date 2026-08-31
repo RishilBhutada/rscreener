@@ -383,6 +383,87 @@ def asfiled_table(trend: dict | None, announced: dict | None = None) -> dict | N
     return out
 
 
+
+def screener_context(data_json: Path) -> tuple[dict, dict, dict]:
+    """Everything the company page used to download the whole table to get.
+
+    The page fetched data.json - 5.6 MB, 4,746 rows, ~55 fields each - and used
+    exactly three things from it: this company's own row, the eight largest
+    companies in its industry, and the industry's median for ten ratios. That is
+    99.4% of the transfer discarded, on the most-visited page in the app, on
+    phones. The three things are small and are computed here instead, once,
+    against the file export_json has just written.
+
+    Returns (row_by_symbol, peers_by_symbol, context_by_symbol).
+    """
+    if not data_json.exists():
+        print("  data.json not found - company pages will fall back to fetching it")
+        return {}, {}, {}
+    rows = json.loads(data_json.read_text(encoding="utf-8"))["rows"]
+
+    # The fields the peer table and the metric grid actually read. Sending the
+    # whole row for eight peers would put most of the saving straight back.
+    PEER_FIELDS = ("symbol", "name", "price", "mcap", "pe", "pb", "roce", "roe",
+                   "div_yield", "net_margin", "sales_cagr_5y", "profit_cagr_5y",
+                   "de", "exchange")
+    MEDIAN_FIELDS = ("pe", "div_yield", "roce", "roe", "sales_cagr_5y",
+                     "profit_cagr_5y", "de", "promoter_holding",
+                     "volatility_1y", "volatility_30d")
+
+    by_industry: dict[str, list] = {}
+    for r in rows:
+        by_industry.setdefault(r.get("industry") or "", []).append(r)
+
+    # Rank by size, computed once over the whole table rather than per company.
+    with_cap = [r for r in rows if isinstance(r.get("mcap"), (int, float))]
+    with_cap.sort(key=lambda r: -r["mcap"])
+    rank_all = {r["symbol"]: i + 1 for i, r in enumerate(with_cap)}
+    rank_ind: dict[str, int] = {}
+    seen: dict[str, int] = {}
+    for r in with_cap:
+        ind = r.get("industry") or ""
+        seen[ind] = seen.get(ind, 0) + 1
+        rank_ind[r["symbol"]] = seen[ind]
+    ind_sizes = {ind: n for ind, n in seen.items()}
+
+    def median(vals: list[float]) -> float | None:
+        if len(vals) < 5:      # below five, a "median" is one firm in a hat
+            return None
+        vals = sorted(vals)
+        m = len(vals) // 2
+        return vals[m] if len(vals) % 2 else (vals[m - 1] + vals[m]) / 2
+
+    medians_by_industry: dict[str, dict] = {}
+    for ind, members in by_industry.items():
+        out = {}
+        for f in MEDIAN_FIELDS:
+            vs = [r[f] for r in members
+                  if isinstance(r.get(f), (int, float)) and r[f] == r[f]]
+            m = median(vs)
+            if m is not None:
+                out[f] = [round(m, 2), len(vs)]     # value, and how many it came from
+        medians_by_industry[ind] = out
+
+    row_by, peers_by, ctx_by = {}, {}, {}
+    for r in rows:
+        sym, ind = r["symbol"], (r.get("industry") or "")
+        row_by[sym] = r
+        peers_by[sym] = [
+            {k: p.get(k) for k in PEER_FIELDS}
+            for p in sorted((x for x in by_industry.get(ind, []) if x["symbol"] != sym),
+                            key=lambda x: -(x.get("mcap") or 0))[:8]
+        ]
+        ctx_by[sym] = {
+            "industry": ind,
+            "medians": medians_by_industry.get(ind, {}),
+            "rank": rank_all.get(sym),
+            "rank_of": len(with_cap),
+            "ind_rank": rank_ind.get(sym),
+            "ind_rank_of": ind_sizes.get(ind, 0),
+        }
+    return row_by, peers_by, ctx_by
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbols", help="comma list, or @path - rebuild only these "
@@ -452,6 +533,9 @@ def main() -> None:
     # written above the thing that populates its input.
     no_pe = why_no_pe(con, {s: e for s, (e, _) in listing.items()})
     actions_by_symbol = corporate_actions(con)
+    # Read AFTER export_json.py has written it - the nightly runs them in that
+    # order. Falls back silently when absent so a standalone run still works.
+    row_by_sym, peers_by_sym, ctx_by_sym = screener_context(OUT_DIR.parent / "data.json")
     trends = build_trends(con, shares_by_symbol, only)
     bands = ratio_bands(con, shares_by_symbol, netdebt_by_symbol, only)
     prices_by_symbol: dict[str, dict] = {}
@@ -541,6 +625,11 @@ def main() -> None:
             # for something that is not coming.
             "exchange": listing.get(sym, ("NSE", None))[0],
             "bse_code": listing.get(sym, ("NSE", None))[1],
+            # The three things the page used to download 5.6 MB of screener
+            # table to obtain. See screener_context().
+            "row": row_by_sym.get(sym),
+            "peers": peers_by_sym.get(sym),
+            "context": ctx_by_sym.get(sym),
         }
         if sym in has_statements:
             stmts = pd.read_sql("SELECT * FROM statements WHERE symbol = ?", con, params=(sym,))

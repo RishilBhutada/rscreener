@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Settings from "@/components/Settings";
+import { loadIndex } from "@/lib/index-data";
 import { buildIndex, search, didYouMean, type SearchIndex, type SearchRow } from "@/lib/search";
 import AccountButton from "@/components/AccountButton";
 
@@ -24,12 +25,14 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
   const ensureData = async () => {
     if (cache) { if (!indexCache) indexCache = buildIndex(cache); if (rows.length === 0) setRows(cache); return; }
     try {
-      const d = await (await fetch(`${BASE}/data.json`)).json();
-      cache = (d.rows as Record<string, unknown>[]).map((r) => ({
-        symbol: String(r.symbol),
-        name: String(r.name ?? ""),
-        mcap: (r.mcap as number) ?? 0,
-        exchange: r.exchange as string | undefined,
+      // index.json, not data.json: this box reads three fields and the full
+      // table costs 5.6 MB.
+      const d = await loadIndex();
+      cache = d.rows.map((r) => ({
+        symbol: r.symbol,
+        name: r.name,
+        mcap: r.mcap,
+        exchange: r.exchange,
       }));
       indexCache = buildIndex(cache);
       setRows(cache);

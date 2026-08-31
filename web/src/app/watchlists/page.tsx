@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
+import { loadIndex } from "@/lib/index-data";
 import { Row } from "@/lib/query";
 import { shortName } from "@/lib/names";
 import {
@@ -56,7 +57,11 @@ export default function WatchlistsPage() {
   const addRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetch(`${BASE}/data.json`).then((r) => r.json()).then(setData).catch(() => {});
+    // A watchlist shows six columns for a handful of symbols. It
+    // used to download every field of every company in India to fill them.
+    loadIndex()
+      .then((d) => setData({ generated_at: d.generated_at ?? "", rows: d.rows as unknown as Row[] }))
+      .catch(() => {});
     setState(loadLists());
     setReady(true);
   }, []);

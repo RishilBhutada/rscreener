@@ -459,9 +459,18 @@ def main() -> None:
     if {"net_margin", "net_income", "revenue"} <= set(df.columns):
         nm, ni, rev = [], df["net_income"], df["revenue"]
         for v, inc, rv in zip(df["net_margin"], ni, rev):
-            material = inc is not None and inc == inc and abs(inc) > 1e7   # over Rs 1 crore
-            if v == 0 and material:
-                if rv is not None and rv == rv and rv > 0:
+            # The materiality test used to gate BOTH branches, so a 0.0 margin
+            # sitting beside a loss under Rs 1 crore was published as a fact.
+            # QUINTEGRA lost Rs 10.4 lakh and reports no revenue at all, and the
+            # screener said its net margin was exactly zero. The size of the
+            # loss is a reason to skip RECOMPUTING a margin, never a reason to
+            # keep a zero that the numbers contradict: 152 rows were still
+            # publishing one on 31-Aug, three weeks after this block was written
+            # to stop exactly that.
+            known_inc = inc is not None and inc == inc
+            good_rev = rv is not None and rv == rv and rv > 0
+            if v == 0 and known_inc and inc != 0:
+                if good_rev:
                     nm.append(inc / rv); fixed_margin += 1        # still a fraction here
                 else:
                     nm.append(None); blanked_margin += 1
@@ -488,6 +497,65 @@ def main() -> None:
     if n_ps:
         print(f"  withheld {n_ps} price-to-sales figures whose company reports "
               f"non-positive revenue")
+
+    # Revenue that is negative is not revenue. 50 companies publish one -
+    # SAMMAANCAP at minus Rs 1,261 crore, IFCI at minus Rs 593 crore - because
+    # Yahoo's "Total Revenue" for a lender is net of interest and provisions and
+    # can come out below zero. As a figure on a screener it is meaningless, and
+    # every ratio built on it inherits the meaninglessness: an operating margin
+    # of 52.97% computed against a negative denominator is a sign cancellation,
+    # not a margin. P/S was already withheld here; the rest were not.
+    n_rev = 0
+    if "revenue" in df.columns:
+        neg = [rv is not None and rv == rv and rv < 0 for rv in df["revenue"]]
+        n_rev = sum(neg)
+        for col in ("revenue", "net_margin", "op_margin", "gross_margin", "debtor_days"):
+            if col in df.columns:
+                df[col] = [None if bad else v for v, bad in zip(df[col], neg)]
+    if n_rev:
+        print(f"  withheld revenue and every margin built on it for {n_rev} companies "
+              f"whose source reports revenue below zero")
+
+    # A margin is a fraction of sales. Past a few hundred percent it is not a
+    # margin, it is a denominator that has collapsed: NATURO reports one rupee
+    # of revenue and an operating margin of -291,703,400%, VALLABHSQ reports
+    # zero revenue and -259,100%. Such a row sorts to the very top or bottom of
+    # any margin screen, which is the worst place for a number nobody can use.
+    #
+    # The bound is generous on purpose - a genuine margin CAN exceed 100% when
+    # other income dwarfs a small revenue line, and those are real companies
+    # worth seeing. Five hundred percent is where arithmetic stops and the
+    # source's data shape takes over.
+    n_mag = 0
+    for col in ("net_margin", "op_margin", "gross_margin"):
+        if col not in df.columns:
+            continue
+        vals = []
+        for v in df[col]:
+            if v is not None and v == v and abs(v) > 5.0:   # still a FRACTION here, so 5.0 = 500%
+                vals.append(None); n_mag += 1
+            else:
+                vals.append(v)
+        df[col] = vals
+    if n_mag:
+        print(f"  withheld {n_mag} margins beyond +/-500%, which are collapsed "
+              f"denominators rather than margins")
+
+    # Same fault, different ratio: 55 companies publish debtor days in the
+    # millions. SVPGLOB shows 7,037,184 days of receivables - 19,000 years -
+    # against Rs 5.6 lakh of revenue. Five years is already an extreme that
+    # deserves attention; a thousand is a broken input.
+    n_dd = 0
+    if "debtor_days" in df.columns:
+        vals = []
+        for v in df["debtor_days"]:
+            if v is not None and v == v and (v > 1825 or v < 0):
+                vals.append(None); n_dd += 1
+            else:
+                vals.append(v)
+        df["debtor_days"] = vals
+    if n_dd:
+        print(f"  withheld {n_dd} debtor-day figures beyond five years or below zero")
 
     n_roe = withhold_on_dead_equity(df, "roe")
     if n_roe:
@@ -573,6 +641,39 @@ def main() -> None:
     OUT.write_text(json.dumps(clean_nan(payload), ensure_ascii=False, allow_nan=False), encoding="utf-8")
     kb = OUT.stat().st_size / 1024
     print(f"exported {len(df)}/{n_universe} symbols -> {OUT} ({kb:.0f} KB)")
+
+    # A search box does not need a financial database.
+    #
+    # Every page that carries the top nav downloaded the whole of data.json to
+    # power the search box, and the landing page downloaded it again for a strip
+    # of watchlist rows. That was 1.1 MB when the audit found it and is 5.6 MB
+    # now that the universe is 4,746 companies with fifty-odd fields each - the
+    # cost of the fault grew five times while the fault stayed open.
+    #
+    # Five fields per company answer both: name and symbol to find it, exchange
+    # to label it, price and one-month return for the watchlist strip. Written
+    # as parallel arrays rather than objects because 4,746 repetitions of
+    # `{"symbol":...,"name":...}` is mostly punctuation.
+    idx = OUT.parent / "index.json"
+    idx.write_text(json.dumps(clean_nan({
+        "generated_at": payload["generated_at"],
+        "price_asof": price_asof,
+        "universe_size": int(n_universe),
+        "covered": len(df),
+        # mcap is here because search ranks matches by size, so "reliance"
+        # offers Reliance Industries before Reliance Power. The four ratios are
+        # here because the watchlist table shows exactly those columns, and one
+        # index serving four pages beats a second file or a 5.6 MB download.
+        "fields": ["symbol", "name", "exchange", "price", "ret_1m", "mcap",
+                   "pe", "roe", "roce", "div_yield"],
+        "rows": [[r.get("symbol"), r.get("name"), r.get("exchange"),
+                  r.get("price"), r.get("ret_1m"), r.get("mcap"),
+                  r.get("pe"), r.get("roe"), r.get("roce"), r.get("div_yield")]
+                 for r in payload["rows"]],
+    }), ensure_ascii=False, allow_nan=False, separators=(",", ":")), encoding="utf-8")
+    ikb = idx.stat().st_size / 1024
+    print(f"  search index -> {idx.name} ({ikb:.0f} KB, {kb / max(ikb, 1):.0f}x smaller "
+          f"than the table it replaces on the home and nav search)")
     sample = df[df.symbol == "RELIANCE"]
     if not sample.empty:
         print(sample[["symbol", "price", "mcap", "pe", "roe", "de", "div_yield"]].to_string(index=False))

@@ -60,6 +60,19 @@ type Company = {
   no_pe_reason?: string | null;
   exchange?: string | null;
   bse_code?: number | string | null;
+  /** Written by pipeline/export_company_json.py so this page need not download
+   *  the whole screener table. Optional: a company file exported before that
+   *  change has none of the three, and the page falls back to fetching it. */
+  row?: Row | null;
+  peers?: Row[] | null;
+  context?: {
+    industry?: string;
+    medians?: Record<string, [number, number]>;
+    rank?: number | null;
+    rank_of?: number;
+    ind_rank?: number | null;
+    ind_rank_of?: number;
+  } | null;
 };
 
 /** Working-capital ratios per year - how the business is actually financed. */
@@ -618,7 +631,11 @@ function ValuationHistory({ company }: { company: Company }) {
 
 /** Every company in the same industry, plus where this one sits by size. */
 type Cohort = {
+  /** Only populated by the fallback path, where medians must be computed here.
+   *  With a modern company file the medians arrive precomputed and this is []. */
   rows: Row[];
+  /** field -> [median, how many companies it came from] */
+  medians: Record<string, [number, number]>;
   industry: string;
   rank: number | null;
   rankOf: number;
@@ -631,7 +648,10 @@ type Cohort = {
  *  there are several - drags a mean somewhere no company actually is.
  *  Withheld below five companies, where a "median" is just one firm's number
  *  wearing a statistical hat. */
-function industryMedian(rows: Row[], field: string): { value: number; n: number } | null {
+function industryMedian(cohort: Cohort, field: string): { value: number; n: number } | null {
+  const pre = cohort.medians?.[field];
+  if (pre) return { value: pre[0], n: pre[1] };
+  const rows = cohort.rows;
   const vs = rows
     .map((r) => r[field])
     .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
@@ -704,7 +724,7 @@ function RatioGrid({ snapshot, row, cohort }: { snapshot: Row; row: Row | null; 
       return `${cohort.rank.toLocaleString("en-IN")} of ${cohort.rankOf.toLocaleString("en-IN")} by size${
         cohort.indRank ? ` · ${cohort.indRank} of ${cohort.indRankOf} in its industry` : ""}`;
     }
-    const med = industryMedian(cohort.rows, field);
+    const med = industryMedian(cohort, field);
     const mine = g(field);
     if (!med) return null;
     const shown = Math.abs(med.value) >= 100 ? fmtNum(med.value, 0) : fmtNum(med.value);
@@ -903,6 +923,27 @@ function CompanyView() {
 
   useEffect(() => {
     if (!company) return;
+    // The row, the peers and the industry context now travel INSIDE this
+    // company's own file - about 3 KB of the 32 KB already downloaded. This
+    // page used to fetch the whole 5.6 MB screener table and keep three things
+    // from it: 99.4% of the transfer discarded, on the app's most-visited page.
+    if (company.row || company.peers || company.context) {
+      setFullRow((company.row as Row) ?? null);
+      setPeers((company.peers as Row[]) ?? []);
+      const c = company.context;
+      setCohort(c ? {
+        rows: [],
+        industry: c.industry ?? "",
+        medians: c.medians ?? {},
+        rank: c.rank ?? null,
+        rankOf: c.rank_of ?? 0,
+        indRank: c.ind_rank ?? null,
+        indRankOf: c.ind_rank_of ?? 0,
+      } : null);
+      return;
+    }
+    // Older company files carry none of that. Rather than show a page with no
+    // peers and no context, fall back to what this page used to do.
     fetch(`${BASE}/data.json`)
       .then((r) => r.json())
       .then((d: ScreenData) => {
@@ -916,14 +957,6 @@ function CompanyView() {
             .sort((a, b) => ((b.mcap as number) ?? 0) - ((a.mcap as number) ?? 0))
             .slice(0, 8)
         );
-        // Context, not a verdict. Every screener worth studying - Tickertape,
-        // Trendlyne - refuses to print a bare ratio: each one is labelled
-        // against its industry, because a P/E of 28 means nothing until you
-        // know the industry sits at 12 or at 60. Computed here from the rows
-        // already downloaded for peers, so it costs one pass over an array and
-        // covers all 4,746 companies at once rather than waiting on a pipeline
-        // run. Deliberately NOT coloured good or bad: above the median is not
-        // an opinion this app is entitled to have.
         const withCap = d.rows.filter((r) => typeof r.mcap === "number");
         const byCap = [...withCap].sort((a, b) => (b.mcap as number) - (a.mcap as number));
         const rank = byCap.findIndex((r) => r.symbol === company.snapshot.symbol);
@@ -932,6 +965,7 @@ function CompanyView() {
         setCohort({
           rows: sameIndustry,
           industry: String(ind),
+          medians: {},
           rank: rank >= 0 ? rank + 1 : null,
           rankOf: byCap.length,
           indRank: indRank >= 0 ? indRank + 1 : null,

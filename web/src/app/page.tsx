@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
+import { loadIndex } from "@/lib/index-data";
 import { loadRecent } from "@/lib/store";
 import { allWatched, loadLists } from "@/lib/watchlists";
 import { shortName } from "@/lib/names";
@@ -40,19 +41,13 @@ export default function Home() {
     setWatch(allWatched(st));
     setLists(st.lists.filter((l) => l.symbols.length > 0).length);
     setRecent(loadRecent());
-    fetch(`${BASE}/data.json`)
-      .then((r) => r.json())
+    // The landing page needs a name, a symbol, a price and a one-month return.
+    // It used to download the entire screener table to get them.
+    loadIndex()
       .then((d) => {
-        setRows((d.rows as Record<string, unknown>[]).map((r) => ({
-          symbol: String(r.symbol),
-          name: String(r.name ?? ""),
-          mcap: (r.mcap as number) ?? 0,
-          price: r.price as number | undefined,
-          ret_1m: r.ret_1m as number | undefined,
-          exchange: r.exchange as string | undefined,
-        })));
-        setAsof(d.price_asof ?? null);
-        setCovered(d.covered ?? null);
+        setRows(d.rows);
+        setAsof(d.price_asof);
+        setCovered(d.covered);
       })
       .catch(() => { /* search degrades to nothing rather than an error wall */ });
   }, []);

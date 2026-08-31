@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
+import { loadIndex } from "@/lib/index-data";
 import { Row } from "@/lib/query";
 import { Holding, loadPortfolio, parseHoldings, savePortfolio } from "@/lib/portfolio";
 
@@ -23,7 +24,11 @@ export default function PortfolioPage() {
   const [importError, setImportError] = useState("");
 
   useEffect(() => {
-    fetch(`${BASE}/data.json`).then((r) => r.json()).then(setData).catch(() => {});
+    // A portfolio needs a name and a price per holding, and nothing
+    // else from the table it used to download in full.
+    loadIndex()
+      .then((d) => setData({ generated_at: d.generated_at ?? "", rows: d.rows as unknown as Row[] }))
+      .catch(() => {});
     const loaded = loadPortfolio();
     setHoldings(loaded);
     if (loaded.length === 0) setImporting(true);
