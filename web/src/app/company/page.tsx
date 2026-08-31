@@ -910,6 +910,23 @@ function FScore({ f }: { f: FScoreData }) {
  *  under three years of monthly points the percentile is noise, so it is
  *  withheld rather than shown small.
  */
+/** Whether "Against its own history" has anything to draw.
+ *
+ *  Exported as its own rule because the SECTION and the MENU ENTRY that points
+ *  at it must agree. They did not: the menu asked whether a band exists at all
+ *  while the section needs 36 monthly points, so NSDL - BSE-only, no bands -
+ *  offered "Own history" and scrolled to an empty div. That is the same fault
+ *  as the half-empty section menu fixed on 9-Aug: a menu item that goes
+ *  nowhere reads as a broken page, which is worse than an absent one.
+ */
+function hasValuationHistory(company: Company): boolean {
+  return [company.pe_band, company.pb_band, company.ev_band, company.ps_band].some(
+    (b) => (b?.series ?? []).filter(
+      (p) => Array.isArray(p) && typeof p[1] === "number" && Number.isFinite(p[1])
+    ).length >= 36
+  );
+}
+
 function ValuationHistory({ company }: { company: Company }) {
   const bands: [string, PeBand | null | undefined, string][] = [
     ["Price to earnings", company.pe_band, "P/E"],
@@ -1466,7 +1483,7 @@ function CompanyView() {
           ["performance", "Price history", true],
           ["analysis", "Analysis", true],
           ["checks", "Nine checks", Boolean(company.fscore)],
-          ["valuation", "Own history", Boolean(company.pe_band || company.pb_band || company.ps_band)],
+          ["valuation", "Own history", hasValuationHistory(company)],
           ["peers", "Peers", true],
           ["quarters", "Quarters", Boolean(quarterly)],
           ["profit-loss", "Profit & Loss", Boolean(pnl)],
@@ -1556,9 +1573,11 @@ function CompanyView() {
         <div id="checks" className="scroll-mt-32"><FScore f={company.fscore} /></div>
       )}
 
-      <div id="valuation" className="scroll-mt-32">
-        <ValuationHistory company={company} />
-      </div>
+      {hasValuationHistory(company) && (
+        <div id="valuation" className="scroll-mt-32">
+          <ValuationHistory company={company} />
+        </div>
+      )}
 
       {peers.length > 0 && (
         <section id="peers" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
