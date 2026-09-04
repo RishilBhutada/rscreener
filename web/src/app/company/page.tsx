@@ -1301,6 +1301,139 @@ function CompanyView() {
     nav.scrollBy({ left: delta, behavior: still ? "auto" : "smooth" });
   }, [mode, page, paneIds]);
 
+  // ONE SWIPE, ONE SECTION - driven here rather than left to the browser.
+  //
+  // scroll-snap-stop: always is supported and still let a single swipe cross
+  // several sections in the installed app: snap decides where a scroll comes to
+  // REST, and the WebView's fling had already carried it three panes by then.
+  // So the horizontal gesture is taken off the browser entirely - CSS
+  // touch-action: pan-y - and moved here, where a gesture can only ever commit
+  // to the neighbouring section.
+  //
+  // The finger is tracked 1:1 during the drag, which is what makes it feel
+  // attached rather than approximate, and the axis is locked on the first few
+  // pixels so a vertical read never drifts sideways and a sideways swipe never
+  // scrolls the page.
+  useEffect(() => {
+    const el = pager.current;
+    if (!el || mode !== "swipe") return;
+
+    const paneAt = (i: number) => {
+      const id = paneIds[i];
+      return id ? (Array.from(el.children).find((c) => c.id === id) as HTMLElement | undefined) : undefined;
+    };
+
+    let startX = 0, startY = 0, startScroll = 0, startIndex = 0;
+    let axis: "x" | "y" | null = null;
+    let lastX = 0, lastT = 0, velocity = 0, current = 0;
+
+    const width = () => el.clientWidth || 1;
+
+    const settle = (index: number) => {
+      const n = el.children.length;
+      const target = Math.max(0, Math.min(n - 1, index));
+      el.scrollTo({ left: target * width(), behavior: "smooth" });
+    };
+
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      startX = lastX = current = t.clientX;
+      startY = t.clientY;
+      startScroll = el.scrollLeft;
+      startIndex = Math.round(startScroll / width());
+      axis = null;
+      velocity = 0;
+      lastT = e.timeStamp;
+    };
+
+    const onMove = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+
+      // Lock the axis once the gesture has committed to a direction. Below the
+      // threshold neither is claimed, so a tap or a tiny wobble does nothing.
+      if (axis === null) {
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+      }
+      if (axis === "y") return;   // the page scrolls; touch-action: pan-y allows it
+
+      // Velocity over a FRAME, not between consecutive events. Touch events can
+      // arrive a fraction of a millisecond apart - coalesced, or on a 120Hz
+      // panel - and dividing a few pixels by that gives a number that looks
+      // like a violent flick. A 40px twitch was paging the section on exactly
+      // that arithmetic. Sampling no faster than one frame keeps the figure
+      // honest.
+      const dt = e.timeStamp - lastT;
+      if (dt >= 16) {
+        velocity = (t.clientX - lastX) / dt;   // px per ms, signed
+        lastX = t.clientX;
+        lastT = e.timeStamp;
+      }
+      current = t.clientX;
+
+      // 1:1 with the finger, with resistance at the two ends so the first and
+      // last sections feel like edges rather than like a broken control.
+      let next = startScroll - dx;
+      const max = (el.children.length - 1) * width();
+      if (next < 0) next = next / 3;
+      else if (next > max) next = max + (next - max) / 3;
+      el.scrollLeft = next;
+    };
+
+    const onEnd = () => {
+      if (axis !== "x") { axis = null; return; }
+      const moved = current - startX;
+      const travelled = moved / width();
+      // Either a decisive flick or a third of the way across commits to the
+      // next section; anything less falls back to where it started. One
+      // section per gesture whichever way it was earned.
+      //
+      // A flick also has to have GONE somewhere - 24px at minimum. Speed alone
+      // is not intent: a fast twitch while reading is not a request to change
+      // section, and it was being treated as one.
+      const flicked = Math.abs(velocity) > 0.35 && Math.abs(moved) > 24;
+      let index = startIndex;
+      if (travelled <= -0.33 || (flicked && velocity < 0)) index = startIndex + 1;
+      else if (travelled >= 0.33 || (flicked && velocity > 0)) index = startIndex - 1;
+      settle(index);
+      axis = null;
+    };
+
+    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchmove", onMove, { passive: true });
+    el.addEventListener("touchend", onEnd, { passive: true });
+    el.addEventListener("touchcancel", onEnd, { passive: true });
+    return () => {
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchmove", onMove);
+      el.removeEventListener("touchend", onEnd);
+      el.removeEventListener("touchcancel", onEnd);
+    };
+  }, [mode, paneIds]);
+
+  // The pager is exactly as tall as the section you are looking at.
+  //
+  // A flex row is as tall as its tallest child, so without this the page would
+  // carry the height of the longest section under every short one - the empty
+  // space below Analysis would be the height of the balance sheet. Re-measured
+  // when the pane changes size, because Documents grows when a year is opened.
+  useEffect(() => {
+    const el = pager.current;
+    if (!el || mode !== "swipe") { if (el) el.style.height = ""; return; }
+    const id = paneIds[page];
+    const pane = id ? (Array.from(el.children).find((c) => c.id === id) as HTMLElement | undefined) : undefined;
+    if (!pane) return;
+    const fit = () => { el.style.height = `${pane.scrollHeight}px`; };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(pane);
+    return () => ro.disconnect();
+  }, [mode, page, paneIds]);
+
   const step = useCallback((d: number) => {
     const el = pager.current;
     if (!el) return;

@@ -161,25 +161,43 @@ input, textarea, select, button {
   :root:not([data-theme="light"]) { --warn: #fbbf24; }
 }
 
-/* Company page, "swipe sideways" mode (Settings → Company page sections).
+/* Company page, "swipe sideways" mode (Settings -> Company page sections).
  *
  * The same children that stack vertically in scroll mode become full-width
  * snap panes here. Doing it in CSS rather than in JSX means a section added to
  * the page later joins the pager automatically, and neither mode has a
  * separate copy of the markup that could drift from the other.
  *
- * Each pane scrolls vertically on its own, because some sections - a balance
- * sheet, a 40-row ratios table - are taller than any phone. Locking the pane
- * to the viewport and letting its content scroll inside keeps "one section at
- * a time" true without hiding the bottom of the long ones.
+ * WHAT WAS WRONG, AND IT WAS ONE THING CAUSING TWO COMPLAINTS.
+ *
+ * Each pane used to be capped at calc(100dvh - 13rem) with its own
+ * overflow-y: auto. A flex row stretches its children, so that cap became a
+ * fixed height for ALL FIFTEEN sections at once - measured on the live site,
+ * every pane was exactly 604px. Analysis has 492px of content and got 604px of
+ * box, which is the dead space. Summary has 926px and got the same 604px,
+ * which is the scroll-inside-a-scroll - and that inner scroller then ate the
+ * swipe, because a gesture that starts on a scrollable area belongs to it.
+ *
+ * Neither was needed. `align-items: flex-start` lets each pane be its own
+ * height, the page scrolls vertically the way a page should, and no pane has an
+ * inner scroller for a sideways gesture to get lost in.
+ *
+ * `touch-action: pan-y` is the other half: it hands vertical panning to the
+ * page and takes horizontal away from the browser entirely, so the native fling
+ * - which was carrying a single swipe across several sections regardless of
+ * scroll-snap-stop - never runs. The swipe is driven from JS instead, one
+ * section per gesture, which is what was asked for and what snap alone would
+ * not deliver in the app's WebView.
  */
 .rs-pager {
   display: flex;
+  align-items: flex-start;
   overflow-x: auto;
   overflow-y: hidden;
-  scroll-snap-type: x mandatory;
+  scroll-snap-type: x mandatory;   /* still does the work for mouse and trackpad */
   scrollbar-width: none;
   overscroll-behavior-x: contain;
+  touch-action: pan-y;
   gap: 0;
 }
 .rs-pager::-webkit-scrollbar { display: none; }
@@ -187,20 +205,8 @@ input, textarea, select, button {
   flex: 0 0 100%;
   min-width: 100%;
   scroll-snap-align: start;
-  /* One swipe moves exactly one section.
-   *
-   * `scroll-snap-type: mandatory` only decides WHERE a scroll comes to rest,
-   * not how far it may travel: a quick flick carried its momentum across three
-   * or four panes and landed on whichever one it happened to reach, so the
-   * gesture had no fixed meaning. `always` makes every pane a stop the scroll
-   * cannot pass, which is what this property exists for. */
   scroll-snap-stop: always;
-  max-height: calc(100dvh - 13rem);
-  overflow-y: auto;
-  padding-right: 2px; /* keeps a card's border off the next pane's edge */
 }
-/* Sticky headers inside a statement table stick to the pane, not the page. */
-.rs-pager > * > * { scroll-margin-top: 0; }
 
 /* Company page, scroll mode. A flex column rather than a block stack, purely
  * so the same CSS `order` that sequences the swipe panes also sequences the
