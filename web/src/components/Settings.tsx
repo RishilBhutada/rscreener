@@ -345,16 +345,12 @@ export default function Settings() {
                 Data freshness is separate and lives on the{" "}
                 <a href="./status/" className="text-[var(--accent-ink)] font-semibold">Data page</a>.
               </p>
-              {/* Was a bare arrow in the header. Installed to the home screen
-                  there is no browser reload button, so it has to live
-                  somewhere - just not somewhere permanent and unlabelled. */}
-              <button
-                onClick={() => window.location.reload()}
-                className="mt-2 min-h-[44px] px-3 rounded-lg border border-[var(--line)]
-                           bg-[var(--card2)] text-[var(--ink2)] text-sm font-medium w-full"
-              >
-                ↻ Reload the app
-              </button>
+              {/* The reload control lives in the header again, where it is one
+                  tap from anywhere. Naming it here rather than duplicating it,
+                  so there are not two buttons doing the same job. */}
+              <p className="pt-1">
+                To fetch the newest version, use ↻ at the top of the screen.
+              </p>
             </div>
           </div>
         </div>

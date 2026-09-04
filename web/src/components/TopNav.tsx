@@ -16,6 +16,65 @@ type Lite = SearchRow;
 let cache: Lite[] | null = null;
 let indexCache: SearchIndex | null = null;
 
+/** Fetch the app again, properly.
+ *
+ *  The APK is a thin shell around the live site, so an update needs no
+ *  reinstall - but the Android WebView keeps its own HTTP cache, and it will
+ *  happily serve yesterday's page for a good while. That is invisible: the site
+ *  updated, the app did not, and nothing on screen says which you are looking
+ *  at. It is exactly why a change can ship and not appear.
+ *
+ *  location.reload() is not enough for that, because a soft reload is allowed
+ *  to come out of the same cache. This empties any cache storage, then asks for
+ *  the document under a URL the cache has never seen, which it cannot answer
+ *  from a stored copy. The marker is stripped straight back out of the address
+ *  bar so it never accumulates or gets shared in a link.
+ */
+const REFRESH_MARK = "rsr";
+
+function hardRefresh() {
+  const done = () => {
+    const u = new URL(window.location.href);
+    u.searchParams.set(REFRESH_MARK, Date.now().toString(36));
+    window.location.replace(u.toString());
+  };
+  if (typeof caches === "undefined") return done();
+  caches.keys()
+    .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+    .catch(() => {})      // no cache storage, or blocked: reload anyway
+    .then(done, done);
+}
+
+function RefreshButton() {
+  const [spinning, setSpinning] = useState(false);
+
+  // Take the marker out of the URL once the fresh page is running, so it is
+  // never carried into a bookmark or a shared link.
+  useEffect(() => {
+    const u = new URL(window.location.href);
+    if (!u.searchParams.has(REFRESH_MARK)) return;
+    u.searchParams.delete(REFRESH_MARK);
+    window.history.replaceState(null, "", u.pathname + u.search + u.hash);
+  }, []);
+
+  return (
+    <button
+      onClick={() => { setSpinning(true); hardRefresh(); }}
+      aria-label="Get the latest version of the app"
+      title="Get the latest version"
+      className="rounded-full border border-[var(--line)] bg-[var(--card2)] w-10 h-10 sm:w-8 sm:h-8
+                 flex items-center justify-center text-[var(--ink2)] hover:border-[var(--line2)]"
+    >
+      <span
+        aria-hidden="true"
+        className={`text-base leading-none ${spinning ? "animate-spin" : ""}`}
+      >
+        ↻
+      </span>
+    </button>
+  );
+}
+
 export default function TopNav({ active }: { active?: "home" | "screens" | "sectors" | "calendar" | "portfolio" | "watchlists" | "ipo" | "status" }) {
   const router = useRouter();
   const [q, setQ] = useState("");
@@ -179,8 +238,14 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
             phone. The search box is `order-last w-full` there, so it drops to
             its own row and this group lands beside the wordmark on the first -
             hard against the logo on the left, which is where it sat. */}
+        {/* Refresh sits back out here, beside the gear. It went into Settings on
+            the argument that it is used rarely - which was wrong for an app
+            whose whole delivery mechanism is "the site updated, reload it".
+            Two taps behind a panel is too far for the one control that answers
+            "am I looking at the current version". */}
         <div className="shrink-0 ml-auto flex items-center gap-2">
           <AccountButton />
+          <RefreshButton />
           <Settings />
         </div>
       </div>
