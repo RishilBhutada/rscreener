@@ -372,6 +372,19 @@ jobs:
         # exported JSON the guards just approved is left exactly as it is.
         run: |
           git fetch origin main --depth=1
+          # Deepened for the build stamp below, which has to walk BACK past the
+          # housekeeping commits this job pushes. At --depth=1 there is nothing
+          # to walk: git log finds no non-housekeeping commit, the fallback
+          # returns the tip, and the stamp names the scoreboard commit. That is
+          # exactly what shipped on 31-Aug and what the live site then showed.
+          # Reproduced in a scratch repo before this line was written: depth 1
+          # names the housekeeping commit, depth 30 names the real change.
+          #
+          # Blobless where the server offers it, so deepening costs commits and
+          # trees but not thirty copies of a 5 MB export. Older servers ignore
+          # the filter with a warning and simply send more; either is fine.
+          git fetch origin main --deepen=30 --filter=blob:none 2>/dev/null \
+            || git fetch origin main --deepen=30 2>/dev/null || true
           BEFORE=$(git rev-parse --short HEAD)
           git checkout FETCH_HEAD -- web/src web/package.json web/package-lock.json web/next.config.ts 2>/dev/null || true
           echo "built from $(git rev-parse --short FETCH_HEAD) (this job started at $BEFORE)"
@@ -402,6 +415,9 @@ jobs:
             git log -1 --format=%s "$REF" | cut -c1-120
             echo "RS_EOF"
           } >> "$GITHUB_ENV"
+          # Printed, because this stamp has now been wrong three times in one
+          # day and every time it was found on the live site rather than here.
+          echo "stamping the app as: $(git log -1 --format="%h %cI %s" "$REF")"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
