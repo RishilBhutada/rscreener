@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Settings from "@/components/Settings";
 import { loadIndex } from "@/lib/index-data";
 import { DESTINATIONS, BAR_SLOTS } from "@/lib/destinations";
 import { applyOrder, loadOrder } from "@/lib/order";
+import { previousPage, recordNavigation } from "@/lib/navdepth";
 import { buildIndex, search, didYouMean, type SearchIndex, type SearchRow } from "@/lib/search";
 import AccountButton from "@/components/AccountButton";
 
@@ -71,6 +72,54 @@ function RefreshButton() {
       >
         ↻
       </span>
+    </button>
+  );
+}
+
+/** Back, in the top left, on every screen with somewhere of ours behind it.
+ *
+ *  Hidden on the page the session began on: a back arrow with nothing behind it
+ *  is a control that does nothing when tapped, which teaches you to distrust the
+ *  ones that do. It also cannot leave the app - see lib/navdepth.ts for the two
+ *  browser signals that were supposed to guarantee that and did not.
+ */
+function BackButton() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const [depth, setDepth] = useState(0);
+  const lastUrl = useRef<string | null>(null);
+
+  useEffect(() => {
+    // Only when the URL actually changed. This effect also runs again on first
+    // paint, when the Suspense boundary resolves and useSearchParams delivers -
+    // which is not a navigation, and counting it as one put a back arrow on the
+    // freshly opened home page.
+    const q = params.toString();
+    const url = pathname + (q ? `?${q}` : "");
+    if (lastUrl.current === url) return;
+    lastUrl.current = url;
+    setDepth(recordNavigation(url));
+  }, [pathname, params]);
+
+  if (depth <= 0) return null;
+
+  return (
+    <button
+      onClick={() => {
+        // router.back() so the browser's own forward stack stays honest; the
+        // trail corrects itself from wherever we land.
+        const target = previousPage();
+        if (target) router.back();
+        else router.push("/");
+      }}
+      aria-label="Go back"
+      title="Back"
+      className="shrink-0 rounded-full border border-[var(--line)] bg-[var(--card2)]
+                 w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center
+                 text-[var(--ink2)] hover:border-[var(--line2)] active:scale-95 transition-transform"
+    >
+      <span aria-hidden="true" className="text-base leading-none">←</span>
     </button>
   );
 }
@@ -151,6 +200,11 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
   return (
     <header className="bg-[var(--card)] border-b border-[var(--line)] sm:sticky sm:top-0 z-30">
       <div className="max-w-6xl mx-auto px-4 h-auto sm:h-14 py-2.5 sm:py-0 flex flex-wrap items-center gap-x-3 gap-y-2 sm:gap-4">
+        {/* Suspense around this one control, not the whole header. Reading the
+            query string opts a component out of static prerendering, and the
+            header is on every page - without this boundary the whole site would
+            have had to render in the browser to draw an arrow. */}
+        <Suspense fallback={null}><BackButton /></Suspense>
         <Link href="/" className="flex items-baseline gap-0.5 shrink-0">
           <span className="text-lg sm:text-xl font-bold tracking-tight text-[var(--ink)]">Rscreener</span>
           <span className="text-lg sm:text-xl font-bold text-[var(--accent)] hidden sm:inline">▮▮▮</span>
