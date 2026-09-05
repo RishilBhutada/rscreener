@@ -114,7 +114,21 @@ def main() -> None:
             "_have_sql": "SELECT DISTINCT symbol FROM prices",
         "name": "Share prices",
         "what": "Daily closes from the exchange feed. Drives every price, market cap and ratio.",
-        **_spread(con, "SELECT symbol, MAX(date) FROM prices WHERE freq='daily' GROUP BY symbol"),
+        # SIX DAYS, not zero. This was the one source judged against "is it on
+        # the very newest date any company reached" - the exact test the
+        # tolerance above exists to prevent, and it was left off the source it
+        # hurts most. Measured on the live site 6-Sep-2026: 4,725 companies of
+        # 4,908 sat on 3-Sep, one trading day back and entirely current; twelve
+        # companies had a 4-Sep bar. The page therefore reported SHARE PRICES AT
+        # 4%, and that number is what a reader uses to decide whether to trust
+        # anything else here.
+        #
+        # Not every share trades every day, so a bar one or two sessions old is
+        # normal rather than stale. Six days matches check_prices.py, which
+        # fails the build when the median price is older than six trading days -
+        # so the page and the guard now draw the line in the same place instead
+        # of disagreeing by a factor of twenty-four.
+        **_spread(con, "SELECT symbol, MAX(date) FROM prices WHERE freq='daily' GROUP BY symbol", 6),
         "cadence": "every night",
     })
 
