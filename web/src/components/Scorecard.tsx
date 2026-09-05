@@ -8,6 +8,9 @@ type Check = { measured: number; agree: number; pct: number | null; what: string
 type Part = {
   score: number | null;
   fields?: Record<string, number | null>;
+  /** Per field: how many companies the figure can apply to at all. */
+  reach?: Record<string, { eligible: number; of: number; pct: number | null }>;
+  holding_all_they_could?: number;
   checks?: Record<string, Check>;
   companies_with_a_valuation_history?: number;
   median_years_of_history?: number | null;
@@ -153,13 +156,29 @@ export default function Scorecard() {
           </div>
           <div>
             <p className="font-semibold text-[var(--ink2)] mb-1">Complete — by field</p>
-            <div className="grid grid-cols-2 gap-x-4">
-              {Object.entries(c.parts.complete?.fields ?? {}).map(([label, v]) => (
-                <div key={label} className="flex justify-between gap-2 py-0.5 border-t border-[var(--line)]">
-                  <span className="text-[var(--ink3)]">{label}</span>
-                  <span className="tabular-nums font-semibold" style={{ color: tone(v).fg }}>{v}%</span>
-                </div>
-              ))}
+            <p className="text-[var(--ink3)] mb-1">
+              Each figure is measured against the companies it CAN apply to, not against all
+              of them — a loss-making company has no P/E and a BSE-only company files no
+              shareholding pattern with the NSE. How many that is, is stated beside each.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+              {Object.entries(c.parts.complete?.fields ?? {}).map(([label, v]) => {
+                const r = c.parts.complete?.reach?.[label];
+                return (
+                  <div key={label} className="py-0.5 border-t border-[var(--line)]">
+                    <div className="flex justify-between gap-2">
+                      <span className="text-[var(--ink3)]">{label}</span>
+                      <span className="tabular-nums font-semibold" style={{ color: tone(v).fg }}>{v}%</span>
+                    </div>
+                    {r && r.eligible < r.of && (
+                      <p className="text-[10px] text-[var(--ink3)] tabular-nums">
+                        of the {r.eligible.toLocaleString("en-IN")} companies it can apply to
+                        {" "}({r.pct}% of {r.of.toLocaleString("en-IN")})
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

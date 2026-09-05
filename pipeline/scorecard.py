@@ -61,18 +61,86 @@ def pct(n: int, d: int) -> float | None:
     return None if not d else round(100.0 * n / d, 1)
 
 
-def completeness(rows: list[dict]) -> dict:
-    """How much of what the page shows is actually filled in."""
+def eligible(con: sqlite3.Connection, rows: list[dict]) -> dict[str, set]:
+    """Who CAN have each field, as opposed to who does.
+
+    The score could never reach 100 and the reason was this function's absence.
+    Completeness divided by the whole universe, so promoter holding was measured
+    against 2,700 companies listed only on BSE - whose shareholding pattern is
+    filed with an exchange this app does not read, and never will be present -
+    and five-year growth was measured against 854 companies that listed less
+    than five years ago. Those are not gaps. Counting them as gaps produced a
+    permanent, unfixable deficit that buried the part which IS fixable: on the
+    last run, twenty-five companies.
+
+    A score that cannot reach its own maximum is not a measurement, it is a
+    mood. Each field is now measured against the companies for which the figure
+    can exist at all, and what cannot exist is reported separately as reach.
+    """
+    listed: dict[str, datetime] = {}
+    try:
+        for s, d in con.execute('SELECT SYMBOL, "DATE OF LISTING" FROM universe'):
+            if not d:
+                continue
+            for fmt in ("%d-%b-%Y", "%Y-%m-%d"):
+                try:
+                    listed[s] = datetime.strptime(d, fmt); break
+                except ValueError:
+                    continue
+    except Exception:  # noqa: BLE001 - an older database without the column
+        pass
+
+    now = datetime.now()
+    everyone = {r["symbol"] for r in rows}
+    nse = {r["symbol"] for r in rows if (r.get("exchange") or "NSE") == "NSE"}
+
+    def listed_at_least(years: int) -> set:
+        # No listing date on file means no evidence it is too young; it stays in
+        # the denominator rather than being quietly excused.
+        return {s for s in everyone
+                if s not in listed or (now - listed[s]).days >= years * 365}
+
+    old_enough = listed_at_least(6)
+    # A P/E needs positive trailing earnings. A loss-making company has no P/E,
+    # and printing one would be the fault this app exists to avoid - so it is
+    # not a hole in the data either.
+    earning = {r["symbol"] for r in rows
+               if isinstance(r.get("net_income"), (int, float)) and r["net_income"] > 0}
+
+    return {
+        "price": everyone,
+        "mcap": everyone,
+        "pe": earning,
+        "book_value": everyone,
+        "roe": everyone,
+        "roce": everyone,
+        "de": everyone,
+        "sales_cagr_5y": old_enough,
+        "profit_cagr_5y": old_enough,
+        # Shareholding comes from NSE's filing archive. For a BSE-only company
+        # it is not missing; it is somewhere this app does not read.
+        "promoter_holding": nse,
+    }
+
+
+def completeness(con: sqlite3.Connection, rows: list[dict]) -> dict:
+    """How much of what CAN be filled in, is."""
     n = len(rows)
-    per_field = {}
+    can = eligible(con, rows)
+    per_field, reach = {}, {}
     for key, label in CORE_FIELDS:
-        have = sum(1 for r in rows if r.get(key) is not None)
-        per_field[label] = pct(have, n)
+        pool = can.get(key, {r["symbol"] for r in rows})
+        have = sum(1 for r in rows if r["symbol"] in pool and r.get(key) is not None)
+        per_field[label] = pct(have, len(pool))
+        # Stated, never silently excluded: how much of the universe the figure
+        # can apply to at all.
+        reach[label] = {"eligible": len(pool), "of": n, "pct": pct(len(pool), n)}
     filled = [v for v in per_field.values() if v is not None]
     return {
         "score": round(sum(filled) / len(filled), 1) if filled else None,
         "companies": n,
         "fields": per_field,
+        "reach": reach,
     }
 
 
@@ -197,6 +265,78 @@ def correctness(con: sqlite3.Connection, rows: list[dict]) -> dict:
     # pipeline did not mangle it in transit. Both are worth knowing and they are
     # not the same thing, so they are reported apart and only one is counted.
     scored = [c["pct"] for c in checks.values() if c["pct"] is not None]
+    # 4. The balance sheet must balance: assets = liabilities + equity.
+    #
+    #    An identity the company itself has to satisfy, so any failure is a
+    #    parsing or scaling fault on our side rather than a difference of
+    #    opinion between sources. It has to include MINORITY INTEREST: the first
+    #    version of this check compared against shareholders' equity alone and
+    #    accused 1,454 company-years, every one of which was a group with
+    #    subsidiaries doing nothing wrong. Written down because a check that
+    #    fails 7.6% of the time is usually testing the wrong thing, and this one
+    #    was.
+    bs: dict[tuple, dict] = {}
+    for s, pe, item, v in con.execute(
+        "SELECT symbol, period_end, item, value FROM statements WHERE stmt_type='balance' "
+        "AND item IN ('Total Assets','Total Liabilities Net Minority Interest',"
+        "'Total Equity Gross Minority Interest') AND value IS NOT NULL"
+    ):
+        bs.setdefault((s, pe), {})[item] = float(v)
+    bal_n = bal_ok = 0
+    for r in bs.values():
+        ta = r.get("Total Assets")
+        tl = r.get("Total Liabilities Net Minority Interest")
+        eq = r.get("Total Equity Gross Minority Interest")
+        if not ta or tl is None or eq is None:
+            continue
+        bal_n += 1
+        if abs((tl + eq) - ta) / abs(ta) <= 0.02:
+            bal_ok += 1
+    if bal_n:
+        checks["The balance sheet balances"] = {
+            "measured": bal_n, "agree": bal_ok, "pct": pct(bal_ok, bal_n),
+            "what": "total assets against liabilities plus equity, including minority interest - "
+                    "an identity the company must satisfy, so a failure is ours",
+        }
+
+    # 5. Four filed quarters against the filed annual, same company, same year.
+    #
+    #    Both come from the company's own filings, so they are meant to agree.
+    #    Where they do not, one of the two is wrong and the page is currently
+    #    showing it. This is the check that stopped a bad idea: building missing
+    #    annual years by summing quarters looked free until this measured the
+    #    method at 10.6% materially wrong.
+    def _fy_end(period_end: str) -> str:
+        y, m = int(period_end[:4]), int(period_end[5:7])
+        return f"{y + 1 if m >= 4 else y}-03-31"
+
+    filed_year: dict[tuple, float] = {}
+    for s, pe, v in con.execute(
+        "SELECT symbol, period_end, value FROM results_history "
+        "WHERE period_type='annual' AND item='revenue' AND value IS NOT NULL"
+    ):
+        filed_year[(s, pe)] = float(v)
+    quarters: dict[tuple, list] = {}
+    for s, pe, v in con.execute(
+        "SELECT symbol, period_end, value FROM results_history "
+        "WHERE period_type='quarterly' AND item='revenue' AND value IS NOT NULL"
+    ):
+        quarters.setdefault((s, _fy_end(pe)), []).append(float(v))
+    q_n = q_ok = 0
+    for key, vals in quarters.items():
+        annual = filed_year.get(key)
+        if len(vals) != 4 or not annual:
+            continue
+        q_n += 1
+        if abs(sum(vals) - annual) / abs(annual) <= 0.05:
+            q_ok += 1
+    if q_n:
+        checks["Four filed quarters against the filed year"] = {
+            "measured": q_n, "agree": q_ok, "pct": pct(q_ok, q_n),
+            "what": "a year's revenue against its own four quarters added up - both filed by "
+                    "the company, so a disagreement means one of the two is wrong",
+        }
+
     return {
         "score": round(sum(scored) / len(scored), 1) if scored else None,
         "checks": checks,
@@ -261,32 +401,76 @@ def freshness(rows: list[dict], asof: str | None) -> dict:
     return out
 
 
-def depth(files: list[Path]) -> dict:
-    """How far back the history actually reaches, on the pages that have one."""
-    spans, with_band, pre_2012 = [], 0, 0
+def depth(files: list[Path], con: sqlite3.Connection | None = None) -> dict:
+    """How much of each company's OWN history we hold.
+
+    This measured the median years of chart history against a flat 20-year
+    target, which marks a company down for not having existed. Of the companies
+    scored, hundreds listed within the last five years: their maximum possible
+    history IS three or four years, and holding all of it was being reported as
+    a 20% score. The number said the data was thin when what was thin was the
+    company's life.
+
+    Each company is now measured against its own ceiling - the years since it
+    listed, capped at the twenty the charts are built for - and the score is the
+    median of those ratios. A company holding everything it could possibly have
+    scores 100, which is what a score should be able to say.
+    """
+    listed: dict[str, datetime] = {}
+    if con is not None:
+        try:
+            for s, d in con.execute('SELECT SYMBOL, "DATE OF LISTING" FROM universe'):
+                if not d:
+                    continue
+                for fmt in ("%d-%b-%Y", "%Y-%m-%d"):
+                    try:
+                        listed[s] = datetime.strptime(d, fmt); break
+                    except ValueError:
+                        continue
+        except Exception:  # noqa: BLE001
+            pass
+
+    now_year = datetime.now(timezone.utc).year
+    ratios, spans, with_band, pre_2012, complete_history = [], [], 0, 0, 0
     for f in files:
         try:
             d = json.loads(f.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
             continue
         b = d.get("pe_band")
-        if b and b.get("series"):
-            with_band += 1
-            start = b["series"][0][0]
-            spans.append(int(start[:4]))
-            if start < "2012-01-01":
-                pre_2012 += 1
-    now_year = datetime.now(timezone.utc).year
+        if not (b and b.get("series")):
+            continue
+        with_band += 1
+        start_year = int(b["series"][0][0][:4])
+        spans.append(start_year)
+        if b["series"][0][0] < "2012-01-01":
+            pre_2012 += 1
+        held = now_year - start_year
+        sym = f.stem
+        possible = 20
+        if sym in listed:
+            possible = min(20, max(1, now_year - listed[sym].year))
+        r = min(1.0, held / possible) if possible else None
+        if r is not None:
+            ratios.append(r)
+            if r >= 0.95:
+                complete_history += 1
+
     median_years = None
     if spans:
         spans.sort()
         median_years = now_year - spans[len(spans) // 2]
-    # 20 years is the target the charts are built for.
+    score = None
+    if ratios:
+        ratios.sort()
+        score = round(ratios[len(ratios) // 2] * 100, 1)
     return {
-        "score": round(min(100.0, (median_years or 0) / 20 * 100), 1) if median_years else None,
+        "score": score,
         "companies_with_a_valuation_history": with_band,
         "median_years_of_history": median_years,
         "reaching_before_2012": pre_2012,
+        "holding_all_they_could": complete_history,
+        "what": "median share of each company's own possible history that we hold",
     }
 
 
@@ -302,10 +486,10 @@ def main() -> None:
     files = sorted(COMPANIES.glob("*.json"))
 
     parts = {
-        "complete": completeness(rows),
+        "complete": completeness(con, rows),
         "correct": correctness(con, rows),
         "fresh": freshness(rows, blob.get("price_asof")),
-        "deep": depth(files),
+        "deep": depth(files, con),
     }
     # Correctness is weighted hardest deliberately. A missing figure is a gap a
     # reader can see; a wrong one is acted on.
