@@ -7,6 +7,8 @@
  *  sector drill-down) still fetch data.json; nothing else should.
  */
 
+import { isRefreshLoad } from "@/components/TopNav";
+
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 export type LiteRow = {
@@ -41,7 +43,10 @@ let inflight: Promise<LiteIndex> | null = null;
 export function loadIndex(): Promise<LiteIndex> {
   if (cache) return Promise.resolve(cache);
   if (inflight) return inflight;
-  inflight = fetch(`${BASE}/index.json`)
+  // On the load a refresh produced, go past the HTTP cache for the data too.
+  // Reloading the shell around cached numbers is the same staleness wearing a
+  // different coat, and it is the exact thing the refresh button exists to end.
+  inflight = fetch(`${BASE}/index.json`, isRefreshLoad() ? { cache: "reload" } : undefined)
     .then((r) => {
       if (!r.ok) throw new Error("no index");
       return r.json();

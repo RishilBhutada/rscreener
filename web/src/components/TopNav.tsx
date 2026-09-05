@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Settings from "@/components/Settings";
 import { loadIndex } from "@/lib/index-data";
+import { BUILD_COMMIT } from "@/lib/buildinfo";
 import { DESTINATIONS, BAR_SLOTS } from "@/lib/destinations";
 import { applyOrder, loadOrder } from "@/lib/order";
 import { previousPage, recordNavigation } from "@/lib/navdepth";
@@ -17,37 +18,55 @@ type Lite = SearchRow;
 let cache: Lite[] | null = null;
 let indexCache: SearchIndex | null = null;
 
-/** Fetch the app again, properly.
+/** Fetch the app again - but only when there is something to fetch.
  *
  *  The APK is a thin shell around the live site, so an update needs no
- *  reinstall - but the Android WebView keeps its own HTTP cache, and it will
- *  happily serve yesterday's page for a good while. That is invisible: the site
- *  updated, the app did not, and nothing on screen says which you are looking
- *  at. It is exactly why a change can ship and not appear.
+ *  reinstall; the Android WebView simply keeps its own HTTP cache and will
+ *  serve yesterday's page for a good while. location.reload() does not help,
+ *  because a soft reload may come straight back out of that same cache. So this
+ *  empties any cache storage and asks for the document under a URL the cache
+ *  has never seen, which it cannot answer from a stored copy.
  *
- *  location.reload() is not enough for that, because a soft reload is allowed
- *  to come out of the same cache. This empties any cache storage, then asks for
- *  the document under a URL the cache has never seen, which it cannot answer
- *  from a stored copy. The marker is stripped straight back out of the address
- *  bar so it never accumulates or gets shared in a link.
+ *  What it did NOT do was tell you anything. It reloaded whatever the state of
+ *  things, and you were left exactly as unsure as before - which was the whole
+ *  complaint that led to this button existing. It now asks first: version.json
+ *  is written at build time and fetched here with the cache bypassed, so the
+ *  live commit can be compared against the one baked into the running bundle.
+ *
+ *    they differ   there is a new version - clear the caches and load it
+ *    they match    say so and stay put. A full reload to end up on the page you
+ *                  were already on costs you your scroll position and every
+ *                  open section, in exchange for nothing.
+ *    cannot tell   reload anyway. Being unable to check is not evidence of
+ *                  being current, and reloading is the safe way to be wrong.
  */
 const REFRESH_MARK = "rsr";
 
-function hardRefresh() {
-  const done = () => {
+/** True on the load that a refresh produced, so the data files are re-fetched
+ *  rather than read back out of the cache the reload just went around. A fresh
+ *  app shell showing yesterday's numbers is the same bug wearing a new coat. */
+export function isRefreshLoad(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URL(window.location.href).searchParams.has(REFRESH_MARK);
+}
+
+function reloadBypassingCache() {
+  const go = () => {
     const u = new URL(window.location.href);
     u.searchParams.set(REFRESH_MARK, Date.now().toString(36));
     window.location.replace(u.toString());
   };
-  if (typeof caches === "undefined") return done();
+  if (typeof caches === "undefined") return go();
   caches.keys()
     .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
     .catch(() => {})      // no cache storage, or blocked: reload anyway
-    .then(done, done);
+    .then(go, go);
 }
 
+type Check = "idle" | "checking" | "current";
+
 function RefreshButton() {
-  const [spinning, setSpinning] = useState(false);
+  const [state, setState] = useState<Check>("idle");
 
   // Take the marker out of the URL once the fresh page is running, so it is
   // never carried into a bookmark or a shared link.
@@ -58,30 +77,77 @@ function RefreshButton() {
     window.history.replaceState(null, "", u.pathname + u.search + u.hash);
   }, []);
 
+  useEffect(() => {
+    if (state !== "current") return;
+    const t = setTimeout(() => setState("idle"), 4000);
+    return () => clearTimeout(t);
+  }, [state]);
+
+  const check = async () => {
+    if (state === "checking") return;
+    setState("checking");
+    try {
+      const r = await fetch(`${BASE}/version.json`, { cache: "no-store" });
+      if (!r.ok) throw new Error("no version file");
+      const live = await r.json();
+      if (live?.commit && BUILD_COMMIT && live.commit !== BUILD_COMMIT) {
+        reloadBypassingCache();       // a new build exists; go and get it
+        return;
+      }
+      setState("current");            // already on it - do not disturb the page
+    } catch {
+      reloadBypassingCache();         // could not check; reloading is the safe error
+    }
+  };
+
   return (
-    <button
-      onClick={() => { setSpinning(true); hardRefresh(); }}
-      aria-label="Get the latest version of the app"
-      title="Get the latest version"
-      className="rounded-full border border-[var(--line)] bg-[var(--card2)] w-10 h-10 sm:w-8 sm:h-8
-                 flex items-center justify-center text-[var(--ink2)] hover:border-[var(--line2)]"
-    >
-      <span
-        aria-hidden="true"
-        className={`text-base leading-none ${spinning ? "animate-spin" : ""}`}
+    <div className="relative shrink-0">
+      <button
+        onClick={check}
+        disabled={state === "checking"}
+        aria-label="Check for a newer version of the app"
+        title="Check for a newer version"
+        className="rounded-full border border-[var(--line)] bg-[var(--card2)] w-10 h-10 sm:w-8 sm:h-8
+                   flex items-center justify-center text-[var(--ink2)] hover:border-[var(--line2)]
+                   disabled:opacity-60"
       >
-        ↻
-      </span>
-    </button>
+        <span aria-hidden="true"
+              className={`text-base leading-none ${state === "checking" ? "animate-spin" : ""}`}>
+          {state === "current" ? "✓" : "↻"}
+        </span>
+      </button>
+      {/* The answer, where the question was asked. The old button spun for a
+          moment and then navigated away, so the spinner never actually rendered
+          - it was feedback in name only. */}
+      {state === "current" && (
+        <p role="status"
+           className="absolute right-0 top-full mt-1.5 z-40 whitespace-nowrap rounded-lg border
+                      border-[var(--line)] bg-[var(--card)] px-2.5 py-1.5 text-[11px]
+                      text-[var(--ink2)] shadow-lg">
+          You already have the latest version.
+        </p>
+      )}
+    </div>
   );
 }
 
-/** Back, in the top left, on every screen with somewhere of ours behind it.
+/** Back, in the top left. On EVERY screen, with no exceptions.
  *
- *  Hidden on the page the session began on: a back arrow with nothing behind it
- *  is a control that does nothing when tapped, which teaches you to distrust the
- *  ones that do. It also cannot leave the app - see lib/navdepth.ts for the two
- *  browser signals that were supposed to guarantee that and did not.
+ *  It used to hide itself wherever the trail was empty, on the reasoning that an
+ *  arrow with nothing behind it does nothing when tapped. That reasoning was
+ *  fine and the result was not: opening the app lands you on a page that IS the
+ *  start of the trail, so the arrow was missing exactly when someone first went
+ *  looking for it, and deep-linking straight to a company gave a page with no
+ *  way back to anything.
+ *
+ *  So it is always drawn, and instead every tap is given something real to do:
+ *
+ *    somewhere behind you   go back to it
+ *    nothing behind, not home   go to the home page - which is what you want
+ *                           from a page you arrived at by link
+ *    nothing behind, on home    scroll to the top
+ *
+ *  No state where the arrow is present and inert.
  */
 function BackButton() {
   const router = useRouter();
@@ -93,8 +159,8 @@ function BackButton() {
   useEffect(() => {
     // Only when the URL actually changed. This effect also runs again on first
     // paint, when the Suspense boundary resolves and useSearchParams delivers -
-    // which is not a navigation, and counting it as one put a back arrow on the
-    // freshly opened home page.
+    // which is not a navigation, and counting it as one put the trail one step
+    // deep on a freshly opened page.
     const q = params.toString();
     const url = pathname + (q ? `?${q}` : "");
     if (lastUrl.current === url) return;
@@ -102,19 +168,17 @@ function BackButton() {
     setDepth(recordNavigation(url));
   }, [pathname, params]);
 
-  if (depth <= 0) return null;
+  const atHome = pathname === "/" || pathname === "";
 
   return (
     <button
       onClick={() => {
-        // router.back() so the browser's own forward stack stays honest; the
-        // trail corrects itself from wherever we land.
-        const target = previousPage();
-        if (target) router.back();
-        else router.push("/");
+        if (depth > 0 && previousPage()) router.back();
+        else if (!atHome) router.push("/");
+        else window.scrollTo({ top: 0, behavior: "smooth" });
       }}
-      aria-label="Go back"
-      title="Back"
+      aria-label={depth > 0 ? "Go back" : atHome ? "Back to the top" : "Go to the home page"}
+      title={depth > 0 ? "Back" : atHome ? "Back to top" : "Home"}
       className="shrink-0 rounded-full border border-[var(--line)] bg-[var(--card2)]
                  w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center
                  text-[var(--ink2)] hover:border-[var(--line2)] active:scale-95 transition-transform"

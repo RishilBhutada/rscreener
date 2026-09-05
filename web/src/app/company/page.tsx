@@ -10,6 +10,7 @@ import { Row } from "@/lib/query";
 import { loadNote, pushRecent, saveNote } from "@/lib/store";
 import WatchStar from "@/components/WatchStar";
 import { loadSectionMode, SectionMode } from "@/components/Settings";
+import { isRefreshLoad } from "@/components/TopNav";
 import { applyOrder, loadOrder } from "@/lib/order";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -1505,7 +1506,9 @@ function CompanyView() {
 
   useEffect(() => {
     if (!symbol) return;
-    fetch(`${BASE}/companies/${symbol}.json`)
+    // Past the HTTP cache on the load a refresh produced - a fresh shell around
+    // yesterday's company file is the staleness this button exists to end.
+    fetch(`${BASE}/companies/${symbol}.json`, isRefreshLoad() ? { cache: "reload" } : undefined)
       .then((r) => { if (!r.ok) throw new Error(`no data for ${symbol}`); return r.json(); })
       .then(setCompany)
       .catch((e) => setError(String(e.message ?? e)));

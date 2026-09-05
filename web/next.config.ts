@@ -22,6 +22,23 @@ const BUILD_TIME = process.env.RS_BUILD_TIME || new Date().toISOString();
 const BUILD_COMMIT = process.env.RS_BUILD_COMMIT || git("git rev-parse --short HEAD");
 const BUILD_SUBJECT = process.env.RS_BUILD_SUBJECT || git("git log -1 --format=%s");
 
+// A file saying which build is live, written where the values are already
+// known. The refresh button fetches it with the cache bypassed and compares it
+// against the commit baked into the running bundle, so it can say "you already
+// have the latest" instead of reloading and leaving you none the wiser. Tiny on
+// purpose: it is fetched to answer one question.
+try {
+  const fs = require("node:fs") as typeof import("node:fs");
+  fs.mkdirSync("public", { recursive: true });
+  fs.writeFileSync(
+    "public/version.json",
+    JSON.stringify({ commit: BUILD_COMMIT, built: BUILD_TIME, subject: BUILD_SUBJECT }),
+  );
+} catch {
+  // No version file means the button falls back to reloading unconditionally,
+  // which is what it did before this existed.
+}
+
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
