@@ -260,7 +260,32 @@ def already_done(con: sqlite3.Connection, max_age_hours: float = 0,
             print(f"  {len(incomplete & done)} symbols are logged as fetched but have no price or "
                   f"market cap - fetching them again rather than leaving the gap")
         done -= incomplete
-    return done
+
+    # A symbol the source has never heard of is ANSWERED, not pending.
+    #
+    # already_done retries anything with an error, which is right for a dropped
+    # connection and wrong for "no data returned (symbol unknown or delisted)".
+    # Measured on the snapshot log: 332 symbols carry that answer, almost all of
+    # them BSE scrips Yahoo has no page for, and every one was being asked again
+    # every single night. That is 332 requests a night spent on a question
+    # already answered, while the page counted them as backlog that would one
+    # day clear.
+    #
+    # Held for a month rather than forever: a scrip can start being quoted -
+    # a new listing, a symbol change - so the question is worth re-asking
+    # occasionally, just not nightly. Transient failures (DNS, timeouts, a 429)
+    # keep retrying immediately, which is what they need.
+    settled_cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+    settled = {
+        r[0] for r in con.execute(
+            f"SELECT symbol FROM {log_table} WHERE error LIKE 'no data returned%' AND fetched_at >= ?",
+            (settled_cutoff,),
+        ).fetchall()
+    }
+    if settled:
+        print(f"  {len(settled)} symbol(s) the source has no page for - answered within the last "
+              f"30 days, so not asked again tonight")
+    return done | settled
 
 
 
