@@ -546,6 +546,40 @@ _CROSS_CACHE: list = []
 # ...and once examined, the filing is only condemned if it is ALSO this far from
 # the rest of that company's own filed history.
 OWN_SERIES_LIMIT = 5.0
+# The gate for the THREE-witness test, which is far tighter than the two-witness
+# one above it can afford to be. Two sources disagreeing by 25% says nothing -
+# it does not even say which is wrong. Three documents do: when the company's
+# own four quarterly filings land on one side of a 25% disagreement and not the
+# other, that is an answer, not a coin toss. 5x is the right bar when the only
+# tie-break is the company's own neighbouring years; 1.25x is the right bar when
+# the tie-break is the company's own quarters.
+THIRD_WITNESS_LIMIT = 1.25
+
+
+_QSUM_CACHE: dict = {}
+
+
+def _fy_quarter_sums(con: sqlite3.Connection, symbol: str) -> dict[str, float]:
+    """{fiscal-year-end: sum of that year's four filed quarterly profits}.
+
+    Only complete years: three quarters and a gap would understate the year and
+    then wrongly accuse the annual filing of being too big. Built once for the
+    whole table and cached, because it is asked for inside a per-company loop.
+    """
+    if not _QSUM_CACHE:
+        by: dict[tuple, list] = {}
+        for s, pe, v in con.execute(
+            "SELECT symbol, period_end, value FROM results_history "
+            "WHERE period_type='quarterly' AND item='pat' AND value IS NOT NULL"
+        ):
+            y, m = int(pe[:4]), int(pe[5:7])
+            by.setdefault((s, f"{y + 1 if m >= 4 else y}-03-31"), []).append(float(v))
+        sums: dict[str, dict[str, float]] = {}
+        for (s, fy_end), vals in by.items():
+            if len(vals) == 4:
+                sums.setdefault(s, {})[fy_end] = sum(vals)
+        _QSUM_CACHE.update(sums)
+    return _QSUM_CACHE.get(symbol, {})
 
 
 def cross_source_outliers(con: sqlite3.Connection) -> dict[tuple[str, str], set]:
@@ -607,6 +641,15 @@ def cross_source_outliers(con: sqlite3.Connection) -> dict[tuple[str, str], set]
                     continue
                 r = abs(sv / fv)
                 if 1 / CROSS_SOURCE_LIMIT <= r <= CROSS_SOURCE_LIMIT:
+                    # Not a gross disagreement - but a moderate one can still be
+                    # settled outright if the company's own quarters take a side.
+                    if ptype == "annual" and not (1 / THIRD_WITNESS_LIMIT <= r <= THIRD_WITNESS_LIMIT):
+                        qs = _fy_quarter_sums(con, sym).get(pe)
+                        if qs:
+                            backs_second = 1 / THIRD_WITNESS_LIMIT <= abs(qs / sv) <= THIRD_WITNESS_LIMIT
+                            backs_filed = 1 / THIRD_WITNESS_LIMIT <= abs(qs / fv) <= THIRD_WITNESS_LIMIT
+                            if backs_second and not backs_filed:
+                                out.setdefault((sym, ptype), set()).add(pe)
                     continue                       # the two sources agree well enough
                 others = [abs(v) for j, (_, v) in enumerate(seq) if j != i and v]
                 if not others:
@@ -617,11 +660,39 @@ def cross_source_outliers(con: sqlite3.Connection) -> dict[tuple[str, str], set]
                 own = abs(fv) / med
                 if own > OWN_SERIES_LIMIT or own < 1 / OWN_SERIES_LIMIT:
                     out.setdefault((sym, ptype), set()).add(pe)
+                elif ptype == "annual":
+                    # A THIRD witness, and it is the company itself.
+                    #
+                    # The rule above needs the filing to be out of line with the
+                    # company's own OTHER YEARS, which misses a figure that is
+                    # wrong by an amount too small to look strange next to its
+                    # neighbours - PFC's FY2024 profit is filed at 26,461 crore
+                    # against the provider's 19,761, and neither is absurd for a
+                    # company that size, so nothing could choose between them.
+                    #
+                    # Its own four quarterly filings can. They are filed
+                    # separately from the annual, parsed by the same code but
+                    # from different documents, and they add up to the year:
+                    # PFC's come to 20,230 crore, which settles it.
+                    #
+                    # Measured across all 202 disputed years: the quarters back
+                    # OUR filed annual 142 times and the provider 7 times. So
+                    # this is not a tie-break that quietly sides with the
+                    # provider - it clears our figure far more often than it
+                    # condemns it, and only the 7 are dropped.
+                    quarters = _fy_quarter_sums(con, sym)
+                    qs = quarters.get(pe)
+                    if qs and fv and sv:
+                        backs_second = 1 / CROSS_SOURCE_LIMIT <= abs(qs / sv) <= CROSS_SOURCE_LIMIT
+                        backs_filed = 1 / CROSS_SOURCE_LIMIT <= abs(qs / fv) <= CROSS_SOURCE_LIMIT
+                        if backs_second and not backs_filed:
+                            out.setdefault((sym, ptype), set()).add(pe)
     n = sum(len(v) for v in out.values())
     if n:
         print(f"  cross-source check: dropped {n} filed periods across "
-              f"{len({k[0] for k in out})} companies whose scale is contradicted by "
-              f"both a second source and their own history")
+              f"{len({k[0] for k in out})} companies contradicted by two independent "
+              f"witnesses - a second source plus either the company's own other "
+              f"years or its own four quarterly filings")
     _CROSS_CACHE.append(out)
     return out
 
