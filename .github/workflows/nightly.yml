@@ -246,6 +246,22 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "20"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_filing_dates.py --symbols ${{ steps.plan.outputs.nse_target }} --max-age-hours 168 --limit 900 --sleep 0.2
+      - name: Annual reports for the BSE-only half of the universe
+        # 2,700 of 5,069 companies are listed only on BSE, and every document on
+        # a company page came from NSE's archive - so every one of them had an
+        # empty Documents section. Not "nothing filed": nothing ever asked for.
+        #
+        # BSE publishes no structured financials for free (its results links are
+        # zips of PDFs and every structured endpoint returns an error page), but
+        # it does publish the annual reports, and it keeps decades of them.
+        # Measured on a 120-company sample: 100% had reports, median 28 each,
+        # zero failures.
+        #
+        # 400 a night covers the BSE universe in seven nights, then refreshes on
+        # a 30-day cycle. Roughly two minutes of wall clock.
+        env:
+          RSCREENER_STEP_MINUTES: "12"
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_bse_documents.py --exchange BSE --max-age-hours 720 --limit 400 --sleep 0.3
       - name: Deepen as-filed P&L history (bounded rotation, full ~20yr depth)
         if: steps.plan.outputs.earnings == '1'
         # 60 a night meant 2,000 companies would take 33 nights to gain full depth,

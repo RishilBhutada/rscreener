@@ -127,3 +127,61 @@ Technicals · Shareholding · Deals · Corporate Actions · Alerts.
 StockEdge, MoneyControl, Value Research (its company URLs moved; the id-based
 path 404s), Screener.in's own recent changes. PARITY.md tracks screener.in
 feature by feature and stays the authority for that one.
+
+---
+
+# Data ceiling — what was measured, and what is not worth doing
+
+Measured 6-Sep-2026 against the live scorecard and the database, in answer to
+"is the data as accurate and as vast as it can get".
+
+**Overall 83.6/100.** Fresh 100, Correct 94.7, Complete 73.8, **Deep 25**.
+
+## Where the incompleteness actually comes from
+
+The weakest fields are 5-year sales growth (28.4%) and 5-year profit growth
+(19.9%), and neither is a fetching failure. Of 5,069 companies:
+
+  1,315  already hold 6+ annual years
+  2,700  BSE-only - the NSE filing archive has nothing for them, ever
+    854  listed less than 6 years ago - a 5-year CAGR is genuinely impossible
+     25  NSE, old enough, still thin  <- the entire fetchable gap
+
+The NSE backfill is finished. Twenty-five companies is what is left of it.
+
+And 2,120 companies hold EXACTLY five annual years - the Yahoo ceiling - so
+they miss a 5-year CAGR by one data point. Nothing free supplies that point.
+
+## Rejected: deriving annual years by adding up four filed quarters
+
+A fiscal year is its four quarters for anything that flows, 2,236 companies
+have quarterly filings, and the pipeline only ever read rows already labelled
+annual. It looked like free depth. It was built, and then measured against the
+5,291 company-years where a filed annual row AND four quarters both exist:
+
+    median error 0.00%     within 1%: 82%     within 5%: 89%
+
+  - so 10.6% of derived years would be materially wrong, and the worst was out
+    by a factor of 26,000. The obvious culprit - Indian filers putting the
+    audited full year in the Q4 slot - accounts for only 0.2% of it, so the
+    remaining 552 disagreements have no cheap test to catch them.
+
+The payoff was 472 new years and about 15 companies gaining a 5-year growth
+figure. Publishing 472 numbers with a one-in-nine chance of being materially
+wrong, to gain 15 companies, is a bad trade for an app whose whole claim is
+that a figure can be traced and is withheld when it cannot. Reverted.
+
+Do not rebuild this without a test that separates the 10%.
+
+## BSE fundamentals: no structured source at zero cost
+
+Probed BSE's public API. `FinancialResult` returns a real table of years and
+quarters and 65 links per company - all of them zips of **PDFs**, not XBRL.
+Every structured-looking endpoint (ComprehensiveFinancials, Financialratio,
+QuarterlyResult, XBRLData, ShareHoldingPattern) returns an HTML error page.
+So filed financials for the 2,700 BSE-only companies would mean extracting
+tables from PDFs - not a reliable free path, and not attempted.
+
+One endpoint does work and is worth having: `AnnualReport_New` lists annual
+report PDFs per scrip - 30 years of them for Reliance. Those 2,700 companies
+currently have no Documents section at all.
