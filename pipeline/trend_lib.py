@@ -558,19 +558,28 @@ THIRD_WITNESS_LIMIT = 1.25
 
 _QSUM_CACHE: dict = {}
 
+# The lines a company files quarterly AND the provider also reports annually,
+# so all three witnesses can speak about the same figure.
+THIRD_WITNESS_ITEMS = (
+    ("revenue", "Total Revenue"),
+    ("pat", "Net Income Common Stockholders"),
+    ("total_expenses", "Total Expenses"),
+)
 
-def _fy_quarter_sums(con: sqlite3.Connection, symbol: str) -> dict[str, float]:
-    """{fiscal-year-end: sum of that year's four filed quarterly profits}.
 
-    Only complete years: three quarters and a gap would understate the year and
-    then wrongly accuse the annual filing of being too big. Built once for the
-    whole table and cached, because it is asked for inside a per-company loop.
+def _fy_quarter_sums(con: sqlite3.Connection, symbol: str, item: str = "pat") -> dict[str, float]:
+    """{fiscal-year-end: that year's four filed quarterly values, added up}.
+
+    Complete years only: three quarters and a gap would understate the year and
+    then wrongly accuse the annual filing of being too large. Built once per
+    item for the whole table and cached, because it is asked for inside a loop
+    over every company.
     """
-    if not _QSUM_CACHE:
+    if item not in _QSUM_CACHE:
         by: dict[tuple, list] = {}
         for s, pe, v in con.execute(
             "SELECT symbol, period_end, value FROM results_history "
-            "WHERE period_type='quarterly' AND item='pat' AND value IS NOT NULL"
+            "WHERE period_type='quarterly' AND item=? AND value IS NOT NULL", (item,)
         ):
             y, m = int(pe[:4]), int(pe[5:7])
             by.setdefault((s, f"{y + 1 if m >= 4 else y}-03-31"), []).append(float(v))
@@ -578,11 +587,11 @@ def _fy_quarter_sums(con: sqlite3.Connection, symbol: str) -> dict[str, float]:
         for (s, fy_end), vals in by.items():
             if len(vals) == 4:
                 sums.setdefault(s, {})[fy_end] = sum(vals)
-        _QSUM_CACHE.update(sums)
-    return _QSUM_CACHE.get(symbol, {})
+        _QSUM_CACHE[item] = sums
+    return _QSUM_CACHE[item].get(symbol, {})
 
 
-def cross_source_outliers(con: sqlite3.Connection) -> dict[tuple[str, str], set]:
+def cross_source_outliers(con: sqlite3.Connection) -> dict[tuple[str, str], dict]:
     """Filings whose SCALE is contradicted by two independent signals at once.
 
     The docstring on implausible_quarters says this cannot be done: "a filing
@@ -641,16 +650,7 @@ def cross_source_outliers(con: sqlite3.Connection) -> dict[tuple[str, str], set]
                     continue
                 r = abs(sv / fv)
                 if 1 / CROSS_SOURCE_LIMIT <= r <= CROSS_SOURCE_LIMIT:
-                    # Not a gross disagreement - but a moderate one can still be
-                    # settled outright if the company's own quarters take a side.
-                    if ptype == "annual" and not (1 / THIRD_WITNESS_LIMIT <= r <= THIRD_WITNESS_LIMIT):
-                        qs = _fy_quarter_sums(con, sym).get(pe)
-                        if qs:
-                            backs_second = 1 / THIRD_WITNESS_LIMIT <= abs(qs / sv) <= THIRD_WITNESS_LIMIT
-                            backs_filed = 1 / THIRD_WITNESS_LIMIT <= abs(qs / fv) <= THIRD_WITNESS_LIMIT
-                            if backs_second and not backs_filed:
-                                out.setdefault((sym, ptype), set()).add(pe)
-                    continue                       # the two sources agree well enough
+                    continue                       # not a gross error; pass two looks closer
                 others = [abs(v) for j, (_, v) in enumerate(seq) if j != i and v]
                 if not others:
                     continue                       # one period on file - nothing to weigh it against
@@ -659,40 +659,60 @@ def cross_source_outliers(con: sqlite3.Connection) -> dict[tuple[str, str], set]
                     continue
                 own = abs(fv) / med
                 if own > OWN_SERIES_LIMIT or own < 1 / OWN_SERIES_LIMIT:
-                    out.setdefault((sym, ptype), set()).add(pe)
-                elif ptype == "annual":
-                    # A THIRD witness, and it is the company itself.
-                    #
-                    # The rule above needs the filing to be out of line with the
-                    # company's own OTHER YEARS, which misses a figure that is
-                    # wrong by an amount too small to look strange next to its
-                    # neighbours - PFC's FY2024 profit is filed at 26,461 crore
-                    # against the provider's 19,761, and neither is absurd for a
-                    # company that size, so nothing could choose between them.
-                    #
-                    # Its own four quarterly filings can. They are filed
-                    # separately from the annual, parsed by the same code but
-                    # from different documents, and they add up to the year:
-                    # PFC's come to 20,230 crore, which settles it.
-                    #
-                    # Measured across all 202 disputed years: the quarters back
-                    # OUR filed annual 142 times and the provider 7 times. So
-                    # this is not a tie-break that quietly sides with the
-                    # provider - it clears our figure far more often than it
-                    # condemns it, and only the 7 are dropped.
-                    quarters = _fy_quarter_sums(con, sym)
-                    qs = quarters.get(pe)
-                    if qs and fv and sv:
-                        backs_second = 1 / CROSS_SOURCE_LIMIT <= abs(qs / sv) <= CROSS_SOURCE_LIMIT
-                        backs_filed = 1 / CROSS_SOURCE_LIMIT <= abs(qs / fv) <= CROSS_SOURCE_LIMIT
-                        if backs_second and not backs_filed:
-                            out.setdefault((sym, ptype), set()).add(pe)
-    n = sum(len(v) for v in out.values())
-    if n:
-        print(f"  cross-source check: dropped {n} filed periods across "
-              f"{len({k[0] for k in out})} companies contradicted by two independent "
-              f"witnesses - a second source plus either the company's own other "
-              f"years or its own four quarterly filings")
+                    out.setdefault((sym, ptype), {})[pe] = None      # the whole filing
+
+    # PASS TWO - one LINE at a time, judged by the company's own four quarters.
+    #
+    # The rule above condemns a whole filing, and it should: a figure wrong by a
+    # factor of a hundred means a units line was misread for the document, and
+    # SRF's cost-of-materials for FY2023 is wrong by the same hundred as its
+    # profit. But a figure wrong by a QUARTER indicts only itself. Of the eleven
+    # company-years the quarters condemn, eight have exactly one bad line, and
+    # in six of those the other two were checked and are sound - DHUNINV's FY2023
+    # profit is wrong while its revenue and expenses are fine. Dropping that year
+    # would discard two good figures to remove one bad, which misrepresents what
+    # the company reported just as surely as keeping the bad one.
+    #
+    # Annual only: a quarter has no four quarters of its own to be checked
+    # against. The bar is 1.25x rather than 5x because three documents landing on
+    # one side of a disagreement is an answer, where two sources 25% apart are
+    # just two sources 25% apart.
+    for ours, theirs in THIRD_WITNESS_ITEMS:
+        filed_i = {
+            (s, p): float(v) for s, p, v in con.execute(
+                "SELECT symbol, period_end, MAX(value) FROM results_history "
+                "WHERE period_type='annual' AND item=? AND value IS NOT NULL "
+                "GROUP BY symbol, period_end", (ours,)
+            )
+        }
+        prov_i = {
+            (s, p): float(v) for s, p, v in con.execute(
+                "SELECT symbol, period_end, value FROM statements "
+                "WHERE period_type='annual' AND item=? AND value IS NOT NULL", (theirs,)
+            )
+        }
+        for key, fv in filed_i.items():
+            sv = prov_i.get(key)
+            if not fv or not sv:
+                continue
+            if 1 / THIRD_WITNESS_LIMIT <= abs(sv / fv) <= THIRD_WITNESS_LIMIT:
+                continue                            # the two already agree
+            qs = _fy_quarter_sums(con, key[0], ours).get(key[1])
+            if not qs:
+                continue                            # no complete year of quarters to ask
+            backs_provider = 1 / THIRD_WITNESS_LIMIT <= abs(qs / sv) <= THIRD_WITNESS_LIMIT
+            backs_filed = 1 / THIRD_WITNESS_LIMIT <= abs(qs / fv) <= THIRD_WITNESS_LIMIT
+            if backs_provider and not backs_filed:
+                slot = out.setdefault((key[0], "annual"), {})
+                if slot.get(key[1], False) is not None:      # not already condemned entire
+                    slot.setdefault(key[1], set()).add(ours)
+
+    whole = sum(1 for v in out.values() for x in v.values() if x is None)
+    lines = sum(len(x) for v in out.values() for x in v.values() if x)
+    if whole or lines:
+        print(f"  cross-source check: dropped {whole} whole filing(s) and {lines} individual "
+              f"line(s) across {len({k[0] for k in out})} companies, each contradicted by a "
+              f"second source AND by the company's own other years or its own four quarters")
     _CROSS_CACHE.append(out)
     return out
 
@@ -711,8 +731,16 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None,
         if ptype_ == "quarterly":
             for bad_ in suspect.get(sym_, set()):
                 periods_.pop(bad_, None)   # same rule as the charts: drop, do not draw
-        for bad_ in cross.get((sym_, ptype_), set()):
-            periods_.pop(bad_, None)
+        # None means the filing is condemned entire; a set means only those
+        # lines are, and the rest of that year is sound and stays.
+        for bad_, items_ in cross.get((sym_, ptype_), {}).items():
+            if items_ is None:
+                periods_.pop(bad_, None)
+            else:
+                row_ = periods_.get(bad_)
+                if row_:
+                    for item_ in items_:
+                        row_.pop(item_, None)
     splits = split_factors(con)
     known = splits_trustworthy(con, shares)
     bal = balance_equity(con)
@@ -915,7 +943,11 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
             by_pe.setdefault(r["period_end"], {})[r["item"]] = r["value"]
         ev = splits.get(sym)
         sh_now = shares.get(sym)   # yardstick for effective_shares sanity
-        skip = suspect.get(sym, set()) | cross_q.get((sym, "quarterly"), set())
+        # Quarterly verdicts are always whole-filing: pass two is annual-only,
+        # because a quarter has no four quarters of its own to be judged by.
+        skip = suspect.get(sym, set()) | {
+            pe_ for pe_, items_ in cross_q.get((sym, "quarterly"), {}).items() if items_ is None
+        }
         flows, eqs = [], []
         for pe in sorted(by_pe):
             # A filing that disagrees with itself is dropped rather than drawn.
