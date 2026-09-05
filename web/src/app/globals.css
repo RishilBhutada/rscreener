@@ -220,3 +220,37 @@ input, textarea, select, button {
   flex-direction: column;
   gap: 1.5rem;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * THE TYPE SCALE, and what each step is for.
+ *
+ * Measured on the company page before this was written: 141 text nodes below
+ * 12px, twenty-two of them at 10px carrying real content - the industry
+ * medians, the size rank, the "of the 4,606 companies it applies to" line. Ten
+ * pixels is smaller than a legal footnote and those are things you are meant to
+ * read. They are 11px now, and nothing readable sits below that.
+ *
+ * The steps below are what the app ACTUALLY uses, counted on a rendered page,
+ * not an ideal invented here. A first draft of this comment left 12px out and
+ * called 19px a heading size; 12px turned out to be the second most used step
+ * in the app and 19px is not app text at all - it is the SVG chart's axis
+ * labels. A scale that misdescribes the code is worth less than none.
+ *
+ * Pick the step whose JOB matches, never the size that happens to fit:
+ *
+ *   11px  text-[11px]   footnotes, counts, units, the line under a figure that
+ *                       qualifies it. The floor - nothing readable goes lower.
+ *   12px  text-xs       captions, buttons, table headers, timestamps.
+ *   13px  text-[13px]   secondary prose - the sentence explaining why a chart
+ *                       is absent, a hint under a setting.
+ *   14px  text-sm       body. Table cells, list rows, most of the app.
+ *   16px  text-base     section titles, and prose meant to be read rather
+ *                       than scanned.
+ *   18px  text-lg       the wordmark.
+ *   24px  text-2xl      a page heading.
+ *   30px  text-3xl      the one number a page exists to show.
+ *
+ * Two things sit outside it and should stay outside it: a glyph inside a shape
+ * (the tick in a status circle) where an adjacent label carries the meaning for
+ * a screen reader, and the chart's own axis text, which the SVG sizes itself.
+ * ───────────────────────────────────────────────────────────────────────── */

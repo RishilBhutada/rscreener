@@ -984,7 +984,7 @@ function ValuationHistory({ company }: { company: Company }) {
                 <div className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-[var(--accent)]"
                      style={{ left: `calc(${at}% - 4px)` }} />
               </div>
-              <div className="flex justify-between text-[10px] text-[var(--ink3)] mt-1 tabular-nums">
+              <div className="flex justify-between text-[11px] leading-snug text-[var(--ink3)] mt-1 tabular-nums">
                 <span>low {fmtNum(r.lo)}</span>
                 {/* The window is stated, not just its length. These four
                     series do NOT reach equally far back: P/E and MCap/Sales
@@ -1149,7 +1149,7 @@ function RatioGrid({ snapshot, row, cohort }: { snapshot: Row; row: Row | null; 
                       and Trendlyne both colour this line as good or bad news;
                       a P/E above the industry median is neither, and this app
                       does not hand out opinions it cannot defend. */}
-                  {ctx && <p className="text-[10px] text-[var(--ink3)] text-right tabular-nums">{ctx}</p>}
+                  {ctx && <p className="text-[11px] leading-snug text-[var(--ink3)] text-right tabular-nums">{ctx}</p>}
                 </div>
               );
             })}

@@ -171,7 +171,7 @@ export default function Scorecard() {
                       <span className="tabular-nums font-semibold" style={{ color: tone(v).fg }}>{v}%</span>
                     </div>
                     {r && r.eligible < r.of && (
-                      <p className="text-[10px] text-[var(--ink3)] tabular-nums">
+                      <p className="text-[11px] leading-snug text-[var(--ink3)] tabular-nums">
                         of the {r.eligible.toLocaleString("en-IN")} companies it can apply to
                         {" "}({r.pct}% of {r.of.toLocaleString("en-IN")})
                       </p>
