@@ -351,5 +351,20 @@
    "fresh"
   ],
   "companies": 4908
+ },
+ {
+  "at": "2026-09-06 22:00 UTC",
+  "overall": 89.4,
+  "complete": 80.5,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 66.7,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4910
  }
 ]
