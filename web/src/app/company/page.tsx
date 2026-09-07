@@ -60,6 +60,9 @@ type Company = {
   coverage?: Coverage | null;
   ratios?: WcRatios | null;
   no_pe_reason?: string | null;
+  /** Whether the filed figures are consolidated or standalone. Captioning one
+   *  as the other says the numbers cover a different business than they do. */
+  basis?: string | null;
   fscore?: FScoreData | null;
   exchange?: string | null;
   bse_code?: number | string | null;
@@ -1568,6 +1571,13 @@ function CompanyView() {
       .catch(() => { /* peers are optional */ });
   }, [company]);
 
+  // "Consolidated" is not a safe default: say which one this company files, and
+  // say nothing rather than guess when the basis was never recorded.
+  const figuresCaption =
+    company?.basis === "standalone" ? "Standalone figures in ₹ Crores"
+    : company?.basis === "consolidated" ? "Consolidated figures in ₹ Crores"
+    : "Figures in ₹ Crores";
+
   const exportCompanyCsv = () => {
     if (!company) return;
     const esc = (v: unknown) => {
@@ -1653,6 +1663,7 @@ function CompanyView() {
         </div>
       )}
 
+      {/* Built once: four tables share it, and they must not disagree. */}
       <nav ref={sectionNav} className="sticky top-0 sm:top-14 z-20 -mx-4 px-4 bg-[var(--card)] border-y border-[var(--line)] flex gap-1 overflow-x-auto text-sm font-medium py-2 sm:py-1.5 [scrollbar-width:none]">
         {/* Built from what this company ACTUALLY has. Five of these sections are
             conditionally rendered - quarters, P&L, balance sheet, cash flow and
@@ -1816,17 +1827,21 @@ function CompanyView() {
         </section>
       )}
 
-      {quarterly && <div id="quarters" className="scroll-mt-32"><StatementTable title="Quarterly results" stmt={quarterly} subtitle="Consolidated figures in ₹ Crores" boldRows={["Net Profit", "Net profit"]} /></div>}
+      {/* The caption says what the figures ACTUALLY are. It read "Consolidated"
+          on every company, hardcoded, and 1,347 of the 3,198 with filed results
+          file standalone - which excludes subsidiaries, so for a holding company
+          the label named a different business from the one in the table. */}
+      {quarterly && <div id="quarters" className="scroll-mt-32"><StatementTable title="Quarterly results" stmt={quarterly} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} /></div>}
 
       {pnl && (
         <div id="profit-loss" className="scroll-mt-32 space-y-6">
-          <StatementTable title="Profit & loss" stmt={pnl} subtitle="Consolidated figures in ₹ Crores" boldRows={["Net Profit", "Net profit"]} />
+          <StatementTable title="Profit & loss" stmt={pnl} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} />
           <CompoundedGrowth trend={company.trend} prices={company.prices} />
         </div>
       )}
 
-      {balance && <div id="balance-sheet" className="scroll-mt-32"><StatementTable title="Balance sheet" stmt={balance} subtitle="Consolidated figures in ₹ Crores" boldRows={["Total Assets", "Total Liabilities"]} /></div>}
-      {cashflow && <div id="cash-flows" className="scroll-mt-32"><StatementTable title="Cash flows" stmt={cashflow} subtitle="Consolidated figures in ₹ Crores" boldRows={["Free Cash Flow"]} /></div>}
+      {balance && <div id="balance-sheet" className="scroll-mt-32"><StatementTable title="Balance sheet" stmt={balance} subtitle={figuresCaption} boldRows={["Total Assets", "Total Liabilities"]} /></div>}
+      {cashflow && <div id="cash-flows" className="scroll-mt-32"><StatementTable title="Cash flows" stmt={cashflow} subtitle={figuresCaption} boldRows={["Free Cash Flow"]} /></div>}
 
       {Object.keys(company.statements).length === 0 && !company.trend?.annual && (
         <div className="bg-[var(--warn-soft)] border border-[var(--warn-line)] text-[var(--warn-ink)] rounded-xl p-4 text-sm">

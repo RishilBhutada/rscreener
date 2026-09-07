@@ -518,6 +518,34 @@ def asfiled_table(trend: dict | None, announced: dict | None = None) -> dict | N
 
 
 
+def reporting_basis(con: sqlite3.Connection) -> dict[str, str]:
+    """{symbol: 'consolidated' | 'standalone'} - what the filed figures ACTUALLY are.
+
+    Every statement table on every company page was captioned "Consolidated
+    figures in Rs Crores", hardcoded. It is not true for 1,347 of the 3,198
+    companies with filed results: they file standalone, the fetcher stores
+    standalone, and the page said consolidated anyway.
+
+    That is not a cosmetic slip. Standalone excludes subsidiaries, so for a
+    holding company the two are different businesses - captioning one as the
+    other tells the reader the numbers cover something they do not.
+
+    The newest period decides the label, because that is what the top of the
+    table shows, and a company that moved from one basis to the other should be
+    described by where it is now.
+    """
+    if not _table_exists(con, "results_history"):
+        return {}
+    out: dict[str, str] = {}
+    for sym, basis in con.execute(
+        "SELECT symbol, basis FROM results_history WHERE basis IS NOT NULL "
+        "GROUP BY symbol HAVING period_end = MAX(period_end)"
+    ):
+        if basis:
+            out[sym] = str(basis)
+    return out
+
+
 def screener_context(data_json: Path) -> tuple[dict, dict, dict]:
     """Everything the company page used to download the whole table to get.
 
@@ -654,6 +682,7 @@ def main() -> None:
     netdebt_by_symbol = net_debt_series(con)
     quarters_by_symbol = quarter_blocks(con)
     wc_ratios = working_capital_ratios(con)
+    basis_by_symbol = reporting_basis(con)
     fscores = piotroski(con)
     coverage_by_symbol = coverage_notes(con)
     # symbol -> (exchange, bse code). Older databases have no EXCHANGE column,
@@ -750,6 +779,7 @@ def main() -> None:
             "actions": actions_by_symbol.get(sym),
             "coverage": coverage_by_symbol.get(sym),
             "ratios": wc_ratios.get(sym),
+            "basis": basis_by_symbol.get(sym),
             "fscore": fscores.get(sym),
             "no_pe_reason": None if (bands.get(sym, {}) or {}).get("pe") else no_pe.get(sym),
             # Which exchange this company is listed on, because it decides what

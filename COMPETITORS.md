@@ -185,3 +185,60 @@ tables from PDFs - not a reliable free path, and not attempted.
 One endpoint does work and is worth having: `AnnualReport_New` lists annual
 report PDFs per scrip - 30 years of them for Reliance. Those 2,700 companies
 currently have no Documents section at all.
+
+---
+
+# Scan round three — 7-Sep-2026
+
+Screener.in's own current page and MoneyControl, plus the ones already covered.
+The first find was not a feature at all but a fault of ours, which is the best
+argument for reading rival apps closely.
+
+## Found by scanning: a caption that was wrong on 1,347 companies
+
+Screener.in labels its statements "Consolidated Figures in Rs. Crores / View
+Standalone" and lets you switch. Ours said "Consolidated figures in Rs Crores"
+on all four tables, hardcoded, on every company. We store the real basis and
+have all along: **1,851 companies file consolidated and 1,347 file standalone.**
+So 42% of company pages named a basis the numbers did not have.
+
+Standalone excludes subsidiaries. For a holding company the two are different
+businesses, so the caption was describing something other than the table under
+it. Fixed: each table now states the basis actually filed, and says only
+"Figures in Rs Crores" where the basis was never recorded rather than guessing.
+Verified - 3M INDIA reads Standalone, Reliance and ITC read Consolidated.
+
+## Taken from screener.in, still to do
+
+- [ ] **A median row in the peer table.** They print "Median: 8 Co." under the
+      peers. We have the peer rows already; this is arithmetic on them.
+- [ ] **Quarterly variation columns** - profit and sales growth against the same
+      quarter a year earlier, in the peer table. We hold the quarters.
+- [ ] **A TTM column** on the P&L. We already compute trailing twelve months for
+      the valuation bands; the P&L does not show it.
+- [ ] **Standalone/consolidated TOGGLE**, not just the label now fixed above.
+      Needs both bases stored; today the fetcher keeps one.
+- [ ] **"Part of" index membership** - Sensex, Nifty 50, BSE 500. Finology shows
+      it too, so that is two apps. Needs an index-constituent fetcher.
+- [ ] **A written description of the business** and its subsidiary structure.
+      Screener.in has ABOUT and KEY POINTS with citations; Simply Wall St opens
+      with the same thing. We show a sector tag and nothing else. No free
+      structured source found yet - this is the biggest content gap.
+- [ ] **Raw PDF link per result row**, straight to the filing behind the number.
+- [ ] Company website link, and the F&O tag.
+
+## MoneyControl
+
+- **SWOT with counts** - Strengths (13), Weaknesses (4), Opportunities (3),
+  Threats (2), each a specific rule-based line such as "FII/FPI decreased their
+  shareholding last quarter". Our Pros & Cons is the same idea with less
+  structure; the counts and the four-way split are worth copying.
+- **"MC Essentials 53% Pass"** - a checklist pass rate, which is what our nine
+  Piotroski checks already are.
+- **Day range as well as the 52-week range.** We show the 52-week bar; the
+  day's range is one more line from data we hold.
+- **Open interest and F&O positioning.** NOT TAKEN, and not queued: F&O work
+  products are out of bounds under the project's own leverage rule until the
+  Phase-3 gate. Recording the decision so it is not re-proposed as an oversight.
+- **Broker "Buy Now" buttons.** Refused - this app screens and never routes an
+  order.
