@@ -18,6 +18,71 @@ type Lite = SearchRow;
 let cache: Lite[] | null = null;
 let indexCache: SearchIndex | null = null;
 
+/** Drawn icons, not typed ones.
+ *
+ *  The header used text characters - an arrow, a gear, a circular arrow taken
+ *  straight from the font. They look cheap because they ARE cheap: a glyph is
+ *  drawn by whichever font the device falls back to, at whatever weight that
+ *  font gives it, so the arrow came out hairline next to a heavier gear and
+ *  neither matched the other. On some Android builds the gear renders in colour
+ *  as an emoji.
+ *
+ *  These are paths instead: one stroke weight, one corner radius, one size, and
+ *  they inherit the text colour so the theme still drives them. Stroke width is
+ *  1.75 rather than a round 2 because at 18px a 2px stroke closes up the inside
+ *  of the arrowhead.
+ */
+function Icon({ children, size = 18, className = "" }: {
+  children: React.ReactNode; size?: number; className?: string;
+}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+      className={className}
+    >
+      {children}
+    </svg>
+  );
+}
+
+/** A shaft as well as a head. A bare chevron is the commonest way to draw this
+ *  and it reads as "previous item in a carousel"; an arrow with a shaft reads as
+ *  "go back", which is what the control does. */
+const ArrowLeft = ({ size }: { size?: number }) => (
+  <Icon size={size}><path d="M19 12H5" /><path d="m12 19-7-7 7-7" /></Icon>
+);
+
+/** An open circle with a head, not a closed loop: the gap is what says this
+ *  turns once on demand rather than spinning forever. */
+const Rotate = ({ size, className }: { size?: number; className?: string }) => (
+  <Icon size={size} className={className}>
+    <path d="M20.5 12a8.5 8.5 0 1 1-2.5-6.01" />
+    <path d="M20.5 4.2v4.6h-4.6" />
+  </Icon>
+);
+
+const Check = ({ size }: { size?: number }) => (
+  <Icon size={size}><path d="m4.5 12.5 5 5 10-11" /></Icon>
+);
+
+/** Six lobes and a hub. Eight is the usual choice and turns to mush below 20px;
+ *  six keeps daylight between the teeth at the 18px this renders at. */
+const Gear = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M10.3 3.4a1 1 0 0 1 1-.85h1.4a1 1 0 0 1 1 .85l.2 1.35c.55.19 1.06.48 1.5.85l1.3-.5a1 1 0 0 1 1.2.44l.7 1.2a1 1 0 0 1-.2 1.25l-1.05.87c.06.29.09.6.09.91s-.03.62-.09.91l1.05.87a1 1 0 0 1 .2 1.25l-.7 1.2a1 1 0 0 1-1.2.44l-1.3-.5c-.44.37-.95.66-1.5.85l-.2 1.35a1 1 0 0 1-1 .85h-1.4a1 1 0 0 1-1-.85l-.2-1.35a5.6 5.6 0 0 1-1.5-.85l-1.3.5a1 1 0 0 1-1.2-.44l-.7-1.2a1 1 0 0 1 .2-1.25l1.05-.87a5.5 5.5 0 0 1 0-1.82l-1.05-.87a1 1 0 0 1-.2-1.25l.7-1.2a1 1 0 0 1 1.2-.44l1.3.5c.44-.37.95-.66 1.5-.85z" />
+    <circle cx="12" cy="12" r="2.5" />
+  </Icon>
+);
+
 /** Fetch the app again - but only when there is something to fetch.
  *
  *  The APK is a thin shell around the live site, so an update needs no
@@ -165,10 +230,9 @@ function RefreshButton() {
                    w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-[var(--ink2)]
                    hover:border-[var(--line2)] disabled:opacity-60"
       >
-        <span aria-hidden="true"
-              className={`text-base leading-none ${state === "checking" ? "animate-spin" : ""}`}>
-          {state === "current" ? "✓" : "↻"}
-        </span>
+        {state === "current"
+          ? <Check />
+          : <Rotate className={state === "checking" ? "animate-spin" : ""} />}
       </button>
 
       {state === "current" && !details && (
@@ -294,7 +358,7 @@ function BackButton() {
                  w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center
                  text-[var(--ink2)] hover:border-[var(--line2)] active:scale-95 transition-transform"
     >
-      <span aria-hidden="true" className="text-base leading-none">←</span>
+      <ArrowLeft />
     </button>
   );
 }

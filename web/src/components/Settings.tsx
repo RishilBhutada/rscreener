@@ -252,7 +252,13 @@ export default function Settings() {
         className="rounded-full border border-[var(--line)] bg-[var(--card2)] w-10 h-10 sm:w-8 sm:h-8
                    flex items-center justify-center text-[var(--ink2)] hover:border-[var(--line2)]"
       >
-        <span aria-hidden="true" className="text-base leading-none">⚙</span>
+        {/* Drawn, to match the arrow and the refresh beside it. As a text
+            glyph this rendered as a colour emoji on some Android builds. */}
+        <svg viewBox="0 0 24 24" width={18} height={18} fill="none" stroke="currentColor"
+             strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M10.3 3.4a1 1 0 0 1 1-.85h1.4a1 1 0 0 1 1 .85l.2 1.35c.55.19 1.06.48 1.5.85l1.3-.5a1 1 0 0 1 1.2.44l.7 1.2a1 1 0 0 1-.2 1.25l-1.05.87c.06.29.09.6.09.91s-.03.62-.09.91l1.05.87a1 1 0 0 1 .2 1.25l-.7 1.2a1 1 0 0 1-1.2.44l-1.3-.5c-.44.37-.95.66-1.5.85l-.2 1.35a1 1 0 0 1-1 .85h-1.4a1 1 0 0 1-1-.85l-.2-1.35a5.6 5.6 0 0 1-1.5-.85l-1.3.5a1 1 0 0 1-1.2-.44l-.7-1.2a1 1 0 0 1 .2-1.25l1.05-.87a5.5 5.5 0 0 1 0-1.82l-1.05-.87a1 1 0 0 1-.2-1.25l.7-1.2a1 1 0 0 1 1.2-.44l1.3.5c.44-.37.95-.66 1.5-.85z" />
+          <circle cx="12" cy="12" r="2.5" />
+        </svg>
       </button>
 
       {open && (
