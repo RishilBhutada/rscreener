@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Settings from "@/components/Settings";
 import { loadIndex } from "@/lib/index-data";
-import { BUILD_COMMIT } from "@/lib/buildinfo";
+import { BUILD_COMMIT, BUILD_SUBJECT, BUILD_TIME } from "@/lib/buildinfo";
 import { DESTINATIONS, BAR_SLOTS } from "@/lib/destinations";
 import { applyOrder, loadOrder } from "@/lib/order";
 import { previousPage, recordNavigation } from "@/lib/navdepth";
@@ -63,10 +63,36 @@ function reloadBypassingCache() {
     .then(go, go);
 }
 
+type Version = { commit?: string; built?: string; subject?: string };
 type Check = "idle" | "checking" | "current";
+
+/** When a build was made, written the way a person says it. */
+function whenBuilt(iso?: string): string {
+  if (!iso) return "unknown";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "unknown";
+  const mins = Math.round((Date.now() - d.getTime()) / 60000);
+  const stamp = d.toLocaleString("en-IN", {
+    day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+  if (mins < 1) return `just now — ${stamp}`;
+  if (mins < 60) return `${mins} min ago — ${stamp}`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs === 1 ? "" : "s"} ago — ${stamp}`;
+  const days = Math.round(hrs / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago — ${stamp}`;
+}
 
 function RefreshButton() {
   const [state, setState] = useState<Check>("idle");
+  // Long-press opens the record rather than acting: what change you are
+  // running, when it was made, and whether anything newer has been published.
+  // A tap asks the app to move; a hold asks it to explain itself.
+  const [details, setDetails] = useState(false);
+  const [live, setLive] = useState<Version | null>(null);
+  const [liveError, setLiveError] = useState(false);
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const held = useRef(false);
 
   // Take the marker out of the URL once the fresh page is running, so it is
   // never carried into a bookmark or a shared link.
@@ -83,49 +109,134 @@ function RefreshButton() {
     return () => clearTimeout(t);
   }, [state]);
 
-  const check = async () => {
-    if (state === "checking") return;
-    setState("checking");
+  const fetchLive = async (): Promise<Version | null> => {
     try {
       const r = await fetch(`${BASE}/version.json`, { cache: "no-store" });
       if (!r.ok) throw new Error("no version file");
-      const live = await r.json();
-      if (live?.commit && BUILD_COMMIT && live.commit !== BUILD_COMMIT) {
-        reloadBypassingCache();       // a new build exists; go and get it
-        return;
-      }
-      setState("current");            // already on it - do not disturb the page
+      const v: Version = await r.json();
+      setLive(v);
+      setLiveError(false);
+      return v;
     } catch {
-      reloadBypassingCache();         // could not check; reloading is the safe error
+      setLiveError(true);
+      return null;
     }
   };
+
+  const check = async () => {
+    if (state === "checking") return;
+    setState("checking");
+    const v = await fetchLive();
+    if (!v) return reloadBypassingCache();   // cannot check; reloading is the safe error
+    if (v.commit && BUILD_COMMIT && v.commit !== BUILD_COMMIT) return reloadBypassingCache();
+    setState("current");                     // already on it - do not disturb the page
+  };
+
+  const startHold = () => {
+    held.current = false;
+    holdTimer.current = setTimeout(() => {
+      held.current = true;
+      setDetails(true);
+      fetchLive();
+    }, 450);
+  };
+  const endHold = () => {
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+    holdTimer.current = null;
+  };
+
+  const behind = !!(live?.commit && BUILD_COMMIT && live.commit !== BUILD_COMMIT);
 
   return (
     <div className="relative shrink-0">
       <button
-        onClick={check}
+        onPointerDown={startHold}
+        onPointerUp={endHold}
+        onPointerLeave={endHold}
+        onPointerCancel={endHold}
+        // A hold has already done its job; letting the click through as well
+        // would check for updates behind the panel it just opened.
+        onClick={() => { if (held.current) { held.current = false; return; } check(); }}
+        onContextMenu={(e) => { e.preventDefault(); setDetails(true); fetchLive(); }}
         disabled={state === "checking"}
-        aria-label="Check for a newer version of the app"
-        title="Check for a newer version"
-        className="rounded-full border border-[var(--line)] bg-[var(--card2)] w-10 h-10 sm:w-8 sm:h-8
-                   flex items-center justify-center text-[var(--ink2)] hover:border-[var(--line2)]
-                   disabled:opacity-60"
+        aria-label="Check for a newer version. Press and hold to see what changed."
+        title="Tap to check for a newer version · hold to see what changed"
+        className="select-none touch-none rounded-full border border-[var(--line)] bg-[var(--card2)]
+                   w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-[var(--ink2)]
+                   hover:border-[var(--line2)] disabled:opacity-60"
       >
         <span aria-hidden="true"
               className={`text-base leading-none ${state === "checking" ? "animate-spin" : ""}`}>
           {state === "current" ? "✓" : "↻"}
         </span>
       </button>
-      {/* The answer, where the question was asked. The old button spun for a
-          moment and then navigated away, so the spinner never actually rendered
-          - it was feedback in name only. */}
-      {state === "current" && (
+
+      {state === "current" && !details && (
         <p role="status"
            className="absolute right-0 top-full mt-1.5 z-40 whitespace-nowrap rounded-lg border
                       border-[var(--line)] bg-[var(--card)] px-2.5 py-1.5 text-[11px]
                       text-[var(--ink2)] shadow-lg">
           You already have the latest version.
         </p>
+      )}
+
+      {details && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setDetails(false)} />
+          <div role="dialog" aria-label="What changed"
+               className="absolute right-0 top-full mt-1.5 z-50 w-[min(20rem,calc(100vw-2rem))]
+                          rounded-xl border border-[var(--line)] bg-[var(--card)] p-3 shadow-xl">
+            <p className="text-[11px] uppercase tracking-wide text-[var(--ink3)]">
+              The change you are running
+            </p>
+            <p className="mt-0.5 text-[13px] leading-snug text-[var(--ink)]">
+              {BUILD_SUBJECT || "unknown"}
+            </p>
+            <p className="mt-1 text-[11px] leading-snug text-[var(--ink3)] tabular-nums">
+              made {whenBuilt(BUILD_TIME)}
+              {BUILD_COMMIT ? ` · ${BUILD_COMMIT}` : ""}
+            </p>
+
+            <div className="mt-2.5 pt-2.5 border-t border-[var(--line)]">
+              {liveError ? (
+                <p className="text-[11px] text-[var(--ink3)]">
+                  Could not reach the site to ask what the newest change is.
+                </p>
+              ) : !live ? (
+                <p className="text-[11px] text-[var(--ink3)]">Asking the site…</p>
+              ) : behind ? (
+                <>
+                  <p className="text-[11px] uppercase tracking-wide text-[var(--ink3)]">
+                    Newer change published
+                  </p>
+                  <p className="mt-0.5 text-[13px] leading-snug text-[var(--ink)]">{live.subject}</p>
+                  <p className="mt-1 text-[11px] text-[var(--ink3)] tabular-nums">
+                    made {whenBuilt(live.built)}{live.commit ? ` · ${live.commit}` : ""}
+                  </p>
+                  <button
+                    onClick={reloadBypassingCache}
+                    className="mt-2 w-full min-h-[40px] rounded-lg bg-[var(--accent-soft)]
+                               border border-[var(--accent-line)] text-[var(--accent-ink)]
+                               text-sm font-semibold"
+                  >
+                    Get it now
+                  </button>
+                </>
+              ) : (
+                <p className="text-[11px] text-[var(--ink3)]">
+                  This is the newest change published. Nothing to update.
+                </p>
+              )}
+            </div>
+
+            <p className="mt-2 text-[11px] text-[var(--ink3)]">
+              Company figures are refreshed separately —{" "}
+              <a href={`${BASE}/status/`} className="text-[var(--accent-ink)] font-semibold">
+                see the Data page
+              </a>.
+            </p>
+          </div>
+        </>
       )}
     </div>
   );
