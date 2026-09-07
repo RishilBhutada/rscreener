@@ -32,7 +32,20 @@ let indexCache: SearchIndex | null = null;
  *  1.75 rather than a round 2 because at 18px a 2px stroke closes up the inside
  *  of the arrowhead.
  */
-function Icon({ children, size = 18, className = "" }: {
+/** The shared treatment for a header control.
+ *
+ *  No border and no filled circle. Three outlined pills in a row was the thing
+ *  that read as cheap: it is a lot of chrome around a small mark, and it makes
+ *  each icon look timid inside a box far bigger than itself. The tap target is
+ *  the same 40px it always was - it is just no longer drawn as furniture. The
+ *  background appears on hover and press, so the control still answers when you
+ *  touch it.
+ */
+const CONTROL = "shrink-0 rounded-full w-10 h-10 sm:w-9 sm:h-9 flex items-center justify-center " +
+  "text-[var(--ink2)] hover:text-[var(--ink)] hover:bg-[var(--card2)] " +
+  "active:bg-[var(--line)] active:scale-95 transition-all duration-150";
+
+function Icon({ children, size = 20, className = "" }: {
   children: React.ReactNode; size?: number; className?: string;
 }) {
   return (
@@ -42,7 +55,7 @@ function Icon({ children, size = 18, className = "" }: {
       height={size}
       fill="none"
       stroke="currentColor"
-      strokeWidth={1.75}
+      strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -62,11 +75,19 @@ const ArrowLeft = ({ size }: { size?: number }) => (
 );
 
 /** An open circle with a head, not a closed loop: the gap is what says this
- *  turns once on demand rather than spinning forever. */
+ *  turns once on demand rather than spinning forever.
+ *
+ *  The first version drew the arc from a single sweep and hung a right-angled
+ *  corner off it, which at this size reads as a tick that missed rather than an
+ *  arrow. This one ends the arc where the head begins and draws the head as two
+ *  strokes meeting at the arc's own tangent, so it points along the direction of
+ *  travel instead of across it. The gap sits at the top right, where the eye
+ *  starts, so the direction is legible before the shape is.
+ */
 const Rotate = ({ size, className }: { size?: number; className?: string }) => (
   <Icon size={size} className={className}>
-    <path d="M20.5 12a8.5 8.5 0 1 1-2.5-6.01" />
-    <path d="M20.5 4.2v4.6h-4.6" />
+    <path d="M20 12a8 8 0 1 1-2.34-5.66" />
+    <path d="M20 4.5V10h-5.5" />
   </Icon>
 );
 
@@ -226,9 +247,7 @@ function RefreshButton() {
         disabled={state === "checking"}
         aria-label="Check for a newer version. Press and hold to see what changed."
         title="Tap to check for a newer version · hold to see what changed"
-        className="select-none touch-none rounded-full border border-[var(--line)] bg-[var(--card2)]
-                   w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-[var(--ink2)]
-                   hover:border-[var(--line2)] disabled:opacity-60"
+        className={`select-none touch-none ${CONTROL} disabled:opacity-60`}
       >
         {state === "current"
           ? <Check />
@@ -354,9 +373,7 @@ function BackButton() {
       }}
       aria-label={depth > 0 ? "Go back" : atHome ? "Back to the top" : "Go to the home page"}
       title={depth > 0 ? "Back" : atHome ? "Back to top" : "Home"}
-      className="shrink-0 rounded-full border border-[var(--line)] bg-[var(--card2)]
-                 w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center
-                 text-[var(--ink2)] hover:border-[var(--line2)] active:scale-95 transition-transform"
+      className={CONTROL}
     >
       <ArrowLeft />
     </button>
