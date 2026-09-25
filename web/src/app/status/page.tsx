@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import TopNav from "@/components/TopNav";
 import RefreshPanel from "@/components/RefreshPanel";
 import Scorecard from "@/components/Scorecard";
+import InfoTip from "@/components/InfoTip";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -119,12 +120,14 @@ export default function StatusPage() {
                 return (
                   <div key={src.key} className={`px-4 py-3.5 ${i ? "border-t border-[var(--line)]" : ""}`}>
                     <div className="flex items-baseline justify-between gap-3 flex-wrap">
-                      <h2 className="text-base font-semibold text-[var(--ink)]">{src.name}</h2>
+                      <h2 className="text-base font-semibold text-[var(--ink)]">
+                        {src.name}
+                        <InfoTip title={src.name} className="ml-1.5"><p>{src.what}</p></InfoTip>
+                      </h2>
                       <span className={`text-xs font-medium ${t.text}`}>
                         {src.pct}% {t.label}
                       </span>
                     </div>
-                    <p className="text-xs text-[var(--ink3)] mt-0.5">{src.what}</p>
 
                     <div className="h-1.5 bg-[var(--card2)] rounded-full mt-2.5 overflow-hidden">
                       <div className="h-full rounded-full transition-all" style={{ width: `${src.pct}%`, background: t.bar }} />

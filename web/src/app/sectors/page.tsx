@@ -6,6 +6,7 @@ import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import { titleCase } from "@/lib/names";
 import { Row } from "@/lib/query";
+import InfoTip from "@/components/InfoTip";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -91,10 +92,15 @@ function SectorsView() {
     return (
       <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
         <div className="px-4 py-3 border-b border-[var(--line)]">
-          <h1 className="text-sm font-bold text-[var(--ink)]">Sectors</h1>
-          <p className="text-xs text-[var(--ink3)] mt-0.5">
-            Median of the companies in each sector, so one very large member cannot speak for the rest.
-          </p>
+          <h1 className="text-sm font-bold text-[var(--ink)]">
+            Sectors
+            <InfoTip title="Sectors" className="ml-1.5">
+              <p>
+                Median of the companies in each sector, so one very large member cannot speak
+                for the rest.
+              </p>
+            </InfoTip>
+          </h1>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

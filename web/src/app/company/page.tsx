@@ -12,6 +12,7 @@ import WatchStar from "@/components/WatchStar";
 import { loadSectionMode, SectionMode } from "@/components/Settings";
 import { isRefreshLoad } from "@/components/TopNav";
 import { applyOrder, loadOrder } from "@/lib/order";
+import InfoTip, { InfoPart } from "@/components/InfoTip";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -181,11 +182,16 @@ function RatiosTable({ r }: { r: WcRatios }) {
   return (
     <section id="ratios" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
       <div className="px-4 pt-3.5 pb-2">
-        <h2 className="text-base font-semibold text-[var(--ink)]">Ratios</h2>
-        <p className="text-xs text-[var(--ink3)] mt-0.5">
-          How the business is financed, year by year. Computed from the filed balance sheet
-          and income statement — nothing here is estimated.
-        </p>
+        <h2 className="text-base font-semibold text-[var(--ink)]">
+          Ratios
+          <InfoTip title="Ratios" className="ml-1.5">
+            <p>How the business is financed, year by year.</p>
+            <p>
+              Computed from the filed balance sheet and income statement — nothing here is
+              estimated. A year missing an input shows a dash rather than a zero.
+            </p>
+          </InfoTip>
+        </h2>
       </div>
       <div className="overflow-x-auto" ref={(el) => { if (el) el.scrollLeft = el.scrollWidth; }}>
         <table className="w-full text-sm border-collapse">
@@ -412,6 +418,19 @@ function PriceAsOf({ row, snapshot }: { row: Row | null; snapshot?: Row | null }
   );
 }
 
+/** Behind the "i" on both cards. One set of words, two buttons: whichever
+ *  column the reader is looking at when he wonders where these came from is
+ *  the one carrying the answer. */
+const PROS_CONS_NOTE = (
+  <>
+    <p>
+      These are generated from the numbers by simple rules — not analysis, and never a
+      recommendation.
+    </p>
+    <p>Verify against the filings before trusting anything.</p>
+  </>
+);
+
 function ProsCons({ row }: { row: Row | null }) {
   if (!row) return null;
   const pros: string[] = [];
@@ -439,18 +458,23 @@ function ProsCons({ row }: { row: Row | null }) {
   return (
     <section className="grid sm:grid-cols-2 gap-4">
       <div className="rounded-xl border border-[var(--pos)] bg-[color-mix(in_oklab,var(--pos)_8%,var(--card))] p-4">
-        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--pos)] mb-2">Pros</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--pos)] mb-2">
+          Pros
+          <InfoTip title="Pros and cons" className="ml-1">{PROS_CONS_NOTE}</InfoTip>
+        </p>
         <ul className="space-y-1.5 text-sm text-[var(--ink2)] list-disc pl-4">
           {pros.length ? pros.map((p) => <li key={p}>{p}</li>) : <li className="list-none text-[var(--ink3)]">No standout positives from the current numbers.</li>}
         </ul>
       </div>
       <div className="rounded-xl border border-[var(--neg)] bg-[color-mix(in_oklab,var(--neg)_8%,var(--card))] p-4">
-        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--neg)] mb-2">Cons</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--neg)] mb-2">
+          Cons
+          <InfoTip title="Pros and cons" className="ml-1">{PROS_CONS_NOTE}</InfoTip>
+        </p>
         <ul className="space-y-1.5 text-sm text-[var(--ink2)] list-disc pl-4">
           {cons.length ? cons.map((c) => <li key={c}>{c}</li>) : <li className="list-none text-[var(--ink3)]">No obvious red flags from the current numbers.</li>}
         </ul>
       </div>
-      <p className="sm:col-span-2 text-xs text-[var(--ink3)]">These are generated from the numbers by simple rules — not analysis, and never a recommendation. Verify against the filings before trusting anything.</p>
     </section>
   );
 }
@@ -524,20 +548,27 @@ const METRIC_INFO: Record<string, { how: string; means: string; watch?: string }
   },
 };
 
-function InfoDot({ label, onOpen }: { label: string; onOpen: (l: string) => void }) {
-  if (!METRIC_INFO[label]) return null;
+/** The "i" beside a figure in the summary grid.
+ *
+ *  This used to be an eye, and opening it pushed a panel onto the bottom of
+ *  the section — so the answer appeared several inches away from the number
+ *  that raised the question, and on a phone often off-screen entirely. Now
+ *  it is the same "i" used everywhere else, and the words arrive on top of
+ *  the page rather than under it. */
+function MetricInfo({ label, method }: { label: string; method: string }) {
+  const info = METRIC_INFO[label];
+  if (!info) return null;
   return (
-    <button
-      onClick={() => onOpen(label)}
-      aria-label={`How ${label} is calculated`}
-      title={`How ${label} is calculated`}
-      className="ml-1 align-middle text-[var(--ink3)] hover:text-[var(--accent-ink)]"
-    >
-      <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 inline-block" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" />
-        <circle cx="12" cy="12" r="2.6" />
-      </svg>
-    </button>
+    <InfoTip title={label} label={`How ${label} is worked out`} className="ml-1">
+      <InfoPart head="How it is worked out">{info.how}</InfoPart>
+      <InfoPart head="What it tells you">{info.means}</InfoPart>
+      {info.watch && <InfoPart head="Where it misleads">{info.watch}</InfoPart>}
+      {label.startsWith("Volatility") && method && (
+        <p className="text-[var(--ink3)]">
+          Method used for this company: {method === "yang-zhang" ? "Yang-Zhang (OHLC)" : "close-to-close"}.
+        </p>
+      )}
+    </InfoTip>
   );
 }
 
@@ -570,11 +601,16 @@ function PriceHistory({ row, snapshot }: { row: Row | null; snapshot: Row }) {
 
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
-      <h2 className="text-base font-semibold text-[var(--ink)]">Price history</h2>
-      <p className="text-xs text-[var(--ink3)] mt-0.5">
-        Change in the share price alone. Dividends are not added back, so a high-yield
-        company has done better than these figures say.
-      </p>
+      <h2 className="text-base font-semibold text-[var(--ink)]">
+        Price history
+        <InfoTip title="Price history" className="ml-1.5">
+          <p>Change in the share price alone.</p>
+          <p>
+            Dividends are not added back, so a high-yield company has done better than these
+            figures say.
+          </p>
+        </InfoTip>
+      </h2>
 
       {at !== null && (
         <div className="mt-3">
@@ -606,9 +642,15 @@ function PriceHistory({ row, snapshot }: { row: Row | null; snapshot: Row }) {
 
       {beta !== null && beta !== undefined && (
         <p className="text-[11px] text-[var(--ink3)] mt-3">
-          Beta {fmtNum(beta)} — over the last year this share moved about{" "}
-          {Math.abs(beta) < 0.05 ? "independently of" : `${fmtNum(Math.abs(beta))}× as far as`} the market
-          on an average day. A number below 1 is not safety; it is only a smaller swing.
+          Beta {fmtNum(beta)}
+          <InfoTip title="Beta" className="ml-1">
+            <p>
+              Over the last year this share moved about{" "}
+              {Math.abs(beta) < 0.05 ? "independently of" : `${fmtNum(Math.abs(beta))}× as far as`}{" "}
+              the market on an average day.
+            </p>
+            <p>A number below 1 is not safety; it is only a smaller swing.</p>
+          </InfoTip>
         </p>
       )}
     </section>
@@ -791,7 +833,16 @@ function HoldingTrend({ s }: { s: Shareholding }) {
 
   return (
     <div className="px-4 pb-3.5 pt-1 space-y-1.5 border-t border-[var(--line)]">
-      <p className="text-xs font-semibold text-[var(--ink2)] pt-2.5">Promoter stake</p>
+      <p className="text-xs font-semibold text-[var(--ink2)] pt-2.5">
+        Promoter stake
+        <InfoTip title="Promoter stake" className="ml-1">
+          <p>A movement is stated, never interpreted.</p>
+          <p>
+            Promoters sell and buy for reasons no filing discloses — pledges, estate
+            planning, an unrelated business.
+          </p>
+        </InfoTip>
+      </p>
       {windows.map((w) => (
         <p key={w.label} className="text-[13px] text-[var(--ink3)]">
           <span className="text-[var(--ink2)]">{w.label}:</span>{" "}
@@ -805,10 +856,6 @@ function HoldingTrend({ s }: { s: Shareholding }) {
           Promoters have reduced their stake in {streak} consecutive quarters.
         </p>
       )}
-      <p className="text-[11px] text-[var(--ink3)] pt-0.5">
-        A movement is stated, never interpreted. Promoters sell and buy for reasons
-        no filing discloses — pledges, estate planning, an unrelated business.
-      </p>
     </div>
   );
 }
@@ -846,11 +893,23 @@ function FScore({ f }: { f: FScoreData }) {
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h2 className="text-base font-semibold text-[var(--ink)]">Nine tests on the accounts</h2>
-          <p className="text-xs text-[var(--ink3)] mt-0.5 max-w-xl">
-            The Piotroski F-score, comparing {f.years[1].slice(0, 4)} against{" "}
-            {f.years[0].slice(0, 4)}. Every test is arithmetic on two filed years, and
-            all nine are shown — a score whose workings are hidden cannot be argued with.
+          <h2 className="text-base font-semibold text-[var(--ink)]">
+            Nine tests on the accounts
+            <InfoTip title="Nine tests on the accounts" className="ml-1.5">
+              <p>
+                The Piotroski F-score, comparing {f.years[1].slice(0, 4)} against{" "}
+                {f.years[0].slice(0, 4)}. Every test is arithmetic on two filed years, and all
+                nine are shown — a score whose workings are hidden cannot be argued with.
+              </p>
+              <p>
+                A test whose inputs are missing counts as neither a pass nor a fail. Scoring an
+                absent figure as zero would turn missing data into bad news, which is not what
+                it is.
+              </p>
+            </InfoTip>
+          </h2>
+          <p className="text-xs text-[var(--ink3)] mt-0.5 tabular-nums">
+            {f.years[1].slice(0, 4)} vs {f.years[0].slice(0, 4)}
           </p>
         </div>
         <div className="text-right shrink-0">
@@ -894,10 +953,6 @@ function FScore({ f }: { f: FScoreData }) {
         ))}
       </ul>
 
-      <p className="text-[11px] text-[var(--ink3)] mt-3">
-        A test whose inputs are missing counts as neither a pass nor a fail. Scoring an
-        absent figure as zero would turn missing data into bad news, which is not what it is.
-      </p>
     </section>
   );
 }
@@ -966,12 +1021,21 @@ function ValuationHistory({ company }: { company: Company }) {
 
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
-      <h2 className="text-base font-semibold text-[var(--ink)]">Against its own history</h2>
-      <p className="text-xs text-[var(--ink3)] mt-0.5 mb-3">
-        Where today&rsquo;s valuation sits in this company&rsquo;s own record. Cheap and
-        expensive mean nothing across industries; against the same company&rsquo;s past
-        they mean something. Not a signal — a business can be worth more than it used to be.
-      </p>
+      <h2 className="text-base font-semibold text-[var(--ink)] mb-3">
+        Against its own history
+        <InfoTip title="Against its own history" className="ml-1.5">
+          <p>Where today&rsquo;s valuation sits in this company&rsquo;s own record.</p>
+          <p>
+            Cheap and expensive mean nothing across industries; against the same
+            company&rsquo;s past they mean something. Not a signal — a business can be worth
+            more than it used to be.
+          </p>
+          <p>
+            Each series ends {rows[0].date}, the last month with a filed trailing figure —
+            not today&rsquo;s price.
+          </p>
+        </InfoTip>
+      </h2>
       <div className="space-y-3.5">
         {rows.map((r) => {
           // Position on the bar, clamped: the newest point IS the max or the
@@ -1006,9 +1070,6 @@ function ValuationHistory({ company }: { company: Company }) {
           );
         })}
       </div>
-      <p className="text-[11px] text-[var(--ink3)] mt-3">
-        Each series ends {rows[0].date}, the last month with a filed trailing figure — not today&rsquo;s price.
-      </p>
     </section>
   );
 }
@@ -1046,7 +1107,6 @@ function industryMedian(cohort: Cohort, field: string): { value: number; n: numb
 }
 
 function RatioGrid({ snapshot, row, cohort }: { snapshot: Row; row: Row | null; cohort: Cohort | null }) {
-  const [open, setOpen] = useState<string | null>(null);
   const g = (k: string) => num(row, k) ?? num(snapshot, k);
   const method = String((row?.["vol_method"] ?? snapshot["vol_method"]) ?? "");
   const vol = (k: string) => {
@@ -1129,7 +1189,6 @@ function RatioGrid({ snapshot, row, cohort }: { snapshot: Row; row: Row | null; 
     const n = med.n < 15 ? ` (of ${med.n})` : "";
     return `industry median ${shown}${n}${side}`;
   };
-  const info = open ? METRIC_INFO[open] : null;
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-5">
@@ -1145,7 +1204,7 @@ function RatioGrid({ snapshot, row, cohort }: { snapshot: Row; row: Row | null; 
                   <div className="flex items-baseline justify-between">
                     <span className="text-sm text-[var(--ink3)]">
                       {label}
-                      <InfoDot label={label} onOpen={setOpen} />
+                      <MetricInfo label={label} method={method} />
                     </span>
                     <span className="text-sm font-semibold text-[var(--ink)] tabular-nums">{value}</span>
                   </div>
@@ -1161,39 +1220,6 @@ function RatioGrid({ snapshot, row, cohort }: { snapshot: Row; row: Row | null; 
         ))}
       </div>
 
-      {info && (
-        <div className="mt-4 rounded-xl border border-[var(--line2)] bg-[var(--card2)] p-4 relative">
-          <button
-            onClick={() => setOpen(null)}
-            aria-label="Close"
-            className="absolute top-3 right-3 text-[var(--ink3)] hover:text-[var(--ink)] text-lg leading-none"
-          >
-            &times;
-          </button>
-          <h3 className="text-sm font-semibold text-[var(--ink)] pr-6">{open}</h3>
-          <dl className="mt-2 space-y-2 text-xs leading-relaxed">
-            <div>
-              <dt className="text-[var(--ink3)] uppercase tracking-wide text-[11px]">How it is worked out</dt>
-              <dd className="text-[var(--ink2)] mt-0.5">{info.how}</dd>
-            </div>
-            <div>
-              <dt className="text-[var(--ink3)] uppercase tracking-wide text-[11px]">What it tells you</dt>
-              <dd className="text-[var(--ink2)] mt-0.5">{info.means}</dd>
-            </div>
-            {info.watch && (
-              <div>
-                <dt className="text-[var(--ink3)] uppercase tracking-wide text-[11px]">Where it misleads</dt>
-                <dd className="text-[var(--ink2)] mt-0.5">{info.watch}</dd>
-              </div>
-            )}
-            {open?.startsWith("Volatility") && method && (
-              <p className="text-[var(--ink3)]">
-                Method used for this company: {method === "yang-zhang" ? "Yang-Zhang (OHLC)" : "close-to-close"}.
-              </p>
-            )}
-          </dl>
-        </div>
-      )}
     </section>
   );
 }
@@ -1750,13 +1776,16 @@ function CompanyView() {
           this changes nothing on screen - it removes a coupling that would have
           hidden the explanation precisely when it was most needed. */}
       {company.exchange === "BSE" && (
-        <p className="text-[13px] leading-relaxed text-[var(--ink3)] border border-[var(--line)] rounded-xl p-3 bg-[var(--card2)]">
-          <span className="font-semibold text-[var(--ink2)]">Listed on BSE only{company.bse_code ? ` — scrip code ${company.bse_code}` : ""}.</span>{" "}
-          Price, market cap and the chart come from the exchange feed and are current.
-          The as-filed quarterly table, the valuation bands and the shareholding
-          pattern are built from NSE&rsquo;s filing archive, which does not carry
-          companies that are not listed there — so those sections are absent rather
-          than pending.
+        <p className="text-[13px] leading-relaxed text-[var(--ink3)] border border-[var(--line)] rounded-xl px-3 py-2 bg-[var(--card2)]">
+          <span className="font-semibold text-[var(--ink2)]">Listed on BSE only{company.bse_code ? ` — scrip code ${company.bse_code}` : ""}.</span>
+          <InfoTip title="Listed on BSE only" className="ml-1">
+            <p>Price, market cap and the chart come from the exchange feed and are current.</p>
+            <p>
+              The as-filed quarterly table, the valuation bands and the shareholding pattern
+              are built from NSE&rsquo;s filing archive, which does not carry companies that
+              are not listed there — so those sections are absent rather than pending.
+            </p>
+          </InfoTip>
         </p>
       )}
 
@@ -1855,9 +1884,15 @@ function CompanyView() {
           each is the app declining to publish a P/E that would not mean
           anything. An unexplained absence is indistinguishable from a bug. */}
       {company.no_pe_reason && (
-        <p className="text-[13px] leading-relaxed text-[var(--ink3)] border border-[var(--line)] rounded-xl p-3 bg-[var(--card2)]">
-          <span className="font-semibold text-[var(--ink2)]">No price-to-earnings chart for this company.</span>{" "}
-          {company.no_pe_reason}
+        <p className="text-[13px] leading-relaxed text-[var(--ink3)] border border-[var(--line)] rounded-xl px-3 py-2 bg-[var(--card2)]">
+          <span className="font-semibold text-[var(--ink2)]">No price-to-earnings chart for this company.</span>
+          <InfoTip title="No price-to-earnings chart" className="ml-1">
+            <p>{company.no_pe_reason}</p>
+            <p>
+              The chart is withheld rather than missing: a P/E built on these numbers would
+              not mean anything, so none is published.
+            </p>
+          </InfoTip>
         </p>
       )}
 
@@ -1883,7 +1918,15 @@ function CompanyView() {
       )}
 
       <section id="documents" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-3">
-        <h2 className="text-sm font-bold text-[var(--ink)]">Documents</h2>
+        <h2 className="text-sm font-bold text-[var(--ink)]">
+          Documents
+          <InfoTip title="Documents" className="ml-1.5">
+            <p>
+              Use the cross-check link before trusting any number here — this app&rsquo;s data
+              is unverified.
+            </p>
+          </InfoTip>
+        </h2>
         {company.documents && <DocumentsByYear docs={company.documents} />}
         <div className="flex gap-4 flex-wrap text-sm">
           <a href={`https://www.nseindia.com/get-quotes/equity?symbol=${encodeURIComponent(symbol)}`} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-ink)] font-semibold hover:underline">
@@ -1893,7 +1936,6 @@ function CompanyView() {
             Cross-check on Screener.in ↗
           </a>
         </div>
-        <p className="text-xs text-[var(--ink3)]">Use the cross-check link before trusting any number here — this app&apos;s data is unverified.</p>
       </section>
 
       {/* Named, because in swipe mode an unnamed pane is only reachable by
@@ -1912,7 +1954,14 @@ function CompanyView() {
       </div>
 
       <footer className="text-xs text-[var(--ink3)] leading-relaxed pb-8">
-        Data: Yahoo Finance via yfinance, as of {company.generated_at} — <strong>every number is unverified until checked against a company filing</strong>. This tool screens; it never recommends.
+        Data as of {company.generated_at}
+        <InfoTip title="Where these numbers come from" className="ml-1">
+          <p>Yahoo Finance via yfinance, as of {company.generated_at}.</p>
+          <p>
+            <strong>Every number is unverified until checked against a company filing.</strong>{" "}
+            This tool screens; it never recommends.
+          </p>
+        </InfoTip>
       </footer>
     </div>
   );

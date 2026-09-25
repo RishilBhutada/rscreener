@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import InfoTip from "@/components/InfoTip";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -78,11 +79,16 @@ export default function Scorecard() {
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 sm:p-5">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h2 className="text-base font-bold text-[var(--ink)]">Data quality</h2>
-          <p className="text-xs text-[var(--ink3)] mt-0.5">
-            Measured after every refresh, not asserted. Every &ldquo;correct&rdquo; check compares two
-            figures produced independently of each other.
-          </p>
+          <h2 className="text-base font-bold text-[var(--ink)]">
+            Data quality
+            <InfoTip title="Data quality" className="ml-1.5">
+              <p>Measured after every refresh, not asserted.</p>
+              <p>
+                Every &ldquo;correct&rdquo; check compares two figures produced independently
+                of each other.
+              </p>
+            </InfoTip>
+          </h2>
         </div>
         <div className="text-right">
           <div className="flex items-baseline gap-0.5">
