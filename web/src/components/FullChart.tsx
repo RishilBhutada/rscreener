@@ -394,6 +394,17 @@ export default function FullChart({ symbol }: { symbol: string }) {
     if (v !== "price" && ["1M", "3M", "6M", "YTD", "1Y"].includes(range)) setRange("5Y");
   };
 
+  // One rule, checked after every change rather than on each path that can
+  // break it: the candle size on screen must cover the range on screen.
+  // PE -> Price used to leave daily candles under a "5Y" label, because the
+  // valuation views move the range and only the price view moved the candle.
+  useEffect(() => {
+    if (view !== "price" || !file || covers(interval, range)) return;
+    const next = covers(AUTO[range], range) ? AUTO[range] : (["d", "w", "m"] as Interval[]).find((iv) => covers(iv, range)) ?? "m";
+    if (next !== interval) { kept.current = null; setIv(next); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, range, interval, file]);
+
   const isHidden = (k: string) => !!hidden[`${view}:${k}`];
 
   /* Build the chart. Rebuilt whole on any change; the window you were looking
