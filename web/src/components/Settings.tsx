@@ -43,14 +43,15 @@ const SECTIONS: { id: string; label: string }[] = [
   { id: "notes", label: "Your notes" },
 ];
 
-const THEMES = [["light", "Light"], ["dark", "Dark"], ["system", "Auto"]] as const;
+const THEMES = [["light", "Light"], ["dark", "Dark"], ["black", "Black"], ["system", "Auto"]] as const;
 const LAYOUTS = [["scroll", "Scroll"], ["swipe", "Swipe"]] as const;
 
-const ACCENTS = ["emerald", "indigo", "rose", "amber"] as const;
+const ACCENTS = ["mono", "indigo", "emerald", "rose", "amber"] as const;
 
 /** Taken from globals.css, both themes - the swatch has to be the colour the
  *  app will actually paint, and the dark theme uses lighter accents. */
 const ACCENT_DOT: Record<string, { light: string; dark: string }> = {
+  mono: { light: "#27272a", dark: "#e4e4e7" },
   emerald: { light: "#059669", dark: "#10b981" },
   indigo: { light: "#5a4fca", dark: "#818cf8" },
   rose: { light: "#e11d48", dark: "#fb7185" },
@@ -78,10 +79,78 @@ export function loadSectionMode(): SectionMode {
 
 function apply(theme: string, accent: string) {
   const d = document.documentElement;
-  const dark = theme === "dark" || (theme === "system" &&
+  const dark = theme === "dark" || theme === "black" || (theme === "system" &&
     window.matchMedia("(prefers-color-scheme: dark)").matches);
   d.dataset.theme = dark ? "dark" : "light";
+  // Black is the dark theme with its surfaces replaced, so it keeps every dark
+  // rule and adds one attribute - see globals.css.
+  if (theme === "black") d.dataset.shade = "black";
+  else delete d.dataset.shade;
   d.dataset.accent = accent;
+  document.querySelector('meta[name="theme-color"]')
+    ?.setAttribute("content", theme === "black" ? "#000000" : dark ? "#0b1017" : "#f5f6f8");
+}
+
+/** The surfaces of each theme, for the preview tiles. Copied from globals.css
+ *  so each tile shows the theme it selects rather than a picture of one. */
+const PREVIEW: Record<string, { bg: string; card: string; line: string; ink: string }> = {
+  light: { bg: "#f5f6f8", card: "#ffffff", line: "#e5e8ee", ink: "#0f1729" },
+  dark: { bg: "#0b1017", card: "#121924", line: "#223048", ink: "#e8edf5" },
+  black: { bg: "#000000", card: "#0b0b0b", line: "#262626", ink: "#f5f5f5" },
+};
+
+function Mini({ p, accent }: { p: { bg: string; card: string; line: string; ink: string }; accent: string }) {
+  return (
+    <span className="absolute inset-0 p-1.5 flex flex-col gap-1" style={{ background: p.bg }}>
+      <span className="block h-1 w-1/2 rounded-full" style={{ background: p.ink, opacity: 0.8 }} />
+      <span className="flex-1 rounded-[5px] border p-1 flex flex-col gap-1" style={{ background: p.card, borderColor: p.line }}>
+        <span className="block h-1 w-2/3 rounded-full" style={{ background: accent }} />
+        <span className="block h-1 w-full rounded-full" style={{ background: p.line }} />
+        <span className="block h-1 w-3/4 rounded-full" style={{ background: p.line }} />
+      </span>
+    </span>
+  );
+}
+
+/** Theme as four small pictures of the app rather than four words - the way a
+ *  phone's own display settings offer it, and the only way to show the
+ *  difference between Dark and Black before choosing. */
+function ThemePicker({ value, accent, onChange }: { value: string; accent: string; onChange: (t: string) => void }) {
+  const dot = (dark: boolean) => (ACCENT_DOT[accent] ?? ACCENT_DOT.indigo)[dark ? "dark" : "light"];
+  return (
+    <div className="px-4 pt-3.5 pb-4">
+      <div className="flex items-center gap-3 mb-3">
+        <span className="w-8 h-8 rounded-[10px] bg-[var(--accent-soft)] text-[var(--accent-ink)] flex items-center justify-center shrink-0">
+          <Glyph d={ICON.theme} />
+        </span>
+        <span className="text-[15px] font-medium text-[var(--ink)]">Theme</span>
+      </div>
+      <div role="radiogroup" aria-label="Theme" className="grid grid-cols-4 gap-2.5">
+        {THEMES.map(([id, label]) => {
+          const on = value === id;
+          return (
+            <button key={id} type="button" role="radio" aria-checked={on} onClick={() => onChange(id)}
+              className="rs-press flex flex-col items-center gap-1.5">
+              <span className={`relative block w-full aspect-[3/4] rounded-xl overflow-hidden border transition-shadow duration-200 ${
+                on ? "border-transparent ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[var(--card)]" : "border-[var(--line2)]"}`}>
+                {id === "system" ? (
+                  <>
+                    <Mini p={PREVIEW.light} accent={dot(false)} />
+                    <span className="absolute inset-0" style={{ clipPath: "polygon(100% 0, 100% 100%, 0 100%)" }}>
+                      <Mini p={PREVIEW.dark} accent={dot(true)} />
+                    </span>
+                  </>
+                ) : (
+                  <Mini p={PREVIEW[id]} accent={dot(id !== "light")} />
+                )}
+              </span>
+              <span className={`text-xs ${on ? "text-[var(--ink)] font-semibold" : "text-[var(--ink3)] font-medium"}`}>{label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 /** The gear in the header. A link to the Settings page, lit while you are on it. */
@@ -202,16 +271,12 @@ function MainScreen() {
       <PageTitle>Settings</PageTitle>
 
       <Group title="Appearance">
-        <Row
-          icon={<Glyph d={ICON.theme} />}
-          title="Theme"
-          right={<Segmented label="Theme" value={theme} options={THEMES} onChange={pickTheme} />}
-        />
+        <ThemePicker value={theme} accent={accent} onChange={pickTheme} />
         <Row
           icon={<Glyph d={ICON.accent} />}
-          title="Accent colour"
+          title="Accent"
           right={
-            <div className="flex gap-2.5 shrink-0" role="radiogroup" aria-label="Accent colour">
+            <div className="flex gap-2 shrink-0" role="radiogroup" aria-label="Accent colour">
               {ACCENTS.map((a) => (
                 <button
                   key={a}
@@ -220,14 +285,15 @@ function MainScreen() {
                   onClick={() => pickAccent(a)}
                   aria-label={a.charAt(0).toUpperCase() + a.slice(1)}
                   aria-checked={accent === a}
-                  className="rs-press w-7 h-7 rounded-full flex items-center justify-center"
+                  className="rs-press w-[26px] h-[26px] rounded-full flex items-center justify-center"
                   style={{
                     background: ACCENT_DOT[a][isDark ? "dark" : "light"],
                     boxShadow: accent === a ? "0 0 0 2px var(--card), 0 0 0 4px var(--ink2)" : "none",
                   }}
                 >
                   {accent === a && (
-                    <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="white" strokeWidth="3"
+                    <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none"
+                      stroke={a === "mono" && isDark ? "#000" : "white"} strokeWidth="3"
                       strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
                   )}
                 </button>

@@ -23,7 +23,7 @@ export const viewport: Viewport = {
   themeColor: "#0f172a",
 };
 
-const themeInit = `(function(){try{var t=localStorage.getItem("rs_theme")||"system";var d=document.documentElement;var dark=t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme: dark)").matches);d.dataset.theme=dark?"dark":"light";d.dataset.accent=localStorage.getItem("rs_accent")||"indigo";}catch(e){}})();`;
+const themeInit = `(function(){try{var t=localStorage.getItem("rs_theme")||"system";var d=document.documentElement;var dark=t==="dark"||t==="black"||(t==="system"&&matchMedia("(prefers-color-scheme: dark)").matches);d.dataset.theme=dark?"dark":"light";if(t==="black")d.dataset.shade="black";var tc=t==="black"?"#000000":dark?"#0b1017":"#f5f6f8";document.addEventListener("DOMContentLoaded",function(){var m=document.querySelector('meta[name="theme-color"]');if(m)m.setAttribute("content",tc);});d.dataset.accent=localStorage.getItem("rs_accent")||"indigo";}catch(e){}})();`;
 
 export default function RootLayout({
   children,

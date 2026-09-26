@@ -638,6 +638,14 @@ def main() -> None:
         print(f"rebuilding {len(only)} symbol(s) only")
 
     con = sqlite3.connect(DB, timeout=180)
+    # The per-company statements lookup further down runs once for each of
+    # ~3,900 companies, and `statements` had no index on symbol: every lookup
+    # scanned all 3.7 million rows. 363 ms apiece - about fifteen of a publish's
+    # twenty minutes, spent re-reading the same table. With the index the whole
+    # loop's lookups take seconds. Built here rather than by a fetcher because
+    # the database is saved to the release BEFORE this runs; it costs ~2 s.
+    con.execute("CREATE INDEX IF NOT EXISTS idx_statements_symbol ON statements(symbol)")
+    con.commit()
     snaps = pd.read_sql("SELECT * FROM fundamentals", con)
     # Same correction as data.json, from the same function: the company page falls
     # back to this snapshot when the screener row is missing, so a stale price here

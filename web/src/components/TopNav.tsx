@@ -7,7 +7,10 @@ import Settings from "@/components/Settings";
 import { loadIndex } from "@/lib/index-data";
 import { BUILD_COMMIT, BUILD_SUBJECT, BUILD_TIME } from "@/lib/buildinfo";
 import { DESTINATIONS, BAR_SLOTS } from "@/lib/destinations";
-import { REFRESH_MARK, isRefreshLoad, reloadBypassingCache } from "@/lib/reload";
+import {
+  REFRESH_MARK, isRefreshLoad, reloadBypassingCache,
+  fetchLiveVersion, isNewer, pendingRelease, pendingText, type Pending, type Version,
+} from "@/lib/reload";
 import { applyOrder, loadOrder } from "@/lib/order";
 import { previousPage, recordNavigation } from "@/lib/navdepth";
 import { buildIndex, search, didYouMean, type SearchIndex, type SearchRow } from "@/lib/search";
@@ -152,8 +155,7 @@ const Gear = ({ size }: { size?: number }) => (
 // the data loaders import it from here.
 export { isRefreshLoad };
 
-type Version = { commit?: string; built?: string; subject?: string };
-type Check = "idle" | "checking" | "current";
+type Check = "idle" | "checking" | "current" | "pending";
 
 /** When a build was made, written the way a person says it. */
 function whenBuilt(iso?: string): string {
@@ -180,6 +182,10 @@ function RefreshButton() {
   const [details, setDetails] = useState(false);
   const [live, setLive] = useState<Version | null>(null);
   const [liveError, setLiveError] = useState(false);
+  const [pending, setPending] = useState<Pending>(null);
+  // A newer version found WITHOUT being asked, and whether it was waved away.
+  const [ready, setReady] = useState<Version | null>(null);
+  const [dismissed, setDismissed] = useState(false);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const held = useRef(false);
 
@@ -193,23 +199,40 @@ function RefreshButton() {
   }, []);
 
   useEffect(() => {
-    if (state !== "current") return;
-    const t = setTimeout(() => setState("idle"), 4000);
+    if (state !== "current" && state !== "pending") return;
+    const t = setTimeout(() => setState("idle"), state === "pending" ? 7000 : 4000);
     return () => clearTimeout(t);
   }, [state]);
 
+  // Looks for a newer version by itself: a few seconds after the app opens,
+  // every time it comes back to the foreground, and every five minutes while
+  // it is on screen. This button used to be the only way to find out, so an
+  // update that landed while the app sat open went unseen until somebody
+  // thought to press it - and pressed too early, it said "latest" and stopped.
+  useEffect(() => {
+    let alive = true;
+    const look = async () => {
+      if (document.visibilityState !== "visible") return;
+      const v = await fetchLiveVersion();
+      if (alive && isNewer(v, BUILD_COMMIT)) setReady(v);
+    };
+    const first = setTimeout(look, 4000);
+    const every = setInterval(look, 5 * 60 * 1000);
+    const onVis = () => { if (document.visibilityState === "visible") look(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      alive = false;
+      clearTimeout(first);
+      clearInterval(every);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
+
   const fetchLive = async (): Promise<Version | null> => {
-    try {
-      const r = await fetch(`${BASE}/version.json`, { cache: "no-store" });
-      if (!r.ok) throw new Error("no version file");
-      const v: Version = await r.json();
-      setLive(v);
-      setLiveError(false);
-      return v;
-    } catch {
-      setLiveError(true);
-      return null;
-    }
+    const v = await fetchLiveVersion();
+    setLive(v);
+    setLiveError(!v);
+    return v;
   };
 
   const check = async () => {
@@ -217,8 +240,13 @@ function RefreshButton() {
     setState("checking");
     const v = await fetchLive();
     if (!v) return reloadBypassingCache();   // cannot check; reloading is the safe error
-    if (v.commit && BUILD_COMMIT && v.commit !== BUILD_COMMIT) return reloadBypassingCache();
-    setState("current");                     // already on it - do not disturb the page
+    if (isNewer(v, BUILD_COMMIT)) return reloadBypassingCache();
+    // Nothing newer is live - but something may be on its way. Saying a flat
+    // "latest version" while a publish is two minutes from done is how this
+    // button earned the reputation of not working.
+    const p = await pendingRelease();
+    setPending(p);
+    setState(p ? "pending" : "current");
   };
 
   const startHold = () => {
@@ -256,14 +284,41 @@ function RefreshButton() {
           ? <Check />
           : <Rotate className={state === "checking" ? "animate-spin" : ""} />}
       </button>
+      {/* A dot on the icon while a newer version is waiting. */}
+      {ready && (
+        <span aria-hidden="true"
+          className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-[var(--accent)] ring-2 ring-[var(--card)] pointer-events-none" />
+      )}
 
-      {state === "current" && !details && (
+      {(state === "current" || state === "pending") && !details && (
         <p role="status"
-           className="absolute right-0 top-full mt-1.5 z-40 whitespace-nowrap rounded-lg border
-                      border-[var(--line)] bg-[var(--card)] px-2.5 py-1.5 text-[11px]
+           className="rs-fade absolute right-0 top-full mt-1.5 z-40 w-max max-w-[calc(100vw-2rem)] rounded-lg border
+                      border-[var(--line)] bg-[var(--card)] px-2.5 py-1.5 text-[12px]
                       text-[var(--ink2)] shadow-lg">
-          You already have the latest version.
+          {state === "pending" && pending ? pendingText(pending) : "You have the latest version."}
         </p>
+      )}
+
+      {ready && !dismissed && (
+        <div role="status"
+          className="rs-sheet fixed inset-x-0 mx-auto w-fit max-w-[calc(100vw-2rem)] z-50
+                     bottom-[calc(76px+env(safe-area-inset-bottom))] sm:bottom-6
+                     flex items-center gap-3 rounded-full border border-[var(--line2)] bg-[var(--card)]
+                     shadow-[0_10px_30px_rgba(0,0,0,0.35)] pl-4 pr-1.5 py-1.5">
+          <span className="text-[13px] font-medium text-[var(--ink)] whitespace-nowrap">New version ready</span>
+          <button
+            onClick={reloadBypassingCache}
+            className="rs-press rounded-full bg-[var(--accent-fill)] text-[var(--accent-fill-ink)]
+                       text-[13px] font-semibold px-3.5 min-h-[34px]"
+          >
+            Update
+          </button>
+          <button onClick={() => setDismissed(true)} aria-label="Not now"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-[var(--ink3)] hover:bg-[var(--card2)]">
+            <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2"
+              strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </div>
       )}
 
       {details && (
@@ -276,10 +331,10 @@ function RefreshButton() {
               The change you are running
             </p>
             <p className="mt-0.5 text-[13px] leading-snug text-[var(--ink)]">
-              {BUILD_SUBJECT || "unknown"}
+              {BUILD_SUBJECT || "Unknown"}
             </p>
             <p className="mt-1 text-[11px] leading-snug text-[var(--ink3)] tabular-nums">
-              made {whenBuilt(BUILD_TIME)}
+              Made {whenBuilt(BUILD_TIME)}
               {BUILD_COMMIT ? ` · ${BUILD_COMMIT}` : ""}
             </p>
 
@@ -297,7 +352,7 @@ function RefreshButton() {
                   </p>
                   <p className="mt-0.5 text-[13px] leading-snug text-[var(--ink)]">{live.subject}</p>
                   <p className="mt-1 text-[11px] text-[var(--ink3)] tabular-nums">
-                    made {whenBuilt(live.built)}{live.commit ? ` · ${live.commit}` : ""}
+                    Made {whenBuilt(live.built)}{live.commit ? ` · ${live.commit}` : ""}
                   </p>
                   <button
                     onClick={reloadBypassingCache}
@@ -328,7 +383,7 @@ function RefreshButton() {
   );
 }
 
-/** Back, in the top left. On EVERY screen, with no exceptions.
+/** Back, in the top left, on every screen except Home (where it is not drawn).
  *
  *  It used to hide itself wherever the trail was empty, on the reasoning that an
  *  arrow with nothing behind it does nothing when tapped. That reasoning was
@@ -342,7 +397,8 @@ function RefreshButton() {
  *    somewhere behind you   go back to it
  *    nothing behind, not home   go to the home page - which is what you want
  *                           from a page you arrived at by link
- *    nothing behind, on home    scroll to the top
+ *    on home                    not drawn - it could only scroll to the top,
+ *                               which looked like a button that does nothing
  *
  *  No state where the arrow is present and inert.
  */

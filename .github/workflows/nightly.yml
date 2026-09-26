@@ -1,4 +1,7 @@
 name: Nightly data refresh
+# Named per run so the app can tell an app-update publish (minutes) from a data
+# refresh (hours) when it reads the public run list - see web/src/lib/reload.ts.
+run-name: "${{ inputs.scope == 'rebuild and publish only (no fetching)' && 'Publish app update' || (github.event_name == 'schedule' && 'Nightly data refresh' || 'Data refresh') }}"
 
 on:
   schedule:
