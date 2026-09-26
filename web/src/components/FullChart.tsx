@@ -52,6 +52,20 @@ type Interval = "d" | "w" | "m";
 type Range = "1M" | "3M" | "6M" | "YTD" | "1Y" | "2Y" | "3Y" | "5Y" | "10Y" | "MAX";
 type Kind = "candles" | "hollow" | "bars" | "heikin" | "line" | "area";
 type Ind = "vol" | "dma50" | "dma200" | "sma20" | "ema21" | "bb" | "rsi";
+/** How results and corporate actions are drawn. Five on offer while the owner
+ *  chooses; the ones not chosen come out. */
+type EvStyle = "labels" | "badges" | "strip" | "lines" | "shade";
+const EV_STYLES: [EvStyle, string, string][] = [
+  ["labels", "Labels", "The words on the chart - Dividend ₹11 above the bar, Q1 below it"],
+  ["badges", "Badges", "A small lettered dot on the bar; the detail appears when you touch it"],
+  ["strip", "Timeline", "A thin row under the chart holds every event, so the price stays clean"],
+  ["lines", "Lines", "A faint vertical line through the whole chart on each event date"],
+  ["shade", "Quarters", "Each fiscal quarter tinted in its colour, with the result day marked"],
+];
+const EV_KEY = "rs_fullchart_ev";
+const CA_SHORT: Record<string, string> = { dividend: "D", bonus: "B", split: "S", rights: "R", buyback: "BB", other: "•" };
+/** Indian fiscal quarter of a calendar month: Apr-Jun is Q1. */
+const fyQ = (month: number) => (month >= 4 && month <= 6 ? 1 : month >= 7 && month <= 9 ? 2 : month >= 10 ? 3 : 4);
 
 const RANGES: Range[] = ["1M", "3M", "6M", "YTD", "1Y", "2Y", "3Y", "5Y", "10Y", "MAX"];
 const RANGE_DAYS: Record<Range, number> = {
@@ -262,6 +276,8 @@ type LegendData = {
   pct?: number | null;
   items: LItem[];
   working?: Working | null;
+  /** Results declared or corporate actions on the bar under the finger. */
+  events?: { text: string; color: string }[];
 };
 
 type Bar = { day: number; v: number; q?: number; announced?: string | null; chg?: Growth };
@@ -271,6 +287,11 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const kept = useRef<{ key: string; from: number; to: number } | null>(null);
+  // First and last day of the series on screen, for placing a range. The range
+  // used to be placed by fitting the whole chart and reading its width back in
+  // the same breath - but the library applies a fit on the next frame, so the
+  // reading was stale, the fit won, and "1Y" showed two years.
+  const spanRef = useRef<{ first: number; last: number } | null>(null);
 
   const [file, setFile] = useState<ChartFile | null>(null);
   const [company, setCompany] = useState<Company | null>(null);
@@ -288,10 +309,12 @@ export default function FullChart({ symbol }: { symbol: string }) {
   // The company chart's own switches, same defaults.
   const [peWin, setPeWin] = useState("ttm");
   const [showQ, setShowQ] = useState(false);
-  const [showDates, setShowDates] = useState(false);
+  // On while the display style is being chosen, so every style can be seen.
+  const [showDates, setShowDates] = useState(true);
   const [showChg, setShowChg] = useState(true);
   const [epsCmp, setEpsCmp] = useState<"yoy" | "prev">("yoy");
-  const [showCA, setShowCA] = useState(false);
+  const [showCA, setShowCA] = useState(true);
+  const [evStyle, setEvStyle] = useState<EvStyle>("labels");
   const [caOn, setCaOn] = useState<Record<string, boolean>>({ dividend: true, bonus: true, split: true, rights: true, buyback: true, other: true });
   const [hidden, setHidden] = useState<Record<string, boolean>>({});
   const [cmpSym, setCmpSym] = useState<string | null>(null);
@@ -301,7 +324,17 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [cmpQ, setCmpQ] = useState("");
   const [vis, setVis] = useState<{ from: number; to: number } | null>(null);
 
-  useEffect(() => { setPrefs(loadPrefs()); }, []);
+  useEffect(() => {
+    setPrefs(loadPrefs());
+    try {
+      const e = localStorage.getItem(EV_KEY);
+      if (e && EV_STYLES.some(([k]) => k === e)) setEvStyle(e as EvStyle);
+    } catch { /* private mode */ }
+  }, []);
+  const pickEvStyle = (e: EvStyle) => {
+    setEvStyle(e);
+    try { localStorage.setItem(EV_KEY, e); } catch { /* private mode */ }
+  };
   const savePrefs = (p: Prefs) => {
     setPrefs(p);
     try { localStorage.setItem(PREF_KEY, JSON.stringify(p)); } catch { /* private mode */ }
@@ -460,9 +493,10 @@ export default function FullChart({ symbol }: { symbol: string }) {
       const days = rows.map((r) => r[0]);
       const closes = rows.map((r) => r[4]);
       const comparing = !!cmpFile;
+      const stripOn = evStyle === "strip" && (showCA || showDates);
       chart.priceScale("right").applyOptions({
         mode: comparing ? PriceScaleMode.Percentage : prefs.log ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
-        scaleMargins: { top: 0.08, bottom: onInd.has("vol") ? 0.22 : 0.06 },
+        scaleMargins: { top: 0.08, bottom: (onInd.has("vol") ? 0.22 : 0.06) + (stripOn ? 0.1 : 0) },
       });
       const ohlc = (rs: Row[]) => rs.map(([t, o, h, l, c]) => ({ time: toTime(t), open: o, high: h, low: l, close: c }));
       const value = (rs: Row[]) => rs.map(([t, , , , c]) => ({ time: toTime(t), value: c }));
@@ -521,7 +555,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
         const v = chart.addSeries(HistogramSeries, {
           priceScaleId: "vol", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false,
         });
-        chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+        chart.priceScale("vol").applyOptions({ scaleMargins: stripOn ? { top: 0.74, bottom: 0.08 } : { top: 0.82, bottom: 0 } });
         v.setData(rows.map(([t, o, , , c, vv]) => ({ time: toTime(t), value: vv, color: alpha(c >= o ? p.pos : p.neg, 0.45) })));
       }
       if (onInd.has("rsi")) {
@@ -726,16 +760,20 @@ export default function FullChart({ symbol }: { symbol: string }) {
       };
     }
 
-    // Result dates and corporate actions, marked on the main series.
+    // Result dates and corporate actions. Collected once, then drawn in the
+    // chosen style - and listed in the legend for the bar under the finger in
+    // every style, so the details are never only in a label that may overlap.
+    type Ev = { day: number; kind: "ca" | "res"; short: string; label: string; text: string; color: string };
+    const evs: Ev[] = [];
     if (anchor && anchorDays.length) {
-      const ms: SeriesMarker<Time>[] = [];
       if (showCA) {
         for (const a of company?.actions ?? []) {
           const k = CA_LABEL[a.kind] ? a.kind : "other";
           if (!caOn[k]) continue;
           const d = snap(anchorDays, dayOf(a.date));
           if (d === null) continue;
-          ms.push({ time: toTime(d), position: "aboveBar", shape: "arrowDown", color: p.ca[k], text: a.detail ? `${CA_LABEL[k]} ${a.detail}` : CA_LABEL[k] });
+          const label = a.detail ? `${CA_LABEL[k]} ${a.detail}` : CA_LABEL[k];
+          evs.push({ day: d, kind: "ca", short: CA_SHORT[k] ?? "•", label, text: `${label} · ex-date ${dateOf(dayOf(a.date))}`, color: p.ca[k] });
         }
       }
       if (showDates) {
@@ -743,12 +781,78 @@ export default function FullChart({ symbol }: { symbol: string }) {
           if (!q.announced) continue;
           const d = snap(anchorDays, dayOf(q.announced));
           if (d === null) continue;
-          ms.push({ time: toTime(d), position: "belowBar", shape: "circle", color: p.q[q.q] ?? p.q[1], text: `Q${q.q}` });
+          evs.push({ day: d, kind: "res", short: `Q${q.q}`, label: `Q${q.q}`, text: `${Q_LABEL[q.q] ?? `Q${q.q}`} results declared ${dateOf(dayOf(q.announced))}`, color: p.q[q.q] ?? p.q[1] });
         }
       }
-      ms.sort((a, b) => (a.time as number) - (b.time as number));
-      if (ms.length) createSeriesMarkers(anchor, ms);
+      evs.sort((x, y) => x.day - y.day);
+      const byTime = (list: SeriesMarker<Time>[]) => list.sort((x, y) => (x.time as number) - (y.time as number));
+
+      if (evStyle === "labels") {
+        if (evs.length) createSeriesMarkers(anchor, byTime(evs.map((e): SeriesMarker<Time> => e.kind === "ca"
+          ? { time: toTime(e.day), position: "aboveBar", shape: "arrowDown", color: e.color, text: e.label }
+          : { time: toTime(e.day), position: "belowBar", shape: "circle", color: e.color, text: e.short })));
+      } else if (evStyle === "badges") {
+        if (evs.length) createSeriesMarkers(anchor, byTime(evs.map((e): SeriesMarker<Time> => e.kind === "ca"
+          ? { time: toTime(e.day), position: "aboveBar", shape: "circle", color: e.color, text: e.short, size: 1 }
+          : { time: toTime(e.day), position: "belowBar", shape: "square", color: e.color, size: 1 })));
+      } else if (evStyle === "strip") {
+        // A band along the foot of the chart, on an axis of its own. It was a
+        // separate pane, and a pane holding one flat line got zero height and
+        // stopped the whole chart drawing. The axis range is fixed so a line
+        // of identical values still has somewhere to sit.
+        const flat = chart.addSeries(LineSeries, {
+          priceScaleId: "strip", color: "rgba(0, 0, 0, 0)", lineVisible: false, priceLineVisible: false,
+          lastValueVisible: false, crosshairMarkerVisible: false,
+          autoscaleInfoProvider: () => ({ priceRange: { minValue: -1, maxValue: 1 } }),
+        });
+        chart.priceScale("strip").applyOptions({ scaleMargins: { top: 0.9, bottom: 0.06 }, visible: false });
+        chart.priceScale("right").applyOptions({ scaleMargins: { top: 0.08, bottom: Math.max(0.16, chart.priceScale("right").options().scaleMargins.bottom) } });
+        flat.setData(anchorDays.map((d) => ({ time: toTime(d), value: 0 })));
+        if (evs.length) createSeriesMarkers(flat, byTime(evs.map((e): SeriesMarker<Time> => ({
+          time: toTime(e.day), position: "inBar",
+          shape: e.kind === "ca" ? "circle" : "square", color: e.color, text: e.short, size: 1,
+        }))));
+      } else if (evStyle === "lines") {
+        // Full-height bars on an axis of their own read as vertical lines.
+        const ln = chart.addSeries(HistogramSeries, {
+          priceScaleId: "ev", priceLineVisible: false, lastValueVisible: false, base: 0,
+        });
+        chart.priceScale("ev").applyOptions({ scaleMargins: { top: 0, bottom: 0 }, visible: false });
+        const seen = new Map<number, string>();
+        for (const e of evs) if (!seen.has(e.day)) seen.set(e.day, e.color);
+        ln.setData([...seen].map(([d, c]) => ({ time: toTime(d), value: 1, color: alpha(c, 0.45) })));
+        const res = evs.filter((e) => e.kind === "res");
+        if (res.length) createSeriesMarkers(anchor, byTime(res.map((e): SeriesMarker<Time> => (
+          { time: toTime(e.day), position: "belowBar", shape: "circle", color: e.color, text: e.short, size: 0.8 }))));
+      } else {
+        // Every bar tinted by the fiscal quarter it falls in, so the quarters
+        // read as bands - the company chart's quarter colours, behind the price.
+        const sh = chart.addSeries(HistogramSeries, {
+          priceScaleId: "shade", priceLineVisible: false, lastValueVisible: false, base: 0,
+        });
+        chart.priceScale("shade").applyOptions({ scaleMargins: { top: 0, bottom: 0 }, visible: false });
+        sh.setData(anchorDays.map((d) => {
+          const q = fyQ(new Date(d * DAY * 1000).getUTCMonth() + 1);
+          return { time: toTime(d), value: 1, color: alpha(p.q[q], 0.17) };
+        }));
+        if (evs.length) createSeriesMarkers(anchor, byTime(evs.map((e): SeriesMarker<Time> => e.kind === "ca"
+          ? { time: toTime(e.day), position: "aboveBar", shape: "circle", color: e.color, text: e.short, size: 1 }
+          : { time: toTime(e.day), position: "belowBar", shape: "arrowUp", color: e.color, text: e.short, size: 1 })));
+      }
     }
+    const evAt = new Map<number, { text: string; color: string }[]>();
+    for (const e of evs) evAt.set(e.day, [...(evAt.get(e.day) ?? []), { text: e.text, color: e.color }]);
+    if (evAt.size) {
+      const base = legendAt;
+      legendAt = (day) => {
+        const d = base(day);
+        if (!d || !anchorDays.length) return d;
+        const at = day === null ? anchorDays[anchorDays.length - 1] : anchorDays[atOrBefore(anchorDays, day)];
+        const e = evAt.get(at);
+        return e ? { ...d, events: e } : d;
+      };
+    }
+    if (anchorDays.length) spanRef.current = { first: anchorDays[0], last: anchorDays[anchorDays.length - 1] };
 
     createTextWatermark(chart.panes()[0], {
       horzAlign: "center", vertAlign: "center",
@@ -796,20 +900,14 @@ export default function FullChart({ symbol }: { symbol: string }) {
     };
     // `range` is applied below without a rebuild.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, company, view, interval, prefs, peWin, showQ, showDates, showChg, epsCmp, showCA, caOn, hidden, cmpFile, cmpCo, cmpSym, themeKey, symbol]);
+  }, [file, company, view, interval, prefs, peWin, showQ, showDates, showChg, epsCmp, showCA, caOn, hidden, cmpFile, cmpCo, cmpSym, themeKey, symbol, evStyle]);
 
   const applyRange = () => {
-    const chart = chartRef.current;
-    if (!chart) return;
-    // Measure the whole series, then take the range back from its last day.
-    chart.timeScale().fitContent();
-    const all = chart.timeScale().getVisibleRange();
-    if (!all) return;
-    const first = Math.round((all.from as number) / DAY), last = Math.round((all.to as number) / DAY);
-    const days = rangeDays(range, last);
-    if (Number.isFinite(days) && last - days > first) {
-      chart.timeScale().setVisibleRange({ from: toTime(last - days), to: toTime(last) });
-    }
+    const chart = chartRef.current, sp = spanRef.current;
+    if (!chart || !sp) return;
+    const days = rangeDays(range, sp.last);
+    if (!Number.isFinite(days) || sp.last - days <= sp.first) chart.timeScale().fitContent();
+    else chart.timeScale().setVisibleRange({ from: toTime(sp.last - days), to: toTime(sp.last) });
   };
   // A new range moves the window; it does not rebuild the chart.
   useEffect(() => { applyRange(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [range]);
@@ -858,11 +956,16 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const nLayers = view === "price"
     ? prefs.inds.length + (showCA ? 1 : 0) + (showDates ? 1 : 0)
     : (showCA ? 1 : 0) + (showDates ? 1 : 0) + (showQ ? 1 : 0);
+  // Counted against the chart's window as it is NOW, read when the sheet
+  // renders. A copy kept in state lagged a step behind a range change, so the
+  // sheet said "2 in view" over a chart showing 4.
   const caCount: Record<string, number> = {};
+  const vr = sheet ? chartRef.current?.timeScale().getVisibleRange() : null;
+  const win = vr ? { from: Math.round((vr.from as number) / DAY), to: Math.round((vr.to as number) / DAY) } : vis;
   for (const a of company?.actions ?? []) {
     const k = CA_LABEL[a.kind] ? a.kind : "other";
     const d = dayOf(a.date);
-    if (!vis || (d >= vis.from && d <= vis.to)) caCount[k] = (caCount[k] ?? 0) + 1;
+    if (!win || (d >= win.from && d <= win.to)) caCount[k] = (caCount[k] ?? 0) + 1;
   }
   const peerList = (company?.peers ?? [])
     .map((q) => ({ sym: String(q.symbol ?? ""), nm: String(q.name ?? q.symbol ?? "") }))
@@ -1005,6 +1108,16 @@ export default function FullChart({ symbol }: { symbol: string }) {
                 </span>
               )}
             </p>
+            {L.events && L.events.length > 0 && (
+              <p className="flex flex-wrap gap-x-2">
+                {L.events.map((e, i) => (
+                  <span key={i} className="inline-flex items-center gap-1">
+                    <i className="inline-block w-2 h-2 rounded-full" style={{ background: e.color }} />
+                    <span className="text-[var(--ink2)]">{e.text}</span>
+                  </span>
+                ))}
+              </p>
+            )}
             {ratioNote && (
               <p className="pointer-events-auto text-[var(--ink3)]">
                 Ratio from {dateOf(ratioNote.start, "month")}
@@ -1027,6 +1140,19 @@ export default function FullChart({ symbol }: { symbol: string }) {
         {error && <p className="absolute inset-0 flex items-center justify-center px-8 text-center text-sm text-[var(--ink3)]">{error}</p>}
       </div>
 
+      {(showCA || showDates) && (
+        // PREVIEW ONLY - the event-style chooser, in a row of its own so it
+        // covers nothing on the chart. It comes out once a style is picked.
+        <div className="shrink-0 flex items-center gap-0.5 overflow-x-auto px-2 py-1 border-t border-[var(--line)] bg-[var(--card)] [scrollbar-width:none]">
+          <span className="shrink-0 px-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--ink3)]">Event style</span>
+          {EV_STYLES.map(([k, label]) => (
+            <button key={k} onClick={() => pickEvStyle(k)} aria-pressed={evStyle === k}
+              className={`shrink-0 min-h-[30px] px-2.5 rounded-lg text-[12px] font-semibold ${evStyle === k ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)]"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       <footer className="shrink-0 border-t border-[var(--line)] pb-[env(safe-area-inset-bottom)] flex flex-col [@media(max-height:500px)]:flex-row [@media(max-height:500px)]:items-center">
         <div className="flex items-center gap-0 overflow-x-auto px-1.5 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [@media(max-height:500px)]:flex-1">
           {RANGES.map((r) => (
@@ -1146,6 +1272,21 @@ export default function FullChart({ symbol }: { symbol: string }) {
                 )}
                 {(company?.actions?.length ?? 0) > 0 && (
                   <Toggle on={showCA} label="Corporate actions" sub="Dividends, bonuses, splits and rights, on their ex-date" onClick={() => setShowCA(!showCA)} />
+                )}
+                {(showCA || showDates) && (
+                  <>
+                    <Head>Event style · preview</Head>
+                    {EV_STYLES.map(([k, label, sub]) => (
+                      <button key={k} onClick={() => pickEvStyle(k)}
+                        className={`w-full min-h-[52px] px-3 rounded-xl flex items-center gap-3 text-left ${evStyle === k ? "bg-[var(--accent-soft)]" : "active:bg-[var(--card2)]"}`}>
+                        <span className="flex-1">
+                          <span className={`block text-[15px] ${evStyle === k ? "text-[var(--accent-ink)] font-semibold" : "text-[var(--ink)]"}`}>{label}</span>
+                          <span className="block text-xs text-[var(--ink3)]">{sub}</span>
+                        </span>
+                        {evStyle === k && <svg viewBox="0 0 24 24" className="w-5 h-5 text-[var(--accent-ink)]" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>}
+                      </button>
+                    ))}
+                  </>
                 )}
                 {showCA && (
                   <div className="pl-6">
