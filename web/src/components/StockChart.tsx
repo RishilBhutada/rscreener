@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import InfoTip from "@/components/InfoTip";
+import Link from "next/link";
 
 type Pt = [string, number] | [string, number, number | null];
 export type ChartPrices = { monthly?: Pt[]; weekly?: Pt[]; daily?: Pt[] };
@@ -678,6 +679,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   if (!model.length || !model.some((s) => s.data.length > 1)) {
     return (
       <ChartShell range={range} setRange={setRange} view={view} setView={setView}
+        expandHref={symbol ? `/chart?s=${encodeURIComponent(symbol)}` : undefined}
         moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand }}>
         <div className="h-64 flex items-center justify-center text-sm text-[var(--ink3)]">No data yet for this view.</div>
       </ChartShell>
@@ -747,6 +749,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
 
   return (
     <ChartShell range={range} setRange={setRange} view={view} setView={setView}
+        expandHref={symbol ? `/chart?s=${encodeURIComponent(symbol)}` : undefined}
       moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand }}
       onViewChange={() => setHover(null)}>
       <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
@@ -1228,8 +1231,10 @@ const MORE_VIEWS: [View, string][] = [
 ];
 
 function ChartShell({
-  range, setRange, view, setView, moreOpen, setMoreOpen, avail, onViewChange, children,
+  range, setRange, view, setView, moreOpen, setMoreOpen, avail, onViewChange, expandHref, children,
 }: {
+  /** The full-screen chart for this company. */
+  expandHref?: string;
   range: string; setRange: (r: string) => void;
   view: View; setView: (v: View) => void;
   moreOpen: boolean; setMoreOpen: (b: boolean) => void;
@@ -1271,6 +1276,22 @@ function ChartShell({
                 </div>
               )}
             </div>
+          )}
+          {expandHref && (
+            <Link
+              href={expandHref}
+              // Remembered so the full chart's back arrow returns here rather
+              // than pushing a second copy of this page onto the history.
+              onClick={() => { try { sessionStorage.setItem("rs_chart_from", location.pathname + location.search); } catch { /* private mode */ } }}
+              aria-label="Open the full-screen chart"
+              title="Full-screen chart"
+              className={`${btn(false)} gap-1.5 ml-auto sm:ml-1`}
+            >
+              <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+              </svg>
+              Full view
+            </Link>
           )}
         </div>
       </div>
