@@ -19,9 +19,9 @@ export type ChartBand = {
 } | null;
 
 /** How a ratio was arrived at, in the units it was arrived in. */
-type Working = { label: string; value: string; note?: string }[];
+export type Working = { label: string; value: string; note?: string }[];
 
-function workingFor(view: View, band: ChartBand, idx: number, qs?: Quarter[] | null): Working | null {
+export function workingFor(view: View, band: ChartBand, idx: number, qs?: Quarter[] | null): Working | null {
   const p = band?.parts?.[idx];
   if (!p) return null;
   const n = (v: unknown, d = 2) =>
@@ -59,7 +59,7 @@ function workingFor(view: View, band: ChartBand, idx: number, qs?: Quarter[] | n
 }
 
 /** earnings window behind the PE line; each is annualised onto the TTM scale */
-const PE_WINDOWS: [string, string, string][] = [
+export const PE_WINDOWS: [string, string, string][] = [
   ["ttm", "TTM", "Trailing 4 quarters — the standard PE. Negative only if all four together net to a loss"],
   ["q1", "1Q×4", "Latest quarter annualised (×4) — fastest to react, but carries that quarter's seasonality and one-offs"],
   // 2Q×2 and 3Q×⁴⁄₃ were removed at the owner's request: four ways of stating the
@@ -99,12 +99,12 @@ type XY = {
  *  refuses to publish. Those cases get named instead: loss to profit, profit to
  *  loss, or a loss that deepened or narrowed.
  */
-type Growth =
+export type Growth =
   | { kind: "pct"; pct: number }
   | { kind: "toProfit" | "toLoss" | "worseLoss" | "betterLoss" }
   | { kind: "none" };
 
-function growth(cur: number, prev: number | undefined): Growth {
+export function growth(cur: number, prev: number | undefined): Growth {
   if (prev === undefined || prev === null || !isFinite(prev) || prev === 0) return { kind: "none" };
   if (prev > 0 && cur > 0) return { kind: "pct", pct: ((cur - prev) / prev) * 100 };
   if (prev > 0 && cur <= 0) return { kind: "toLoss" };
@@ -114,7 +114,7 @@ function growth(cur: number, prev: number | undefined): Growth {
   return cur > prev ? { kind: "betterLoss" } : { kind: "worseLoss" };
 }
 
-function growthText(g: Growth | undefined, short = true): string {
+export function growthText(g: Growth | undefined, short = true): string {
   if (!g) return "";
   switch (g.kind) {
     case "pct": {
@@ -285,8 +285,8 @@ const CA_COLOUR: Record<string, string> = {
   buyback: "var(--ca-buy)",
   other: "var(--ca-oth)",
 };
-const CA_ORDER = ["dividend", "bonus", "split", "rights", "buyback", "other"];
-const CA_LABEL: Record<string, string> = {
+export const CA_ORDER = ["dividend", "bonus", "split", "rights", "buyback", "other"];
+export const CA_LABEL: Record<string, string> = {
   dividend: "Dividend", bonus: "Bonus", split: "Split",
   rights: "Rights", buyback: "Buyback", other: "Other",
 };
@@ -299,7 +299,7 @@ const Q_COLOUR: Record<number, string> = {
   3: "var(--q3)",
   4: "var(--q4)",
 };
-const Q_LABEL: Record<number, string> = { 1: "Q1 Apr–Jun", 2: "Q2 Jul–Sep", 3: "Q3 Oct–Dec", 4: "Q4 Jan–Mar" };
+export const Q_LABEL: Record<number, string> = { 1: "Q1 Apr–Jun", 2: "Q2 Jul–Sep", 3: "Q3 Oct–Dec", 4: "Q4 Jan–Mar" };
 
 export default function StockChart({ prices, peBand, evBand, pbBand, psBand, trendQ, livePrice, quarters, actions, symbol, peers, coverage, exchange }: {
   prices: ChartPrices;
