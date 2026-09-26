@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
+import InfoTip from "@/components/InfoTip";
 import { loadIndex } from "@/lib/index-data";
 import { Row } from "@/lib/query";
 import { Holding, loadPortfolio, parseHoldings, savePortfolio } from "@/lib/portfolio";
@@ -175,10 +176,14 @@ export default function PortfolioPage() {
                   that quietly makes a number up. */}
               {totals.unpriced > 0 && (
                 <p className="col-span-2 sm:col-span-4 text-[11px] text-[var(--ink3)]">
-                  These four figures cover the {enriched.length - totals.unpriced} holdings that have a
-                  price. {totals.unpriced} more, costing ₹{fmt(totals.unpricedCost, 0)}, are left out of
-                  all four rather than counted at what you paid — including them would report a
-                  &ldquo;current value&rdquo; that is not current.
+                  Excludes {totals.unpriced} unpriced holding{totals.unpriced === 1 ? "" : "s"} (cost ₹{fmt(totals.unpricedCost, 0)})
+                  <InfoTip title="Unpriced holdings" className="ml-1">
+                    <p>These four figures cover the {enriched.length - totals.unpriced} holdings that have a price.</p>
+                    <p>
+                      The rest are left out of all four rather than counted at what you paid — including
+                      them would report a &ldquo;current value&rdquo; that is not current.
+                    </p>
+                  </InfoTip>
                 </p>
               )}
             </section>

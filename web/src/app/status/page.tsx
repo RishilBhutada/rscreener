@@ -80,11 +80,26 @@ export default function StatusPage() {
       <TopNav active="status" />
       <main className="max-w-4xl mx-auto px-4 py-5 sm:py-6 space-y-5">
         <div>
-          <h1 className="text-2xl font-bold">Data status</h1>
-          <p className="text-sm text-[var(--ink3)] mt-1">
-            What Rscreener holds, how fresh each part is, and where it is still catching up.
-            Everything refreshes automatically each night at 22:00 IST — nothing here needs you to press anything.
-          </p>
+          <h1 className="text-2xl font-bold">
+            Data status
+            <InfoTip title="Data status" className="ml-2">
+              <p>
+                What Rscreener holds, how fresh each part is, and where it is still catching up.
+                Everything refreshes automatically each night at 22:00 IST — nothing here needs
+                you to press anything.
+              </p>
+              <p>
+                &ldquo;Current&rdquo; means a company is no more than one reporting period behind
+                the newest data we hold. A company reporting on its own schedule is not counted as
+                stale; one that has genuinely stopped updating is.
+              </p>
+              <p>
+                If a source sits below 95% for more than a few days, something has broken — the
+                build also refuses to publish stale prices or a chart that lost history, so a
+                failure stops the release rather than quietly shipping.
+              </p>
+            </InfoTip>
+          </h1>
         </div>
 
         {err && (
@@ -92,7 +107,11 @@ export default function StatusPage() {
             Could not load the status file ({err}).
           </div>
         )}
-        {!s && !err && <p className="text-sm text-[var(--ink3)]">Loading…</p>}
+        {!s && !err && (
+          <div className="space-y-3" aria-busy="true" aria-label="Loading">
+            <div className="rs-skel h-16" /><div className="rs-skel h-48" /><div className="rs-skel h-72" />
+          </div>
+        )}
 
         {s && (
           <>
@@ -160,13 +179,6 @@ export default function StatusPage() {
               })}
             </section>
 
-            <p className="text-xs text-[var(--ink3)] leading-relaxed">
-              &ldquo;Current&rdquo; means a company is no more than one reporting period behind the newest data we hold.
-              A company reporting on its own schedule is not counted as stale; one that has genuinely stopped
-              updating is. If a source sits below 95% for more than a few days, something has broken — the build
-              also refuses to publish stale prices or a chart that lost history, so a failure stops the release
-              rather than quietly shipping.
-            </p>
           </>
         )}
       </main>

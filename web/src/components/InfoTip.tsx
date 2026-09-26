@@ -82,7 +82,7 @@ export default function InfoTip({
         createPortal(
           <div className="fixed inset-0 z-[120] flex items-end justify-center p-3 sm:items-center sm:p-6">
             <div
-              className="absolute inset-0 bg-black/50"
+              className="rs-fade absolute inset-0 bg-black/50"
               onClick={() => setOpen(false)}
               aria-hidden="true"
             />
@@ -90,7 +90,7 @@ export default function InfoTip({
               role="dialog"
               aria-modal="true"
               aria-label={title}
-              className="relative w-full sm:max-w-md max-h-[78vh] overflow-y-auto rounded-2xl border border-[var(--line2)] bg-[var(--card)] p-4 pb-5 shadow-[0_18px_50px_rgba(0,0,0,0.35)]"
+              className="rs-sheet relative w-full sm:max-w-md max-h-[78vh] overflow-y-auto rounded-2xl border border-[var(--line2)] bg-[var(--card)] p-4 pb-5 shadow-[0_18px_50px_rgba(0,0,0,0.35)]"
             >
               <div className="flex items-start justify-between gap-3">
                 <h3 className="text-sm font-semibold text-[var(--ink)]">{title}</h3>

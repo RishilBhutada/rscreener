@@ -41,6 +41,26 @@ let indexCache: SearchIndex | null = null;
  *  background appears on hover and press, so the control still answers when you
  *  touch it.
  */
+/** Bottom-bar icons, drawn. They were text characters - a house, a star, three
+ *  bars - which a phone renders in whatever fallback font it has, so no two
+ *  sat at the same size or on the same baseline. */
+function NavIcon({ d }: { d: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className="w-[22px] h-[22px]" fill="none" stroke="currentColor"
+      strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={d} />
+    </svg>
+  );
+}
+
+function MoreIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="w-[22px] h-[22px]" fill="currentColor" aria-hidden="true">
+      <circle cx="5.5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="18.5" cy="12" r="1.6" />
+    </svg>
+  );
+}
+
 const CONTROL = "shrink-0 rounded-full w-10 h-10 sm:w-9 sm:h-9 flex items-center justify-center " +
   "text-[var(--ink2)] hover:text-[var(--ink)] hover:bg-[var(--card2)] " +
   "active:bg-[var(--line)] active:scale-95 transition-all duration-150";
@@ -364,15 +384,20 @@ function BackButton() {
 
   const atHome = pathname === "/" || pathname === "";
 
+  // Not drawn on the home page. There it could only scroll to the top - an
+  // arrow that looks like it does nothing, which reads as broken. Everywhere
+  // else it always does something: back one page, or home when there is no
+  // page to go back to. The trail above still records the home visit.
+  if (atHome) return null;
+
   return (
     <button
       onClick={() => {
         if (depth > 0 && previousPage()) router.back();
-        else if (!atHome) router.push("/");
-        else window.scrollTo({ top: 0, behavior: "smooth" });
+        else router.push("/");
       }}
-      aria-label={depth > 0 ? "Go back" : atHome ? "Back to the top" : "Go to the home page"}
-      title={depth > 0 ? "Back" : atHome ? "Back to top" : "Home"}
+      aria-label={depth > 0 ? "Go back" : "Go to the home page"}
+      title={depth > 0 ? "Back" : "Home"}
       className={CONTROL}
     >
       <ArrowLeft />
@@ -466,7 +491,9 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
           <span className="text-lg sm:text-xl font-bold text-[var(--accent)] hidden sm:inline">▮▮▮</span>
         </Link>
 
-        <div ref={boxRef} className="relative order-last w-full sm:order-none sm:flex-1 sm:max-w-md group">
+        {/* Hidden on the home page, whose own search box is the page. Two
+            search fields one above the other was the first thing on screen. */}
+        <div ref={boxRef} className={`relative order-last w-full sm:order-none sm:flex-1 sm:max-w-md group ${active === "home" ? "hidden" : ""}`}>
           <input
             value={q}
             onFocus={ensureData}
@@ -582,37 +609,43 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
             key={key}
             href={href}
             aria-current={active === key ? "page" : undefined}
-            className={`flex flex-col items-center justify-center gap-0.5 min-h-[56px] text-[11px] font-medium ${
-              active === key ? "text-[var(--accent-ink)]" : "text-[var(--ink3)]"}`}
+            className={`rs-press flex flex-col items-center justify-center gap-1 min-h-[58px] text-[11px] ${
+              active === key ? "text-[var(--accent-ink)] font-semibold" : "text-[var(--ink3)] font-medium"}`}
           >
-            <span aria-hidden="true" className="text-base leading-none">{icon}</span>
+            {/* The current page sits in a pill, not just a change of colour -
+                a tint alone is the one signal a glance in daylight misses. */}
+            <span className={`flex items-center justify-center w-14 h-7 rounded-full transition-colors duration-200 ${
+              active === key ? "bg-[var(--accent-soft)]" : ""}`}>
+              <NavIcon d={icon} />
+            </span>
             {label}
           </Link>
         ))}
         <button
           onClick={() => setMoreOpen(true)}
-          className="flex flex-col items-center justify-center gap-0.5 min-h-[56px] text-[11px] font-medium text-[var(--ink3)]"
+          className="rs-press flex flex-col items-center justify-center gap-1 min-h-[58px] text-[11px] font-medium text-[var(--ink3)]"
         >
-          <span aria-hidden="true" className="text-base leading-none">···</span>
+          <span className="flex items-center justify-center w-14 h-7 rounded-full"><MoreIcon /></span>
           More
         </button>
       </nav>
 
       {moreOpen && (
         <div className="sm:hidden fixed inset-0 z-50" onClick={() => setMoreOpen(false)}>
-          <div className="absolute inset-0 bg-black/40" />
+          <div className="rs-fade absolute inset-0 bg-black/40" />
           <div
-            className="absolute bottom-0 inset-x-0 bg-[var(--card)] rounded-t-2xl border-t border-[var(--line)] p-2 pb-[calc(env(safe-area-inset-bottom)+8px)]"
+            className="rs-sheet absolute bottom-0 inset-x-0 bg-[var(--card)] rounded-t-2xl border-t border-[var(--line)] p-2 pb-[calc(env(safe-area-inset-bottom)+8px)]"
             onClick={(e) => e.stopPropagation()}
           >
-            {SECONDARY.map(({ key, label, href }) => (
+            {SECONDARY.map(({ key, label, href, icon }) => (
               <Link
                 key={key}
                 href={href}
                 onClick={() => setMoreOpen(false)}
-                className={`block px-4 min-h-[48px] flex items-center rounded-lg text-sm font-medium ${
-                  active === key ? "text-[var(--accent-ink)] bg-[var(--accent-soft)]" : "text-[var(--ink2)]"}`}
+                className={`px-4 min-h-[50px] flex items-center gap-3.5 rounded-xl text-sm font-medium ${
+                  active === key ? "text-[var(--accent-ink)] bg-[var(--accent-soft)]" : "text-[var(--ink2)] active:bg-[var(--card2)]"}`}
               >
+                <NavIcon d={icon} />
                 {label}
               </Link>
             ))}

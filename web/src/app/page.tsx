@@ -33,8 +33,6 @@ export default function Home() {
   const [lists, setLists] = useState(0);
   const [recent, setRecent] = useState<string[]>([]);
   const [asof, setAsof] = useState<string | null>(null);
-  const [asofN, setAsofN] = useState(0);
-  const [covered, setCovered] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -50,8 +48,6 @@ export default function Home() {
         // The date most companies are on, not the newest one any single
         // company reached - see pipeline/export_json.py.
         setAsof(d.price_modal ?? d.price_asof);
-        setAsofN(d.price_modal_n ?? 0);
-        setCovered(d.covered);
       })
       .catch(() => { /* search degrades to nothing rather than an error wall */ });
   }, []);
@@ -100,7 +96,7 @@ export default function Home() {
             line whatever it holds - and it can now hold more than twelve. */}
         <div className="flex gap-2 mt-2 overflow-x-auto -mx-4 px-4 pb-1
                         [scrollbar-width:none] [&::-webkit-scrollbar]:hidden
-                        [scroll-snap-type:x_proximity]">
+                        [scroll-snap-type:x_proximity] [scroll-padding-inline:1rem]">
           {syms.slice(0, 20).map((sym) => (
             <Link
               key={sym}
@@ -121,19 +117,12 @@ export default function Home() {
     <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
       <TopNav active="home" />
 
-      <main className="max-w-2xl mx-auto px-4 pt-10 sm:pt-20 pb-12">
-        <h1 className="text-center text-2xl sm:text-3xl font-bold tracking-tight">
-          Every listed company, in one place
-        </h1>
-        {/* Said "Every NSE company" while half the database is BSE-only - 2,372
-            of 4,746 companies the page was denying it had. */}
-        <p className="text-center text-sm text-[var(--ink3)] mt-2">
-          Twenty years of financials, valuation charts you can check line by line, and
-          a screener over {covered ? covered.toLocaleString("en-IN") : "4,700+"} companies
-          across the NSE and the BSE.
-        </p>
-
-        <div className="relative mt-7">
+      {/* No headline and no strapline. "Every listed company, in one place"
+          and a sentence about twenty years of financials sat above the search
+          box on every visit - an advert for the app, shown to the one person
+          already using it, pushing his own watchlist down the screen. */}
+      <main className="max-w-2xl mx-auto px-4 pt-5 sm:pt-12 pb-12">
+        <div className="relative">
           <svg viewBox="0 0 24 24" aria-hidden="true"
             className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--ink3)] pointer-events-none">
             <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" strokeWidth="2" />
@@ -149,7 +138,7 @@ export default function Home() {
               else if (e.key === "Enter" && matches[hi]) go(matches[hi].symbol);
               else if (e.key === "Escape") setQ("");
             }}
-            placeholder="Search any company — name or symbol"
+            placeholder="Search a company or symbol"
             aria-label="Search for a company"
             autoComplete="off"
             className="w-full rounded-xl border border-[var(--line2)] bg-[var(--card)] pl-11 pr-4 py-3.5 text-base
@@ -175,12 +164,11 @@ export default function Home() {
           )}
         </div>
 
-        <Chips title="Recently viewed" syms={recent} />
-        <Chips
-          title={watch.length ? (lists > 1 ? `Across your ${lists} watchlists` : "Your watchlist") : "Or start with"}
-          syms={watch.length ? watch : SUGGESTED}
-          more={watch.length ? { href: "/watchlists", label: "Manage lists" } : undefined}
-        />
+        <Chips title="Recent" syms={recent} />
+        {/* Suggestions only for somebody with no watchlist yet. With one, this
+            row repeated the same companies the priced list below shows - the
+            watchlist appeared twice on one screen. */}
+        {watch.length === 0 && <Chips title="Start with" syms={SUGGESTED} />}
 
         {/* This was a grid of seven tiles - Watchlists, Screener, Sectors, IPO,
             Calendar, Portfolio, Data - every one of them already a link in the
@@ -189,19 +177,25 @@ export default function Home() {
             Replaced with the numbers he came to see: the companies he is
             actually following, priced. */}
         {watchRows.length > 0 && (
-          <section className="mt-9">
+          <section className="mt-7">
             <div className="flex items-baseline justify-between mb-2">
-              <h2 className="text-sm font-semibold text-[var(--ink2)]">
-                {lists > 1 ? `Across your ${lists} watchlists` : "Your watchlist"}
+              <h2 className="text-xs uppercase tracking-wide text-[var(--ink3)]">
+                {lists > 1 ? `Watchlists (${lists})` : "Watchlist"}
               </h2>
               <Link href="/watchlists" className="text-xs font-semibold text-[var(--accent-ink)]">Manage</Link>
             </div>
             <div className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
+              {/* The column is labelled once, here, instead of a sentence under
+                  the list saying what the percentages are. */}
+              <div className="flex items-center gap-3 px-3.5 pt-2 pb-1 text-[11px] text-[var(--ink3)]">
+                <span className="flex-1" />
+                <span className="w-16 text-right">1M</span>
+              </div>
               {watchRows.map((r) => (
                 <Link
                   key={r.symbol}
                   href={`/company?s=${encodeURIComponent(r.symbol)}`}
-                  className="flex items-center gap-3 px-3.5 min-h-[44px] border-b border-[var(--line)] last:border-b-0 hover:bg-[var(--card2)]"
+                  className="flex items-center gap-3 px-3.5 min-h-[46px] border-t border-[var(--line)] hover:bg-[var(--card2)] active:bg-[var(--card2)]"
                 >
                   {/* One line, not two. The name and ticker sat stacked, so eight
                       companies cost sixteen lines of a phone screen. They now sit
@@ -226,17 +220,17 @@ export default function Home() {
                 </Link>
               ))}
             </div>
-            <p className="text-[11px] text-[var(--ink3)] mt-1.5">Change shown is over one month.</p>
           </section>
         )}
 
+        {/* The date, and nothing else. The count of companies on that date
+            and the invitation to the status page are one tap away on it. */}
         {asof && (
-          <p className="text-center text-xs text-[var(--ink3)] mt-8">
-            Prices at close of {new Date(asof + "T00:00:00").toLocaleDateString("en-IN",
-              { day: "numeric", month: "short", year: "numeric" })}
-            {asofN > 0 && covered ? ` — ${asofN.toLocaleString("en-IN")} of ${covered.toLocaleString("en-IN")} companies` : ""}
-            {" · "}
-            <Link href="/status" className="hover:underline">what else is up to date</Link>
+          <p className="text-center text-[11px] text-[var(--ink3)] mt-8">
+            <Link href="/status" className="hover:underline">
+              Close of {new Date(asof + "T00:00:00").toLocaleDateString("en-IN",
+                { day: "numeric", month: "short", year: "numeric" })}
+            </Link>
           </p>
         )}
       </main>

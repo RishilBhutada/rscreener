@@ -86,7 +86,7 @@ function SectorsView() {
   }, [data, sector]);
 
   if (error) return <p className="text-[var(--neg)]">{error}</p>;
-  if (!data) return <p className="text-[var(--ink3)]">Loading…</p>;
+  if (!data) return <div className="rs-skel h-96" aria-busy="true" aria-label="Loading" />;
 
   if (!sector) {
     return (
@@ -98,6 +98,11 @@ function SectorsView() {
               <p>
                 Median of the companies in each sector, so one very large member cannot speak
                 for the rest.
+              </p>
+              <p>
+                Loss-making companies are left out of the median P/E — a negative P/E is a loss,
+                not a cheap share, and counting it would make a struggling sector look like a
+                bargain.
               </p>
             </InfoTip>
           </h1>
@@ -135,10 +140,6 @@ function SectorsView() {
             </tbody>
           </table>
         </div>
-        <p className="px-4 py-2.5 text-xs text-[var(--ink3)] border-t border-[var(--line)]">
-          Loss-making companies are left out of the median P/E — a negative P/E is a loss, not a cheap share,
-          and counting it would make a struggling sector look like a bargain.
-        </p>
       </section>
     );
   }
@@ -190,7 +191,7 @@ export default function SectorsPage() {
     <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
       <TopNav active="sectors" />
       <main className="max-w-6xl mx-auto px-4 py-6">
-        <Suspense fallback={<p className="text-[var(--ink3)]">Loading…</p>}>
+        <Suspense fallback={<div className="rs-skel h-96" aria-busy="true" aria-label="Loading" />}>
           <SectorsView />
         </Suspense>
       </main>

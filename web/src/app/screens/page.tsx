@@ -8,6 +8,7 @@ import { allWatched, toggleActive } from "@/lib/watchlists";
 import { FIELD_CATALOG, FIELD_GROUPS } from "@/lib/fields";
 import QueryBuilder from "@/components/QueryBuilder";
 import TopNav from "@/components/TopNav";
+import InfoTip from "@/components/InfoTip";
 import { titleCase } from "@/lib/names";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -234,12 +235,10 @@ function ScreensInner() {
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
       <TopNav active="screens" />
-      {data && (
-        <p className="max-w-6xl mx-auto px-4 pt-3 text-xs text-[var(--ink3)]">
-          {data.covered.toLocaleString("en-IN")} of {data.universe_size.toLocaleString("en-IN")} NSE companies · built {data.generated_at}
-          {data.price_asof && <> · <span className="font-medium">prices at close of {data.price_asof}</span></>}
-        </p>
-      )}
+      {/* The coverage-and-build-date line that sat above the builder is gone:
+          it said the same thing on every visit and called a two-exchange
+          universe "NSE companies". The one part that matters when reading
+          results - the price date - now sits with the results. */}
 
       <main className="max-w-6xl mx-auto px-4 py-5 sm:py-6 space-y-4 sm:space-y-6">
         {loadError && <div className="bg-[var(--neg-soft)] border border-[var(--neg-line)] text-[var(--neg)] rounded-lg p-4 text-sm">{loadError}</div>}
@@ -289,7 +288,10 @@ function ScreensInner() {
                     1.5e-7 and matched all 4,413 companies carrying both fields -
                     a suggested screen that silently filtered nothing. Use fields
                     that share a unit. */}
-                <span className="text-xs text-[var(--ink3)]">Ctrl+Enter runs · arithmetic works: <code className="font-mono">roce - de * 10 &gt; 15</code></span>
+                <InfoTip title="Formula tips">
+                  <p>Ctrl+Enter runs the screen on a keyboard.</p>
+                  <p>Arithmetic works: <code className="font-mono">roce - de * 10 &gt; 15</code></p>
+                </InfoTip>
               </div>
               {showFields && (
                 <div className="border border-[var(--line)] rounded-lg p-3 space-y-2 max-h-64 overflow-auto">
@@ -438,6 +440,7 @@ function ScreensInner() {
               <span>
                 <strong className="text-[var(--ink)]">{applied.matches.length.toLocaleString("en-IN")}</strong> companies match
                 {applied.skipped > 0 && <span className="text-[var(--ink3)]"> · {applied.skipped.toLocaleString("en-IN")} skipped (missing a queried field)</span>}
+                {data?.price_asof && <span className="text-[var(--ink3)]"> · close of {data.price_asof}</span>}
               </span>
               <button
                 onClick={() => {

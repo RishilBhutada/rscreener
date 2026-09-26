@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import InfoTip from "@/components/InfoTip";
 
 type Pt = [string, number] | [string, number, number | null];
 export type ChartPrices = { monthly?: Pt[]; weekly?: Pt[]; daily?: Pt[] };
@@ -358,8 +359,51 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   }, [cmpSym]);
   const [on, setOn] = useState<Record<string, boolean>>({});
   const [moreOpen, setMoreOpen] = useState(false);
-  const [hover, setHover] = useState<{ t: number; px: number } | null>(null);
+  const [hover, setHover] = useState<{ t: number; px: number; py: number } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
+  // A finger on the chart right now. While it is down the readout is kept to
+  // the date and the values - the full workings run to thirty lines, which on
+  // a phone is most of the chart and sat on top of the very finger doing the
+  // scrubbing. Lift the finger and the readout stays where it was, workings
+  // included, until you tap somewhere else.
+  const [dragging, setDragging] = useState(false);
+  useEffect(() => {
+    if (!hover || dragging) return;
+    const away = (e: PointerEvent) => {
+      if (e.pointerType !== "mouse" && !svgRef.current?.contains(e.target as Node)) setHover(null);
+    };
+    document.addEventListener("pointerdown", away);
+    return () => document.removeEventListener("pointerdown", away);
+  }, [hover, dragging]);
+  // Places the price readout AFTER it has been measured. It used to be pinned
+  // 14px beside the finger on whichever half of the chart the finger was not
+  // in - without ever checking its own width. On a phone the box is wider
+  // than half the chart, so from the middle onwards its far side ran past the
+  // screen edge and the numbers you were scrubbing for were cut off.
+  // Now: beside the finger if it fits, flipped to the other side if not,
+  // clamped inside the chart as a last resort - and dropped to the bottom when
+  // the finger is up in the band the box would cover.
+  useLayoutEffect(() => {
+    const el = tipRef.current, svg = svgRef.current;
+    if (!el || !svg || !hover) return;
+    const r = svg.getBoundingClientRect();
+    const w = el.offsetWidth, h = el.offsetHeight, gap = 16, pad = 4;
+    let left = hover.px + gap;
+    if (left + w > r.width - pad) left = hover.px - gap - w;
+    left = Math.max(pad, Math.min(r.width - w - pad, left));
+    // Top of the chart unless the finger is in that band; then the bottom,
+    // unless the finger is in that band too, in which case whichever end is
+    // further from it.
+    const hi = pad, lo = r.height - h - pad;
+    const covers = (y: number) => hover.py >= y - 12 && hover.py <= y + h + 12;
+    const top = lo <= hi || !covers(hi) ? hi
+      : !covers(lo) ? lo
+      : Math.abs(hover.py - (hi + h / 2)) >= Math.abs(hover.py - (lo + h / 2)) ? hi : lo;
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+    el.style.visibility = "visible";
+  });
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 640px)");
@@ -678,7 +722,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     if (!rect) return;
     const fx = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
     const t = t0 + ((fx * W - ML) / plotW) * (t1 - t0);
-    setHover({ t: Math.min(t1, Math.max(t0, t)), px: e.clientX - rect.left });
+    setHover({ t: Math.min(t1, Math.max(t0, t)), px: e.clientX - rect.left, py: e.clientY - rect.top });
   };
 
   // EPS bars get their own strip along the bottom of the plot rather than sharing
@@ -935,48 +979,44 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         const gapYears = (primary.data[0].t - toT(priceStart)) / (365.25 * 86400000);
         if (gapYears < 1.5) return null;
         return (
-          <p className="text-xs text-[var(--ink3)] mb-2 leading-relaxed">
-            This ratio starts{" "}
-            <span className="text-[var(--ink2)]">
-              {new Date(primary.data[0].t).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}
-            </span>{" "}
-            though the price goes back to{" "}
-            <span className="text-[var(--ink2)]">
-              {new Date(toT(priceStart)).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}
-            </span>
-            .{" "}
-            {coverage?.from ? (
-              // The record is known, so say what it actually contains. Blaming
-              // our own fetching when the filings are already in hand is not a
-              // softer answer, it is a wrong one - and it contradicted the
-              // coverage panel further down the same page.
-              <>
-                Earnings on record begin{" "}
-                <span className="text-[var(--ink2)]">
+          <p className="text-[11px] text-[var(--ink3)] mb-2">
+            Ratio from{" "}
+            {new Date(primary.data[0].t).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}
+            <InfoTip title="Why the ratio starts later than the price" className="ml-1">
+              <p>
+                This ratio starts{" "}
+                {new Date(primary.data[0].t).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}{" "}
+                though the price goes back to{" "}
+                {new Date(toT(priceStart)).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}.
+              </p>
+              {coverage?.from ? (
+                <p>
+                  Earnings on record begin{" "}
                   {new Date(coverage.from + "T00:00:00").toLocaleDateString("en-IN", { month: "short", year: "numeric" })}
-                </span>
-                {(coverage.gap_count ?? coverage.gaps?.length ?? 0) > 0 && (
-                  <> with {coverage.gap_count ?? coverage.gaps?.length} quarter
-                    {(coverage.gap_count ?? coverage.gaps?.length ?? 0) === 1 ? "" : "s"} missing</>
-                )}
-                , and a trailing-twelve-month figure needs four consecutive quarters.{" "}
-                <span className="text-[var(--ink2)]">Details below the chart.</span>
-              </>
-            ) : (
-              <>
-                Earlier earnings for this company have not been fetched yet, so the ratio cannot be
-                computed that far back &mdash; it is missing data, not a gap in the business.{" "}
-                <a href={`${CHART_BASE}/status`} className="underline hover:text-[var(--ink2)]">
-                  see what is still being fetched
-                </a>
-              </>
-            )}
+                  {(coverage.gap_count ?? coverage.gaps?.length ?? 0) > 0 && (
+                    <> with {coverage.gap_count ?? coverage.gaps?.length} quarter
+                      {(coverage.gap_count ?? coverage.gaps?.length ?? 0) === 1 ? "" : "s"} missing</>
+                  )}
+                  , and a trailing-twelve-month figure needs four consecutive quarters.
+                </p>
+              ) : (
+                <p>
+                  Earlier earnings for this company have not been fetched yet, so the ratio cannot
+                  be computed that far back &mdash; it is missing data, not a gap in the business.{" "}
+                  <a href={`${CHART_BASE}/status`} className="underline">See what is still being fetched</a>.
+                </p>
+              )}
+            </InfoTip>
           </p>
         );
       })()}
       <div className="relative">
         <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full touch-none select-none"
-          onPointerMove={onMove} onPointerDown={onMove} onPointerLeave={() => setHover(null)}>
+          onPointerMove={onMove}
+          onPointerDown={(e) => { setDragging(e.pointerType !== "mouse"); onMove(e); }}
+          onPointerUp={() => setDragging(false)}
+          onPointerCancel={() => setDragging(false)}
+          onPointerLeave={(e) => { if (e.pointerType === "mouse") setHover(null); }}>
 
           {axR && axR.ticks.map((v) => (
             <g key={`r${v}`}>
@@ -1128,8 +1168,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         </svg>
 
         {hover && hoverPt && (
-          <div className="absolute top-2 pointer-events-none bg-[var(--card)] border border-[var(--line2)] rounded-lg shadow-lg px-3 py-2 text-xs space-y-0.5 z-10"
-            style={hover.px < boxW / 2 ? { left: hover.px + 14 } : { right: boxW - hover.px + 14 }}>
+          <div ref={tipRef} className="absolute pointer-events-none bg-[var(--card)] border border-[var(--line2)] rounded-lg shadow-lg px-3 py-2 text-xs space-y-0.5 z-10"
+            style={{ left: 0, top: 0, visibility: "hidden", maxWidth: Math.max(160, boxW - 8) }}>
             <p className="font-semibold text-[var(--ink)]">
               {new Date(hoverPt.t).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
             </p>
@@ -1147,7 +1187,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
               );
             })}
             {(() => {
-              if (!hoverPt || !activeBand?.parts) return null;
+              if (!hoverPt || !activeBand?.parts || (dragging && boxW < 520)) return null;
               const idx = activeBand.series.findIndex((r) => toT(r[0]) === hoverPt.t);
               const w = idx >= 0 ? workingFor(view, activeBand, idx, quarters) : null;
               if (!w) return null;
@@ -1155,7 +1195,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                 <div className="mt-1.5 pt-1.5 border-t border-[var(--line)] space-y-0.5">
                   <p className="text-[11px] uppercase tracking-wide text-[var(--ink3)]">How this was worked out</p>
                   {w.map((r, i) => (
-                    <p key={i} className="tabular-nums flex items-baseline gap-2 whitespace-pre">
+                    <p key={i} className="tabular-nums flex items-baseline gap-2 whitespace-pre-wrap">
                       <span className="text-[var(--ink3)] flex-1">{r.label}</span>
                       <span className="font-medium text-[var(--ink)]">{r.value}</span>
                       {r.note && <span className="text-[11px] text-[var(--ink3)]">{r.note}</span>}

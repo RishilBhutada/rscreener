@@ -59,7 +59,11 @@ export default function CalendarPage() {
           </div>
         </div>
         {error && <p className="text-[var(--neg)] text-sm">{error} — run the pipeline&apos;s fetch_events step first.</p>}
-        {!cal && !error && <p className="text-[var(--ink3)] text-sm">Loading…</p>}
+        {!cal && !error && (
+          <div className="space-y-3" aria-busy="true" aria-label="Loading">
+            <div className="rs-skel h-28" /><div className="rs-skel h-28" /><div className="rs-skel h-28" />
+          </div>
+        )}
         {/* "Nothing upcoming" and "this file is seven weeks old" look identical on
             screen, and for seven weeks it was the second one: every event in it
             had already happened, so the page said there was nothing coming. Age
@@ -98,7 +102,7 @@ export default function CalendarPage() {
             </ul>
           </section>
         ))}
-        {cal && <p className="text-xs text-[var(--ink3)]">Source: NSE event calendar · as of {cal.generated_at} · refreshed nightly</p>}
+        {cal && <p className="text-[11px] text-[var(--ink3)]">NSE event calendar · {cal.generated_at}</p>}
       </main>
     </div>
   );

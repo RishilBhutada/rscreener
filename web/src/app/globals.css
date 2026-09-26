@@ -254,3 +254,47 @@ input, textarea, select, button {
  * (the tick in a status circle) where an adjacent label carries the meaning for
  * a screen reader, and the chart's own axis text, which the SVG sizes itself.
  * ───────────────────────────────────────────────────────────────────────── */
+
+/* ── Motion ────────────────────────────────────────────────────────────────
+ * Short and quiet on purpose. Every page, sheet and popup arrived by cutting
+ * in, which is what made the app feel like a web page wearing an app icon.
+ * Nothing here runs longer than a quarter of a second, nothing loops except a
+ * loading placeholder, and all of it switches off for a phone set to reduce
+ * motion. Transform and opacity only, so it runs on the compositor.
+ * ───────────────────────────────────────────────────────────────────────── */
+@keyframes rs-page-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes rs-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rs-sheet-in { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: none; } }
+@keyframes rs-pop-in { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: none; } }
+@keyframes rs-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* Every page has one <main>, and it remounts on navigation - so this plays on
+ * each page change without a line of JavaScript. */
+main { animation: rs-page-in 0.22s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.rs-fade { animation: rs-fade-in 0.18s ease-out both; }
+.rs-sheet { animation: rs-sheet-in 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@media (min-width: 640px) { .rs-sheet { animation-name: rs-pop-in; animation-duration: 0.18s; } }
+
+/* A grey block that shimmers where content is about to be. Better than
+ * "Loading..." because it holds the layout still: the page does not jump
+ * when the numbers arrive. */
+.rs-skel {
+  background: linear-gradient(90deg, var(--card2) 30%, var(--line) 50%, var(--card2) 70%);
+  background-size: 200% 100%;
+  animation: rs-shimmer 1.4s linear infinite;
+  border-radius: 0.75rem;
+}
+
+/* Press feedback. A tap that changes nothing for 100ms feels like a missed
+ * tap; a 4% shrink is enough to say "got it" without being a performance. */
+html { -webkit-tap-highlight-color: transparent; }
+a, button { transition: color 0.15s, background-color 0.15s, border-color 0.15s, opacity 0.15s, transform 0.12s; }
+.rs-press:active { transform: scale(0.96); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

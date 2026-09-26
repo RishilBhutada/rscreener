@@ -119,20 +119,24 @@ function CoverageNote({ cov, bandFrom }: { cov?: Coverage | null; bandFrom?: str
   // already reaches back further than the chart's own range.
   if (nGaps === 0 && cov.from <= "2008-12-31") return null;
   return (
-    <div className="mt-3 text-xs text-[var(--ink2)] bg-[var(--card2)] border border-[var(--line)] rounded-xl px-3 py-2">
-      <span className="font-semibold text-[var(--ink)]">Why the history starts where it does. </span>
-      Filings on record for this company begin <strong>{monthYear(cov.from)}</strong> ({cov.quarters} quarters).
-      {nGaps > 0 && (
-        <>
-          {" "}
-          {nGaps === 1 ? "One quarter is" : `${nGaps} quarters are`} missing from those records
-          {gaps.length > 0 && <> — {gaps.slice(0, 6).join(", ")}{nGaps > gaps.slice(0, 6).length ? " and others" : ""}</>}.
-          {" "}A trailing-twelve-month figure needs four consecutive quarters, so each gap moves the ratio lines forward by a year.
-        </>
-      )}
-      {bandFrom && <> The valuation lines therefore begin <strong>{monthYear(bandFrom)}</strong>.</>}
-      {" "}Nothing here is estimated: a quarter that was never filed is left out rather than filled in.
-    </div>
+    <p className="mt-3 text-[11px] text-[var(--ink3)]">
+      Filings from {monthYear(cov.from)}
+      {nGaps > 0 ? ` · ${nGaps} quarter${nGaps === 1 ? "" : "s"} missing` : ""}
+      <InfoTip title="Why the history starts where it does" className="ml-1">
+        <p>
+          Filings on record for this company begin <strong>{monthYear(cov.from)}</strong> ({cov.quarters} quarters).
+        </p>
+        {nGaps > 0 && (
+          <p>
+            {nGaps === 1 ? "One quarter is" : `${nGaps} quarters are`} missing from those records
+            {gaps.length > 0 && <> — {gaps.slice(0, 6).join(", ")}{nGaps > gaps.slice(0, 6).length ? " and others" : ""}</>}.
+            {" "}A trailing-twelve-month figure needs four consecutive quarters, so each gap moves the ratio lines forward by a year.
+          </p>
+        )}
+        {bandFrom && <p>The valuation lines therefore begin <strong>{monthYear(bandFrom)}</strong>.</p>}
+        <p>Nothing here is estimated: a quarter that was never filed is left out rather than filled in.</p>
+      </InfoTip>
+    </p>
   );
 }
 
@@ -1224,6 +1228,20 @@ function RatioGrid({ snapshot, row, cohort }: { snapshot: Row; row: Row | null; 
   );
 }
 
+/** The shape of a company page, shimmering, while its data loads - instead of
+ *  "Loading TCS..." on an empty screen that then jumps into a full page. */
+function CompanySkeleton() {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-label="Loading">
+      <div className="rs-skel h-8 w-3/4" />
+      <div className="rs-skel h-4 w-1/2" />
+      <div className="rs-skel h-10 w-2/5 !mt-6" />
+      <div className="flex gap-2 !mt-6">{[0, 1, 2, 3].map((i) => <div key={i} className="rs-skel h-9 w-20" />)}</div>
+      <div className="rs-skel h-80 w-full" />
+    </div>
+  );
+}
+
 function CompanyView() {
   const params = useSearchParams();
   const symbol = (params.get("s") ?? "").toUpperCase();
@@ -1644,7 +1662,7 @@ function CompanyView() {
 
   if (!symbol) return <p className="text-[var(--ink3)] p-6">No company selected. <Link className="text-[var(--accent-ink)] underline" href="/">Back to screener</Link></p>;
   if (error) return <p className="text-[var(--neg)] p-6">{error} — <Link className="text-[var(--accent-ink)] underline" href="/">back to screener</Link></p>;
-  if (!company) return <p className="text-[var(--ink3)] p-6">Loading {symbol}…</p>;
+  if (!company) return <CompanySkeleton />;
 
   const s = company.snapshot;
   const price = num(fullRow, "price") ?? num(s, "price");
@@ -1972,7 +1990,7 @@ export default function CompanyPage() {
     <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
       <TopNav />
       <main className="max-w-6xl mx-auto px-4 py-6">
-        <Suspense fallback={<p className="text-[var(--ink3)]">Loading…</p>}>
+        <Suspense fallback={<CompanySkeleton />}>
           <CompanyView />
         </Suspense>
       </main>

@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import TopNav from "@/components/TopNav";
+import InfoTip from "@/components/InfoTip";
 
 /** Two sites that do IPOs properly, rather than a thin copy of them.
  *
@@ -31,12 +31,21 @@ export default function IpoPage() {
       <TopNav active="ipo" />
       <main className="max-w-2xl mx-auto px-4 py-8 sm:py-12 space-y-6">
         <div>
-          <h1 className="text-2xl font-bold">IPOs</h1>
-          <p className="text-sm text-[var(--ink3)] mt-2 leading-relaxed">
-            Rscreener doesn&rsquo;t track IPOs. Grey-market premium is an unofficial number
-            quoted by dealers &mdash; there is no filing to check it against, so it could never
-            be held to the standard everything else here is. These two sites do it properly.
-          </p>
+          <h1 className="text-2xl font-bold">
+            IPOs
+            <InfoTip title="Why IPOs are not tracked here" className="ml-2">
+              <p>
+                Grey-market premium is an unofficial number quoted by dealers &mdash; there is no
+                filing to check it against, so it could never be held to the standard everything
+                else here is.
+              </p>
+              <p>
+                Both sites below open in a new tab and are not affiliated with Rscreener. Once a
+                company lists, it appears here like any other.
+              </p>
+            </InfoTip>
+          </h1>
+          <p className="text-sm text-[var(--ink3)] mt-1">Tracked properly by these two.</p>
         </div>
 
         <div className="space-y-3">
@@ -58,11 +67,6 @@ export default function IpoPage() {
           ))}
         </div>
 
-        <p className="text-xs text-[var(--ink3)] leading-relaxed">
-          Both open in a new tab and are not affiliated with Rscreener. Once a company lists it
-          appears here like any other &mdash; search for it on the{" "}
-          <Link href="/" className="hover:underline text-[var(--accent-ink)]">home page</Link>.
-        </p>
       </main>
     </div>
   );
