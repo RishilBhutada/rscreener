@@ -141,7 +141,10 @@ function heikinAshi(rows: Row[]): Row[] {
 const price = (x: number) => x.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 /** Axis labels: round numbers print as round numbers ("3,500", not
  *  "3,500.00") - the axis is the widest thing on a phone chart. */
-const axis = (x: number) => x.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+// Blank below zero: the space kept free for the volume bars sits below the
+// lowest price, and the axis was labelling it -200 and -400 - prices that
+// cannot exist.
+const axis = (x: number) => (x < 0 ? "" : x.toLocaleString("en-IN", { maximumFractionDigits: 2 }));
 const vol = (x: number) =>
   x >= 1e7 ? `${(x / 1e7).toFixed(2)} Cr` : x >= 1e5 ? `${(x / 1e5).toFixed(2)} L` : x >= 1e3 ? `${(x / 1e3).toFixed(1)} K` : `${x}`;
 const dateOf = (day: number, withDay = true) =>
@@ -257,10 +260,9 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const pickRange = (r: Range) => {
     setRange(r);
     kept.current = null;
-    // Keep the candle size you chose if it still covers the range; otherwise
-    // fall to the one that does, rather than show a half-empty chart.
-    const want = covers(interval, r) && interval !== "m" ? interval : AUTO[r];
-    const next = covers(want, r) ? want : (["d", "w", "m"] as Interval[]).find((iv) => covers(iv, r)) ?? "m";
+    // Each range opens on its natural candle, as Kite does. Keeping the
+    // previous one gave 1M in weekly candles after a trip to 5Y - four bars.
+    const next = covers(AUTO[r], r) ? AUTO[r] : (["d", "w", "m"] as Interval[]).find((iv) => covers(iv, r)) ?? "m";
     setIv(next);
   };
 
@@ -520,7 +522,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
           <div className="pointer-events-none absolute left-2 top-1.5 z-10 text-[11px] leading-[1.35] tabular-nums">
             <p className="text-[var(--ink3)]">
               {dateOf(L.row[0], interval !== "m")}
-              <span className="ml-1.5 uppercase">{interval === "d" ? "1D" : interval === "w" ? "1W" : "1M"}</span>
+              <span className="ml-1.5">{interval === "d" ? "Daily" : interval === "w" ? "Weekly" : "Monthly"}</span>
             </p>
             <p className="flex flex-wrap gap-x-2">
               {(["O", "H", "L", "C"] as const).map((k, j) => (
