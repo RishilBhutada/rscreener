@@ -761,7 +761,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
           }}
           className="rounded-lg border border-[var(--line)] bg-[var(--card2)] text-[var(--ink2)] px-2 py-1.5 sm:py-1 max-w-[52vw] sm:max-w-none"
         >
-          <option value="">nothing</option>
+          <option value="">None</option>
           {(peers ?? [])
             .map((p) => ({ sym: String(p.symbol ?? ""), nm: String(p.name ?? p.symbol ?? "") }))
             .filter((p) => p.sym && p.sym !== symbol)
@@ -858,7 +858,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             </label>
           ))}
           {showCA && caShown.length === 0 && (
-            <span className="text-[var(--ink3)]">none in this range</span>
+            <span className="text-[var(--ink3)]">None in this range</span>
           )}
         </div>
       )}
@@ -908,10 +908,10 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                       and twelve months in the other, so one wording cannot serve
                       both without misleading in one of them. */}
                   {(peWin === "ttm"
-                    ? ([["yoy", "vs year before", "Compare these twelve months with the TWELVE MONTHS BEFORE THEM. The two periods share no quarter, so it is a full year measured against a full year."],
-                        ["prev", "vs quarter earlier", "Compare these twelve months with the twelve months ending one quarter earlier. They share three of their four quarters, so the figure moves by one quarter's news spread across a whole year of earnings - smoother, and smaller, than the same news in the 1Q x4 view."]] as const)
-                    : ([["yoy", "vs year ago", "Compare each quarter with the SAME quarter a year earlier. Quarterly earnings are seasonal, so this is the comparison filings and analysts use."],
-                        ["prev", "vs previous", "Compare each quarter with the one immediately before it. Reads momentum, but mixes in seasonality - a December quarter is not a June quarter."]] as const)
+                    ? ([["yoy", "Year before", "Compare these twelve months with the TWELVE MONTHS BEFORE THEM. The two periods share no quarter, so it is a full year measured against a full year."],
+                        ["prev", "Quarter before", "Compare these twelve months with the twelve months ending one quarter earlier. They share three of their four quarters, so the figure moves by one quarter's news spread across a whole year of earnings - smoother, and smaller, than the same news in the 1Q x4 view."]] as const)
+                    : ([["yoy", "Year ago", "Compare each quarter with the SAME quarter a year earlier. Quarterly earnings are seasonal, so this is the comparison filings and analysts use."],
+                        ["prev", "Previous", "Compare each quarter with the one immediately before it. Reads momentum, but mixes in seasonality - a December quarter is not a June quarter."]] as const)
                   ).map(([k, label, tip]) => (
                     <button
                       key={k}

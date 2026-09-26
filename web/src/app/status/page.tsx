@@ -157,7 +157,7 @@ export default function StatusPage() {
                         <span className="text-[var(--ink2)] font-medium">{src.current.toLocaleString("en-IN")}</span>
                         {" of "}{src.universe.toLocaleString("en-IN")} companies current
                       </span>
-                      <span>newest: <span className="text-[var(--ink2)]">{fmtDate(src.newest)}</span>
+                      <span>Newest: <span className="text-[var(--ink2)]">{fmtDate(src.newest)}</span>
                         {age !== null && age > 0 && ` (${age} trading day${age === 1 ? "" : "s"} ago)`}</span>
                       {src.behind > 0 && (
                         <span className="text-[var(--neg)]">{src.behind.toLocaleString("en-IN")} out of date</span>
@@ -165,9 +165,9 @@ export default function StatusPage() {
                       {src.missing > 0 && (
                         <span className="text-[var(--neg)]">{src.missing.toLocaleString("en-IN")} not fetched yet</span>
                       )}
-                      <span>refreshes {src.cadence}</span>
+                      <span>Refreshes {src.cadence}</span>
                       {src.nights_left === 0 ? (
-                        <span className="text-[var(--pos)]">complete</span>
+                        <span className="text-[var(--pos)]">Complete</span>
                       ) : src.nights_left ? (
                         <span className="text-[var(--ink2)]">
                           100% in {src.nights_left} night{src.nights_left === 1 ? "" : "s"} — by {fmtDate(src.eta)}

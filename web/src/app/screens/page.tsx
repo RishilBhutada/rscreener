@@ -342,7 +342,7 @@ function ScreensInner() {
             <button onClick={saveScreen} className="text-sm bg-[var(--btn)] hover:opacity-85 text-[var(--btn-ink)] px-4 py-1.5 rounded-lg">Save</button>
           </div>
           <div className="flex gap-2 flex-wrap">
-            {screens.length === 0 && <span className="text-xs text-[var(--ink3)]">none yet — saved screens live on this device</span>}
+            {screens.length === 0 && <span className="text-xs text-[var(--ink3)]">None yet — saved screens live on this device</span>}
             {screens.map((s) => (
               <span key={s.name} className="inline-flex items-center gap-1 text-xs bg-[var(--accent-soft)] border border-[var(--accent-line)] rounded-full px-3 py-1">
                 <button className="font-semibold text-[var(--accent-ink)]" title={s.query}

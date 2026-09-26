@@ -7,6 +7,7 @@ import Settings from "@/components/Settings";
 import { loadIndex } from "@/lib/index-data";
 import { BUILD_COMMIT, BUILD_SUBJECT, BUILD_TIME } from "@/lib/buildinfo";
 import { DESTINATIONS, BAR_SLOTS } from "@/lib/destinations";
+import { REFRESH_MARK, isRefreshLoad, reloadBypassingCache } from "@/lib/reload";
 import { applyOrder, loadOrder } from "@/lib/order";
 import { previousPage, recordNavigation } from "@/lib/navdepth";
 import { buildIndex, search, didYouMean, type SearchIndex, type SearchRow } from "@/lib/search";
@@ -146,28 +147,10 @@ const Gear = ({ size }: { size?: number }) => (
  *    cannot tell   reload anyway. Being unable to check is not evidence of
  *                  being current, and reloading is the safe way to be wrong.
  */
-const REFRESH_MARK = "rsr";
-
-/** True on the load that a refresh produced, so the data files are re-fetched
- *  rather than read back out of the cache the reload just went around. A fresh
- *  app shell showing yesterday's numbers is the same bug wearing a new coat. */
-export function isRefreshLoad(): boolean {
-  if (typeof window === "undefined") return false;
-  return new URL(window.location.href).searchParams.has(REFRESH_MARK);
-}
-
-function reloadBypassingCache() {
-  const go = () => {
-    const u = new URL(window.location.href);
-    u.searchParams.set(REFRESH_MARK, Date.now().toString(36));
-    window.location.replace(u.toString());
-  };
-  if (typeof caches === "undefined") return go();
-  caches.keys()
-    .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
-    .catch(() => {})      // no cache storage, or blocked: reload anyway
-    .then(go, go);
-}
+// The reload itself and its URL marker now live in lib/reload, so Settings can
+// offer the same check without importing this component. Re-exported because
+// the data loaders import it from here.
+export { isRefreshLoad };
 
 type Version = { commit?: string; built?: string; subject?: string };
 type Check = "idle" | "checking" | "current";
@@ -405,7 +388,7 @@ function BackButton() {
   );
 }
 
-export default function TopNav({ active }: { active?: "home" | "screens" | "sectors" | "calendar" | "portfolio" | "watchlists" | "ipo" | "status" }) {
+export default function TopNav({ active }: { active?: "home" | "screens" | "sectors" | "calendar" | "portfolio" | "watchlists" | "others" | "status" | "settings" }) {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<Lite[]>([]);
@@ -471,7 +454,7 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
     ["home", "Home", "/"],
     ["watchlists", "Watchlists", "/watchlists"],
     ["sectors", "Sectors", "/sectors"],
-    ["ipo", "IPO", "/ipo"],
+    ["others", "Others", "/others"],
     ["calendar", "Calendar", "/calendar"],
     ["portfolio", "Portfolio", "/portfolio"],
     ["screens", "Screener", "/screens"],
@@ -493,7 +476,7 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
 
         {/* Hidden on the home page, whose own search box is the page. Two
             search fields one above the other was the first thing on screen. */}
-        <div ref={boxRef} className={`relative order-last w-full sm:order-none sm:flex-1 sm:max-w-md group ${active === "home" ? "hidden" : ""}`}>
+        <div ref={boxRef} className={`relative order-last w-full sm:order-none sm:flex-1 sm:max-w-md group ${active === "home" || active === "settings" ? "hidden" : ""}`}>
           <input
             value={q}
             onFocus={ensureData}

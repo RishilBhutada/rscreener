@@ -1,9 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
+import Link from "next/link";
+import { usePathname, useSearchParams } from "next/navigation";
 import { BUILD_TIME, BUILD_COMMIT, BUILD_SUBJECT } from "@/lib/buildinfo";
 import { DESTINATIONS, BAR_SLOTS } from "@/lib/destinations";
 import { applyOrder, clearOrder, loadOrder, move, saveOrder, OrderKind } from "@/lib/order";
+import { reloadBypassingCache } from "@/lib/reload";
+import { Glyph, Group, PageTitle, Row, Segmented } from "@/components/ListUI";
+
+const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
+/** Settings is a page, not a panel.
+ *
+ *  It used to slide in from the side over whatever you were reading: one long
+ *  column of headings, hints and two fold-out lists, the version at the very
+ *  bottom. It is now a full screen laid out the way a phone's own settings
+ *  are - grouped by what each setting is about, one row per setting, the
+ *  control on the row itself, and the two long reordering lists on screens of
+ *  their own a tap away. The gear in the header is a link to it.
+ */
 
 /** The company page's sections, in the order they are written. Every one that
  *  can appear is listed, so a saved order always names them all and none can
@@ -27,119 +43,8 @@ const SECTIONS: { id: string; label: string }[] = [
   { id: "notes", label: "Your notes" },
 ];
 
-/** A list you can put in your own order.
- *
- *  Up/down buttons rather than drag-and-drop. Dragging is nicer to use once it
- *  works and considerably worse when it does not: on a touch screen it fights
- *  the scroll of the panel it sits in, and it is unreachable by keyboard. Two
- *  buttons per row are boring, work everywhere, and announce themselves to a
- *  screen reader without any extra machinery.
- */
-function Reorder({
-  kind, items, labelOf,
-}: {
-  kind: OrderKind;
-  items: { id: string; label: string }[];
-  labelOf?: (id: string) => string;
-}) {
-  const [order, setOrder] = useState<string[]>([]);
-  // Closed until asked for. Fifteen rows of up/down buttons is the right
-  // control for the job and the wrong thing to meet on opening Settings -
-  // unfolded, these two lists made the panel four screens long and pushed
-  // everything after them, including the version, out of easy reach.
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => { setOrder(loadOrder(kind)); }, [kind]);
-
-  // The list as it currently reads, whether or not an order has been saved.
-  const shown = applyOrder(items, (x) => x.id, order);
-
-  const bump = (id: string, by: -1 | 1) => {
-    const current = shown.map((x) => x.id);
-    const next = move(current, id, by);
-    setOrder(next);
-    saveOrder(kind, next);
-  };
-
-  const reset = () => { setOrder([]); clearOrder(kind); };
-
-  if (!open) {
-    return (
-      <div>
-        <p className="text-[13px] text-[var(--ink2)] truncate">
-          {shown.map((x) => x.label).join(" · ")}
-        </p>
-        <button
-          onClick={() => setOpen(true)}
-          className="mt-1.5 min-h-[44px] px-3 rounded-lg border border-[var(--line)]
-                     bg-[var(--card2)] text-[var(--ink2)] text-sm font-medium"
-        >
-          Change the order
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <ul className="rounded-lg border border-[var(--line)] overflow-hidden">
-        {shown.map((it, i) => (
-          <li key={it.id}
-              className="flex items-center gap-2 px-2.5 py-1.5 bg-[var(--card2)] border-b border-[var(--line)] last:border-b-0">
-            <span className="text-[11px] text-[var(--ink3)] tabular-nums w-4 shrink-0">{i + 1}</span>
-            <span className="flex-1 min-w-0 text-sm text-[var(--ink)] truncate">
-              {labelOf ? labelOf(it.id) : it.label}
-            </span>
-            <button
-              onClick={() => bump(it.id, -1)}
-              disabled={i === 0}
-              aria-label={`Move ${it.label} up`}
-              className="min-h-[36px] min-w-[36px] rounded-md border border-[var(--line)] bg-[var(--card)]
-                         text-[var(--ink2)] disabled:opacity-30 text-sm"
-            >
-              ↑
-            </button>
-            <button
-              onClick={() => bump(it.id, 1)}
-              disabled={i === shown.length - 1}
-              aria-label={`Move ${it.label} down`}
-              className="min-h-[36px] min-w-[36px] rounded-md border border-[var(--line)] bg-[var(--card)]
-                         text-[var(--ink2)] disabled:opacity-30 text-sm"
-            >
-              ↓
-            </button>
-          </li>
-        ))}
-      </ul>
-      <div className="mt-2 flex items-center gap-4">
-        <button onClick={() => setOpen(false)} className="text-xs font-semibold text-[var(--accent-ink)]">
-          Done
-        </button>
-        {order.length > 0 && (
-          <button onClick={reset} className="text-xs font-semibold text-[var(--ink3)]">
-            Back to the original order
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-
-/** One place for every setting.
- *
- *  Theme and accent used to sit loose in the header - a sun icon and four
- *  coloured dots taking permanent space on every page, next to a refresh button
- *  and an account button, none of them labelled. Settings that are used once a
- *  month do not deserve room on a phone header that also has to hold a search
- *  box. They live behind one gear now.
- */
-
-const THEMES: [string, string, string][] = [
-  ["light", "Light", "☀"],
-  ["dark", "Dark", "☽"],
-  ["system", "Match device", "◑"],
-];
+const THEMES = [["light", "Light"], ["dark", "Dark"], ["system", "Auto"]] as const;
+const LAYOUTS = [["scroll", "Scroll"], ["swipe", "Swipe"]] as const;
 
 const ACCENTS = ["emerald", "indigo", "rose", "amber"] as const;
 
@@ -150,6 +55,18 @@ const ACCENT_DOT: Record<string, { light: string; dark: string }> = {
   indigo: { light: "#5a4fca", dark: "#818cf8" },
   rose: { light: "#e11d48", dark: "#fb7185" },
   amber: { light: "#d97706", dark: "#fbbf24" },
+};
+
+const ICON = {
+  theme: "M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z",
+  accent: "M12 3.5s6 6.2 6 10.5a6 6 0 0 1-12 0C6 9.7 12 3.5 12 3.5z",
+  layout: "M4 5.5h16v13H4zM12 5.5v13",
+  order: "M9 6.5h11M9 12h11M9 17.5h11M4 6.5h1.5M4 12h1.5M4 17.5h1.5",
+  bar: "M7.5 3h9A1.5 1.5 0 0 1 18 4.5v15a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19.5v-15A1.5 1.5 0 0 1 7.5 3zM6 16.5h12",
+  status: "M3 12.5h4l2.5-6 5 11 2.5-5H21",
+  update: "M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5V9H15",
+  version: "M12 3.5a8.5 8.5 0 1 0 0 17a8.5 8.5 0 0 0 0-17zM12 11v5.5M12 7.8v.01",
+  change: "M3.5 12h5M15.5 12h5M12 8.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 0 0 0-7z",
 };
 
 export type SectionMode = "scroll" | "swipe";
@@ -167,63 +84,81 @@ function apply(theme: string, accent: string) {
   d.dataset.accent = accent;
 }
 
-/** Both defined at MODULE scope, deliberately.
- *
- *  They used to be declared inside Settings, which meant a new component
- *  identity on every render - and React treats a new identity as a different
- *  component, so it unmounted the whole subtree and mounted a fresh one. The
- *  reorder lists lost their expanded state every time an item moved: you could
- *  move one thing, then the list folded shut and you had to open it again to
- *  move the next. Hoisting them keeps the identity stable across renders.
- */
-function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+/** The gear in the header. A link to the Settings page, lit while you are on it. */
+export default function SettingsButton() {
+  const pathname = usePathname();
+  const on = !!pathname?.startsWith("/settings");
   return (
-    <div className="py-3 border-b border-[var(--line)] last:border-b-0">
-      <p className="text-sm font-semibold text-[var(--ink)]">{label}</p>
-      {hint && <p className="text-xs text-[var(--ink3)] mt-0.5 mb-2">{hint}</p>}
-      <div className={hint ? "" : "mt-2"}>{children}</div>
-    </div>
-  );
-}
-
-function Choice({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      aria-pressed={on}
-      className={`min-h-[44px] px-3 rounded-lg text-sm font-medium border ${
-        on ? "bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)]"
-           : "bg-[var(--card2)] border-[var(--line)] text-[var(--ink2)]"}`}
+    <Link
+      href="/settings"
+      aria-label="Settings"
+      title="Settings"
+      aria-current={on ? "page" : undefined}
+      className={`shrink-0 rounded-full w-10 h-10 sm:w-9 sm:h-9 flex items-center justify-center
+                  hover:text-[var(--ink)] hover:bg-[var(--card2)] active:bg-[var(--line)] active:scale-95
+                  transition-all duration-150 ${on ? "text-[var(--accent-ink)] bg-[var(--accent-soft)]" : "text-[var(--ink2)]"}`}
     >
-      {children}
-    </button>
+      {/* Drawn, to match the arrow and the refresh beside it. As a text
+          glyph this rendered as a colour emoji on some Android builds. */}
+      <svg viewBox="0 0 24 24" width={20} height={20} fill="none" stroke="currentColor"
+           strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M10.3 3.4a1 1 0 0 1 1-.85h1.4a1 1 0 0 1 1 .85l.2 1.35c.55.19 1.06.48 1.5.85l1.3-.5a1 1 0 0 1 1.2.44l.7 1.2a1 1 0 0 1-.2 1.25l-1.05.87c.06.29.09.6.09.91s-.03.62-.09.91l1.05.87a1 1 0 0 1 .2 1.25l-.7 1.2a1 1 0 0 1-1.2.44l-1.3-.5c-.44.37-.95.66-1.5.85l-.2 1.35a1 1 0 0 1-1 .85h-1.4a1 1 0 0 1-1-.85l-.2-1.35a5.6 5.6 0 0 1-1.5-.85l-1.3.5a1 1 0 0 1-1.2-.44l-.7-1.2a1 1 0 0 1 .2-1.25l1.05-.87a5.5 5.5 0 0 1 0-1.82l-1.05-.87a1 1 0 0 1-.2-1.25l.7-1.2a1 1 0 0 1 1.2-.44l1.3.5c.44-.37.95-.66 1.5-.85z" />
+        <circle cx="12" cy="12" r="2.5" />
+      </svg>
+    </Link>
   );
 }
 
-export default function Settings() {
-  const [open, setOpen] = useState(false);
+/** The whole Settings screen. `?p=nav` and `?p=sections` are its two
+ *  sub-screens - query strings rather than routes, because the site is a
+ *  static export, and they still give the back arrow a page to return to. */
+export function SettingsScreen() {
+  const p = useSearchParams().get("p");
+  if (p === "nav") {
+    return (
+      <ReorderScreen
+        kind="nav"
+        title="Bottom bar"
+        caption={`The first ${BAR_SLOTS} sit in the bar at the bottom of the screen. The rest are under More.`}
+        items={DESTINATIONS.map((d) => ({ id: d.key, label: d.label, icon: d.icon }))}
+        split={BAR_SLOTS}
+      />
+    );
+  }
+  if (p === "sections") {
+    return (
+      <ReorderScreen
+        kind="sections"
+        title="Section order"
+        caption="The order of a company page, whether you scroll or swipe. The section menu follows it."
+        items={SECTIONS}
+      />
+    );
+  }
+  return <MainScreen />;
+}
+
+function MainScreen() {
   const [theme, setTheme] = useState("system");
   const [accent, setAccent] = useState("indigo");
   const [sections, setSections] = useState<SectionMode>("scroll");
   const [isDark, setIsDark] = useState(false);
+  const [navOrder, setNavOrder] = useState<string[]>([]);
+  const [secOrder, setSecOrder] = useState<string[]>([]);
+  const [upd, setUpd] = useState<"idle" | "checking" | "current" | "error">("idle");
 
   useEffect(() => {
     setTheme(localStorage.getItem("rs_theme") || "system");
     setAccent(localStorage.getItem("rs_accent") || "indigo");
     setSections(loadSectionMode());
+    setNavOrder(loadOrder("nav"));
+    setSecOrder(loadOrder("sections"));
     const resolve = () => setIsDark(document.documentElement.dataset.theme === "dark");
     resolve();
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     mq.addEventListener("change", resolve);
     return () => mq.removeEventListener("change", resolve);
   }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("keydown", esc);
-    return () => document.removeEventListener("keydown", esc);
-  }, [open]);
 
   const pickTheme = (t: string) => {
     setTheme(t); localStorage.setItem("rs_theme", t); apply(t, accent);
@@ -238,130 +173,192 @@ export default function Settings() {
     window.dispatchEvent(new CustomEvent("rs-sections", { detail: m }));
   };
 
+  // Asks before it reloads, the same as the ↻ in the header: a new version is
+  // fetched past every cache; the current one is left alone and says so.
+  const checkUpdates = async () => {
+    if (upd === "checking") return;
+    setUpd("checking");
+    try {
+      const r = await fetch(`${BASE}/version.json`, { cache: "no-store" });
+      if (!r.ok) throw new Error(String(r.status));
+      const v: { commit?: string } = await r.json();
+      if (v.commit && BUILD_COMMIT && v.commit !== BUILD_COMMIT) return reloadBypassingCache();
+      setUpd("current");
+    } catch {
+      setUpd("error");
+    }
+  };
+
   const built = BUILD_TIME
     ? new Date(BUILD_TIME).toLocaleString("en-IN",
         { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
     : null;
 
+  const bar = applyOrder(DESTINATIONS, (d) => d.key, navOrder).slice(0, BAR_SLOTS).map((d) => d.label).join(", ");
+  const secs = applyOrder(SECTIONS, (s) => s.id, secOrder).slice(0, 4).map((s) => s.label).join(", ");
+
   return (
-    <>
-      <button
-        onClick={() => setOpen(true)}
-        aria-label="Settings"
-        title="Settings"
-        className="shrink-0 rounded-full w-10 h-10 sm:w-9 sm:h-9 flex items-center justify-center
-                   text-[var(--ink2)] hover:text-[var(--ink)] hover:bg-[var(--card2)]
-                   active:bg-[var(--line)] active:scale-95 transition-all duration-150"
-      >
-        {/* Drawn, to match the arrow and the refresh beside it. As a text
-            glyph this rendered as a colour emoji on some Android builds. */}
-        <svg viewBox="0 0 24 24" width={20} height={20} fill="none" stroke="currentColor"
-             strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M10.3 3.4a1 1 0 0 1 1-.85h1.4a1 1 0 0 1 1 .85l.2 1.35c.55.19 1.06.48 1.5.85l1.3-.5a1 1 0 0 1 1.2.44l.7 1.2a1 1 0 0 1-.2 1.25l-1.05.87c.06.29.09.6.09.91s-.03.62-.09.91l1.05.87a1 1 0 0 1 .2 1.25l-.7 1.2a1 1 0 0 1-1.2.44l-1.3-.5c-.44.37-.95.66-1.5.85l-.2 1.35a1 1 0 0 1-1 .85h-1.4a1 1 0 0 1-1-.85l-.2-1.35a5.6 5.6 0 0 1-1.5-.85l-1.3.5a1 1 0 0 1-1.2-.44l-.7-1.2a1 1 0 0 1 .2-1.25l1.05-.87a5.5 5.5 0 0 1 0-1.82l-1.05-.87a1 1 0 0 1-.2-1.25l.7-1.2a1 1 0 0 1 1.2-.44l1.3.5c.44-.37.95-.66 1.5-.85z" />
-          <circle cx="12" cy="12" r="2.5" />
-        </svg>
-      </button>
+    <div>
+      <PageTitle>Settings</PageTitle>
 
-      {open && (
-        <div className="fixed inset-0 z-50" onClick={() => setOpen(false)}>
-          <div className="absolute inset-0 bg-black/40" />
-          <div
-            role="dialog"
-            aria-label="Settings"
-            onClick={(e) => e.stopPropagation()}
-            className="absolute right-0 top-0 h-full w-full max-w-sm bg-[var(--card)] border-l border-[var(--line)]
-                       overflow-y-auto p-4 pb-[calc(env(safe-area-inset-bottom)+16px)]"
-          >
-            <div className="flex items-center justify-between mb-1">
-              <h2 className="text-base font-bold text-[var(--ink)]">Settings</h2>
-              <button onClick={() => setOpen(false)} aria-label="Close settings"
-                className="min-h-[44px] min-w-[44px] text-[var(--ink3)] text-lg">✕</button>
+      <Group title="Appearance">
+        <Row
+          icon={<Glyph d={ICON.theme} />}
+          title="Theme"
+          right={<Segmented label="Theme" value={theme} options={THEMES} onChange={pickTheme} />}
+        />
+        <Row
+          icon={<Glyph d={ICON.accent} />}
+          title="Accent colour"
+          right={
+            <div className="flex gap-2.5 shrink-0" role="radiogroup" aria-label="Accent colour">
+              {ACCENTS.map((a) => (
+                <button
+                  key={a}
+                  type="button"
+                  role="radio"
+                  onClick={() => pickAccent(a)}
+                  aria-label={a.charAt(0).toUpperCase() + a.slice(1)}
+                  aria-checked={accent === a}
+                  className="rs-press w-7 h-7 rounded-full flex items-center justify-center"
+                  style={{
+                    background: ACCENT_DOT[a][isDark ? "dark" : "light"],
+                    boxShadow: accent === a ? "0 0 0 2px var(--card), 0 0 0 4px var(--ink2)" : "none",
+                  }}
+                >
+                  {accent === a && (
+                    <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="white" strokeWidth="3"
+                      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+                  )}
+                </button>
+              ))}
             </div>
+          }
+        />
+      </Group>
 
-            <Row label="Appearance" hint="Light, dark, or whatever your phone is set to.">
-              <div className="flex gap-1.5 flex-wrap">
-                {THEMES.map(([id, label, icon]) => (
-                  <Choice key={id} on={theme === id} onClick={() => pickTheme(id)}>
-                    <span aria-hidden="true" className="mr-1.5">{icon}</span>{label}
-                  </Choice>
-                ))}
-              </div>
-            </Row>
+      <Group title="Company page">
+        <Row
+          icon={<Glyph d={ICON.layout} />}
+          title="Layout"
+          sub={sections === "swipe" ? "One section at a time" : "One long page"}
+          right={<Segmented label="Company page layout" value={sections} options={LAYOUTS} onChange={pickSections} />}
+        />
+        <Row icon={<Glyph d={ICON.order} />} title="Section order" sub={`${secs}…`} href="/settings?p=sections" chevron />
+      </Group>
 
-            <Row label="Accent colour" hint="Used for links, the active tab and the primary button.">
-              <div className="flex gap-2">
-                {ACCENTS.map((a) => (
-                  <button
-                    key={a}
-                    onClick={() => pickAccent(a)}
-                    aria-label={`Accent colour ${a}`}
-                    aria-pressed={accent === a}
-                    className="rounded-full"
-                    style={{
-                      width: 32, height: 32,
-                      background: ACCENT_DOT[a][isDark ? "dark" : "light"],
-                      outline: accent === a ? "2px solid var(--ink2)" : "1px solid var(--line2)",
-                      outlineOffset: 2,
-                    }}
-                  />
-                ))}
-              </div>
-            </Row>
+      <Group title="Navigation">
+        <Row icon={<Glyph d={ICON.bar} />} title="Bottom bar" sub={bar} href="/settings?p=nav" chevron />
+      </Group>
 
-            <Row
-              label="Company page sections"
-              hint="Summary, chart, quarters and the rest can sit in one long page, or become cards you swipe between one at a time."
-            >
-              <div className="flex gap-1.5">
-                <Choice on={sections === "scroll"} onClick={() => pickSections("scroll")}>
-                  ↕ Scroll down
-                </Choice>
-                <Choice on={sections === "swipe"} onClick={() => pickSections("swipe")}>
-                  ↔ Swipe sideways
-                </Choice>
-              </div>
-            </Row>
+      <Group title="Data">
+        <Row icon={<Glyph d={ICON.status} />} title="Data status" sub="How fresh each source is" href="/status" chevron />
+        <Row
+          icon={<Glyph d={ICON.update} />}
+          title="Check for updates"
+          onClick={checkUpdates}
+          right={
+            <span className={`text-[13px] shrink-0 ${
+              upd === "current" ? "text-[var(--pos)]" : upd === "error" ? "text-[var(--neg)]" : "text-[var(--ink3)]"}`}>
+              {upd === "checking" ? "Checking…" : upd === "current" ? "Up to date" : upd === "error" ? "Couldn't check" : ""}
+            </span>
+          }
+        />
+      </Group>
 
-            <Row
-              label="Bottom bar"
-              hint={`The first ${BAR_SLOTS} sit in the bar on a phone; the rest move under More.`}
-            >
-              <Reorder kind="nav" items={DESTINATIONS.map((d) => ({ id: d.key, label: d.label }))} />
-            </Row>
+      <Group title="About">
+        <Row
+          icon={<Glyph d={ICON.version} />}
+          title="Version"
+          sub={built ?? "Build date unavailable"}
+          right={BUILD_COMMIT ? <span className="font-mono text-xs text-[var(--ink3)] shrink-0">{BUILD_COMMIT.slice(0, 7)}</span> : null}
+        />
+        {BUILD_SUBJECT && <Row icon={<Glyph d={ICON.change} />} title="Latest change" sub={BUILD_SUBJECT} wrap />}
+      </Group>
+    </div>
+  );
+}
 
-            <Row
-              label="Company page order"
-              hint="The sequence sections appear in, whether you scroll or swipe. The section menu follows it too."
-            >
-              <Reorder kind="sections" items={SECTIONS} />
-            </Row>
+/** A list you put in your own order, on a screen of its own.
+ *
+ *  Up/down buttons rather than drag-and-drop. Dragging is nicer once it works
+ *  and considerably worse when it does not: on a touch screen it fights the
+ *  scroll of the page it sits in, and it is unreachable by keyboard. The row
+ *  that just moved flashes once, so the eye can follow it. */
+function ReorderScreen({ kind, title, caption, items, split }: {
+  kind: OrderKind;
+  title: string;
+  caption: string;
+  items: { id: string; label: string; icon?: string }[];
+  /** Draw a divider after this many rows - where the bar ends and More begins. */
+  split?: number;
+}) {
+  const [order, setOrder] = useState<string[]>([]);
+  const [moved, setMoved] = useState<{ id: string; n: number }>({ id: "", n: 0 });
 
-            {/* Last, because it is the thing you check rather than change. */}
-            <div className="pt-4 mt-2 border-t border-[var(--line)] text-xs text-[var(--ink3)] space-y-1">
-              <p className="font-semibold text-[var(--ink2)]">This version of the app</p>
-              {built ? (
-                <>
-                  <p>Last changed {built}</p>
-                  {BUILD_SUBJECT && <p className="text-[var(--ink3)]">“{BUILD_SUBJECT}”</p>}
-                  {BUILD_COMMIT && <p className="font-mono">{BUILD_COMMIT}</p>}
-                </>
-              ) : (
-                <p>Build date unavailable in this build.</p>
-              )}
-              <p className="pt-1">
-                Data freshness is separate and lives on the{" "}
-                <a href="./status/" className="text-[var(--accent-ink)] font-semibold">Data page</a>.
-              </p>
-              {/* The reload control lives in the header again, where it is one
-                  tap from anywhere. Naming it here rather than duplicating it,
-                  so there are not two buttons doing the same job. */}
-              <p className="pt-1">
-                To fetch the newest version, use ↻ at the top of the screen.
-              </p>
+  useEffect(() => { setOrder(loadOrder(kind)); }, [kind]);
+
+  const shown = applyOrder(items, (x) => x.id, order);
+
+  const bump = (id: string, by: -1 | 1) => {
+    const next = move(shown.map((x) => x.id), id, by);
+    setOrder(next);
+    saveOrder(kind, next);
+    setMoved((m) => ({ id, n: m.n + 1 }));
+  };
+  const reset = () => { setOrder([]); clearOrder(kind); };
+
+  const divider = (text: string) => (
+    <div className="px-4 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)] bg-[var(--card2)]">
+      {text}
+    </div>
+  );
+
+  const arrow = (d: string, label: string, disabled: boolean, onClick: () => void) => (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      className="rs-press w-9 h-9 rounded-full flex items-center justify-center text-[var(--ink2)]
+                 bg-[var(--card2)] border border-[var(--line)] disabled:opacity-25 shrink-0"
+    >
+      <Glyph d={d} size={16} />
+    </button>
+  );
+
+  return (
+    <div>
+      <PageTitle>{title}</PageTitle>
+      <p className="-mt-4 mb-5 px-1 text-sm text-[var(--ink3)]">{caption}</p>
+
+      <div className="rounded-2xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
+        {shown.map((it, i) => (
+          <Fragment key={`${it.id}-${moved.id === it.id ? moved.n : 0}`}>
+            {split !== undefined && i === 0 && divider("In the bar")}
+            {split !== undefined && i === split && divider("Under More")}
+            <div className={`flex items-center gap-3 px-4 min-h-[56px] border-t border-[var(--line)] first:border-t-0 ${
+              moved.id === it.id && moved.n > 0 ? "rs-moved" : ""}`}>
+              <span className="w-5 text-xs text-[var(--ink3)] tabular-nums shrink-0">{i + 1}</span>
+              {it.icon && <span className="text-[var(--ink2)] shrink-0"><Glyph d={it.icon} size={20} /></span>}
+              <span className="flex-1 min-w-0 truncate text-[15px] text-[var(--ink)]">{it.label}</span>
+              {arrow("M6 15l6-6 6 6", `Move ${it.label} up`, i === 0, () => bump(it.id, -1))}
+              {arrow("M6 9l6 6 6-6", `Move ${it.label} down`, i === shown.length - 1, () => bump(it.id, 1))}
             </div>
-          </div>
-        </div>
+          </Fragment>
+        ))}
+      </div>
+
+      {order.length > 0 && (
+        <button
+          type="button"
+          onClick={reset}
+          className="mt-4 w-full min-h-[50px] rounded-2xl border border-[var(--line)] bg-[var(--card)]
+                     text-[15px] font-medium text-[var(--neg)] active:bg-[var(--card2)]"
+        >
+          Reset to default order
+        </button>
       )}
-    </>
+    </div>
   );
 }

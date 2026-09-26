@@ -100,7 +100,7 @@ function useRuns() {
 
 function ago(iso: string): string {
   const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-  if (mins < 1) return "just now";
+  if (mins < 1) return "Just now";
   if (mins < 60) return `${mins} min ago`;
   const h = Math.floor(mins / 60);
   if (h < 24) return `${h} hour${h === 1 ? "" : "s"} ago`;
@@ -148,6 +148,11 @@ function loadToken(): string {
 function saveToken(v: string) {
   try { v ? localStorage.setItem(TOKEN_KEY, v) : localStorage.removeItem(TOKEN_KEY); } catch { /* private mode */ }
 }
+
+/** Sentence case for display. The scope names themselves are the exact values
+ *  the workflow's input accepts, so they are sent as they are and only shown
+ *  capitalised - "everything" in a menu read like a typo. */
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 const SCOPES: [string, string][] = [
   ["everything", "Every source, then rebuild and publish. What the nightly run does."],
@@ -215,7 +220,7 @@ export default function RefreshPanel() {
       <div className="px-4 py-3.5 border-b border-[var(--line)]">
         <div className="flex items-baseline justify-between gap-3 flex-wrap">
           <h2 className="text-base font-semibold text-[var(--ink)]">Refresh</h2>
-          <span className="text-xs text-[var(--ink3)]">next automatic run {nextRun()} · 22:00 IST daily</span>
+          <span className="text-xs text-[var(--ink3)]">Next automatic run {nextRun()} · 22:00 IST daily</span>
         </div>
 
         {err && (
@@ -229,12 +234,12 @@ export default function RefreshPanel() {
             <span className="inline-block w-2 h-2 rounded-full" style={{ background: tone.dot }} />
             <span className={`font-semibold ${tone.text}`}>Last run {tone.label}</span>
             <span className="text-[var(--ink3)] text-xs">
-              {ago(latest.created_at)} · started {latest.event === "schedule" ? "on schedule" : "by hand"}
+              {ago(latest.created_at)} · Started {latest.event === "schedule" ? "on schedule" : "by hand"}
             </span>
             <a href={latest.html_url} target="_blank" rel="noopener noreferrer"
-              className="text-xs text-[var(--accent-ink)] hover:underline">open in GitHub →</a>
+              className="text-xs text-[var(--accent-ink)] hover:underline">Open in GitHub →</a>
             {live && (
-              <button onClick={reload} className="text-xs text-[var(--ink3)] hover:text-[var(--ink)]">refresh status</button>
+              <button onClick={reload} className="text-xs text-[var(--ink3)] hover:text-[var(--ink)]">Refresh status</button>
             )}
           </div>
         )}
@@ -260,7 +265,7 @@ export default function RefreshPanel() {
                   onChange={(e) => setScope(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--card2)] text-[var(--ink)] px-2.5 py-2 text-sm"
                 >
-                  {SCOPES.map(([name]) => <option key={name} value={name}>{name}</option>)}
+                  {SCOPES.map(([name]) => <option key={name} value={name}>{cap(name)}</option>)}
                 </select>
                 <span className="block text-xs text-[var(--ink3)] mt-1">
                   {SCOPES.find(([n]) => n === scope)?.[1]}
@@ -288,7 +293,7 @@ export default function RefreshPanel() {
                       </span>
                     ))}
                     <button onClick={() => setPicked([])}
-                      className="text-xs text-[var(--ink3)] underline underline-offset-2 px-1">clear</button>
+                      className="text-xs text-[var(--ink3)] underline underline-offset-2 px-1">Clear</button>
                   </div>
                 )}
                 <div className="relative mt-1">
@@ -371,7 +376,7 @@ export default function RefreshPanel() {
                 onClick={() => { saveToken(""); setToken(""); setSendMsg(null); }}
                 className="text-xs text-[var(--ink3)] hover:text-[var(--ink)]"
               >
-                forget token
+                Forget token
               </button>
               {sendMsg && <span className="text-xs text-[var(--ink2)]">{sendMsg}</span>}
             </div>
@@ -392,7 +397,7 @@ export default function RefreshPanel() {
               </button>
               <a href={DISPATCH_UI} target="_blank" rel="noopener noreferrer"
                 className="rounded-lg px-3 py-2 text-sm font-medium text-[var(--ink2)] border border-[var(--line)] hover:bg-[var(--card2)]">
-                or run it on GitHub &rarr;
+                Or run it on GitHub &rarr;
               </a>
             </div>
 
@@ -431,7 +436,7 @@ export default function RefreshPanel() {
                 <p className="mt-2 text-[var(--ink3)]">
                   It stays in this browser and is sent only to github.com. It is never in the app&rsquo;s code and never
                   reaches any server of ours &mdash; there isn&rsquo;t one. Scoped as above, the worst a leak could do is
-                  start a data refresh. Use <span className="text-[var(--ink2)]">forget token</span> to remove it, or
+                  start a data refresh. Use <span className="text-[var(--ink2)]">Forget token</span> to remove it, or
                   revoke it on GitHub at any time.
                 </p>
               </div>
@@ -452,9 +457,9 @@ export default function RefreshPanel() {
                   className="flex items-center gap-2 text-xs hover:underline">
                   <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
                     style={{ background: tn?.dot ?? "var(--ink3)" }} />
-                  <span className={tn?.text ?? "text-[var(--ink3)]"}>{tn?.label ?? k}</span>
+                  <span className={tn?.text ?? "text-[var(--ink3)]"}>{cap(tn?.label ?? k)}</span>
                   <span className="text-[var(--ink3)]">{ago(r.created_at)}</span>
-                  <span className="text-[var(--ink3)] truncate">· {r.event === "schedule" ? "scheduled" : "manual"}</span>
+                  <span className="text-[var(--ink3)] truncate">· {r.event === "schedule" ? "Scheduled" : "Manual"}</span>
                 </a>
               );
             })}

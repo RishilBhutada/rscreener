@@ -147,7 +147,7 @@ function SectorsView() {
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
       <h1 className="px-4 py-3 text-sm font-bold text-[var(--ink)] border-b border-[var(--line)]">
-        {sector} <span className="font-normal text-[var(--ink3)]">· {companies.length} companies · <Link href="/sectors" className="text-[var(--accent-ink)] hover:underline">all sectors</Link></span>
+        {sector} <span className="font-normal text-[var(--ink3)]">· {companies.length} companies · <Link href="/sectors" className="text-[var(--accent-ink)] hover:underline">All sectors</Link></span>
       </h1>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -178,7 +178,7 @@ function SectorsView() {
           <div className="px-3 py-2 text-xs text-[var(--ink3)] border-t border-[var(--line)]">
             Showing {rowCap.toLocaleString("en-IN")} of {companies.length.toLocaleString("en-IN")} companies in this sector
             <button onClick={() => setRowCap(companies.length)}
-              className="ml-2 font-semibold text-[var(--accent-ink)] underline underline-offset-2">show all</button>
+              className="ml-2 font-semibold text-[var(--accent-ink)] underline underline-offset-2">Show all</button>
           </div>
         )}
       </div>

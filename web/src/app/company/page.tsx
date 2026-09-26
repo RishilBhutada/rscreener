@@ -417,7 +417,7 @@ function PriceAsOf({ row, snapshot }: { row: Row | null; snapshot?: Row | null }
       title={old ? "This close is behind the market — the price feed has not refreshed for this stock." : "Closing price on this date"}
       className={`text-xs font-medium ${old ? "text-[var(--neg)]" : "text-[var(--ink3)]"}`}
     >
-      close of {label}{old ? " · stale" : ""}
+      Close of {label}{old ? " · stale" : ""}
     </span>
   );
 }
@@ -1057,7 +1057,7 @@ function ValuationHistory({ company }: { company: Company }) {
                      style={{ left: `calc(${at}% - 4px)` }} />
               </div>
               <div className="flex justify-between text-[11px] leading-snug text-[var(--ink3)] mt-1 tabular-nums">
-                <span>low {fmtNum(r.lo)}</span>
+                <span>Low {fmtNum(r.lo)}</span>
                 {/* The window is stated, not just its length. These four
                     series do NOT reach equally far back: P/E and MCap/Sales
                     come from filed quarterly results to 2006, while EV/EBITDA
@@ -1068,7 +1068,7 @@ function ValuationHistory({ company }: { company: Company }) {
                   {r.short} was lower than this in <strong className="text-[var(--ink2)]">{r.pct}%</strong>{" "}
                   of {r.n} months since {r.from} · median {fmtNum(r.median)}
                 </span>
-                <span>high {fmtNum(r.hi)}</span>
+                <span>High {fmtNum(r.hi)}</span>
               </div>
             </div>
           );
@@ -1191,7 +1191,7 @@ function RatioGrid({ snapshot, row, cohort }: { snapshot: Row; row: Row | null; 
     // NSDL sits in an industry of six: "industry median 40.27" reads like a
     // fact about an industry, when it is the middle of five other companies.
     const n = med.n < 15 ? ` (of ${med.n})` : "";
-    return `industry median ${shown}${n}${side}`;
+    return `Industry median ${shown}${n}${side}`;
   };
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
@@ -1661,7 +1661,7 @@ function CompanyView() {
   };
 
   if (!symbol) return <p className="text-[var(--ink3)] p-6">No company selected. <Link className="text-[var(--accent-ink)] underline" href="/">Back to screener</Link></p>;
-  if (error) return <p className="text-[var(--neg)] p-6">{error} — <Link className="text-[var(--accent-ink)] underline" href="/">back to screener</Link></p>;
+  if (error) return <p className="text-[var(--neg)] p-6">{error} — <Link className="text-[var(--accent-ink)] underline" href="/">Back to screener</Link></p>;
   if (!company) return <CompanySkeleton />;
 
   const s = company.snapshot;

@@ -291,6 +291,11 @@ html { -webkit-tap-highlight-color: transparent; }
 a, button { transition: color 0.15s, background-color 0.15s, border-color 0.15s, opacity 0.15s, transform 0.12s; }
 .rs-press:active { transform: scale(0.96); }
 
+/* The row you just moved in a reorder list flashes once, so the eye can
+ * follow it to its new place instead of re-reading the whole list. */
+@keyframes rs-moved-bg { from { background-color: var(--accent-soft); } to { background-color: transparent; } }
+.rs-moved { animation: rs-moved-bg 0.8s ease-out; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
