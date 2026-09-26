@@ -33,9 +33,9 @@ export function isNewer(v: Version | null, running: string): boolean {
   return !!(v?.commit && running && v.commit !== running);
 }
 
-/** Minutes an app-update publish usually takes, start to live, once the
- *  company export stopped rescanning the statements table. */
-export const PUBLISH_MINUTES = 7;
+/** Minutes an app-update publish takes, start to live. Measured: 12.7 on
+ *  26-Sep-2026, the first run after the statements index (it was 20). */
+export const PUBLISH_MINUTES = 13;
 
 export type Pending = { kind: "publish" | "refresh"; startedMin: number } | null;
 
