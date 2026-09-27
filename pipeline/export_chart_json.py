@@ -154,6 +154,13 @@ def main() -> None:
     con.close()
     print(f"chart files: {written} -> {OUT}  ({total_bytes / 1e6:.0f} MB, "
           f"{total_bytes / max(written, 1) / 1e3:.0f} KB each on average)")
+    # Every company page links to its full chart. A run that writes far fewer
+    # files than there are companies (a database restored without prices, say)
+    # would publish a site where most of those links open an error - so it
+    # stops the publish instead of shipping that quietly.
+    companies = sum(1 for _ in (ROOT / "web" / "public" / "companies").glob("*.json"))
+    if companies and written < 0.9 * companies:
+        raise SystemExit(f"only {written} chart files for {companies} companies - refusing to publish")
 
 
 if __name__ == "__main__":

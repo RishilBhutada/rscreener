@@ -338,6 +338,12 @@ jobs:
 
       - run: python pipeline/export_json.py
       - run: python pipeline/export_company_json.py
+      - name: Write the full-screen chart's price files (one per company)
+        # web/public/charts/<SYMBOL>.json - the candles the full chart draws,
+        # weekly and monthly resampled from the verified daily closes. About
+        # 150 MB, so never committed: written here from this run's database,
+        # after the company export, whose file count it checks itself against.
+        run: python pipeline/export_chart_json.py
       - name: Score the data and record the score
         # Runs every night, after the export and before the guards, so the score
         # describes what is about to be published. Appending to a history file
