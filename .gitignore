@@ -11,4 +11,5 @@ node_modules/
 web/public/charts/
 web/public/etf/
 web/public/etfs.json
+web/public/etf-val/
 web/public/calendar.json

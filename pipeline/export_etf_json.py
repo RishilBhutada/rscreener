@@ -229,6 +229,14 @@ def main() -> None:
     ters: dict[str, tuple[float, str]] = {}
     if con.execute("SELECT 1 FROM sqlite_master WHERE name='etf_ter'").fetchone():
         ters = {k: (t, d) for k, t, d in con.execute("SELECT scheme_key, ter, ter_date FROM etf_ter")}
+    # The index's own PE / PB / yield (fetch_etfs.load_valuations): an ETF's
+    # valuation, since it has no earnings of its own. Ten years, per index.
+    vals: dict[str, list[tuple[str, float | None, float | None, float | None]]] = {}
+    val_names: dict[str, str] = {}
+    if con.execute("SELECT 1 FROM sqlite_master WHERE name='index_valuation'").fetchone():
+        for k, d, pe, pb, dy in con.execute("SELECT index_key, date, pe, pb, dy FROM index_valuation ORDER BY index_key, date"):
+            vals.setdefault(k, []).append((d, pe, pb, dy))
+        val_names = {k: ln for k, ln in con.execute("SELECT index_key, long_name FROM index_val_names")}
     idx: dict[str, tuple[list[str], list[float]]] = {}
     for t, d, c in con.execute("SELECT ticker, date, close FROM index_prices ORDER BY ticker, date"):
         ds, vs = idx.setdefault(t, ([], []))
@@ -242,6 +250,29 @@ def main() -> None:
     # Each underlying index as a chart file of its own, so the full-screen chart
     # can draw an ETF over the index it tracks. A foreign index is in rupees
     # (that day's rate), as a rupee investor's ETF sees it.
+    val_doc: dict[str, dict] = {}
+    VAL_DIR = ROOT / "web" / "public" / "etf-val"
+    VAL_DIR.mkdir(parents=True, exist_ok=True)
+    for k, rs in vals.items():
+        rs = [r for r in rs if r[1]]
+        if not rs:
+            continue
+        slug = "VAL-" + re.sub(r"[^A-Z0-9]", "", k.upper())
+        (VAL_DIR / f"{slug}.json").write_text(json.dumps({
+            "name": val_names.get(k, k),
+            "rows": [[day_no(d), round(pe, 2), round(pb, 2) if pb else None, round(dy, 2) if dy else None] for d, pe, pb, dy in rs],
+        }, separators=(",", ":"), allow_nan=False), encoding="utf-8")
+        last = rs[-1]
+        cut5 = (date.fromisoformat(last[0]) - timedelta(days=5 * 365)).isoformat()
+        pe5 = sorted(r[1] for r in rs if r[0] >= cut5)
+        val_doc[k] = {
+            "file": slug, "name": val_names.get(k, k), "date": last[0],
+            "pe": last[1], "pb": last[2], "dy": last[3],
+            "pe_median_5y": round(median(pe5), 2) if pe5 else None,
+            # The share of the last five years' days with a LOWER PE than today.
+            "pe_pct_5y": round(100 * sum(1 for v in pe5 if v < last[1]) / len(pe5)) if pe5 else None,
+            "pe_lo_5y": pe5[0] if pe5 else None, "pe_hi_5y": pe5[-1] if pe5 else None,
+        }
     idx_chart: dict[tuple, str] = {}
     for e in etfs:
         itick, fxtick, ilabel = e[10], e[11], e[12]
@@ -362,6 +393,7 @@ def main() -> None:
             "turnover_cr": round(med_turn, 2),
             "ter": ters.get(re.sub(r"[^a-z0-9]", "", (scheme or "").lower()), (None, None))[0],
             "ter_date": ters.get(re.sub(r"[^a-z0-9]", "", (scheme or "").lower()), (None, None))[1],
+            "valuation": val_doc.get(ukey) if klass == "equity" else None,
             "traded_days_20": traded,
             "thin": thin,
             "rows": rows,
@@ -387,6 +419,7 @@ def main() -> None:
         listing.append({k: doc[k] for k in (
             "s", "name", "underlying", "class", "price", "price_date", "nav", "nav_date", "prem", "prem_date",
             "prem_avg_1m", "turnover_cr", "thin", "ter")} | {
+            "pe": (doc["valuation"] or {}).get("pe"),
             "r1y_price": doc["ret_price"].get("1y"), "r1y_nav": doc["ret_nav"].get("1y"),
             "r1m_price": doc["ret_price"].get("1m"),
             "index": ilabel})

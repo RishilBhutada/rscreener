@@ -10,6 +10,10 @@ import { CLASS_LABEL, pctRankText, pctText, premClass, premSentence, premText, t
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 // The chart library touches the window, so it loads in the browser only.
+const EtfValChart = dynamic(() => import("@/components/EtfValChart"), {
+  ssr: false,
+  loading: () => <div className="rs-skel h-[320px]" aria-busy="true" aria-label="Loading chart" />,
+});
 const EtfChart = dynamic(() => import("@/components/EtfChart"), {
   ssr: false,
   loading: () => <div className="rs-skel h-[440px]" aria-busy="true" aria-label="Loading chart" />,
@@ -189,6 +193,29 @@ function EtfView() {
       }>
         <EtfChart rows={doc.rows} indexLabel={doc.index ? (doc.index.fx ? `${doc.index.label} (₹)` : doc.index.label) : null} />
       </Card>
+
+      {doc.valuation && (
+        <Card title="Valuation of what it holds" tip={
+          <InfoTip title="Valuation of what it holds">
+            <p>An ETF has no earnings of its own. Its PE is the PE of the index it holds: the index companies&apos; combined price over their combined earnings - as for a share.</p>
+            <p>Published daily by NSE Indices for {doc.valuation.name}. Gold, silver, debt and foreign-index ETFs have none here: metal earns nothing, and no free source gives the others.</p>
+          </InfoTip>
+        }>
+          <div className="grid grid-cols-3 px-3 pb-1 tabular-nums">
+            <Stat label="PE" value={doc.valuation.pe.toFixed(1)} />
+            <Stat label="PB" value={doc.valuation.pb == null ? "—" : doc.valuation.pb.toFixed(2)} />
+            <Stat label="Dividend yield" value={doc.valuation.dy == null ? "—" : `${doc.valuation.dy.toFixed(2)}%`} />
+          </div>
+          {doc.valuation.pe_median_5y !== null && doc.valuation.pe_pct_5y !== null && (
+            <p className="px-3 pb-2 text-sm text-[var(--ink2)]">
+              PE {doc.valuation.pe < doc.valuation.pe_median_5y ? "below" : "above"} its five-year median of {doc.valuation.pe_median_5y.toFixed(1)} -
+              higher than on {doc.valuation.pe_pct_5y}% of days in five years.
+              <span className="block text-[11px] text-[var(--ink3)]">{doc.valuation.name} · {when(doc.valuation.date)}</span>
+            </p>
+          )}
+          <EtfValChart file={doc.valuation.file} />
+        </Card>
+      )}
 
       <Card title="Premium">
         <div className="grid grid-cols-2">

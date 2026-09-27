@@ -24,6 +24,11 @@ export type EtfDoc = {
   turnover_cr: number; traded_days_20: number; thin: boolean;
   /** Expense ratio, % a year, as filed with AMFI - and the day it applies to. */
   ter?: number | null; ter_date?: string | null;
+  /** The PE / PB / yield of the index it holds, and where today's PE sits. */
+  valuation?: {
+    file: string; name: string; date: string; pe: number; pb: number | null; dy: number | null;
+    pe_median_5y: number | null; pe_pct_5y: number | null; pe_lo_5y: number | null; pe_hi_5y: number | null;
+  } | null;
   rows: [number, number, number | null, number | null, number?][];
 };
 

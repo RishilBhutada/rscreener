@@ -220,7 +220,7 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "35"
         run: |
-          have=$(python -c "import sqlite3; c=sqlite3.connect('data/rscreener.db'); print(1 if c.execute(\"SELECT 1 FROM sqlite_master WHERE name='etf_prices_monthly'\").fetchone() else 0)")
+          have=$(python -c "import sqlite3; c=sqlite3.connect('data/rscreener.db'); print(1 if c.execute(\"SELECT 1 FROM sqlite_master WHERE name='index_valuation'\").fetchone() else 0)")
           if [ "${{ steps.plan.outputs.prices }}" = "1" ] || [ "$have" = "0" ]; then
             bash pipeline/guarded_fetch.sh python pipeline/fetch_etfs.py --sleep 0.25 --ter-pages 600
           else

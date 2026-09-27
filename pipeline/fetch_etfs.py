@@ -32,6 +32,7 @@ Usage:
 import argparse
 import csv
 import io
+import json
 import re
 import sqlite3
 import time
@@ -373,6 +374,95 @@ def load_ter(session: requests.Session, con: sqlite3.Connection, page_budget: in
           f"{left} left for later nights this month")
 
 
+NI_HOME = "https://www.niftyindices.com/reports/historical-data"
+NI_MAP = "https://liveindexsa.niftyindices.com/assets/json/IndexMapping.json"
+NI_PEPB = "https://www.niftyindices.com/BackPage/getpepbHistoricaldataDBtoString"
+
+
+def load_valuations(con: sqlite3.Connection, sleep: float) -> None:
+    """PE, PB and dividend yield of each Nifty index an equity ETF holds -
+    the ETF's own valuation, since an ETF has no earnings but its index's.
+    Published daily by NSE Indices. Ten years the first time, the last few
+    days after that.
+
+    The ETF list names an index one way ("Nifty Private Bank") and NSE
+    Indices' data call wants its trading name ("Nifty Pvt Bank"); the site's
+    own IndexMapping.json translates, and the answer is kept so the lookup is
+    not repeated. 77 of the 80 Nifty indices ETFs track resolved on
+    27-Sep-2026; three new ones had no valuation history yet."""
+    con.executescript("""
+        CREATE TABLE IF NOT EXISTS index_valuation (
+            index_key TEXT, date TEXT, pe REAL, pb REAL, dy REAL, PRIMARY KEY (index_key, date));
+        CREATE TABLE IF NOT EXISTS index_val_names (index_key TEXT PRIMARY KEY, name TEXT, long_name TEXT);
+    """)
+    keys = sorted({k for (k,) in con.execute(
+        "SELECT DISTINCT underlying_key FROM etfs WHERE asset_class='equity'") if k and k.lower().startswith("nifty")})
+    s = requests.Session()
+    s.headers.update({**HEADERS, "Content-Type": "application/json; charset=utf-8",
+                      "Accept": "application/json, text/javascript, */*; q=0.01", "X-Requested-With": "XMLHttpRequest",
+                      "Origin": "https://www.niftyindices.com", "Referer": NI_HOME})
+    s.get(NI_HOME, timeout=30)
+    known = {k: (n, ln) for k, n, ln in con.execute("SELECT index_key, name, long_name FROM index_val_names")}
+    norm = lambda t: re.sub(r"[^A-Z0-9]", "", (t or "").upper())  # noqa: E731
+    mapping: dict[str, dict] = {}
+    if any(k not in known for k in keys):
+        for x in json.loads(s.get(NI_MAP, timeout=40).content.decode("utf-8-sig")):
+            mapping.setdefault(norm(x["Index_long_name"]), x)
+            mapping.setdefault(norm(x["Trading_Index_Name"]), x)
+
+    def call(name: str, long: str, a: str, b: str) -> list[dict]:
+        cinfo = "{'name':'%s','startDate':'%s','endDate':'%s','indexName':'%s'}" % (name.upper(), a, b, long)
+        r = s.post(NI_PEPB, data=json.dumps({"cinfo": cinfo}), timeout=60)
+        try:
+            j = r.json()
+            d = j.get("d", j) if isinstance(j, dict) else j
+            d = json.loads(d) if isinstance(d, str) else d
+            return d if isinstance(d, list) else []
+        except ValueError:
+            return []
+
+    today = datetime.now(IST).date()
+    fmt = lambda d: d.strftime("%d-%b-%Y")  # noqa: E731
+    got = rows_total = 0
+    for i, k in enumerate(keys):
+        if budget.stop(i, len(keys), "index valuations"):
+            break
+        last = con.execute("SELECT MAX(date) FROM index_valuation WHERE index_key=?", (k,)).fetchone()[0]
+        start = (datetime.strptime(last, "%Y-%m-%d").date() - timedelta(days=10)) if last else today.replace(year=today.year - 10)
+        if k in known:
+            name, long = known[k]
+            data = call(name, long, fmt(start), fmt(today))
+        else:
+            cand = mapping.get(norm(k))
+            data, name, long = [], None, None
+            for nm in dict.fromkeys(([cand["Trading_Index_Name"]] if cand else []) + [k.upper(), re.sub(r"^NIFTY (\d)", r"NIFTY\1", k.upper())]):
+                long = cand["Index_long_name"] if cand else k
+                data = call(nm, long, fmt(start), fmt(today))
+                if data:
+                    name = nm
+                    con.execute("INSERT OR REPLACE INTO index_val_names VALUES (?,?,?)", (k, nm, long))
+                    break
+                time.sleep(sleep)
+        rows = []
+        for x in data:
+            try:
+                d = datetime.strptime(x["DATE"].strip(), "%d %b %Y").strftime("%Y-%m-%d")
+            except (KeyError, ValueError):
+                continue
+            f = lambda v: float(v) if v not in (None, "", "-") else None  # noqa: E731
+            try:
+                rows.append((k, d, f(x.get("pe")), f(x.get("pb")), f(x.get("divYield"))))
+            except ValueError:
+                continue
+        if rows:
+            con.executemany("INSERT OR REPLACE INTO index_valuation VALUES (?,?,?,?,?)", rows)
+            got += 1
+            rows_total += len(rows)
+        con.commit()
+        time.sleep(sleep)
+    print(f"index valuations: {got} of {len(keys)} Nifty indices, {rows_total} days written")
+
+
 def load_indices(session: requests.Session, con: sqlite3.Connection) -> None:
     """Daily closes for each underlying index and currency rate, dated in the
     index's own time zone (Yahoo stamps a session by its opening instant)."""
@@ -411,6 +501,10 @@ def main() -> None:
         load_ter(session, con, args.ter_pages, 0.4)
     except Exception as e:  # noqa: BLE001 - the fees are a nicety; prices and NAVs are not
         print(f"TER: skipped this run - {e}")
+    try:
+        load_valuations(con, 0.25)
+    except Exception as e:  # noqa: BLE001 - as with the fees
+        print(f"index valuations: skipped this run - {e}")
     con.close()
 
 
