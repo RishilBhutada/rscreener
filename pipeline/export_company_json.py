@@ -15,6 +15,7 @@ from pathlib import Path
 import pandas as pd
 
 from export_json import freshen_prices
+from fetch_corporate_actions import dividend_detail
 from trend_lib import build_trends, net_debt_series, ratio_bands
 
 
@@ -465,6 +466,8 @@ def corporate_actions(con: sqlite3.Connection) -> dict[str, list[dict]]:
         "SELECT symbol, ex_date, kind, detail, subject FROM corporate_actions ORDER BY ex_date"
     ):
         if ex:
+            if kind == "dividend" and subject:
+                detail = dividend_detail(subject) or detail
             out.setdefault(sym, []).append(
                 {"date": ex, "kind": kind, "detail": detail, "subject": subject})
     return out

@@ -519,12 +519,21 @@ def _derive(slot: dict) -> dict:
     # nothing to check it against - banks file operating profit and no expense
     # breakdown, which is why it is preferred in the first place.
     computed = (rev - exp + fin + dep) if (rev is not None and exp is not None) else None
-    direct = slot.get("op_profit_direct") or slot.get("ebitda_direct")
-    if direct is not None and computed is not None and computed != 0:
-        ratio = abs(direct / computed)
-        ebitda = direct if 0.2 <= ratio <= 5.0 else computed
+    # The filing first. A bank's filed operating profit is the filing's own
+    # figure and wins while arithmetic agrees with it; a second source's EBITDA
+    # is used only where the filing gives nothing to compute from. It used to
+    # win whenever it was within 5x of the filing, so TCS's EBITDA bars showed
+    # Yahoo's 15,996 Cr for a quarter the filing puts at 18,269 Cr - while the
+    # EV/EBITDA line above them was built from the filing. The ratio and the
+    # figure drawn under it disagreed by 0.8% over a year.
+    filed = slot.get("op_profit_direct")
+    second = slot.get("ebitda_direct")
+    if filed is not None and (computed is None or computed == 0 or 0.2 <= abs(filed / computed) <= 5.0):
+        ebitda = filed
+    elif computed is not None:
+        ebitda = computed
     else:
-        ebitda = direct if direct is not None else computed
+        ebitda = second
     gp = slot.get("gross_profit")  # some old sheets report Gross Profit outright
     if gp is None:
         cogs = slot.get("cogs_direct")
@@ -910,7 +919,7 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
     q = pd.read_sql(
         "SELECT symbol, period_end, item, value FROM results_history "
         "WHERE period_type='quarterly' AND item IN "
-        "('eps','pat','revenue','total_expenses','finance_cost','depreciation','equity','share_capital') "
+        "('eps','pat','revenue','total_expenses','finance_cost','depreciation','equity','share_capital','op_profit_direct') "
         "ORDER BY period_end",
         con,
     )
@@ -955,9 +964,10 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
             if pe in skip:
                 continue
             s = by_pe[pe]
-            rev, exp = s.get("revenue"), s.get("total_expenses")
-            fin, dep = s.get("finance_cost") or 0.0, s.get("depreciation") or 0.0
-            ebitda = (rev - exp + fin + dep) if (rev is not None and exp is not None) else None
+            rev = s.get("revenue")
+            # The same rule as the trend's EBITDA bars, so the EV/EBITDA line and
+            # the EBITDA drawn beneath it are one number.
+            ebitda = _derive(s)["ebitda"]
             # Mirror adj_eps(): exact split factor when the split history is
             # known, else PAT / current shares. Testing "eps is None" first (as
             # this once did) meant a symbol with no split data kept its raw

@@ -84,6 +84,13 @@ jobs:
           else
             echo "no data-db release yet - starting from empty DB (historical depth will be missing)"
           fi
+      - name: Re-date stored weekly and monthly prices (one-time, then a no-op)
+        # Rows written before pipeline/price_periods.py were dated a period
+        # early and ended on a stray one-day bar, which made every "1M" return
+        # a one-day return. This rewrites them once and records that it has;
+        # it runs before any fetcher because an old day-early label and a new
+        # month-end label cannot be told apart afterwards.
+        run: python pipeline/migrate_price_periods.py
       - name: Work out what this run should do
         id: plan
         run: |

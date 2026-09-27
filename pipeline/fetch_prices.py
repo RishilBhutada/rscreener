@@ -16,6 +16,7 @@ from pathlib import Path
 import requests
 
 import budget
+import price_periods
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
@@ -113,7 +114,9 @@ def series(session: requests.Session, sym: str, rng: str, itv: str) -> list[tupl
             continue
         vol = volumes[i] if i < len(volumes) and volumes[i] is not None else None
         out.append((
-            datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d"),
+            # Indian time, not UTC: a period bar opens at 00:00 IST, which in
+            # UTC is the day before - see price_periods.py.
+            price_periods.ist_date(ts),
             at(opens, i), at(highs, i), at(lows, i), round(float(close), 2), vol,
         ))
     return out
@@ -192,6 +195,13 @@ def main() -> None:
             daily = series(session, tick, "2y", "1d")       # 1M/6M/1Yr + DMA + volatility
             if not monthly and not weekly and not daily:
                 raise ValueError("no price history returned")
+            # One row per week and per month, labelled by the day its close is
+            # from, with the latest session folded into the period it belongs
+            # to rather than stored as a bar of its own - see price_periods.py.
+            seen = [r[0] for r in monthly + weekly + daily]
+            cap = datetime.strptime(max(seen), "%Y-%m-%d").date() if seen else None
+            monthly = price_periods.from_fetch(monthly, "monthly", cap)
+            weekly = price_periods.from_fetch(weekly, "weekly", cap)
             # Each frequency replaced ON ITS OWN.
             #
             # This deleted every row for the symbol and re-inserted whatever

@@ -9,6 +9,7 @@ Unit conventions in the exported file (what the query language sees):
 Missing values are exported as null - the app must treat null as
 "excluded from this screen", never as zero.
 """
+import bisect
 import json
 import math
 import sqlite3
@@ -124,43 +125,68 @@ def volatility_fields(con: sqlite3.Connection) -> dict[str, dict]:
 
 
 def price_returns(con: sqlite3.Connection) -> dict[str, dict]:
-    """Trailing returns (%) per symbol from monthly closes (latest point ~= live)."""
+    """Trailing returns (%) per symbol, from the close nearest each anchor date.
+
+    DAILY closes wherever the daily series reaches (about two years), monthly
+    only beyond it. The one-month return was taken from monthly bars, which
+    the price store dated a period early and which ended on the latest session
+    stored as a bar of its own - so "1M" compared yesterday with today. On
+    25-Sep-2026 TCS showed -0.2% for a month in which it fell 9.3%, and nearly
+    every company was the same. Daily closes put each anchor on a real trading
+    day within a week of the date asked for; a monthly close is used only
+    where no daily one exists, within 45 days, and otherwise the figure is
+    withheld rather than taken from the wrong period.
+    """
     if not con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='prices'").fetchone():
         return {}
-    px = pd.read_sql("SELECT symbol, date, close FROM prices WHERE freq='monthly' ORDER BY date", con)
+    px = pd.read_sql(
+        "SELECT symbol, freq, date, close FROM prices WHERE freq IN ('daily','monthly') AND close IS NOT NULL ORDER BY date",
+        con,
+    )
     out: dict[str, dict] = {}
-    # Anchored by DATE, not by counting back N positions.
-    #
-    # The monthly series ends on a PART-FORMED month - today's bar, dated
-    # whenever the export runs - so counting back one position gives "last
-    # month-end to today", which is a full month late in the month and three
-    # days early in it. Run on the 3rd, "1 month return" measured three days and
-    # said one month. The longer anchors carried the same error as a smaller
-    # fraction. Same fault as the growth cards: a period measured in array
-    # positions rather than in time.
-    #
-    # Each anchor now takes the bar CLOSEST to the date it wants, and is
-    # withheld when the nearest bar is more than 45 days off - a window that far
-    # from the label is not the period it claims to be.
+
+    def nearest(dates: list, want) -> int | None:
+        if not dates:
+            return None
+        i = bisect.bisect_left(dates, want)
+        best = None
+        for j in (i - 1, i):
+            if 0 <= j < len(dates) and (best is None or abs(dates[j] - want) < abs(dates[best] - want)):
+                best = j
+        return best
+
     for sym, g in px.groupby("symbol"):
-        dates = [pd.Timestamp(x) for x in g["date"]]
-        closes = list(g["close"])
-        if len(closes) < 2 or not closes[-1]:
+        d = g[g["freq"] == "daily"]
+        m = g[g["freq"] == "monthly"]
+        dd, dc = [pd.Timestamp(x) for x in d["date"]], list(d["close"])
+        md, mc = [pd.Timestamp(x) for x in m["date"]], list(m["close"])
+        # "Now" is the newest close. A daily series stale by more than a week
+        # (it happens) gives way to the monthly one.
+        use_daily = len(dc) >= 2 and (not md or dd[-1] >= md[-1] - pd.Timedelta(days=7))
+        if use_daily:
+            last_d, last_c = dd[-1], dc[-1]
+        elif len(mc) >= 2:
+            last_d, last_c = md[-1], mc[-1]
+        else:
             continue
-        last_d, last_c = dates[-1], closes[-1]
-        d = {}
+        if not last_c:
+            continue
+        res = {}
         for key, months in RETURN_ANCHORS.items():
             want = last_d - pd.DateOffset(months=months)
-            best_i, best_gap = None, None
-            for i, dt in enumerate(dates[:-1]):
-                gap = abs((dt - want).days)
-                if best_gap is None or gap < best_gap:
-                    best_i, best_gap = i, gap
-            if best_i is None or best_gap > 45 or not closes[best_i]:
-                continue
-            d[key] = round((last_c / closes[best_i] - 1) * 100, 1)
-        if d:
-            out[sym] = d
+            base = None
+            if use_daily and dd[0] <= want + pd.Timedelta(days=7):
+                i = nearest(dd[:-1], want)
+                if i is not None and abs((dd[i] - want).days) <= 7:
+                    base = dc[i]
+            if base is None and len(md) > 1:
+                i = nearest(md[:-1], want)
+                if i is not None and abs((md[i] - want).days) <= 45:
+                    base = mc[i]
+            if base:
+                res[key] = round((last_c / base - 1) * 100, 1)
+        if res:
+            out[sym] = res
     return out
 
 

@@ -51,14 +51,32 @@ AMOUNT = re.compile(r"(?:rs\.?|inr|₹)\s*([\d]+(?:\.\d+)?)", re.I)   # Rs 6 · 
 RATIO = re.compile(r"(\d+)\s*:\s*(\d+)")                                  # 1:1 · 1:15
 
 
+def dividend_detail(s: str) -> str | None:
+    """The amount per share, counting every dividend the announcement names.
+
+    Only the first amount was read, so "Interim Dividend - Rs 8 Per Share
+    Special Dividend - Rs 67 Per Share" (TCS, Jan 2023) was drawn as a ₹8
+    dividend - 231 of 15,899 dividend announcements name two amounts. They are
+    now added up, unless the wording says one INCLUDES the other ("Rs 8.50 Per
+    Share (Including Special Dividend Of Rs 2)"), where adding would double it.
+    """
+    amounts = AMOUNT.findall(s)
+    if not amounts:
+        return None
+    if len(amounts) == 1 or re.search(r"\bincl(?:uding|usive|\.)?\b", s, re.I):
+        return f"₹{amounts[0]}"
+    total = sum(float(a) for a in amounts)
+    txt = f"{total:.2f}".rstrip("0").rstrip(".")
+    return f"₹{txt} ({' + '.join('₹' + a for a in amounts)})"
+
+
 def classify(subject: str) -> tuple[str, str | None]:
     """(kind, short detail) for a corporate-action subject line."""
     s = (subject or "").strip()
     for kind, rx in KINDS:
         if rx.search(s):
             if kind == "dividend":
-                m = AMOUNT.search(s)
-                return kind, (f"₹{m.group(1)}" if m else None)
+                return kind, dividend_detail(s)
             if kind in ("bonus", "rights", "split"):
                 m = RATIO.search(s)
                 return kind, (f"{m.group(1)}:{m.group(2)}" if m else None)
