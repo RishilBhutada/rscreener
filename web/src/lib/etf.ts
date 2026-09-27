@@ -19,9 +19,11 @@ export type EtfDoc = {
   /** Share of the past year's days with a LOWER premium than today's. */
   prem_pct_1y?: number | null;
   same_index?: { s: string; name: string; prem: number | null; prem_avg_1m: number | null;
-    turnover_cr: number; thin: boolean; r1y_nav: number | null }[];
+    turnover_cr: number; thin: boolean; r1y_nav: number | null; ter?: number | null }[];
   ret_price: Returns; ret_nav: Returns; ret_index: Returns;
   turnover_cr: number; traded_days_20: number; thin: boolean;
+  /** Expense ratio, % a year, as filed with AMFI - and the day it applies to. */
+  ter?: number | null; ter_date?: string | null;
   rows: [number, number, number | null, number | null, number?][];
 };
 

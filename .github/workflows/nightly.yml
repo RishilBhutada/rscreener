@@ -214,13 +214,15 @@ jobs:
         # so a publish that ships an ETF change has its data rather than
         # waiting for the next night. About five
         # minutes: 351 price histories, ~50 NAV histories on a weekly rotation
-        # (all of them on the first run), a dozen index series.
+        # (all of them on the first run), a dozen index series - and each
+        # fund's expense ratio: AMFI's TER file is ~500 pages a month, read in
+        # one night (the first after the month turns) and then left alone.
         env:
-          RSCREENER_STEP_MINUTES: "25"
+          RSCREENER_STEP_MINUTES: "35"
         run: |
           have=$(python -c "import sqlite3; c=sqlite3.connect('data/rscreener.db'); print(1 if c.execute(\"SELECT 1 FROM sqlite_master WHERE name='etf_prices_monthly'\").fetchone() else 0)")
           if [ "${{ steps.plan.outputs.prices }}" = "1" ] || [ "$have" = "0" ]; then
-            bash pipeline/guarded_fetch.sh python pipeline/fetch_etfs.py --sleep 0.25
+            bash pipeline/guarded_fetch.sh python pipeline/fetch_etfs.py --sleep 0.25 --ter-pages 600
           else
             echo "ETFs are refreshed by the nightly run"
           fi

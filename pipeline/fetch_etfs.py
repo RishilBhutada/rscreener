@@ -32,6 +32,7 @@ Usage:
 import argparse
 import csv
 import io
+import re
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
@@ -303,6 +304,75 @@ def load_prices(session: requests.Session, con: sqlite3.Connection, sleep: float
     print(f"ETF prices: {ok} read, {bad} failed")
 
 
+AMFI_H = {"Accept": "application/json, text/plain, */*", "Referer": "https://www.amfiindia.com/ter-of-mf-schemes"}
+AMC_API = "https://www.amfiindia.com/api/populate-mf"
+TER_API = ("https://www.amfiindia.com/api/populate-te-rdata-revised?MF_ID={mf}&Month={month}"
+           "&strCat=-1&strType=-1&page={page}&pageSize=100")
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def scheme_key(name: str | None) -> str:
+    """A scheme name with case, spaces and punctuation gone - how AMFI's TER
+    file and its NAV file are matched (all 24 Nippon ETFs match exactly)."""
+    return re.sub(r"[^a-z0-9]", "", (name or "").lower())
+
+
+def load_ter(session: requests.Session, con: sqlite3.Connection, page_budget: int, sleep: float) -> None:
+    """Each scheme's expense ratio, from the TER every fund house must file with
+    AMFI daily (SEBI Regulation 52). ETFs file theirs under the direct plan.
+
+    AMFI serves 100 rows a page, one row per scheme per DAY: a month is ~500
+    pages across 57 fund houses. So a few houses a night, within a page
+    budget, until the month is covered; then nothing until the next month."""
+    con.executescript("""
+        CREATE TABLE IF NOT EXISTS etf_ter (
+            scheme_key TEXT PRIMARY KEY, scheme TEXT, ter REAL, ter_date TEXT, mf_id TEXT, fetched_at TEXT);
+        CREATE TABLE IF NOT EXISTS etf_ter_log (mf_id TEXT PRIMARY KEY, month TEXT, fetched_at TEXT);
+    """)
+    month = datetime.now(IST).strftime("%m-%Y")
+    done = dict(con.execute("SELECT mf_id, month FROM etf_ter_log"))
+    body = session.get(AMC_API, headers=AMFI_H, timeout=40).json()
+    amcs = (body.get("data") or []) if isinstance(body, dict) else body   # a bare list today
+    todo = [a for a in amcs if done.get(str(a.get("mfId"))) != month]
+    pages = houses = schemes = 0
+    for a in todo:
+        if pages >= page_budget or budget.stop(houses, len(todo), "fund houses' TER"):
+            break
+        mf, page, latest = str(a["mfId"]), 1, {}
+        while True:
+            j = session.get(TER_API.format(mf=mf, month=month, page=page), headers=AMFI_H, timeout=60).json()
+            for x in j.get("data") or []:
+                nm = x.get("Scheme_Name")
+                if nm and (nm not in latest or (x.get("TER_Date") or "") > (latest[nm].get("TER_Date") or "")):
+                    latest[nm] = x
+            pages += 1
+            if page >= ((j.get("meta") or {}).get("pageCount") or 1):
+                break
+            page += 1
+            time.sleep(sleep)
+        # Nothing filed yet this month (the 1st, say): tried again tomorrow.
+        if not latest:
+            continue
+        stamp = now_utc()
+        for nm, x in latest.items():
+            try:
+                direct, regular = float(x.get("D_TER") or 0), float(x.get("R_TER") or 0)
+            except ValueError:
+                continue
+            ter = direct if direct > 0 else regular
+            if ter > 0:
+                con.execute("INSERT OR REPLACE INTO etf_ter VALUES (?,?,?,?,?,?)",
+                            (scheme_key(nm), nm, ter, (x.get("TER_Date") or "")[:10], mf, stamp))
+                schemes += 1
+        con.execute("INSERT OR REPLACE INTO etf_ter_log VALUES (?,?,?)", (mf, month, stamp))
+        con.commit()
+        houses += 1
+        time.sleep(sleep)
+    left = len(todo) - houses
+    print(f"TER: {houses} fund houses read ({pages} pages, {schemes} schemes); "
+          f"{left} left for later nights this month")
+
+
 def load_indices(session: requests.Session, con: sqlite3.Connection) -> None:
     """Daily closes for each underlying index and currency rate, dated in the
     index's own time zone (Yahoo stamps a session by its opening instant)."""
@@ -326,6 +396,7 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=0, help="NAV histories to read this run (0 = all due)")
     ap.add_argument("--history-max-age-hours", type=float, default=168)
     ap.add_argument("--sleep", type=float, default=0.3)
+    ap.add_argument("--ter-pages", type=int, default=160, help="AMFI TER pages to read this run")
     args = ap.parse_args()
     con = sqlite3.connect(DB, timeout=180)
     schema(con)
@@ -336,6 +407,10 @@ def main() -> None:
     load_history(session, con, args.limit, args.history_max_age_hours, args.sleep)
     load_prices(session, con, args.sleep)
     load_indices(session, con)
+    try:
+        load_ter(session, con, args.ter_pages, 0.4)
+    except Exception as e:  # noqa: BLE001 - the fees are a nicety; prices and NAVs are not
+        print(f"TER: skipped this run - {e}")
     con.close()
 
 

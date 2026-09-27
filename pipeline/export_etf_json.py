@@ -225,6 +225,10 @@ def main() -> None:
     navs: dict[str, dict[str, float]] = {}
     for s, d, n in con.execute(f"SELECT symbol, date, nav FROM etf_nav WHERE symbol IN ({q})", syms):
         navs.setdefault(s, {})[d] = n
+    # Expense ratios, matched by scheme name (fetch_etfs.load_ter).
+    ters: dict[str, tuple[float, str]] = {}
+    if con.execute("SELECT 1 FROM sqlite_master WHERE name='etf_ter'").fetchone():
+        ters = {k: (t, d) for k, t, d in con.execute("SELECT scheme_key, ter, ter_date FROM etf_ter")}
     idx: dict[str, tuple[list[str], list[float]]] = {}
     for t, d, c in con.execute("SELECT ticker, date, close FROM index_prices ORDER BY ticker, date"):
         ds, vs = idx.setdefault(t, ([], []))
@@ -356,6 +360,8 @@ def main() -> None:
             "ret_nav": returns(nav_series),
             "ret_index": returns(idx_series),
             "turnover_cr": round(med_turn, 2),
+            "ter": ters.get(re.sub(r"[^a-z0-9]", "", (scheme or "").lower()), (None, None))[0],
+            "ter_date": ters.get(re.sub(r"[^a-z0-9]", "", (scheme or "").lower()), (None, None))[1],
             "traded_days_20": traded,
             "thin": thin,
             "rows": rows,
@@ -380,7 +386,7 @@ def main() -> None:
             charts += 1
         listing.append({k: doc[k] for k in (
             "s", "name", "underlying", "class", "price", "price_date", "nav", "nav_date", "prem", "prem_date",
-            "prem_avg_1m", "turnover_cr", "thin")} | {
+            "prem_avg_1m", "turnover_cr", "thin", "ter")} | {
             "r1y_price": doc["ret_price"].get("1y"), "r1y_nav": doc["ret_nav"].get("1y"),
             "r1m_price": doc["ret_price"].get("1m"),
             "index": ilabel})
@@ -393,7 +399,7 @@ def main() -> None:
     for sym, doc in docs.items():
         doc["same_index"] = sorted(
             ({"s": o, "name": docs[o]["name"], "prem": docs[o]["prem"], "prem_avg_1m": docs[o]["prem_avg_1m"],
-              "turnover_cr": docs[o]["turnover_cr"], "thin": docs[o]["thin"],
+              "turnover_cr": docs[o]["turnover_cr"], "thin": docs[o]["thin"], "ter": docs[o]["ter"],
               "r1y_nav": docs[o]["ret_nav"].get("1y")}
              for o in members.get(group_of[sym], []) if o != sym),
             key=lambda x: -(x["turnover_cr"] or 0))

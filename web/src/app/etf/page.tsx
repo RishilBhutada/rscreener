@@ -77,7 +77,7 @@ function ReturnsTable({ doc }: { doc: EtfDoc }) {
  *  same index, so a lower number is mostly a higher fee or worse tracking). */
 function SameIndex({ doc }: { doc: EtfDoc }) {
   const rows = [
-    { s: doc.s, name: doc.name, prem: doc.prem, turnover_cr: doc.turnover_cr, thin: doc.thin, r1y_nav: doc.ret_nav["1y"] ?? null, self: true },
+    { s: doc.s, name: doc.name, prem: doc.prem, turnover_cr: doc.turnover_cr, thin: doc.thin, r1y_nav: doc.ret_nav["1y"] ?? null, ter: doc.ter, self: true },
     ...(doc.same_index ?? []).map((x) => ({ ...x, self: false })),
   ].sort((a, b) => (b.turnover_cr ?? 0) - (a.turnover_cr ?? 0));
   return (
@@ -85,8 +85,9 @@ function SameIndex({ doc }: { doc: EtfDoc }) {
       <table className="w-full table-fixed text-[13px] tabular-nums">
         <thead>
           <tr className="text-xs text-[var(--ink3)]">
-            <th className="w-[40%] px-3 py-1.5 text-left font-medium">ETF</th>
+            <th className="w-[31%] px-3 py-1.5 text-left font-medium">ETF</th>
             <th className="px-1.5 py-1.5 text-right font-medium">vs NAV</th>
+            <th className="px-1.5 py-1.5 text-right font-medium">Fee</th>
             <th className="px-1.5 py-1.5 text-right font-medium">₹Cr/day</th>
             <th className="px-3 py-1.5 text-right font-medium">1Y NAV</th>
           </tr>
@@ -100,6 +101,7 @@ function SameIndex({ doc }: { doc: EtfDoc }) {
                 {r.thin && <span className="ml-1 text-[10px] text-[var(--ink3)]">thin</span>}
               </td>
               <td className={`px-1.5 py-2 text-right ${premClass(r.prem)}`}>{premText(r.prem)}</td>
+              <td className="px-1.5 py-2 text-right text-[var(--ink2)]">{r.ter == null ? "—" : `${r.ter.toFixed(2)}%`}</td>
               <td className="px-1.5 py-2 text-right text-[var(--ink2)]">{r.turnover_cr.toLocaleString("en-IN", { maximumFractionDigits: 1 })}</td>
               <td className="px-3 py-2 text-right text-[var(--ink2)]">{pctText(r.r1y_nav)}</td>
             </tr>
@@ -214,6 +216,9 @@ function EtfView() {
       <Card title="About">
         <dl className="px-3 pb-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
           <dt className="text-[var(--ink3)]">Tracks</dt><dd>{doc.underlying || "—"}</dd>
+          <dt className="text-[var(--ink3)]">Fee</dt>
+          <dd>{doc.ter == null ? "—" : `${doc.ter.toFixed(2)}% a year`}
+            {doc.ter_date && <span className="text-xs text-[var(--ink3)]"> · filed with AMFI for {when(doc.ter_date)}</span>}</dd>
           <dt className="text-[var(--ink3)]">Traded</dt><dd>₹{doc.turnover_cr.toLocaleString("en-IN")} Cr a day · {doc.traded_days_20} of 20 sessions</dd>
           <dt className="text-[var(--ink3)]">Listed</dt><dd>{when(doc.listed)}</dd>
           <dt className="text-[var(--ink3)]">ISIN</dt><dd className="font-mono text-xs self-center">{doc.isin ?? "—"}</dd>
