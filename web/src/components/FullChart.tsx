@@ -637,6 +637,8 @@ export default function FullChart({ symbol }: { symbol: string }) {
       layout: {
         background: { color: p.bg }, textColor: p.ink3, fontSize: 11, fontFamily: p.font,
         panes: { separatorColor: p.line, separatorHoverColor: alpha(p.ink3, 0.25), enableResize: true },
+        // Credited in Settings > About instead - see the note there.
+        attributionLogo: false,
       },
       grid: { vertLines: { color: p.grid }, horzLines: { color: p.grid } },
       crosshair: {

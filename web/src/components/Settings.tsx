@@ -68,6 +68,7 @@ const ICON = {
   update: "M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5V9H15",
   version: "M12 3.5a8.5 8.5 0 1 0 0 17a8.5 8.5 0 0 0 0-17zM12 11v5.5M12 7.8v.01",
   change: "M3.5 12h5M15.5 12h5M12 8.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 0 0 0-7z",
+  charts: "M7 3.5v17M17 3.5v17M5 8h4v7H5zM15 6.5h4v7h-4z",
 };
 
 export type SectionMode = "scroll" | "swipe";
@@ -340,6 +341,18 @@ function MainScreen() {
           right={BUILD_COMMIT ? <span className="font-mono text-xs text-[var(--ink3)] shrink-0">{BUILD_COMMIT.slice(0, 7)}</span> : null}
         />
         {BUILD_SUBJECT && <Row icon={<Glyph d={ICON.change} />} title="Latest change" sub={BUILD_SUBJECT} wrap />}
+        {/* The full chart's library asks for this credit and a link to its
+            makers somewhere users can find it. Given here, the chart itself
+            carries no logo - which sat over the left end of its timeline, and
+            a tap meant for a tag there left the app for tradingview.com. */}
+        <Row
+          icon={<Glyph d={ICON.charts} />}
+          title="Charts by TradingView"
+          sub="TradingView Lightweight Charts™ · © 2026 TradingView, Inc. · Apache 2.0"
+          href="https://www.tradingview.com/"
+          external
+          wrap
+        />
       </Group>
     </div>
   );
