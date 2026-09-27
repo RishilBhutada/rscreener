@@ -489,6 +489,8 @@ export default function FullChart({ symbol }: { symbol: string }) {
 
   const [file, setFile] = useState<ChartFile | null>(null);
   const [company, setCompany] = useState<Company | null>(null);
+  // An ETF's own file: its name and each day's NAV, drawn over the candles.
+  const [etfDoc, setEtfDoc] = useState<{ name: string; rows: [number, number, number | null, number | null][] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [index, setIndex] = useState<{ symbol: string; name: string; mcap: number }[]>([]);
   const [view, setView] = useState<View>("price");
@@ -528,11 +530,24 @@ export default function FullChart({ symbol }: { symbol: string }) {
   useEffect(() => {
     if (!symbol) return;
     let live = true;
-    setFile(null); setCompany(null); setError(null);
-    fetch(`${BASE}/charts/${encodeURIComponent(symbol)}.json`)
-      .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
-      .then((d: ChartFile) => { if (live) setFile(d); })
-      .catch(() => { if (live) setError("No price history is published for this company yet."); });
+    setFile(null); setCompany(null); setError(null); setEtfDoc(null);
+    // The candles and, for an ETF, its NAV file, set TOGETHER. Arriving apart,
+    // the chart drew once, then drew again for the NAV line - and the second
+    // build kept the first one's window, which had not yet settled on the
+    // chosen range: "1Y" showed ten weeks.
+    Promise.all([
+      fetch(`${BASE}/charts/${encodeURIComponent(symbol)}.json`)
+        .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); }),
+      fetch(`${BASE}/etf/${encodeURIComponent(symbol)}.json`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+    ])
+      .then(([d, e]: [ChartFile, { name?: string; rows?: [number, number, number | null, number | null][] } | null]) => {
+        if (!live) return;
+        if (e?.rows) setEtfDoc({ name: String(e.name ?? ""), rows: e.rows });
+        setFile(d);
+      })
+      .catch(() => { if (live) setError(`No price history is published for ${symbol} yet.`); });
     // The valuation views, results and corporate actions live in the company
     // file the company page already uses.
     fetch(`${BASE}/companies/${encodeURIComponent(symbol)}.json`)
@@ -570,7 +585,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
     return () => { mo.disconnect(); document.removeEventListener("fullscreenchange", onFs); };
   }, []);
 
-  const name = company?.snapshot?.name || index.find((r) => r.symbol === symbol)?.name || "";
+  const name = company?.snapshot?.name || etfDoc?.name || index.find((r) => r.symbol === symbol)?.name || "";
   const exch = company?.exchange === "BSE" ? "BSE" : "NSE";
   const tq = company?.trend?.quarterly ?? null;
   const avail: Record<View, boolean> = {
@@ -717,6 +732,21 @@ export default function FullChart({ symbol }: { symbol: string }) {
       }
       anchor = main; anchorDays = days;
 
+      // An ETF's NAV as a line over its candles. A weekly or monthly candle
+      // takes the NAV of the last valued day inside it - the day its close is
+      // from - so the gap between candle and line is that period's premium.
+      const navArr: (number | null)[] = [];
+      if (etfDoc && !comparing) {
+        const nd: number[] = [], nv: number[] = [];
+        for (const r of etfDoc.rows) if (r[2] !== null) { nd.push(r[0]); nv.push(r[2]); }
+        for (let i = 0; i < days.length; i++) {
+          const end = i + 1 < days.length ? days[i + 1] - 1 : days[i] + (interval === "d" ? 0 : 40);
+          const j = nd.length ? atOrBefore(nd, end) : -1;
+          navArr.push(j >= 0 && nd[j] >= days[i] && nd[j] <= end ? nv[j] : null);
+        }
+        if (navArr.some((x) => x !== null)) line(p.alt, 2).setData(pts(days, navArr));
+      }
+
       // A comparison is drawn as percentage change from the left edge of the
       // window - two share prices in rupees have no common scale. Averages
       // mean nothing once rebased, so they step aside, as on the company chart.
@@ -774,6 +804,13 @@ export default function FullChart({ symbol }: { symbol: string }) {
           add(onInd.has("ema21"), "EMA 21", e21, FIXED.ema21!);
         }
         add(onInd.has("rsi"), "RSI", r14, FIXED.rsi!, (x) => x.toFixed(1));
+        const nav = navArr[i];
+        if (nav !== null && nav !== undefined) {
+          const prem = (c / nav - 1) * 100;
+          items.push({ label: "NAV", value: `₹${price(nav)}`, color: p.alt });
+          items.push({ label: "vs NAV", value: `${prem >= 0 ? "+" : ""}${prem.toFixed(1)}%`,
+            color: Math.abs(prem) < 0.5 ? p.ink3 : prem > 0 ? p.dma50 : p.alt });
+        }
         if (comparing && peerRows.length && cmpSym) {
           const j = atOrBefore(peerDays, t);
           items.push({ label: cmpSym, value: `₹${price(peerRows[j][4])}`, color: p.alt });
@@ -981,7 +1018,8 @@ export default function FullChart({ symbol }: { symbol: string }) {
 
       // 1. Quarters as tinted blocks behind the chart, first candle of each
       //    fiscal quarter to its last. The series only carries the layer.
-      if (shadeQ) {
+      // Fiscal quarters mark a company's results season - nothing to an ETF.
+      if (shadeQ && company) {
         const spans: QSpan[] = [];
         for (const d of anchorDays) {
           const dt = new Date(d * DAY * 1000);
@@ -1118,7 +1156,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
     };
     // `range` is applied below without a rebuild.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, company, view, interval, prefs, peWin, showQ, showDates, showChg, epsCmp, showCA, caOn, hidden, cmpFile, cmpCo, cmpSym, themeKey, symbol, shadeQ]);
+  }, [file, company, view, interval, prefs, peWin, showQ, showDates, showChg, epsCmp, showCA, caOn, hidden, cmpFile, cmpCo, cmpSym, themeKey, symbol, shadeQ, etfDoc]);
 
   const applyRange = () => {
     const chart = chartRef.current, sp = spanRef.current;
@@ -1136,7 +1174,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const back = () => {
     const from = sessionStorage.getItem("rs_chart_from");
     if (from && from.includes(`s=${encodeURIComponent(symbol)}`)) router.back();
-    else router.replace(`/company?s=${encodeURIComponent(symbol)}`);
+    else router.replace(`/${etfDoc ? "etf" : "company"}?s=${encodeURIComponent(symbol)}`);
   };
   const toggleFull = async () => {
     try {
@@ -1174,9 +1212,10 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const tone = (x: number | null | undefined) => (x == null ? "text-[var(--ink2)]" : x >= 0 ? "text-[var(--pos)]" : "text-[var(--neg)]");
   const indOn = (k: Ind) => prefs.inds.includes(k);
   const kindLabel = KINDS.find(([k]) => k === prefs.kind)?.[1] ?? "Candles";
-  const nLayers = view === "price"
-    ? prefs.inds.length + (showCA ? 1 : 0) + (showDates ? 1 : 0)
-    : (showCA ? 1 : 0) + (showDates ? 1 : 0) + (showQ ? 1 : 0);
+  // Only switches that draw something here: an ETF has no results or
+  // corporate actions, and counting them told it "3 on" with one showing.
+  const evOn = (showCA && (company?.actions?.length ?? 0) > 0 ? 1 : 0) + (showDates && (company?.quarters?.length ?? 0) > 0 ? 1 : 0);
+  const nLayers = view === "price" ? prefs.inds.length + evOn : evOn + (showQ ? 1 : 0);
   // Counted against the chart's window as it is NOW, read when the sheet
   // renders. A copy kept in state lagged a step behind a range change, so the
   // sheet said "2 in view" over a chart showing 4.
@@ -1446,14 +1485,14 @@ export default function FullChart({ symbol }: { symbol: string }) {
                   </>
                 )}
 
-                <Head>Events</Head>
+                {company && <Head>Events</Head>}
                 {(company?.quarters?.length ?? 0) > 0 && (
                   <Toggle on={showDates} label="Result dates" sub="The day each quarter's results were declared" onClick={() => setShowDates(!showDates)} />
                 )}
                 {(company?.actions?.length ?? 0) > 0 && (
                   <Toggle on={showCA} label="Corporate actions" sub="Dividends, bonuses, splits and rights, on their ex-date" onClick={() => setShowCA(!showCA)} />
                 )}
-                <Toggle on={shadeQ} label="Quarter bands" sub="Each fiscal quarter tinted in its colour behind the chart" onClick={() => setShadeQ(!shadeQ)} />
+                {company && <Toggle on={shadeQ} label="Quarter bands" sub="Each fiscal quarter tinted in its colour behind the chart" onClick={() => setShadeQ(!shadeQ)} />}
                 {showCA && (
                   <div className="pl-6">
                     {CA_ORDER.filter((k) => (company?.actions ?? []).some((a) => (CA_LABEL[a.kind] ? a.kind : "other") === k)).map((k) => (

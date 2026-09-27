@@ -46,7 +46,7 @@ DB = ROOT / "data" / "rscreener.db"
 NSE_LIST = "https://archives.nseindia.com/content/equities/eq_etfseclist.csv"
 AMFI_NAV = "https://portal.amfiindia.com/spages/NAVAll.txt"
 MFAPI = "https://api.mfapi.in/mf/{code}"
-CHART = "https://query2.finance.yahoo.com/v8/finance/chart/{sym}?range={rng}&interval=1d"
+CHART = "https://query2.finance.yahoo.com/v8/finance/chart/{sym}?range={rng}&interval={itv}"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     "Accept": "*/*",
@@ -128,7 +128,16 @@ def schema(con: sqlite3.Connection) -> None:
             ticker TEXT, date TEXT, close REAL, PRIMARY KEY (ticker, date));
         CREATE TABLE IF NOT EXISTS etf_prices (
             symbol TEXT, date TEXT, close REAL, volume REAL, PRIMARY KEY (symbol, date));
+        CREATE TABLE IF NOT EXISTS etf_prices_monthly (
+            symbol TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL, volume REAL,
+            PRIMARY KEY (symbol, date));
     """)
+    # Open, high and low arrived with the full-screen chart's candles; the
+    # table was first written with closes only.
+    have = {r[1] for r in con.execute("PRAGMA table_info(etf_prices)")}
+    for col in ("open", "high", "low"):
+        if col not in have:
+            con.execute(f"ALTER TABLE etf_prices ADD COLUMN {col} REAL")
 
 
 def load_list(session: requests.Session, con: sqlite3.Connection) -> list[dict]:
@@ -243,35 +252,48 @@ def load_history(session: requests.Session, con: sqlite3.Connection, limit: int,
     print(f"NAV history: {ok} read, {bad} failed")
 
 
-def yahoo_daily(session: requests.Session, ticker: str, rng: str) -> list[tuple[str, float, float]]:
-    """(date, close, volume) per session, dated in the market's own time zone
-    (Yahoo stamps a session by its opening instant)."""
-    r = session.get(CHART.format(sym=requests.utils.quote(ticker, safe=""), rng=rng), timeout=30)
+def yahoo_bars(session: requests.Session, ticker: str, rng: str, itv: str = "1d") -> list[tuple]:
+    """(date, open, high, low, close, volume) per bar, dated in the market's
+    own time zone (Yahoo stamps a bar by its opening instant) - so a monthly
+    bar is dated the 1st of its month, not the last day of the one before."""
+    r = session.get(CHART.format(sym=requests.utils.quote(ticker, safe=""), rng=rng, itv=itv), timeout=30)
     r.raise_for_status()
     res = r.json()["chart"]["result"][0]
     off = timedelta(seconds=res["meta"].get("gmtoffset") or 0)
     q = res["indicators"]["quote"][0]
+    n = len(res.get("timestamp") or [])
+    col = lambda k: (q.get(k) or [None] * n)  # noqa: E731
     out = {}
-    for ts, c, v in zip(res.get("timestamp") or [], q.get("close") or [], q.get("volume") or []):
+    for ts, o, h, lo, c, v in zip(res.get("timestamp") or [], col("open"), col("high"), col("low"), col("close"), col("volume")):
         if c:
-            out[(datetime.fromtimestamp(ts, timezone.utc) + off).strftime("%Y-%m-%d")] = (c, v or 0)
-    return [(d, c, v) for d, (c, v) in sorted(out.items())]
+            out[(datetime.fromtimestamp(ts, timezone.utc) + off).strftime("%Y-%m-%d")] = (o, h, lo, c, v or 0)
+    return [(d, *vals) for d, vals in sorted(out.items())]
 
 
 def load_prices(session: requests.Session, con: sqlite3.Connection, sleep: float) -> None:
-    """Five years of NSE daily closes for every ETF, replaced per ETF only when
-    a response actually arrived - an empty answer never erases a history."""
+    """Five years of NSE daily bars for every ETF, replaced per ETF only when
+    a response actually arrived - an empty answer never erases a history. And,
+    once per ETF, its monthly bars back to listing, for the long view of the
+    full-screen chart (NIFTYBEES reaches 2002)."""
     syms = [s for (s,) in con.execute("SELECT symbol FROM etfs ORDER BY symbol")]
+    have_monthly = {s for (s,) in con.execute("SELECT DISTINCT symbol FROM etf_prices_monthly")}
     ok = bad = 0
     for i, sym in enumerate(syms):
         if budget.stop(i, len(syms), "ETF price histories"):
             break
         try:
-            rows = yahoo_daily(session, f"{sym}.NS", "5y")
+            rows = yahoo_bars(session, f"{sym}.NS", "5y")
             if not rows:
                 raise ValueError("no closes returned")
             con.execute("DELETE FROM etf_prices WHERE symbol=?", (sym,))
-            con.executemany("INSERT INTO etf_prices VALUES (?,?,?,?)", [(sym, d, c, v) for d, c, v in rows])
+            con.executemany("INSERT INTO etf_prices (symbol, date, open, high, low, close, volume) VALUES (?,?,?,?,?,?,?)",
+                            [(sym, *r) for r in rows])
+            if sym not in have_monthly:
+                time.sleep(sleep)
+                month = yahoo_bars(session, f"{sym}.NS", "max", "1mo")
+                if month:
+                    con.executemany("INSERT OR REPLACE INTO etf_prices_monthly VALUES (?,?,?,?,?,?,?)",
+                                    [(sym, *r) for r in month])
             con.commit()
             ok += 1
         except Exception as e:  # noqa: BLE001 - one ETF's failure is not the run's
@@ -288,7 +310,7 @@ def load_indices(session: requests.Session, con: sqlite3.Connection) -> None:
                      | {t for (t,) in con.execute("SELECT DISTINCT fx_ticker FROM etfs WHERE fx_ticker IS NOT NULL")})
     for t in tickers:
         try:
-            rows = [(d, c) for d, c, _v in yahoo_daily(session, t, "10y")]
+            rows = [(d, c) for d, _o, _h, _l, c, _v in yahoo_bars(session, t, "10y")]
             if len(rows) < 200:
                 raise ValueError(f"only {len(rows)} days")
             con.executemany("INSERT OR REPLACE INTO index_prices VALUES (?,?,?)", [(t, d, c) for d, c in rows])

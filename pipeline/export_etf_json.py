@@ -21,6 +21,8 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from statistics import mean, median
 
+from export_chart_json import OUT as CHART_DIR, _day, _normalise, _px
+
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
 LIST_OUT = ROOT / "web" / "public" / "etfs.json"
@@ -74,6 +76,26 @@ def returns(series: list[tuple[str, float]]) -> dict:
     return out
 
 
+def tidy_wick(o: float, h: float, lo: float, c: float) -> tuple[float, float, bool]:
+    """(high, low, trimmed) for one of the provider's long-history monthly bars.
+
+    Yahoo's monthly history carries corrupt extremes: MON100's June 2021 bar has
+    a low of 10.07 between an open of 98.99 and a close of 107.20 - a print at a
+    tenth of the price, drawn as a wick to the floor of the Max chart. 224 such
+    bars across 26 ETFs on 27-Sep-2026, none in the daily bars. A month's wick
+    below half its body, or above double it, is trimmed back to the body."""
+    body_lo, body_hi = min(o, c), max(o, c)
+    trimmed = False
+    if lo < 0.5 * body_lo:
+        lo, trimmed = body_lo, True
+    if h > 2 * body_hi:
+        h, trimmed = body_hi, True
+    # And a candle always spans its own open and close. Missing highs and lows
+    # arrive as 0 (BANKBEES, 2012) and stand in as the close, which left a
+    # "high" below the open.
+    return max(h, body_hi), min(lo, body_lo), trimmed
+
+
 def main() -> None:
     con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
     if not con.execute("SELECT 1 FROM sqlite_master WHERE name='etfs'").fetchone():
@@ -85,10 +107,27 @@ def main() -> None:
     syms = [e[0] for e in etfs]
     q = ",".join("?" * len(syms))
     px: dict[str, list[tuple[str, float, float]]] = {}
-    for s, d, c, v in con.execute(
-            f"SELECT symbol, date, close, volume FROM etf_prices WHERE close IS NOT NULL"
+    bars: dict[str, list[tuple]] = {}
+    # Open/high/low came later than the table; until a fetch has added them the
+    # candles are flat at the close rather than the export failing.
+    cols = {r[1] for r in con.execute("PRAGMA table_info(etf_prices)")}
+    ohl = "open, high, low" if {"open", "high", "low"} <= cols else "close, close, close"
+    for s, d, c, v, o, h, lo in con.execute(
+            f"SELECT symbol, date, close, volume, {ohl} FROM etf_prices WHERE close IS NOT NULL"
             f" AND symbol IN ({q}) ORDER BY symbol, date", syms):
         px.setdefault(s, []).append((d, c, v or 0))
+        o, h, lo = o or c, h or c, lo or c
+        bars.setdefault(s, []).append((d, o, max(h, o, c), min(lo, o, c), c, v or 0))
+    monthly: dict[str, list[tuple]] = {}
+    wicks = 0
+    if con.execute("SELECT 1 FROM sqlite_master WHERE name='etf_prices_monthly'").fetchone():
+        for s, d, o, h, lo, c, v in con.execute(
+                f"SELECT symbol, date, open, high, low, close, volume FROM etf_prices_monthly"
+                f" WHERE close IS NOT NULL AND symbol IN ({q}) ORDER BY symbol, date", syms):
+            o, h, lo = o or c, h or c, lo or c
+            h, lo, cut = tidy_wick(o, h, lo, c)
+            wicks += cut
+            monthly.setdefault(s, []).append((d, o, h, lo, c, v or 0))
     navs: dict[str, dict[str, float]] = {}
     for s, d, n in con.execute(f"SELECT symbol, date, nav FROM etf_nav WHERE symbol IN ({q})", syms):
         navs.setdefault(s, {})[d] = n
@@ -100,7 +139,9 @@ def main() -> None:
     con.close()
 
     DIR_OUT.mkdir(parents=True, exist_ok=True)
+    CHART_DIR.mkdir(parents=True, exist_ok=True)
     listing = []
+    charts = 0
     for (sym, name, security, underlying, ukey, klass, isin, listed, code, scheme,
          itick, fxtick, ilabel) in etfs:
         prices = px.get(sym) or []
@@ -174,6 +215,20 @@ def main() -> None:
             "rows": rows,
         }
         (DIR_OUT / f"{sym}.json").write_text(json.dumps(doc, separators=(",", ":"), allow_nan=False), encoding="utf-8")
+        # Candles for the full-screen chart, in the company charts' format and
+        # through the same builder: weekly and monthly from the NSE daily bars
+        # wherever they reach, the provider's monthly bars only before that.
+        b = bars.get(sym) or []
+        if b:
+            candles = {
+                "s": sym,
+                "d": [[_day(d), _px(o), _px(h), _px(lo), _px(c), int(v)] for d, o, h, lo, c, v in b],
+                "m": [[_day(d), _px(o), _px(h), _px(lo), _px(c), int(v)] for d, o, h, lo, c, v in monthly.get(sym, [])],
+            }
+            _normalise(candles)
+            candles["asof"] = b[-1][0]
+            (CHART_DIR / f"{sym}.json").write_text(json.dumps(candles, separators=(",", ":"), allow_nan=False), encoding="utf-8")
+            charts += 1
         listing.append({k: doc[k] for k in (
             "s", "name", "underlying", "class", "price", "price_date", "nav", "nav_date", "prem", "prem_date",
             "prem_avg_1m", "turnover_cr", "thin")} | {
@@ -190,7 +245,8 @@ def main() -> None:
         "etfs": listing,
     }, separators=(",", ":"), allow_nan=False), encoding="utf-8")
     print(f"ETFs: {len(listing)} exported, {len(with_prem)} with a same-day premium, "
-          f"{sum(1 for x in listing if x['thin'])} thinly traded")
+          f"{sum(1 for x in listing if x['thin'])} thinly traded, {charts} candle files "
+          f"({wicks} corrupt monthly wicks trimmed)")
 
     # Into the search index as well, so an ETF can be searched for, and a
     # portfolio or watchlist holding one keeps its price - they left the

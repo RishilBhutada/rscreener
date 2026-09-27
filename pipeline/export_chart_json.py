@@ -155,6 +155,10 @@ def main() -> None:
             cur_sym, doc = sym, {"s": sym}
         close = _px(c)
         o, h, lo = _px(o) if o else close, _px(h) if h else close, _px(lo) if lo else close
+        # A candle spans its own open and close. A missing high or low stands in
+        # as the close, which put 1,177 "highs" below their opens across 724
+        # companies (27-Sep-2026) - a candle the eye reads, and cannot be real.
+        h, lo = max(h, o, close), min(lo, o, close)
         doc.setdefault(key, []).append([_day(d), o, h, lo, close, int(v) if v else 0])
     flush()
     con.close()

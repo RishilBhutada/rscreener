@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import InfoTip from "@/components/InfoTip";
 import { CLASS_LABEL, pctText, premClass, premSentence, premText, type EtfDoc, type Returns } from "@/lib/etf";
@@ -19,11 +20,11 @@ const money = (v: number | null | undefined) =>
 const when = (d: string | null | undefined) =>
   d ? new Date(`${d}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : "—";
 
-function Card({ title, tip, children }: { title: string; tip?: React.ReactNode; children: React.ReactNode }) {
+function Card({ title, tip, action, children }: { title: string; tip?: React.ReactNode; action?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
       <h2 className="px-3 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)] flex items-center gap-1">
-        {title}{tip}
+        {title}{tip}{action && <span className="ml-auto normal-case tracking-normal">{action}</span>}
       </h2>
       {children}
     </section>
@@ -128,7 +129,18 @@ function EtfView() {
         )}
       </section>
 
-      <Card title="Price vs what it holds" tip={
+      <Card title="Price vs what it holds" action={
+        <Link href={`/chart?s=${encodeURIComponent(doc.s)}`}
+          // Remembered so the full chart's back arrow returns here.
+          onClick={() => { try { sessionStorage.setItem("rs_chart_from", location.pathname + location.search); } catch { /* private mode */ } }}
+          aria-label="Open the full-screen chart" title="Candles, indicators, full screen"
+          className="rs-press inline-flex items-center gap-1.5 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold text-[var(--accent-ink)] bg-[var(--accent-soft)]">
+          <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+          </svg>
+          Full view
+        </Link>
+      } tip={
         <InfoTip title="Price vs what it holds">
           <p>Top: the exchange price, the NAV and {doc.index ? `the ${doc.index.label}` : "no index (none with a free full history)"}, each as % change from the left edge of the chart.</p>
           <p>Bottom: the premium — price over NAV — each day. Above zero, buyers are paying more than the units hold.</p>
