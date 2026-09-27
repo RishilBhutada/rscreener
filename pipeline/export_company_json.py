@@ -17,6 +17,7 @@ import pandas as pd
 from export_json import freshen_prices
 from fetch_corporate_actions import dividend_detail
 from trend_lib import build_trends, net_debt_series, ratio_bands
+import fund_units
 
 
 def clean_nan(o):
@@ -650,6 +651,19 @@ def main() -> None:
     con.execute("CREATE INDEX IF NOT EXISTS idx_statements_symbol ON statements(symbol)")
     con.commit()
     snaps = pd.read_sql("SELECT * FROM fundamentals", con)
+    # Fund units are not companies (fund_units.py). Their old pages are removed
+    # too - the published site is built from this folder, and a file left in it
+    # stays online with a price that no longer updates.
+    funds = fund_units.symbols(con)
+    snaps = snaps[~snaps["symbol"].isin(funds)].reset_index(drop=True)
+    gone = 0
+    for s in funds:
+        f = OUT_DIR / f"{s}.json"
+        if f.exists():
+            f.unlink()
+            gone += 1
+    if gone:
+        print(f"  removed {gone} company pages that were fund units")
     # Same correction as data.json, from the same function: the company page falls
     # back to this snapshot when the screener row is missing, so a stale price here
     # would leak straight back onto the page the fix was written for.

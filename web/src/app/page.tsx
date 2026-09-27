@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
-import { loadIndex } from "@/lib/index-data";
+import { loadIndex, symbolHref } from "@/lib/index-data";
 import { loadRecent } from "@/lib/store";
 import { allWatched, loadLists } from "@/lib/watchlists";
 import { shortName } from "@/lib/names";
@@ -67,7 +67,7 @@ export default function Home() {
     return watch.map((s) => by.get(s)).filter(Boolean).slice(0, 8) as Lite[];
   }, [watch, rows]);
 
-  const go = (sym: string) => router.push(`/company?s=${encodeURIComponent(sym)}`);
+  const go = (sym: string) => router.push(symbolHref(sym));
   const nameOf = (sym: string) => {
     const hit = rows.find((r) => r.symbol === sym);
     return hit ? shortName(hit.name, sym) : sym;
@@ -100,7 +100,7 @@ export default function Home() {
           {syms.slice(0, 20).map((sym) => (
             <Link
               key={sym}
-              href={`/company?s=${encodeURIComponent(sym)}`}
+              href={symbolHref(sym)}
               className="text-sm rounded-lg border border-[var(--line)] bg-[var(--card)] px-2.5
                          min-h-[44px] flex items-center whitespace-nowrap shrink-0
                          [scroll-snap-align:start]
@@ -139,7 +139,7 @@ export default function Home() {
               else if (e.key === "Escape") setQ("");
             }}
             placeholder="Search a company or symbol"
-            aria-label="Search for a company"
+            aria-label="Search a company or ETF"
             autoComplete="off"
             className="w-full rounded-xl border border-[var(--line2)] bg-[var(--card)] pl-11 pr-4 py-3.5 text-base
                        text-[var(--ink)] placeholder:text-[var(--ink3)]
@@ -194,7 +194,7 @@ export default function Home() {
               {watchRows.map((r) => (
                 <Link
                   key={r.symbol}
-                  href={`/company?s=${encodeURIComponent(r.symbol)}`}
+                  href={symbolHref(r.symbol)}
                   className="flex items-center gap-3 px-3.5 min-h-[46px] border-t border-[var(--line)] hover:bg-[var(--card2)] active:bg-[var(--card2)]"
                 >
                   {/* One line, not two. The name and ticker sat stacked, so eight

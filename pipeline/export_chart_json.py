@@ -26,6 +26,7 @@ import json
 import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
+import fund_units
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
@@ -127,10 +128,15 @@ def main() -> None:
     written, total_bytes = 0, 0
     cur_sym: str | None = None
     doc: dict = {}
+    # Fund units' stored prices are their BSE closes, from when they sat in the
+    # company universe - stale, and not what the ETFs section shows.
+    funds = fund_units.symbols(con)
+    for s in funds:
+        (OUT / f"{s}.json").unlink(missing_ok=True)
 
     def flush() -> None:
         nonlocal written, total_bytes
-        if cur_sym is None:
+        if cur_sym is None or cur_sym in funds:
             return
         _normalise(doc)
         daily = doc.get("d") or doc.get("w") or doc.get("m") or []

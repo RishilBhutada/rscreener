@@ -4,7 +4,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Settings from "@/components/Settings";
-import { loadIndex } from "@/lib/index-data";
+import { loadIndex, symbolHref } from "@/lib/index-data";
 import { BUILD_COMMIT, BUILD_SUBJECT, BUILD_TIME } from "@/lib/buildinfo";
 import { DESTINATIONS, BAR_SLOTS } from "@/lib/destinations";
 import {
@@ -493,7 +493,7 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
   const go = (sym: string) => {
     setQ("");
     (document.activeElement as HTMLElement | null)?.blur();
-    router.push(`/company?s=${encodeURIComponent(sym)}`);
+    router.push(symbolHref(sym));
   };
 
   // Which four sit in the bar is the reader's choice now, not a guess. The old
@@ -544,8 +544,8 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
               else if (e.key === "Enter" && matches[hi]) go(matches[hi].symbol);
               else if (e.key === "Escape") (e.target as HTMLElement).blur();
             }}
-            placeholder="Search for a company"
-            aria-label="Search for a company"
+            placeholder="Search a company or ETF"
+            aria-label="Search a company or ETF"
             className="w-full text-sm bg-[var(--card2)] border border-[var(--line)] rounded-full px-4 py-2.5 sm:py-1.5 focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:bg-[var(--card)]"
           />
           {(matches.length > 0 || suggestion || (ql.trim().length >= 2 && idx)) && (
@@ -572,7 +572,7 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
                   resolves to Reliance Industries. */}
               {matches.length === 0 && (
                 <div className="px-4 py-2.5 text-sm">
-                  <p className="text-[var(--ink3)]">No company matches &ldquo;{ql.trim()}&rdquo;</p>
+                  <p className="text-[var(--ink3)]">Nothing matches &ldquo;{ql.trim()}&rdquo;</p>
                   {suggestion && (
                     <button
                       onMouseDown={(e) => { e.preventDefault(); go(suggestion.symbol); }}

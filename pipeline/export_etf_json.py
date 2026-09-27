@@ -192,6 +192,22 @@ def main() -> None:
     print(f"ETFs: {len(listing)} exported, {len(with_prem)} with a same-day premium, "
           f"{sum(1 for x in listing if x['thin'])} thinly traded")
 
+    # Into the search index as well, so an ETF can be searched for, and a
+    # portfolio or watchlist holding one keeps its price - they left the
+    # company table (fund_units.py), which is where those pages read prices.
+    # Flagged in an 11th column so links open the ETF page, not a company one.
+    ix_path = ROOT / "web" / "public" / "index.json"
+    if ix_path.exists():
+        ix = json.loads(ix_path.read_text(encoding="utf-8"))
+        have = {r[0] for r in ix.get("rows", [])}
+        add = [[x["s"], x["name"], "NSE", x["price"], None, 0, None, None, None, None, 1]
+               for x in listing if x["s"] not in have]
+        ix["rows"] = ix.get("rows", []) + add
+        if "etf" not in ix.get("fields", []):
+            ix["fields"] = ix.get("fields", []) + ["etf"]
+        ix_path.write_text(json.dumps(ix, ensure_ascii=False, allow_nan=False, separators=(",", ":")), encoding="utf-8")
+        print(f"  search index: {len(add)} ETFs added")
+
 
 if __name__ == "__main__":
     main()

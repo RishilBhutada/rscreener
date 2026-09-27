@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import InfoTip from "@/components/InfoTip";
-import { loadIndex } from "@/lib/index-data";
+import { loadIndex, symbolHref } from "@/lib/index-data";
 import { Row } from "@/lib/query";
 import { Holding, loadPortfolio, parseHoldings, savePortfolio } from "@/lib/portfolio";
 
@@ -206,7 +206,7 @@ export default function PortfolioPage() {
                       <tr key={h.symbol} className="border-t border-[var(--line)] hover:bg-[var(--accent-soft)]">
                         <td className="px-2 py-2 sm:px-3">
                           {h.matched ? (
-                            <Link href={`/company?s=${encodeURIComponent(h.symbol)}`} className="font-semibold text-[var(--accent-ink)] hover:underline">{h.symbol}</Link>
+                            <Link href={symbolHref(h.symbol)} className="font-semibold text-[var(--accent-ink)] hover:underline">{h.symbol}</Link>
                           ) : (
                             <span className="font-semibold text-[var(--ink3)]" title="not found in the NSE universe">{h.symbol}?</span>
                           )}

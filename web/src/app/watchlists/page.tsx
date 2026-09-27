@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
-import { loadIndex } from "@/lib/index-data";
+import { loadIndex, symbolHref } from "@/lib/index-data";
 import { Row } from "@/lib/query";
 import { shortName } from "@/lib/names";
 import {
@@ -314,7 +314,7 @@ export default function WatchlistsPage() {
                     {rows.map(({ symbol, row }) => (
                       <tr key={symbol} className="border-t border-[var(--line)] hover:bg-[var(--card2)]">
                         <td className="px-3 py-2">
-                          <Link href={`/company?s=${encodeURIComponent(symbol)}`} className="font-medium text-[var(--ink)] hover:text-[var(--accent-ink)]">
+                          <Link href={symbolHref(symbol)} className="font-medium text-[var(--ink)] hover:text-[var(--accent-ink)]">
                             {row ? shortName(String(row.name ?? ""), symbol) : symbol}
                           </Link>
                           <span className="text-[var(--ink3)] text-xs ml-2">{symbol}</span>

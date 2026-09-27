@@ -1558,7 +1558,14 @@ function CompanyView() {
     fetch(`${BASE}/companies/${symbol}.json`, isRefreshLoad() ? { cache: "reload" } : undefined)
       .then((r) => { if (!r.ok) throw new Error(`no data for ${symbol}`); return r.json(); })
       .then(setCompany)
-      .catch((e) => setError(String(e.message ?? e)));
+      .catch((e) => {
+        // An ETF's old company link - bookmarked, or shared before ETFs left the
+        // company table on 27-Sep-2026. It has a page of its own now.
+        const fail = () => setError(String(e.message ?? e));
+        fetch(`${BASE}/etf/${encodeURIComponent(symbol)}.json`, { method: "HEAD" })
+          .then((r) => (r.ok ? window.location.replace(`${BASE}/etf/?s=${encodeURIComponent(symbol)}`) : fail()))
+          .catch(fail);
+      });
   }, [symbol]);
 
   useEffect(() => {

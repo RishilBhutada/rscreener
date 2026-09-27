@@ -20,6 +20,7 @@ import pandas as pd
 
 from ratios_lib import compute_ratios, derived_roe, latest_annual_items, latest_promoter
 from trend_lib import avg_npm_5y, build_trends, cagr_pct, ratio_bands
+import fund_units
 
 
 def clean_nan(o):
@@ -430,6 +431,13 @@ def freshen_prices(con, df):
 def main() -> None:
     con = sqlite3.connect(DB, timeout=180)
     df = pd.read_sql("SELECT * FROM fundamentals", con)
+    # Fund units stay out of the company table - see fund_units.py. Snapshots
+    # fetched while they were in the universe are still stored.
+    funds = fund_units.symbols(con)
+    before = len(df)
+    df = df[~df["symbol"].isin(funds)].reset_index(drop=True)
+    if before != len(df):
+        print(f"  left out {before - len(df)} fund units (ETFs and scheme units) - not companies")
     df, price_asof = freshen_prices(con, df)  # never show a price older than the series we hold
     n_universe = pd.read_sql("SELECT COUNT(*) n FROM universe", con)["n"][0]
     shares_by_symbol = {

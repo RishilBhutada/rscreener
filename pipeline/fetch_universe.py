@@ -9,6 +9,8 @@ import sqlite3
 from pathlib import Path
 
 import pandas as pd
+
+from fund_units import is_fund_isin, remember
 import requests
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -145,6 +147,11 @@ def main() -> None:
             pass
     universe = pd.concat([keep, extra], ignore_index=True) if len(extra) else keep
 
+    # ETFs and other mutual-fund units are not companies - see fund_units.py.
+    # BSE lists them as equity scrips; they have their own section now.
+    funds = universe[universe["ISIN NUMBER"].map(is_fund_isin)]
+    universe = universe[~universe["ISIN NUMBER"].map(is_fund_isin)].reset_index(drop=True)
+
     # Which ticker each price source answers to. Fetchers used to hardcode
     # ".NS", which silently means "this project is NSE and always will be".
     # Carrying it as data is what lets a BSE-only company be fetched at all.
@@ -156,9 +163,10 @@ def main() -> None:
     universe.to_csv(DATA / "universe.csv", index=False)
     with sqlite3.connect(DB) as con:
         universe.to_sql("universe", con, if_exists="replace", index=False)
+        remember(con, [(s, i, e) for s, i, e in zip(funds["SYMBOL"], funds["ISIN NUMBER"], funds["EXCHANGE"])])
     n_bse = int((universe["EXCHANGE"] == "BSE").sum())
     print(f"universe: {len(universe)} companies - {len(universe) - n_bse} from NSE, "
-          f"{n_bse} listed only on BSE")
+          f"{n_bse} listed only on BSE; {len(funds)} fund units left out")
     print(universe[["SYMBOL", "NAME OF COMPANY", "EXCHANGE"]].head(3).to_string(index=False))
 
 
