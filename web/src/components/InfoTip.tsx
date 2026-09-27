@@ -29,24 +29,6 @@ export default function InfoTip({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const closeRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    // The page behind must not scroll under the popup; on a phone that is the
-    // difference between a dialog and a paragraph that happens to float.
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    closeRef.current?.focus();
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prev;
-    };
-  }, [open]);
 
   return (
     <>
@@ -77,51 +59,61 @@ export default function InfoTip({
         </svg>
       </button>
 
-      {open &&
-        typeof document !== "undefined" &&
-        createPortal(
-          <div className="fixed inset-0 z-[120] flex items-end justify-center p-3 sm:items-center sm:p-6">
-            <div
-              className="rs-fade absolute inset-0 bg-black/50"
-              onClick={() => setOpen(false)}
-              aria-hidden="true"
-            />
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-label={title}
-              className="rs-sheet relative w-full sm:max-w-md max-h-[78vh] overflow-y-auto rounded-2xl border border-[var(--line2)] bg-[var(--card)] p-4 pb-5 shadow-[0_18px_50px_rgba(0,0,0,0.35)]"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <h3 className="text-sm font-semibold text-[var(--ink)]">{title}</h3>
-                <button
-                  ref={closeRef}
-                  type="button"
-                  onClick={() => setOpen(false)}
-                  aria-label="Close"
-                  className="shrink-0 p-1 -m-1 text-[var(--ink3)] hover:text-[var(--ink)]"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.75"
-                    strokeLinecap="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M6 6l12 12M18 6L6 18" />
-                  </svg>
-                </button>
-              </div>
-              <div className="mt-2 space-y-2 text-[13px] leading-relaxed text-[var(--ink2)]">
-                {children}
-              </div>
-            </div>
-          </div>,
-          document.body,
-        )}
+      {open && <InfoDialog title={title} onClose={() => setOpen(false)}>{children}</InfoDialog>}
     </>
+  );
+}
+
+/** The popup itself, for anything that needs one without the "i" button -
+ *  the full chart opens it when an event marker is tapped. Rendered through a
+ *  portal so no scroll container or chart canvas can clip it. */
+export function InfoDialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  // Held in a ref so the set-up below runs once per opening. A parent that
+  // re-renders on every finger movement - the chart - passes a new function
+  // each time, and re-running this would steal focus back on every frame.
+  const close = useRef(onClose);
+  close.current = onClose;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close.current();
+    };
+    document.addEventListener("keydown", onKey);
+    // The page behind must not scroll under the popup; on a phone that is the
+    // difference between a dialog and a paragraph that happens to float.
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeRef.current?.focus();
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[120] flex items-end justify-center p-3 sm:items-center sm:p-6">
+      <div className="rs-fade absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="rs-sheet relative w-full sm:max-w-md max-h-[78vh] overflow-y-auto rounded-2xl border border-[var(--line2)] bg-[var(--card)] p-4 pb-5 shadow-[0_18px_50px_rgba(0,0,0,0.35)]"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <h3 className="text-sm font-semibold text-[var(--ink)]">{title}</h3>
+          <button ref={closeRef} type="button" onClick={onClose} aria-label="Close"
+            className="shrink-0 p-1 -m-1 text-[var(--ink3)] hover:text-[var(--ink)]">
+            <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
+        <div className="mt-2 space-y-2 text-[13px] leading-relaxed text-[var(--ink2)]">{children}</div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
