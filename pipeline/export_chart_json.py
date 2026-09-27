@@ -47,17 +47,13 @@ def _px(v: float | None) -> float | None:
 
 
 def _period_start(freq: str, d: date) -> date:
-    """The first day of the week or month a weekly/monthly row belongs to.
+    """The first day of the week or month a stored weekly/monthly row covers.
 
-    Yahoo labels these rows by period START, but in UTC - so the August bar
-    arrives dated 31 July and the week of Monday 24 August arrives dated
-    Sunday 23 August. Read literally, the chart printed "Jul 2026" over
-    August's candle. A Sunday (weekly) or a month's last day (monthly) is that
-    shifted start; anything else is a real trading date inside its period."""
-    if freq == "w":
-        return d + timedelta(days=1) if d.weekday() == 6 else d - timedelta(days=d.weekday())
-    nxt = d + timedelta(days=1)
-    return nxt if nxt.day == 1 else d.replace(day=1)
+    Since pipeline/price_periods.py (and its one-time migration) every stored
+    row is labelled by the day its close belongs to - a period's last day, or
+    the latest session for the period in progress - so a row simply belongs
+    to the week or month its date falls in."""
+    return d - timedelta(days=d.weekday()) if freq == "w" else d.replace(day=1)
 
 
 def _bucket(freq: str, d: date) -> date:
