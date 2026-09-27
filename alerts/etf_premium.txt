@@ -1,0 +1,12 @@
+# Rscreener ETF premium alerts - one ETF per line: SYMBOL  PERCENT
+# A notification comes when the ETF's price CROSSES that far above its NAV,
+# and again when it falls back under - once per crossing, not every day.
+# Checked nightly, when the day's NAVs are out. Edit this file (even from the
+# GitHub app on your phone); the next nightly run uses it.
+# This is a data alert, not a buy or sell signal.
+MON100      5
+MONQ50      5
+MAFANG      5
+MASPTOP50   5
+MAHKTECH    5
+HNGSNGBEES  5

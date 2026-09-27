@@ -371,6 +371,17 @@ jobs:
         # only by the nightly fetch, straight into the site folder, so each code
         # publish rebuilt the site from the repo's month-old copy.
         run: python pipeline/export_calendar_json.py
+      - name: Tell the owner's phone about ETF premiums crossing his lines
+        # alerts/etf_premium.txt holds the lines. Scheduled runs only: they are
+        # the ones with a new day's NAVs, and a code publish re-running the
+        # same day would repeat the same crossing.
+        # A failed alert must never hold back the night's data: the script
+        # pushes its own "check FAILED" message, and the run carries on.
+        if: github.event_name == 'schedule'
+        continue-on-error: true
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python alerts/etf_premium.py
       - name: Score the data and record the score
         # Runs every night, after the export and before the guards, so the score
         # describes what is about to be published. Appending to a history file
