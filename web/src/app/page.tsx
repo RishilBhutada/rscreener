@@ -7,6 +7,7 @@ import TopNav from "@/components/TopNav";
 import { loadIndex, symbolHref } from "@/lib/index-data";
 import { loadRecent } from "@/lib/store";
 import { allWatched, loadLists } from "@/lib/watchlists";
+import { loadPortfolio } from "@/lib/portfolio";
 import { shortName } from "@/lib/names";
 import { buildIndex, search, didYouMean, type SearchIndex, type SearchRow } from "@/lib/search";
 
@@ -15,6 +16,10 @@ const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 type Lite = SearchRow & { price?: number; ret_1m?: number; exchange?: string };
 
 /** A spread across sectors, shown only until there is something of the user's own. */
+type CalEvent = { kind?: string; symbol: string; purpose: string; date: string };
+/** How far ahead "Coming up" looks. */
+const AHEAD_DAYS = 14;
+
 const SUGGESTED = [
   "RELIANCE", "HDFCBANK", "TCS", "INFY", "ITC", "SBIN",
   "LT", "MARUTI", "SUNPHARMA", "TITAN", "ASIANPAINT", "COALINDIA",
@@ -33,6 +38,8 @@ export default function Home() {
   const [lists, setLists] = useState(0);
   const [recent, setRecent] = useState<string[]>([]);
   const [asof, setAsof] = useState<string | null>(null);
+  const [events, setEvents] = useState<CalEvent[]>([]);
+  const [held, setHeld] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -40,6 +47,13 @@ export default function Home() {
     setWatch(allWatched(st));
     setLists(st.lists.filter((l) => l.symbols.length > 0).length);
     setRecent(loadRecent());
+    setHeld(loadPortfolio().map((h) => h.symbol));
+    // Results meetings and ex-dates, for "Coming up". The calendar file is
+    // small; a failure just leaves the section out.
+    fetch(`${BASE}/calendar.json`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d?.events) setEvents(d.events); })
+      .catch(() => {});
     // The landing page needs a name, a symbol, a price and a one-month return.
     // It used to download the entire screener table to get them.
     loadIndex()
@@ -66,6 +80,17 @@ export default function Home() {
     const by = new Map(rows.map((r) => [r.symbol, r]));
     return watch.map((s) => by.get(s)).filter(Boolean).slice(0, 8) as Lite[];
   }, [watch, rows]);
+
+  // The next two weeks' events for the companies he follows or holds - the
+  // one thing on the calendar page he would otherwise have to go looking for.
+  const upcoming = useMemo(() => {
+    const mine = new Set([...watch, ...held]);
+    if (!mine.size || !events.length) return [];
+    const now = new Date();
+    const today = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    const until = new Date(Date.now() + AHEAD_DAYS * 86400000).toISOString().slice(0, 10);
+    return events.filter((e) => mine.has(e.symbol) && e.date >= today && e.date <= until).slice(0, 12);
+  }, [watch, held, events]);
 
   const go = (sym: string) => router.push(symbolHref(sym));
   const nameOf = (sym: string) => {
@@ -138,7 +163,7 @@ export default function Home() {
               else if (e.key === "Enter" && matches[hi]) go(matches[hi].symbol);
               else if (e.key === "Escape") setQ("");
             }}
-            placeholder="Search a company or symbol"
+            placeholder="Search a company, ETF or symbol"
             aria-label="Search a company or ETF"
             autoComplete="off"
             className="w-full rounded-xl border border-[var(--line2)] bg-[var(--card)] pl-11 pr-4 py-3.5 text-base
@@ -216,6 +241,31 @@ export default function Home() {
                     title="Change over the last month"
                   >
                     {r.ret_1m == null ? "—" : `${r.ret_1m >= 0 ? "+" : ""}${r.ret_1m.toFixed(1)}%`}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {upcoming.length > 0 && (
+          <section className="mt-7">
+            <div className="flex items-baseline justify-between mb-2">
+              <h2 className="text-xs uppercase tracking-wide text-[var(--ink3)]">Coming up</h2>
+              <Link href="/calendar" className="text-xs font-semibold text-[var(--accent-ink)]">Calendar</Link>
+            </div>
+            <div className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden divide-y divide-[var(--line)]">
+              {upcoming.map((e, i) => (
+                <Link key={`${e.symbol}-${e.date}-${i}`} href={symbolHref(e.symbol)}
+                  className="flex items-center gap-3 px-3.5 min-h-[46px] hover:bg-[var(--card2)] active:bg-[var(--card2)]">
+                  <span className="w-14 shrink-0 text-xs tabular-nums text-[var(--ink3)]">
+                    {new Date(e.date + "T00:00:00").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold text-[var(--ink)] truncate">{nameOf(e.symbol)}</span>
+                    <span className={`block text-xs truncate ${e.kind === "exdate" ? "text-[var(--warn-ink)]" : "text-[var(--ink3)]"}`}>
+                      {e.purpose}
+                    </span>
                   </span>
                 </Link>
               ))}

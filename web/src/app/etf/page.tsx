@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import InfoTip from "@/components/InfoTip";
-import { CLASS_LABEL, pctText, premClass, premSentence, premText, type EtfDoc, type Returns } from "@/lib/etf";
+import { CLASS_LABEL, pctRankText, pctText, premClass, premSentence, premText, type EtfDoc, type Returns } from "@/lib/etf";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 // The chart library touches the window, so it loads in the browser only.
@@ -69,6 +69,44 @@ function ReturnsTable({ doc }: { doc: EtfDoc }) {
         ))}
       </tbody>
     </table>
+  );
+}
+
+/** Every ETF tracking the same index, this one included, busiest first -
+ *  the premium, how much each trades, and what its NAV did in a year (the
+ *  same index, so a lower number is mostly a higher fee or worse tracking). */
+function SameIndex({ doc }: { doc: EtfDoc }) {
+  const rows = [
+    { s: doc.s, name: doc.name, prem: doc.prem, turnover_cr: doc.turnover_cr, thin: doc.thin, r1y_nav: doc.ret_nav["1y"] ?? null, self: true },
+    ...(doc.same_index ?? []).map((x) => ({ ...x, self: false })),
+  ].sort((a, b) => (b.turnover_cr ?? 0) - (a.turnover_cr ?? 0));
+  return (
+    <Card title={`Same index · ${rows.length} ETFs`}>
+      <table className="w-full table-fixed text-[13px] tabular-nums">
+        <thead>
+          <tr className="text-xs text-[var(--ink3)]">
+            <th className="w-[40%] px-3 py-1.5 text-left font-medium">ETF</th>
+            <th className="px-1.5 py-1.5 text-right font-medium">vs NAV</th>
+            <th className="px-1.5 py-1.5 text-right font-medium">₹Cr/day</th>
+            <th className="px-3 py-1.5 text-right font-medium">1Y NAV</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, 30).map((r) => (
+            <tr key={r.s} className={`border-t border-[var(--line)] ${r.self ? "bg-[var(--accent-soft)]" : ""}`}>
+              <td className="px-3 py-2 truncate">
+                {r.self ? <span className="font-semibold">{r.s}</span>
+                  : <Link href={`/etf?s=${encodeURIComponent(r.s)}`} className="font-semibold text-[var(--accent-ink)]">{r.s}</Link>}
+                {r.thin && <span className="ml-1 text-[10px] text-[var(--ink3)]">thin</span>}
+              </td>
+              <td className={`px-1.5 py-2 text-right ${premClass(r.prem)}`}>{premText(r.prem)}</td>
+              <td className="px-1.5 py-2 text-right text-[var(--ink2)]">{r.turnover_cr.toLocaleString("en-IN", { maximumFractionDigits: 1 })}</td>
+              <td className="px-3 py-2 text-right text-[var(--ink2)]">{pctText(r.r1y_nav)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
   );
 }
 
@@ -157,7 +195,14 @@ function EtfView() {
           <Stat label="Highest in a year" value={premText(doc.prem_hi_1y?.[1])} cls={premClass(doc.prem_hi_1y?.[1])} sub={when(doc.prem_hi_1y?.[0])} />
           <Stat label="Lowest in a year" value={premText(doc.prem_lo_1y?.[1])} cls={premClass(doc.prem_lo_1y?.[1])} sub={when(doc.prem_lo_1y?.[0])} />
         </div>
+        {pctRankText(doc.prem_pct_1y) && (
+          <p className="px-3 pb-3 text-sm text-[var(--ink2)]">
+            Today&apos;s premium: {pctRankText(doc.prem_pct_1y)?.toLowerCase()}
+          </p>
+        )}
       </Card>
+
+      {(doc.same_index?.length ?? 0) > 0 && <SameIndex doc={doc} />}
 
       <Card title="Returns">
         <ReturnsTable doc={doc} />

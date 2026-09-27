@@ -15,7 +15,10 @@ import {
  *  index, and plain in the bottom one. */
 
 const DAY = 86400;
-export type EtfRow = [number, number, number | null, number | null]; // day, price, nav, index in ₹
+// day, price, nav, index in ₹ - and a 0 on a day nothing traded, whose price
+// is only the last trade carried forward and so says nothing about a premium.
+export type EtfRow = [number, number, number | null, number | null, number?];
+const traded = (r: EtfRow) => !(r.length > 4 && r[4] === 0);
 type Range = "1M" | "6M" | "1Y" | "3Y" | "5Y";
 const RANGES: [Range, number][] = [["1M", 31], ["6M", 183], ["1Y", 366], ["3Y", 1096], ["5Y", 1827]];
 
@@ -95,7 +98,7 @@ export default function EtfChart({ rows, indexLabel }: { rows: EtfRow[]; indexLa
       lineWidth: 1, priceLineVisible: false, lastValueVisible: true,
       priceFormat: { type: "custom", formatter: (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(1)}%`, minMove: 0.01 },
     }, 1);
-    prem.setData(rows.filter((r) => r[2]).map((r) => ({ time: toTime(r[0]), value: (r[1] / (r[2] as number) - 1) * 100 })));
+    prem.setData(rows.filter((r) => r[2] && traded(r)).map((r) => ({ time: toTime(r[0]), value: (r[1] / (r[2] as number) - 1) * 100 })));
     // Its own scale in plain %, not "% from the left edge" like the lines
     // above: a premium is already a percentage, of the NAV that same day.
     prem.priceScale().applyOptions({ mode: PriceScaleMode.Normal, scaleMargins: { top: 0.12, bottom: 0.08 } });
@@ -106,7 +109,8 @@ export default function EtfChart({ rows, indexLabel }: { rows: EtfRow[]; indexLa
     const legendAt = (day: number | null): Legend | null => {
       const r = day === null ? rows[rows.length - 1] : byDay.get(day);
       if (!r) return null;
-      return { date: dateOf(r[0]), price: r[1], nav: r[2], prem: r[2] ? (r[1] / r[2] - 1) * 100 : null, index: r[3] };
+      return { date: `${dateOf(r[0])}${traded(r) ? "" : " · no trades"}`, price: r[1], nav: r[2],
+        prem: r[2] && traded(r) ? (r[1] / r[2] - 1) * 100 : null, index: r[3] };
     };
     setLegend(legendAt(null));
     const onMove = (e: MouseEventParams<Time>) => setLegend(legendAt(e.time === undefined ? null : Math.round((e.time as number) / DAY)));

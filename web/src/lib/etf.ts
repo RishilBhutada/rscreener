@@ -16,9 +16,13 @@ export type EtfDoc = {
   price: number | null; price_date: string | null; nav: number | null; nav_date: string | null;
   prem: number | null; prem_date: string | null; prem_avg_1m: number | null;
   prem_hi_1y: [string, number] | null; prem_lo_1y: [string, number] | null;
+  /** Share of the past year's days with a LOWER premium than today's. */
+  prem_pct_1y?: number | null;
+  same_index?: { s: string; name: string; prem: number | null; prem_avg_1m: number | null;
+    turnover_cr: number; thin: boolean; r1y_nav: number | null }[];
   ret_price: Returns; ret_nav: Returns; ret_index: Returns;
   turnover_cr: number; traded_days_20: number; thin: boolean;
-  rows: [number, number, number | null, number | null][];
+  rows: [number, number, number | null, number | null, number?][];
 };
 
 /** How far from NAV counts as "away" - inside it, the price and the holdings
@@ -44,6 +48,13 @@ export function premSentence(p: number | null | undefined): string {
   if (p === null || p === undefined) return "No same-day NAV to compare with";
   if (Math.abs(p) < NEAR_NAV) return "Trading in line with its NAV";
   return `Trading ${Math.abs(p).toFixed(1)}% ${p > 0 ? "above" : "below"} its NAV`;
+}
+
+/** Today's premium against its own past year, as a sentence. */
+export function pctRankText(pct: number | null | undefined): string | null {
+  if (pct === null || pct === undefined) return null;
+  return pct >= 50 ? `Higher than on ${pct}% of days in the past year`
+    : `Lower than on ${100 - pct}% of days in the past year`;
 }
 
 export function pctText(v: number | null | undefined): string {

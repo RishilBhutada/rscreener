@@ -173,7 +173,9 @@ jobs:
           RSCREENER_STEP_MINUTES: "20"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_fundamentals.py --symbols ${{ steps.plan.outputs.target }} --statements --max-age-hours 720 --limit 500 --sleep 0.4
       - name: Refresh upcoming events calendar
-        if: steps.plan.outputs.prices == '1'
+        # On EVERY run, publish-only included: two NSE calls, seconds. Events
+        # are stored in the database and the page is exported from it, so a
+        # publish never shows an older calendar than the last one fetched.
         # Wrapped like every other fetcher. It was the only one running bare:
         # no retry, no guard, so one dropped NSE response took the results
         # calendar out for a night with the run still reported as a success.
@@ -364,6 +366,11 @@ jobs:
         # web/public/etfs.json and web/public/etf/<SYMBOL>.json - price, NAV,
         # index and the premium between them. Generated, never committed.
         run: python pipeline/export_etf_json.py
+      - name: Write the calendar page from the stored events
+        # Every run, publish-only included: the calendar used to be written
+        # only by the nightly fetch, straight into the site folder, so each code
+        # publish rebuilt the site from the repo's month-old copy.
+        run: python pipeline/export_calendar_json.py
       - name: Score the data and record the score
         # Runs every night, after the export and before the guards, so the score
         # describes what is about to be published. Appending to a history file

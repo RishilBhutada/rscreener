@@ -170,10 +170,13 @@ export default function SettingsButton() {
     >
       {/* Drawn, to match the arrow and the refresh beside it. As a text
           glyph this rendered as a colour emoji on some Android builds. */}
+      {/* A six-tooth gear drawn around the centre of its box (the owner's pick,
+          27-Sep-2026). The one before had its teeth centred 2.4 units above
+          its hub, so the hole sat low and the gear looked lopsided. */}
       <svg viewBox="0 0 24 24" width={20} height={20} fill="none" stroke="currentColor"
-           strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M10.3 3.4a1 1 0 0 1 1-.85h1.4a1 1 0 0 1 1 .85l.2 1.35c.55.19 1.06.48 1.5.85l1.3-.5a1 1 0 0 1 1.2.44l.7 1.2a1 1 0 0 1-.2 1.25l-1.05.87c.06.29.09.6.09.91s-.03.62-.09.91l1.05.87a1 1 0 0 1 .2 1.25l-.7 1.2a1 1 0 0 1-1.2.44l-1.3-.5c-.44.37-.95.66-1.5.85l-.2 1.35a1 1 0 0 1-1 .85h-1.4a1 1 0 0 1-1-.85l-.2-1.35a5.6 5.6 0 0 1-1.5-.85l-1.3.5a1 1 0 0 1-1.2-.44l-.7-1.2a1 1 0 0 1 .2-1.25l1.05-.87a5.5 5.5 0 0 1 0-1.82l-1.05-.87a1 1 0 0 1-.2-1.25l.7-1.2a1 1 0 0 1 1.2-.44l1.3.5c.44-.37.95-.66 1.5-.85z" />
-        <circle cx="12" cy="12" r="2.5" />
+           strokeWidth={1.8} strokeLinejoin="round" aria-hidden="true">
+        <path d="M9.27 5.55L9.44 2.75A9.6 9.6 0 0 1 14.56 2.75L14.73 5.55A7 7 0 0 1 16.22 6.42L18.73 5.16A9.6 9.6 0 0 1 21.29 9.59L18.95 11.14A7 7 0 0 1 18.95 12.86L21.29 14.41A9.6 9.6 0 0 1 18.73 18.84L16.22 17.58A7 7 0 0 1 14.73 18.45L14.56 21.25A9.6 9.6 0 0 1 9.44 21.25L9.27 18.45A7 7 0 0 1 7.78 17.58L5.27 18.84A9.6 9.6 0 0 1 2.71 14.41L5.05 12.86A7 7 0 0 1 5.05 11.14L2.71 9.59A9.6 9.6 0 0 1 5.27 5.16L7.78 6.42A7 7 0 0 1 9.27 5.55Z" />
+        <circle cx="12" cy="12" r="3" />
       </svg>
     </Link>
   );

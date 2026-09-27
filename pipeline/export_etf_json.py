@@ -76,6 +76,99 @@ def returns(series: list[tuple[str, float]]) -> dict:
     return out
 
 
+NAV_SPLITS = (2, 4, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000)
+
+
+def near_ratio(q: float, choices, tol: float) -> float | None:
+    """The choice (or its inverse) q is within `tol` of, if any."""
+    for n in choices:
+        for v in (n, 1 / n):
+            if abs(q / v - 1) < tol:
+                return v
+    return None
+
+
+def adjust_nav(nav: dict[str, float]) -> tuple[dict[str, float], list[float]]:
+    """NAV per unit in TODAY's units, and the split ratios found.
+
+    A fund that splits its units has its NAV fall by the ratio overnight - 71
+    such steps across 68 ETFs in AMFI's history: 1:10 mostly, GOLDBEES 1:100
+    (Dec 2019), QGOLDHALF about 1:50 (2021), GOLDADD 1:10 on 28-Aug-2026.
+    Unadjusted, GOLDADD's one-year NAV return read -86.7% in a year gold rose
+    32%. A move of 45% or more between consecutive NAVs is never the market for
+    these funds; within 8% of a whole split ratio, every NAV before it is
+    divided by that ratio."""
+    days = sorted(nav)
+    out: dict[str, float] = {}
+    factor, found = 1.0, []
+    for i in range(len(days) - 1, -1, -1):
+        d = days[i]
+        out[d] = nav[d] / factor
+        if i and nav[d]:
+            q = nav[days[i - 1]] / nav[d]
+            r = near_ratio(q, NAV_SPLITS, 0.08) if (q >= 1.8 or q <= 0.55) else None
+            if r:
+                factor *= r
+                found.append(r)
+    return out, found
+
+
+def clean_bars(rows: list[tuple]) -> tuple[list[tuple], int]:
+    """(date, o, h, l, c, v, traded) - untraded days and one-day spikes flat.
+
+    8% of ETF days have no trades, and the price source fills them with an old
+    close, sometimes mis-scaled: SILVER1 "closed" at 82.13 for two untraded
+    weeks between real closes near 8.2. A day with no volume is shown as what
+    it was - the last traded price, unchanged - and kept out of every premium.
+    A traded close that jumps 60% and straight back (IVZINGOLD's 11,853.30
+    between 103.06 and 106.19) is a bad print and is flattened the same way."""
+    out, last, n = [], None, 0
+    for i, (d, o, h, lo, c, v) in enumerate(rows):
+        spike = False
+        if v and last and 0 < i < len(rows) - 1:
+            nxt = rows[i + 1][4]
+            if nxt and ((c / last > 1.6 and c / nxt > 1.6) or (c / last < 0.625 and c / nxt < 0.625)):
+                spike = True
+        if (not v or spike) and last:
+            out.append((d, last, last, last, last, 0, False))
+            n += 1
+        else:
+            out.append((d, o, h, lo, c, v, bool(v)))
+            if v:
+                last = c
+    return out, n
+
+
+def align_prices(rows: list[tuple], nav: dict[str, float], ratios: list[float],
+                 month_end: bool = False) -> tuple[list[tuple], int]:
+    """Exchange prices in the same units as the adjusted NAV.
+
+    Yahoo adjusts some ETF splits and not others: BANKNIFTY1 closed at 631.97
+    the day before its 1:10 split and 62.60 the day after. A bar whose close
+    sits a split's ratio - or a power of ten - from that day's NAV is scaled to
+    match, with 25% slack for the premium on top; volume moves the other way,
+    so turnover is unchanged. A genuine premium never nears these ratios (the
+    largest seen is MONQ50's 3.4x on 18-Sep-2026). Monthly bars are compared
+    with the month's last NAV; a day without a NAV keeps the last day's scale."""
+    choices = sorted({10.0, 100.0, 1000.0} | {r if r > 1 else 1 / r for r in ratios})
+    nav_days = sorted(nav)
+    out, scale, n = [], 1.0, 0
+    for row in rows:
+        d, o, h, lo, c, v = row[:6]
+        if month_end:
+            j = bisect.bisect_right(nav_days, d[:8] + "31") - 1
+            ref = nav[nav_days[j]] if j >= 0 and nav_days[j][:7] == d[:7] else None
+        else:
+            ref = nav.get(d)
+        if ref and c and (len(row) < 7 or row[6]):
+            r = near_ratio(c / ref, choices, 0.25)
+            scale = 1 / r if r else 1.0
+        if scale != 1.0:
+            n += 1
+        out.append((d, o * scale, h * scale, lo * scale, c * scale, v / scale) + tuple(row[6:]))
+    return out, n
+
+
 def tidy_wick(o: float, h: float, lo: float, c: float) -> tuple[float, float, bool]:
     """(high, low, trimmed) for one of the provider's long-history monthly bars.
 
@@ -141,11 +234,22 @@ def main() -> None:
     DIR_OUT.mkdir(parents=True, exist_ok=True)
     CHART_DIR.mkdir(parents=True, exist_ok=True)
     listing = []
+    splits_seen = rescaled = flattened = 0
+    docs: dict[str, dict] = {}
+    group_of: dict[str, str] = {}
     charts = 0
     for (sym, name, security, underlying, ukey, klass, isin, listed, code, scheme,
          itick, fxtick, ilabel) in etfs:
-        prices = px.get(sym) or []
-        nav = navs.get(sym) or {}
+        # Splits: NAVs in today's units, prices in the NAV's units.
+        nav, ratios = adjust_nav(navs.get(sym) or {})
+        cleaned, n_flat = clean_bars(bars.get(sym) or [])
+        aligned, n_px = align_prices(cleaned, nav, ratios)
+        month_bars, n_m = align_prices(monthly.get(sym) or [], nav, ratios, month_end=True)
+        splits_seen += len(ratios)
+        rescaled += n_px + n_m
+        flattened += n_flat
+        traded_on = {d for d, *_r, t in aligned if t}
+        prices = [(d, c, v) for d, _o, _h, _l, c, v, _t in aligned]
         if not prices and not nav:
             continue
         start = (datetime.now(timezone.utc).date() - timedelta(days=365 * YEARS + 10)).isoformat()
@@ -170,8 +274,13 @@ def main() -> None:
                 continue
             n = nav.get(d)
             iv = index_inr(d)
-            rows.append([day_no(d), round(c, 2), round(n, 4) if n else None, round(iv, 2) if iv else None])
-            if n:
+            row = [day_no(d), round(c, 2), round(n, 4) if n else None, round(iv, 2) if iv else None]
+            # A day nothing traded carries the last price; it is marked so the
+            # premium - which it would only repeat - leaves it out.
+            if d not in traded_on:
+                row.append(0)
+            rows.append(row)
+            if n and d in traded_on:
                 prem.append((d, (c / n - 1) * 100))
 
         # Liquidity, over the last 20 sessions.
@@ -182,7 +291,11 @@ def main() -> None:
         thin = bool(last20) and (med_turn < THIN_TURNOVER_CR or traded < THIN_TRADED_DAYS)
 
         nav_series = sorted(nav.items())
-        px_series = [(d, c) for d, c, _v in prices]
+        # Price returns from days something traded: an untraded day carries a
+        # close that can be months old (SILVER1 went unquoted for weeks, and its
+        # "price a year ago" was one of those - a 170% return in a year its NAV
+        # rose 67%). No trade within a week of the date, no figure.
+        px_series = [(d, c) for d, c, _v in prices if d in traded_on]
         idx_series = [(d, v) for d in [p[0] for p in prices[-800:]] if (v := index_inr(d))]
         year_ago = (date.fromisoformat(prices[-1][0]) - timedelta(days=365)).isoformat() if prices else None
         prem_1y = [p for p in prem if year_ago and p[0] >= year_ago]
@@ -206,6 +319,10 @@ def main() -> None:
             "prem_avg_1m": round(mean(p[1] for p in prem[-21:]), 2) if prem else None,
             "prem_hi_1y": [hi[0], round(hi[1], 2)] if hi else None,
             "prem_lo_1y": [lo[0], round(lo[1], 2)] if lo else None,
+            # Where today's premium sits in its own past year: the share of
+            # days it was LOWER. 92 reads "higher than on 92% of days".
+            "prem_pct_1y": round(100 * sum(1 for p in prem_1y if p[1] < prem[-1][1]) / len(prem_1y))
+                           if prem and prem_1y else None,
             "ret_price": returns(px_series),
             "ret_nav": returns(nav_series),
             "ret_index": returns(idx_series),
@@ -214,16 +331,19 @@ def main() -> None:
             "thin": thin,
             "rows": rows,
         }
-        (DIR_OUT / f"{sym}.json").write_text(json.dumps(doc, separators=(",", ":"), allow_nan=False), encoding="utf-8")
+        docs[sym] = doc
+        # ETFs tracking the same thing. Global ETFs share NSE's one key "GLOBAL
+        # INDICES", so they are grouped by the index itself.
+        group_of[sym] = ((ilabel or underlying or "") if klass == "international" else (ukey or underlying or "")).strip().lower()
         # Candles for the full-screen chart, in the company charts' format and
         # through the same builder: weekly and monthly from the NSE daily bars
         # wherever they reach, the provider's monthly bars only before that.
-        b = bars.get(sym) or []
+        b = aligned
         if b:
             candles = {
                 "s": sym,
-                "d": [[_day(d), _px(o), _px(h), _px(lo), _px(c), int(v)] for d, o, h, lo, c, v in b],
-                "m": [[_day(d), _px(o), _px(h), _px(lo), _px(c), int(v)] for d, o, h, lo, c, v in monthly.get(sym, [])],
+                "d": [[_day(d), _px(o), _px(h), _px(lo), _px(c), int(v)] for d, o, h, lo, c, v, _t in b],
+                "m": [[_day(d), _px(o), _px(h), _px(lo), _px(c), int(v)] for d, o, h, lo, c, v in month_bars],
             }
             _normalise(candles)
             candles["asof"] = b[-1][0]
@@ -233,7 +353,22 @@ def main() -> None:
             "s", "name", "underlying", "class", "price", "price_date", "nav", "nav_date", "prem", "prem_date",
             "prem_avg_1m", "turnover_cr", "thin")} | {
             "r1y_price": doc["ret_price"].get("1y"), "r1y_nav": doc["ret_nav"].get("1y"),
+            "r1m_price": doc["ret_price"].get("1m"),
             "index": ilabel})
+
+    # Same-index comparison, then every file is written.
+    members: dict[str, list[str]] = {}
+    for sym, g in group_of.items():
+        if g:
+            members.setdefault(g, []).append(sym)
+    for sym, doc in docs.items():
+        doc["same_index"] = sorted(
+            ({"s": o, "name": docs[o]["name"], "prem": docs[o]["prem"], "prem_avg_1m": docs[o]["prem_avg_1m"],
+              "turnover_cr": docs[o]["turnover_cr"], "thin": docs[o]["thin"],
+              "r1y_nav": docs[o]["ret_nav"].get("1y")}
+             for o in members.get(group_of[sym], []) if o != sym),
+            key=lambda x: -(x["turnover_cr"] or 0))
+        (DIR_OUT / f"{sym}.json").write_text(json.dumps(doc, separators=(",", ":"), allow_nan=False), encoding="utf-8")
 
     with_prem = [x for x in listing if x["prem"] is not None]
     LIST_OUT.write_text(json.dumps({
@@ -246,7 +381,8 @@ def main() -> None:
     }, separators=(",", ":"), allow_nan=False), encoding="utf-8")
     print(f"ETFs: {len(listing)} exported, {len(with_prem)} with a same-day premium, "
           f"{sum(1 for x in listing if x['thin'])} thinly traded, {charts} candle files "
-          f"({wicks} corrupt monthly wicks trimmed)")
+          f"({wicks} corrupt monthly wicks trimmed); {splits_seen} unit splits adjusted, "
+          f"{rescaled} price bars rescaled to match, {flattened} untraded or spiked days flattened")
 
     # Into the search index as well, so an ETF can be searched for, and a
     # portfolio or watchlist holding one keeps its price - they left the
@@ -256,7 +392,7 @@ def main() -> None:
     if ix_path.exists():
         ix = json.loads(ix_path.read_text(encoding="utf-8"))
         have = {r[0] for r in ix.get("rows", [])}
-        add = [[x["s"], x["name"], "NSE", x["price"], None, 0, None, None, None, None, 1]
+        add = [[x["s"], x["name"], "NSE", x["price"], x["r1m_price"], 0, None, None, None, None, 1]
                for x in listing if x["s"] not in have]
         ix["rows"] = ix.get("rows", []) + add
         if "etf" not in ix.get("fields", []):
