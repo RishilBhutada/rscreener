@@ -444,7 +444,7 @@ function BackButton() {
   );
 }
 
-export default function TopNav({ active }: { active?: "home" | "screens" | "sectors" | "calendar" | "portfolio" | "watchlists" | "others" | "status" | "settings" }) {
+export default function TopNav({ active }: { active?: "home" | "screens" | "sectors" | "calendar" | "portfolio" | "watchlists" | "others" | "etfs" | "status" | "settings" }) {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<Lite[]>([]);
@@ -510,6 +510,7 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
     ["home", "Home", "/"],
     ["watchlists", "Watchlists", "/watchlists"],
     ["sectors", "Sectors", "/sectors"],
+    ["etfs", "ETFs", "/etfs"],
     ["others", "Others", "/others"],
     ["calendar", "Calendar", "/calendar"],
     ["portfolio", "Portfolio", "/portfolio"],

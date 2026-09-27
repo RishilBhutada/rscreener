@@ -26,6 +26,9 @@ export const DESTINATIONS: { key: string; label: string; href: string; icon: str
   // other sites, kept together and apart from this app's own checked data.
   { key: "others", label: "Others", href: "/others",
     icon: "M7 4.5a2.5 2.5 0 1 1 0 5a2.5 2.5 0 0 1 0-5zM17 4.5a2.5 2.5 0 1 1 0 5a2.5 2.5 0 0 1 0-5zM7 14.5a2.5 2.5 0 1 1 0 5a2.5 2.5 0 0 1 0-5zM17 14.5a2.5 2.5 0 1 1 0 5a2.5 2.5 0 0 1 0-5z" },
+  // Exchange-traded funds against what they hold - price vs NAV vs index.
+  { key: "etfs", label: "ETFs", href: "/etfs",
+    icon: "M12 4 3.5 8.5 12 13l8.5-4.5zM3.5 12.5 12 17l8.5-4.5M3.5 16.5 12 21l8.5-4.5" },
   { key: "sectors", label: "Sectors", href: "/sectors",
     icon: "M4.5 4.5h6v6h-6zM13.5 4.5h6v6h-6zM4.5 13.5h6v6h-6zM13.5 13.5h6v6h-6z" },
   { key: "calendar", label: "Calendar", href: "/calendar",
