@@ -53,19 +53,12 @@ type Interval = "d" | "w" | "m";
 type Range = "1M" | "3M" | "6M" | "YTD" | "1Y" | "2Y" | "3Y" | "5Y" | "10Y" | "MAX";
 type Kind = "candles" | "hollow" | "bars" | "heikin" | "line" | "area";
 type Ind = "vol" | "dma50" | "dma200" | "sma20" | "ema21" | "bb" | "rsi";
-/** Results and corporate actions are drawn three ways at once - chosen by the
- *  owner from five candidates on 27-Sep-2026: fiscal quarters as tinted spans
- *  behind the chart, a faint line through the chart on each event date, and a
- *  timeline band along its foot with a marker per event (circle = corporate
- *  action, square = result) that opens the details when tapped. */
-const CA_SHORT: Record<string, string> = { dividend: "D", bonus: "B", split: "S", rights: "R", buyback: "BB", other: "•" };
-/** PREVIEW ONLY - six candidate symbols for the timeline band, offered side by
- *  side on 27-Sep-2026 so the owner can pick one; the rest come out then. */
-type TlStyle = "shapes" | "badges" | "pins" | "icons" | "dots" | "tags";
-const TL_STYLES: [TlStyle, string][] = [
-  ["shapes", "Shapes"], ["badges", "Badges"], ["pins", "Pins"], ["icons", "Icons"], ["dots", "Dots"], ["tags", "Tags"],
-];
-const TL_KEY = "rs_fullchart_tl";
+/** Results and corporate actions are drawn three ways at once, as the owner
+ *  chose on 27-Sep-2026: fiscal quarters as tinted blocks behind the chart, a
+ *  faint line through the chart on each event date, and a timeline band along
+ *  its foot - results on the upper line, corporate actions on the lower, each
+ *  a tag carrying its figure (Q1, ₹75, Bonus 1:1) that opens the details when
+ *  tapped. Picked from six candidates: shapes, badges, pins, icons, dots, tags. */
 /** The words a tag carries: the amount or ratio where the filing gives one. */
 function caTag(k: string, detail?: string | null): string {
   const d = (detail ?? "").split(" (")[0].trim();
@@ -257,8 +250,8 @@ function alpha(color: string, a: number): string {
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
 }
 
-/** One date on the timeline band: every event on it, the first one leading. */
-type TlEv = { kind: "ca" | "res"; ca?: string; letter: string; tag: string; color: string };
+/** One date on the timeline band: every event on it. */
+type TlEv = { kind: "ca" | "res"; tag: string; color: string };
 type TlMark = { day: number; evs: TlEv[] };
 type Ctx = CanvasRenderingContext2D;
 
@@ -272,71 +265,67 @@ function roundRect(ctx: Ctx, x: number, y: number, w: number, h: number, r: numb
   ctx.closePath();
 }
 
-/** A pictogram per event: a coin for a dividend, a plus for a bonus, a divide
- *  sign for a split, a turning arrow for a buyback, a bar chart for results.
- *  Drawn with lines rather than font glyphs, which Android does not all have. */
-function drawIcon(ctx: Ctx, e: TlEv, x: number, y: number, p: Pal) {
-  const c = e.color;
-  const t = alpha(c, 0.18);
-  const tint = t === c ? p.card2 : t;
-  ctx.strokeStyle = c; ctx.lineWidth = 1.6; ctx.lineCap = "round"; ctx.lineJoin = "round";
-  if (e.kind === "res") {
-    ctx.fillStyle = tint;
-    roundRect(ctx, x - 8, y - 8, 16, 16, 4);
-    ctx.fill(); ctx.stroke();
-    ctx.fillStyle = c;
-    for (const [dx, h] of [[-4.6, 4], [-1.3, 7], [2, 10]]) ctx.fillRect(x + dx, y + 5 - h, 2.6, h);
-    return;
+/** A fiscal quarter's span of candles, first day to last. */
+type QSpan = { key: number; from: number; to: number; color: string };
+
+/** Fiscal quarters as solid tinted blocks behind the chart. Drawn as one
+ *  column per candle, as they first were, the gaps between candles showed
+ *  through and the tint came out as fine stripes. */
+class QuarterBands implements ISeriesPrimitive<Time> {
+  private chart: SeriesAttachedParameter<Time>["chart"] | null = null;
+  private readonly view: IPrimitivePaneView;
+  private readonly spans: QSpan[];
+
+  constructor(spans: QSpan[]) {
+    this.spans = spans;
+    this.view = {
+      zOrder: () => "bottom",
+      renderer: () => ({
+        draw: () => {},
+        drawBackground: (target) => target.useMediaCoordinateSpace(({ context, mediaSize }) => this.draw(context, mediaSize.height)),
+      }),
+    };
   }
-  ctx.fillStyle = tint;
-  ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = c;
-  ctx.beginPath();
-  switch (e.ca) {
-    case "dividend":
-      ctx.font = `700 11px ${p.font}`; ctx.fillText("₹", x, y + 0.5);
-      return;
-    case "bonus":
-      ctx.moveTo(x - 4, y); ctx.lineTo(x + 4, y); ctx.moveTo(x, y - 4); ctx.lineTo(x, y + 4); ctx.stroke();
-      return;
-    case "split":
-      ctx.moveTo(x - 4, y); ctx.lineTo(x + 4, y); ctx.stroke();
-      ctx.beginPath(); ctx.arc(x, y - 3.3, 1.2, 0, Math.PI * 2); ctx.arc(x, y + 3.3, 1.2, 0, Math.PI * 2); ctx.fill();
-      return;
-    case "rights":
-      ctx.font = `700 10px ${p.font}`; ctx.fillText("R", x, y + 0.5);
-      return;
-    case "buyback": {
-      ctx.arc(x, y, 4, -0.2 * Math.PI, 1.35 * Math.PI); ctx.stroke();
-      const ax = x + 4 * Math.cos(-0.2 * Math.PI), ay = y + 4 * Math.sin(-0.2 * Math.PI);
-      ctx.beginPath(); ctx.moveTo(ax - 3, ay - 1.2); ctx.lineTo(ax + 0.4, ay + 0.2); ctx.lineTo(ax + 0.6, ay - 3.4); ctx.stroke();
-      return;
+
+  attached(param: SeriesAttachedParameter<Time>) { this.chart = param.chart; }
+  detached() { this.chart = null; }
+  paneViews() { return [this.view]; }
+
+  private draw(ctx: Ctx, h: number) {
+    const chart = this.chart;
+    if (!chart) return;
+    const ts = chart.timeScale();
+    // Half a candle's width either side, so one quarter's block ends exactly
+    // where the next one's begins.
+    const half = ts.options().barSpacing / 2;
+    for (const q of this.spans) {
+      const a = ts.timeToCoordinate(toTime(q.from));
+      const b = ts.timeToCoordinate(toTime(q.to));
+      if (a === null || b === null) continue;
+      const x0 = Math.round(a - half), x1 = Math.round(b + half);
+      ctx.fillStyle = q.color;
+      ctx.fillRect(x0, 0, x1 - x0, h);
     }
-    default:
-      ctx.arc(x, y, 1.8, 0, Math.PI * 2); ctx.fill();
   }
 }
 
-/** The timeline band's markers, drawn on the chart canvas by hand - the
- *  library's own markers come in four shapes, and none of these is one.
+/** The timeline band along the chart's foot: results on the upper line,
+ *  corporate actions on the lower, each a tag carrying its figure.
  *
- *  Results and their dividend usually fall a few days apart, so at a year's
- *  width their markers landed on top of each other and the one beneath could
- *  not be tapped. Markers that would touch are drawn as ONE, with a count, and
- *  a tap on it lists every event in it. With two rows, results and corporate
- *  actions each get a line of their own and only group with their own kind. */
+ *  Drawn on the chart canvas by hand - the library's own markers are shapes
+ *  with a letter, not labels. Results and their dividend fall days apart, so
+ *  tags that would touch are drawn as ONE ("₹31 +1"), and a tap on it lists
+ *  every event it holds; overlapping, the one beneath could not be tapped. */
 class TimelineMarks implements ISeriesPrimitive<Time> {
   private chart: SeriesAttachedParameter<Time>["chart"] | null = null;
   private series: SeriesAttachedParameter<Time>["series"] | null = null;
   private placed: { days: number[]; x0: number; y0: number; x1: number; y1: number }[] = [];
   private readonly view: IPrimitivePaneView;
   private readonly marks: TlMark[];
-  private readonly style: TlStyle;
-  private readonly rows: 1 | 2;
   private readonly p: Pal;
 
-  constructor(marks: TlMark[], style: TlStyle, rows: 1 | 2, p: Pal) {
-    this.marks = marks; this.style = style; this.rows = rows; this.p = p;
+  constructor(marks: TlMark[], p: Pal) {
+    this.marks = marks; this.p = p;
     this.view = {
       zOrder: () => "top",
       renderer: () => ({ draw: (target) => target.useMediaCoordinateSpace(({ context }) => this.draw(context)) }),
@@ -352,7 +341,7 @@ class TimelineMarks implements ISeriesPrimitive<Time> {
     return b ? { externalId: `ev:${b.days.join(",")}`, zOrder: "top", cursorStyle: "pointer" } : null;
   }
 
-  /** For a fingertip: the marker nearest a tap in the band, within 16px. */
+  /** For a fingertip: the tag nearest a tap in the band, within 16px. */
   near(x: number, y: number): number[] | null {
     let best: number[] | null = null;
     let bd = 17;
@@ -364,28 +353,9 @@ class TimelineMarks implements ISeriesPrimitive<Time> {
     return best;
   }
 
-  private tagLabel(evs: TlEv[]): string {
-    return evs.length > 1 ? `${evs[0].tag} +${evs.length - 1}` : evs[0].tag;
-  }
-
-  /** Half the width a symbol takes, to tell when two would touch. */
-  private half(ctx: Ctx, evs: TlEv[]): number {
-    const e = evs[0];
-    switch (this.style) {
-      case "shapes": return 6;
-      case "badges": return e.kind === "ca" && e.letter.length > 1 ? 10.5 : 8;
-      case "pins": return 7;
-      case "icons": return 8;
-      case "dots": return 4.5;
-      default:
-        ctx.font = `600 10px ${this.p.font}`;
-        return ctx.measureText(`${e.tag} +9`).width / 2 + 5;
-    }
-  }
-
   private draw(ctx: Ctx) {
     this.placed = [];
-    const chart = this.chart, series = this.series;
+    const chart = this.chart, series = this.series, p = this.p;
     if (!chart || !series) return;
     const mid = series.priceToCoordinate(0);
     if (mid === null) return;
@@ -393,17 +363,18 @@ class TimelineMarks implements ISeriesPrimitive<Time> {
     ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
+    ctx.font = `600 10px ${p.font}`;
+    // Room for the widest a grouped tag can get ("₹31 +12"), so a group never
+    // runs into the next one.
+    const half = (tag: string) => ctx.measureText(`${tag} +99`).width / 2 + 5;
     type Group = { x: number; hw: number; evs: TlEv[]; days: number[] };
     const lanes: Group[][] = [[], []];
     for (const m of this.marks) {
       const x = ts.timeToCoordinate(toTime(m.day));
       if (x === null) continue;
-      const parts = this.rows === 2
-        ? [m.evs.filter((e) => e.kind === "res"), m.evs.filter((e) => e.kind === "ca")]
-        : [m.evs];
-      parts.forEach((evs, lane) => {
+      [m.evs.filter((e) => e.kind === "res"), m.evs.filter((e) => e.kind === "ca")].forEach((evs, lane) => {
         if (!evs.length) return;
-        const hw = this.half(ctx, evs);
+        const hw = half(evs[0].tag);
         const row = lanes[lane];
         const prev = row[row.length - 1];
         if (prev && x - hw < prev.x + prev.hw + 2) {
@@ -412,99 +383,27 @@ class TimelineMarks implements ISeriesPrimitive<Time> {
         } else row.push({ x, hw, evs: [...evs], days: [m.day] });
       });
     }
+    // One line, centred, when a company has only one kind of event.
+    const both = lanes[0].length > 0 && lanes[1].length > 0;
     lanes.forEach((row, lane) => {
-      const y = this.rows === 2 ? (lane === 0 ? mid - 9 : mid + 9) : mid;
+      const y = both ? (lane === 0 ? mid - 9 : mid + 9) : mid;
       for (const g of row) {
-        const box = this.drawOne(ctx, g.evs, g.x, y);
-        const n = g.evs.length;
-        if (n > 1 && this.style !== "tags") this.count(ctx, n, box[2] - 1, box[1] + 1);
-        this.placed.push({ days: g.days, x0: box[0], y0: box[1], x1: box[2], y1: box[3] });
-      }
-    });
-    ctx.restore();
-  }
-
-  /** How many events a grouped marker holds: a small filled bubble. */
-  private count(ctx: Ctx, n: number, x: number, y: number) {
-    const p = this.p;
-    ctx.font = `700 8px ${p.font}`;
-    const t = String(n);
-    const w = Math.max(10, ctx.measureText(t).width + 5);
-    ctx.fillStyle = p.ink;
-    roundRect(ctx, x - w / 2, y - 5, w, 10, 5);
-    ctx.fill();
-    ctx.fillStyle = p.bg;
-    ctx.fillText(t, x, y + 0.5);
-  }
-
-  private drawOne(ctx: Ctx, evs: TlEv[], x: number, y: number): [number, number, number, number] {
-    const p = this.p;
-    const e = evs[0];
-    const n = evs.length;
-    switch (this.style) {
-      case "shapes": {
-        ctx.fillStyle = e.color;
-        if (e.kind === "ca") { ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2); ctx.fill(); }
-        else ctx.fillRect(x - 4, y - 4, 8, 8);
-        ctx.font = `600 9px ${p.font}`;
-        ctx.fillText(e.kind === "res" ? e.tag : e.letter, x, y - 11);
-        return [x - 6, y - 16, x + 6, y + 5];
-      }
-      case "badges": {
-        const w = e.kind === "ca" && e.letter.length > 1 ? 21 : 16;
-        ctx.fillStyle = e.color;
-        if (e.kind === "res") roundRect(ctx, x - 8, y - 8, 16, 16, 3.5);
-        else if (w > 16) roundRect(ctx, x - w / 2, y - 8, w, 16, 8);
-        else { ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI * 2); }
-        ctx.fill();
-        ctx.fillStyle = "#fff";
-        ctx.font = `700 ${w > 16 ? 8.5 : 10}px ${p.font}`;
-        ctx.fillText(e.kind === "res" ? "E" : e.letter, x, y + 0.5);
-        return [x - w / 2, y - 8, x + w / 2, y + 8];
-      }
-      case "pins": {
-        const top = y - 21;
-        ctx.strokeStyle = alpha(e.color, 0.75); ctx.lineWidth = 1.2;
-        ctx.beginPath(); ctx.moveTo(x, y + 4); ctx.lineTo(x, top + 12); ctx.stroke();
-        ctx.fillStyle = e.color;
-        ctx.beginPath(); ctx.arc(x, y + 4, 1.8, 0, Math.PI * 2); ctx.fill();
-        if (e.kind === "res") roundRect(ctx, x - 7, top, 14, 13, 3);
-        else { ctx.beginPath(); ctx.arc(x, top + 6.5, 7, 0, Math.PI * 2); }
-        ctx.fill();
-        ctx.fillStyle = "#fff";
-        ctx.font = `700 ${e.kind === "ca" && e.letter.length > 1 ? 7.5 : 9}px ${p.font}`;
-        ctx.fillText(e.kind === "res" ? e.tag.slice(1) : e.letter, x, top + 7);
-        return [x - 7, top, x + 7, y + 6];
-      }
-      case "icons":
-        drawIcon(ctx, e, x, y, p);
-        return [x - 8, y - 8, x + 8, y + 8];
-      case "dots": {
-        const r = n > 1 ? 4.5 : 3.5;
-        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
-        if (e.kind === "ca") { ctx.fillStyle = e.color; ctx.fill(); }
-        else { ctx.fillStyle = p.bg; ctx.fill(); ctx.strokeStyle = e.color; ctx.lineWidth = 1.7; ctx.stroke(); }
-        if (n > 1) {
-          ctx.font = `700 8px ${p.font}`; ctx.fillStyle = p.ink3;
-          ctx.fillText(String(n), x, y - r - 5);
-        }
-        return [x - r, y - r - (n > 1 ? 9 : 0), x + r, y + r];
-      }
-      default: {
-        // Tags: the figure itself, and "+2" where more share the spot.
-        const label = this.tagLabel(evs);
-        ctx.font = `600 10px ${p.font}`;
+        const e = g.evs[0];
+        const label = g.evs.length > 1 ? `${e.tag} +${g.evs.length - 1}` : e.tag;
         const w = ctx.measureText(label).width + 10;
         const t = alpha(e.color, 0.16);
         ctx.fillStyle = t === e.color ? p.card2 : t;
-        roundRect(ctx, x - w / 2, y - 8, w, 16, 8);
+        roundRect(ctx, g.x - w / 2, y - 8, w, 16, 8);
         ctx.fill();
-        ctx.strokeStyle = alpha(e.color, 0.6); ctx.lineWidth = 1; ctx.stroke();
+        ctx.strokeStyle = alpha(e.color, 0.6);
+        ctx.lineWidth = 1;
+        ctx.stroke();
         ctx.fillStyle = e.color;
-        ctx.fillText(label, x, y + 0.5);
-        return [x - w / 2, y - 8, x + w / 2, y + 8];
+        ctx.fillText(label, g.x, y + 0.5);
+        this.placed.push({ days: g.days, x0: g.x - w / 2, y0: y - 8, x1: g.x + w / 2, y1: y + 8 });
       }
-    }
+    });
+    ctx.restore();
   }
 }
 
@@ -545,6 +444,38 @@ type LegendData = {
 
 type Bar = { day: number; v: number; q?: number; announced?: string | null; chg?: Growth };
 
+/* ── The settings sheet's parts ─────────────────────────────────────────── */
+
+const Switch = ({ on }: { on: boolean }) => (
+  <span className={`relative shrink-0 w-10 h-6 rounded-full transition-colors ${on ? "bg-[var(--accent)]" : "bg-[var(--line2)]"}`}>
+    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${on ? "left-[18px]" : "left-0.5"}`} />
+  </span>
+);
+const Toggle = ({ on, label, sub, dot, onClick }: { on: boolean; label: string; sub?: string; dot?: string; onClick: () => void }) => (
+  <button role="switch" aria-checked={on} onClick={onClick}
+    className="w-full min-h-[48px] px-3 rounded-xl flex items-center gap-3 text-[15px] text-[var(--ink)] active:bg-[var(--card2)]">
+    {dot !== undefined && <span className="w-3 h-3 rounded-full shrink-0" style={{ background: dot || "var(--ink3)" }} />}
+    <span className="flex-1 text-left">
+      {label}
+      {sub && <span className="block text-xs text-[var(--ink3)]">{sub}</span>}
+    </span>
+    <Switch on={on} />
+  </button>
+);
+const Head = ({ children }: { children: React.ReactNode }) => (
+  <p className="px-3 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">{children}</p>
+);
+const Seg = <T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) => (
+  <div className="flex items-center rounded-lg bg-[var(--card2)] p-0.5 shrink-0">
+    {options.map(([k, label]) => (
+      <button key={k} role="radio" aria-checked={value === k} onClick={() => onChange(k)}
+        className={`min-h-[30px] px-2.5 rounded-md text-[13px] font-semibold ${value === k ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>
+        {label}
+      </button>
+    ))}
+  </div>
+);
+
 export default function FullChart({ symbol }: { symbol: string }) {
   const router = useRouter();
   const boxRef = useRef<HTMLDivElement>(null);
@@ -578,8 +509,6 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [epsCmp, setEpsCmp] = useState<"yoy" | "prev">("yoy");
   const [showCA, setShowCA] = useState(true);
   const [shadeQ, setShadeQ] = useState(true);
-  const [tlStyle, setTlStyle] = useState<TlStyle>("shapes");
-  const [tlRows, setTlRows] = useState<1 | 2>(1);
   const [evPop, setEvPop] = useState<{ title: string; items: { text: string; sub?: string; color: string }[] } | null>(null);
   const [caOn, setCaOn] = useState<Record<string, boolean>>({ dividend: true, bonus: true, split: true, rights: true, buyback: true, other: true });
   const [hidden, setHidden] = useState<Record<string, boolean>>({});
@@ -590,22 +519,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [cmpQ, setCmpQ] = useState("");
   const [vis, setVis] = useState<{ from: number; to: number } | null>(null);
 
-  useEffect(() => {
-    setPrefs(loadPrefs());
-    try {
-      const t = localStorage.getItem(TL_KEY);
-      if (TL_STYLES.some(([k]) => k === t)) setTlStyle(t as TlStyle);
-      if (localStorage.getItem(`${TL_KEY}_rows`) === "2") setTlRows(2);
-    } catch { /* private mode */ }
-  }, []);
-  const pickRows = (n: 1 | 2) => {
-    setTlRows(n);
-    try { localStorage.setItem(`${TL_KEY}_rows`, String(n)); } catch { /* private mode */ }
-  };
-  const pickTl = (k: TlStyle) => {
-    setTlStyle(k);
-    try { localStorage.setItem(TL_KEY, k); } catch { /* private mode */ }
-  };
+  useEffect(() => { setPrefs(loadPrefs()); }, []);
   const savePrefs = (p: Prefs) => {
     setPrefs(p);
     try { localStorage.setItem(PREF_KEY, JSON.stringify(p)); } catch { /* private mode */ }
@@ -1036,7 +950,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
     // Result dates and corporate actions. Collected once, then drawn in the
     // chosen style - and listed in the legend for the bar under the finger in
     // every style, so the details are never only in a label that may overlap.
-    type Ev = { day: number; kind: "ca" | "res"; ca?: string; letter: string; tag: string; label: string; text: string; sub?: string; color: string };
+    type Ev = { day: number; kind: "ca" | "res"; tag: string; label: string; text: string; sub?: string; color: string };
     const evs: Ev[] = [];
     let tl: TimelineMarks | null = null;
     if (anchor && anchorDays.length) {
@@ -1048,7 +962,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
           if (d === null) continue;
           const label = a.detail ? `${CA_LABEL[k]} ${a.detail}` : CA_LABEL[k];
           evs.push({
-            day: d, kind: "ca", ca: k, letter: CA_SHORT[k] ?? "•", tag: caTag(k, a.detail), label,
+            day: d, kind: "ca", tag: caTag(k, a.detail), label,
             text: `${label} · ex-date ${dateOf(dayOf(a.date))}`, sub: a.subject ?? undefined, color: p.ca[k],
           });
         }
@@ -1058,20 +972,32 @@ export default function FullChart({ symbol }: { symbol: string }) {
           if (!q.announced) continue;
           const d = snap(anchorDays, dayOf(q.announced));
           if (d === null) continue;
-          evs.push({ day: d, kind: "res", letter: "E", tag: `Q${q.q}`, label: `Q${q.q} results`, text: `${Q_LABEL[q.q] ?? `Q${q.q}`} results declared ${dateOf(dayOf(q.announced))}`, color: p.q[q.q] ?? p.q[1] });
+          evs.push({ day: d, kind: "res", tag: `Q${q.q}`, label: `Q${q.q} results`, text: `${Q_LABEL[q.q] ?? `Q${q.q}`} results declared ${dateOf(dayOf(q.announced))}`, color: p.q[q.q] ?? p.q[1] });
         }
       }
       evs.sort((x, y) => x.day - y.day);
 
-      // 1. Quarters as tinted spans. Every bar is tinted by the fiscal quarter
-      //    it falls in, on an axis of its own and drawn BEHIND the chart.
+      // 1. Quarters as tinted blocks behind the chart, first candle of each
+      //    fiscal quarter to its last. The series only carries the layer.
       if (shadeQ) {
-        const sh = chart.addSeries(HistogramSeries, { priceScaleId: "shade", priceLineVisible: false, lastValueVisible: false, base: 0 });
+        const spans: QSpan[] = [];
+        for (const d of anchorDays) {
+          const dt = new Date(d * DAY * 1000);
+          const m = dt.getUTCMonth() + 1;
+          const q = fyQ(m);
+          const key = (m >= 4 ? dt.getUTCFullYear() : dt.getUTCFullYear() - 1) * 10 + q;
+          const last = spans[spans.length - 1];
+          if (last && last.key === key) last.to = d;
+          else spans.push({ key, from: d, to: d, color: alpha(p.q[q], 0.1) });
+        }
+        const sh = chart.addSeries(LineSeries, {
+          priceScaleId: "shade", color: "rgba(0, 0, 0, 0)", lineVisible: false, priceLineVisible: false,
+          lastValueVisible: false, crosshairMarkerVisible: false,
+          autoscaleInfoProvider: () => ({ priceRange: { minValue: -1, maxValue: 1 } }),
+        });
         chart.priceScale("shade").applyOptions({ scaleMargins: { top: 0, bottom: 0 }, visible: false });
-        sh.setData(anchorDays.map((d) => ({
-          time: toTime(d), value: 1, color: alpha(p.q[fyQ(new Date(d * DAY * 1000).getUTCMonth() + 1)], 0.1),
-        })));
-        sh.setSeriesOrder(0);
+        sh.setData(anchorDays.map((d) => ({ time: toTime(d), value: 0 })));
+        sh.attachPrimitive(new QuarterBands(spans));
       }
       if (evs.length) {
         // 2. A faint line through the whole chart on each event date - a
@@ -1094,12 +1020,12 @@ export default function FullChart({ symbol }: { symbol: string }) {
         flat.setData(anchorDays.map((d) => ({ time: toTime(d), value: 0 })));
         const marks: TlMark[] = [];
         for (const e of evs) {
-          const v: TlEv = { kind: e.kind, ca: e.ca, letter: e.letter, tag: e.tag, color: e.color };
+          const v: TlEv = { kind: e.kind, tag: e.tag, color: e.color };
           const last = marks[marks.length - 1];
           if (last && last.day === e.day) last.evs.push(v);
           else marks.push({ day: e.day, evs: [v] });
         }
-        tl = new TimelineMarks(marks, tlStyle, tlRows, p);
+        tl = new TimelineMarks(marks, p);
         flat.attachPrimitive(tl);
         // Keep the lines and the chart itself clear of the band.
         if (view !== "price") {
@@ -1190,7 +1116,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
     };
     // `range` is applied below without a rebuild.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, company, view, interval, prefs, peWin, showQ, showDates, showChg, epsCmp, showCA, caOn, hidden, cmpFile, cmpCo, cmpSym, themeKey, symbol, shadeQ, tlStyle, tlRows]);
+  }, [file, company, view, interval, prefs, peWin, showQ, showDates, showChg, epsCmp, showCA, caOn, hidden, cmpFile, cmpCo, cmpSym, themeKey, symbol, shadeQ]);
 
   const applyRange = () => {
     const chart = chartRef.current, sp = spanRef.current;
@@ -1200,7 +1126,10 @@ export default function FullChart({ symbol }: { symbol: string }) {
     else chart.timeScale().setVisibleRange({ from: toTime(sp.last - days), to: toTime(sp.last) });
   };
   // A new range moves the window; it does not rebuild the chart.
-  useEffect(() => { applyRange(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [range]);
+  useEffect(() => {
+    applyRange();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range]);
 
   const back = () => {
     const from = sessionStorage.getItem("rs_chart_from");
@@ -1250,6 +1179,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
   // renders. A copy kept in state lagged a step behind a range change, so the
   // sheet said "2 in view" over a chart showing 4.
   const caCount: Record<string, number> = {};
+  // eslint-disable-next-line react-hooks/refs
   const vr = sheet ? chartRef.current?.timeScale().getVisibleRange() : null;
   const win = vr ? { from: Math.round((vr.from as number) / DAY), to: Math.round((vr.to as number) / DAY) } : vis;
   for (const a of company?.actions ?? []) {
@@ -1279,35 +1209,6 @@ export default function FullChart({ symbol }: { symbol: string }) {
     `shrink-0 min-h-[34px] px-2 rounded-lg text-[13px] font-semibold tabular-nums transition-colors ${
       disabled ? "text-[var(--ink3)] opacity-35"
         : active ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)] active:bg-[var(--card2)]"}`;
-  const Switch = ({ on }: { on: boolean }) => (
-    <span className={`relative shrink-0 w-10 h-6 rounded-full transition-colors ${on ? "bg-[var(--accent)]" : "bg-[var(--line2)]"}`}>
-      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${on ? "left-[18px]" : "left-0.5"}`} />
-    </span>
-  );
-  const Toggle = ({ on, label, sub, dot, onClick }: { on: boolean; label: string; sub?: string; dot?: string; onClick: () => void }) => (
-    <button role="switch" aria-checked={on} onClick={onClick}
-      className="w-full min-h-[48px] px-3 rounded-xl flex items-center gap-3 text-[15px] text-[var(--ink)] active:bg-[var(--card2)]">
-      {dot !== undefined && <span className="w-3 h-3 rounded-full shrink-0" style={{ background: dot || "var(--ink3)" }} />}
-      <span className="flex-1 text-left">
-        {label}
-        {sub && <span className="block text-xs text-[var(--ink3)]">{sub}</span>}
-      </span>
-      <Switch on={on} />
-    </button>
-  );
-  const Head = ({ children }: { children: React.ReactNode }) => (
-    <p className="px-3 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">{children}</p>
-  );
-  const Seg = <T extends string,>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) => (
-    <div className="flex items-center rounded-lg bg-[var(--card2)] p-0.5 shrink-0">
-      {options.map(([k, label]) => (
-        <button key={k} role="radio" aria-checked={value === k} onClick={() => onChange(k)}
-          className={`min-h-[30px] px-2.5 rounded-md text-[13px] font-semibold ${value === k ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>
-          {label}
-        </button>
-      ))}
-    </div>
-  );
   const indColour = (k: Ind) =>
     k === "dma50" ? "var(--chart-dma50)" : k === "dma200" ? "var(--chart-dma200)" : k === "vol" ? "var(--chart-vol)" : FIXED[k] ?? "var(--ink3)";
 
@@ -1430,26 +1331,6 @@ export default function FullChart({ symbol }: { symbol: string }) {
         {error && <p className="absolute inset-0 flex items-center justify-center px-8 text-center text-sm text-[var(--ink3)]">{error}</p>}
       </div>
 
-      {(showCA || showDates) && (
-        // PREVIEW ONLY - the timeline-symbol chooser, in a row of its own so it
-        // covers nothing on the chart. It comes out once a style is picked.
-        <div className="shrink-0 flex items-center gap-0.5 overflow-x-auto px-2 py-1 border-t border-[var(--line)] bg-[var(--card)] [scrollbar-width:none]">
-          <span className="shrink-0 px-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--ink3)]">Timeline</span>
-          {TL_STYLES.map(([k, label]) => (
-            <button key={k} onClick={() => pickTl(k)} aria-pressed={tlStyle === k}
-              className={`shrink-0 min-h-[30px] px-2.5 rounded-lg text-[12px] font-semibold ${tlStyle === k ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)]"}`}>
-              {label}
-            </button>
-          ))}
-          <span className="shrink-0 mx-1 h-4 border-l border-[var(--line2)]" />
-          {([1, 2] as const).map((n) => (
-            <button key={n} onClick={() => pickRows(n)} aria-pressed={tlRows === n}
-              className={`shrink-0 min-h-[30px] px-2.5 rounded-lg text-[12px] font-semibold ${tlRows === n ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)]"}`}>
-              {n === 1 ? "1 row" : "2 rows"}
-            </button>
-          ))}
-        </div>
-      )}
       <footer className="shrink-0 border-t border-[var(--line)] pb-[env(safe-area-inset-bottom)] flex flex-col [@media(max-height:500px)]:flex-row [@media(max-height:500px)]:items-center">
         <div className="flex items-center gap-0 overflow-x-auto px-1.5 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [@media(max-height:500px)]:flex-1">
           {RANGES.map((r) => (
