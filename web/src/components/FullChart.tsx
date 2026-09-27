@@ -32,7 +32,10 @@ const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const DAY = 86400;
 
 type Row = [number, number, number, number, number, number]; // day, o, h, l, c, v
-type ChartFile = { s: string; asof?: string | null; d?: Row[]; w?: Row[]; m?: Row[] };
+type ChartFile = { s: string; name?: string; asof?: string | null; d?: Row[]; w?: Row[]; m?: Row[] };
+/** Something drawn over the chart: a peer, another ETF, an index. */
+type Cmp = { sym: string; name: string; file: ChartFile | null; co: Company | null };
+const MAX_CMP = 3;
 type Company = {
   snapshot?: { name?: string | null };
   exchange?: string | null;
@@ -444,6 +447,26 @@ type LegendData = {
 
 type Bar = { day: number; v: number; q?: number; announced?: string | null; chg?: Growth };
 
+/** Overlay colours, in the order overlays are added. Cyan is the NAV's colour
+ *  too; the NAV line steps aside whenever something is compared. */
+function cmpColour(k: number, p?: { alt: string }): string {
+  return [p?.alt ?? "var(--chart-alt)", "#f59e0b", "#e879f9"][k] ?? "#94a3b8";
+}
+
+function CmpRow({ sym, name, tag, cmps, onToggle }: {
+  sym: string; name: string; tag: string; cmps: Cmp[]; onToggle: (sym: string, name: string) => void;
+}) {
+  const k = cmps.findIndex((c) => c.sym === sym);
+  return (
+    <button onClick={() => onToggle(sym, name)} aria-pressed={k >= 0}
+      className={`w-full min-h-[46px] px-3 rounded-xl flex items-center gap-3 text-left ${k >= 0 ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink)] active:bg-[var(--card2)]"}`}>
+      <i className="inline-block w-3 h-3 rounded-full shrink-0 border border-[var(--line2)]" style={{ background: k >= 0 ? cmpColour(k) : "transparent" }} />
+      <span className="flex-1 text-[15px] truncate">{name}</span>
+      <span className="text-xs text-[var(--ink3)] shrink-0">{tag}</span>
+    </button>
+  );
+}
+
 /* ── The settings sheet's parts ─────────────────────────────────────────── */
 
 const Switch = ({ on }: { on: boolean }) => (
@@ -490,7 +513,10 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [file, setFile] = useState<ChartFile | null>(null);
   const [company, setCompany] = useState<Company | null>(null);
   // An ETF's own file: its name and each day's NAV, drawn over the candles.
-  const [etfDoc, setEtfDoc] = useState<{ name: string; rows: [number, number, number | null, number | null][] } | null>(null);
+  const [etfDoc, setEtfDoc] = useState<{
+    name: string; rows: [number, number, number | null, number | null][];
+    same: { s: string; name: string }[]; index: { label: string; chart?: string } | null;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [index, setIndex] = useState<{ symbol: string; name: string; mcap: number }[]>([]);
   const [view, setView] = useState<View>("price");
@@ -514,9 +540,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [evPop, setEvPop] = useState<{ title: string; items: { text: string; sub?: string; color: string }[] } | null>(null);
   const [caOn, setCaOn] = useState<Record<string, boolean>>({ dividend: true, bonus: true, split: true, rights: true, buyback: true, other: true });
   const [hidden, setHidden] = useState<Record<string, boolean>>({});
-  const [cmpSym, setCmpSym] = useState<string | null>(null);
-  const [cmpFile, setCmpFile] = useState<ChartFile | null>(null);
-  const [cmpCo, setCmpCo] = useState<Company | null>(null);
+  const [cmps, setCmps] = useState<Cmp[]>([]);
   const [cmpErr, setCmpErr] = useState<string | null>(null);
   const [cmpQ, setCmpQ] = useState("");
   const [vis, setVis] = useState<{ from: number; to: number } | null>(null);
@@ -530,7 +554,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
   useEffect(() => {
     if (!symbol) return;
     let live = true;
-    setFile(null); setCompany(null); setError(null); setEtfDoc(null);
+    setFile(null); setCompany(null); setError(null); setEtfDoc(null); setCmps([]);
     // The candles and, for an ETF, its NAV file, set TOGETHER. Arriving apart,
     // the chart drew once, then drew again for the NAV line - and the second
     // build kept the first one's window, which had not yet settled on the
@@ -542,9 +566,10 @@ export default function FullChart({ symbol }: { symbol: string }) {
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null),
     ])
-      .then(([d, e]: [ChartFile, { name?: string; rows?: [number, number, number | null, number | null][] } | null]) => {
+      .then(([d, e]: [ChartFile, { name?: string; rows?: [number, number, number | null, number | null][];
+        same_index?: { s: string; name: string }[]; index?: { label: string; chart?: string } | null } | null]) => {
         if (!live) return;
-        if (e?.rows) setEtfDoc({ name: String(e.name ?? ""), rows: e.rows });
+        if (e?.rows) setEtfDoc({ name: String(e.name ?? ""), rows: e.rows, same: e.same_index ?? [], index: e.index ?? null });
         setFile(d);
       })
       .catch(() => { if (live) setError(`No price history is published for ${symbol} yet.`); });
@@ -561,20 +586,21 @@ export default function FullChart({ symbol }: { symbol: string }) {
     return () => { live = false; };
   }, [symbol]);
 
-  useEffect(() => {
-    if (!cmpSym) { setCmpFile(null); setCmpCo(null); setCmpErr(null); return; }
-    let live = true;
+  // Up to three series over this one. Tapping one already drawn takes it off.
+  const toggleCmp = (sym: string, name = "") => {
+    if (cmps.some((c) => c.sym === sym)) { setCmps(cmps.filter((c) => c.sym !== sym)); setCmpErr(null); return; }
+    if (cmps.length >= MAX_CMP) { setCmpErr(`Up to ${MAX_CMP} at once - take one off first`); return; }
     setCmpErr(null);
     Promise.all([
-      fetch(`${BASE}/charts/${encodeURIComponent(cmpSym)}.json`).then((r) => (r.ok ? r.json() : null)),
-      fetch(`${BASE}/companies/${encodeURIComponent(cmpSym)}.json`).then((r) => (r.ok ? r.json() : null)),
-    ]).then(([f, c]) => {
-      if (!live) return;
-      if (!f && !c) { setCmpErr(`No data for ${cmpSym}`); setCmpSym(null); return; }
-      setCmpFile(f); setCmpCo(c);
-    }).catch(() => { if (live) setCmpErr(`No data for ${cmpSym}`); });
-    return () => { live = false; };
-  }, [cmpSym]);
+      fetch(`${BASE}/charts/${encodeURIComponent(sym)}.json`).then((r) => (r.ok ? r.json() : null)),
+      sym.startsWith("IDX-") ? Promise.resolve(null)
+        : fetch(`${BASE}/companies/${encodeURIComponent(sym)}.json`).then((r) => (r.ok ? r.json() : null)),
+    ]).then(([f, c]: [ChartFile | null, Company | null]) => {
+      if (!f && !c) { setCmpErr(`No data for ${sym}`); return; }
+      const nm = name || f?.name || c?.snapshot?.name || sym;
+      setCmps((prev) => (prev.some((x) => x.sym === sym) || prev.length >= MAX_CMP ? prev : [...prev, { sym, name: nm, file: f, co: c }]));
+    }).catch(() => setCmpErr(`No data for ${sym}`));
+  };
 
   useEffect(() => {
     const mo = new MutationObserver(() => setThemeKey((k) => k + 1));
@@ -694,7 +720,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
       if (!rows.length) { chart.remove(); chartRef.current = null; return; }
       const days = rows.map((r) => r[0]);
       const closes = rows.map((r) => r[4]);
-      const comparing = !!cmpFile;
+      const comparing = cmps.some((c) => c.file);
       // Room at the foot of the price pane for the timeline band, when there
       // is anything to put in it.
       const stripOn = (showCA && (company?.actions?.length ?? 0) > 0) || (showDates && (company?.quarters?.length ?? 0) > 0);
@@ -750,12 +776,12 @@ export default function FullChart({ symbol }: { symbol: string }) {
       // A comparison is drawn as percentage change from the left edge of the
       // window - two share prices in rupees have no common scale. Averages
       // mean nothing once rebased, so they step aside, as on the company chart.
-      let peerRows: Row[] = [];
-      if (comparing && cmpFile) {
-        peerRows = cmpFile[interval] ?? cmpFile.w ?? cmpFile.m ?? [];
-        const s = line(p.alt, 2);
-        s.setData(peerRows.map(([t, , , , c]) => ({ time: toTime(t), value: c })));
-      }
+      const overlays = cmps.map((c, k) => {
+        const rs: Row[] = c.file ? (c.file[interval] ?? c.file.w ?? c.file.m ?? []) : [];
+        const color = cmpColour(k, p);
+        if (rs.length) line(color, 2).setData(rs.map(([t, , , , cl]) => ({ time: toTime(t), value: cl })));
+        return { c, rs, days: rs.map((r) => r[0]), color };
+      });
       const [w50, w200] = DMA_BARS[interval];
       const d50 = sma(closes, w50), d200 = sma(closes, w200), s20 = sma(closes, 20), e21 = ema(closes, 21);
       const bb = bollinger(closes), r14 = rsi(closes);
@@ -786,7 +812,6 @@ export default function FullChart({ symbol }: { symbol: string }) {
         chart.panes()[0]?.setStretchFactor(3);
         chart.panes()[1]?.setStretchFactor(1);
       }
-      const peerDays = peerRows.map((r) => r[0]);
       legendAt = (day) => {
         const i = day === null ? rows.length - 1 : atOrBefore(days, day);
         const [t, o, h, l, c, vv] = rows[i];
@@ -811,9 +836,11 @@ export default function FullChart({ symbol }: { symbol: string }) {
           items.push({ label: "vs NAV", value: `${prem >= 0 ? "+" : ""}${prem.toFixed(1)}%`,
             color: Math.abs(prem) < 0.5 ? p.ink3 : prem > 0 ? p.dma50 : p.alt });
         }
-        if (comparing && peerRows.length && cmpSym) {
-          const j = atOrBefore(peerDays, t);
-          items.push({ label: cmpSym, value: `₹${price(peerRows[j][4])}`, color: p.alt });
+        for (const o of overlays) {
+          if (!o.rs.length) continue;
+          const j = atOrBefore(o.days, t);
+          const isIdx = o.c.sym.startsWith("IDX-");
+          items.push({ label: isIdx ? o.c.name : o.c.sym, value: `${isIdx ? "" : "₹"}${price(o.rs[j][4])}`, color: o.color });
         }
         return {
           date: dateOf(t, interval === "m" ? "month" : "day"),
@@ -884,13 +911,16 @@ export default function FullChart({ symbol }: { symbol: string }) {
       anchor = main; anchorDays = bd;
 
       // The peer's own ratio on the same axis - the company chart's comparison.
-      const peerBand = view === "pe" ? cmpCo?.pe_band : view === "ev" ? cmpCo?.ev_band : view === "pb" ? cmpCo?.pb_band : cmpCo?.ps_band;
-      const peerDays = peerBand?.series.map((q) => dayOf(q[0])) ?? [];
-      if (peerBand) {
-        const s = line(p.alt, 2);
-        s.applyOptions({ priceFormat: rf });
-        s.setData(peerBand.series.map((q) => ({ time: toTime(dayOf(q[0])), value: q[1] })));
-      }
+      const peerBands = cmps.map((c, k) => {
+        const band = view === "pe" ? c.co?.pe_band : view === "ev" ? c.co?.ev_band : view === "pb" ? c.co?.pb_band : c.co?.ps_band;
+        const color = cmpColour(k, p);
+        if (band) {
+          const s = line(color, 2);
+          s.applyOptions({ priceFormat: rf });
+          s.setData(band.series.map((q) => ({ time: toTime(dayOf(q[0])), value: q[1] })));
+        }
+        return { c, band, days: band?.series.map((q) => dayOf(q[0])) ?? [], color };
+      });
 
       // The figure underneath, exactly as the company chart builds it.
       const bars: Bar[] = [];
@@ -974,9 +1004,10 @@ export default function FullChart({ symbol }: { symbol: string }) {
           const g = b.chg && b.chg.kind !== "none" ? ` ${growthText(b.chg)}` : "";
           items.push({ label: barLabel, value: barFmt(b.v) + g, color: b.chg ? growthCol(b.chg, p) : undefined });
         }
-        if (peerBand && cmpSym && peerDays.length) {
-          const j = atOrBefore(peerDays, bd[i]);
-          items.push({ label: cmpSym, value: ratio(peerBand.series[j][1]), color: p.alt });
+        for (const pb of peerBands) {
+          if (!pb.band || !pb.days.length) continue;
+          const j = atOrBefore(pb.days, bd[i]);
+          items.push({ label: pb.c.sym, value: ratio(pb.band.series[j][1]), color: pb.color });
         }
         // The breakdown behind the ratio, on the trailing basis it was filed on.
         // A 1Q×4 figure has no such breakdown, so none is offered for it.
@@ -1156,7 +1187,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
     };
     // `range` is applied below without a rebuild.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, company, view, interval, prefs, peWin, showQ, showDates, showChg, epsCmp, showCA, caOn, hidden, cmpFile, cmpCo, cmpSym, themeKey, symbol, shadeQ, etfDoc]);
+  }, [file, company, view, interval, prefs, peWin, showQ, showDates, showChg, epsCmp, showCA, caOn, hidden, cmps, themeKey, symbol, shadeQ, etfDoc]);
 
   const applyRange = () => {
     const chart = chartRef.current, sp = spanRef.current;
@@ -1293,13 +1324,19 @@ export default function FullChart({ symbol }: { symbol: string }) {
         {VIEWS.filter(([v]) => avail[v]).map(([v, label]) => (
           <button key={v} onClick={() => pickView(v)} className={`${pill(view === v)} whitespace-nowrap`}>{label}</button>
         ))}
-        {cmpSym && (
+        {cmps.length > 0 && (
           <span className="ml-auto shrink-0 inline-flex items-center gap-1 pl-2 text-xs text-[var(--ink3)] whitespace-nowrap">
-            <i className="inline-block w-3 h-1 rounded-sm" style={{ background: "var(--chart-alt)" }} />
-            vs {cmpSym}
-            <button onClick={() => setCmpSym(null)} aria-label="Stop comparing" className="w-6 h-6 rounded-full flex items-center justify-center text-[var(--ink3)]">
-              <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
-            </button>
+            vs
+            {cmps.map((c, k) => (
+              <span key={c.sym} className="inline-flex items-center gap-1">
+                <i className="inline-block w-3 h-1 rounded-sm" style={{ background: cmpColour(k) }} />
+                {c.sym.startsWith("IDX-") ? c.name : c.sym}
+                <button onClick={() => toggleCmp(c.sym)} aria-label={`Stop comparing with ${c.name}`}
+                  className="w-6 h-6 -ml-1 rounded-full flex items-center justify-center text-[var(--ink3)]">
+                  <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                </button>
+              </span>
+            ))}
           </span>
         )}
       </nav>
@@ -1403,7 +1440,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
           <button onClick={() => setSheet("layers")} className={pill(nLayers > 0)}>
             {view === "price" ? "Indicators" : "Layers"}{nLayers > 0 ? ` · ${nLayers}` : ""}
           </button>
-          <button onClick={() => setSheet("cmp")} className={pill(!!cmpSym)} aria-label="Compare with another company">
+          <button onClick={() => setSheet("cmp")} className={pill(cmps.length > 0)} aria-label="Compare with other charts">
             <svg viewBox="0 0 24 24" className="w-[18px] h-[18px] inline-block" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M7 4v16M17 4v16M4 8l3-4 3 4M14 16l3 4 3-4" />
             </svg>
@@ -1447,7 +1484,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
                     <Head>Indicators</Head>
                     {INDS.map(([k, label]) => (
                       <Toggle key={k} on={indOn(k)} label={label} dot={indColour(k)}
-                        sub={cmpSym && k !== "vol" && k !== "rsi" ? "Hidden while comparing - averages mean nothing once rebased" : undefined}
+                        sub={cmps.length > 0 && k !== "vol" && k !== "rsi" ? "Hidden while comparing - averages mean nothing once rebased" : undefined}
                         onClick={() => savePrefs({ ...prefs, inds: indOn(k) ? prefs.inds.filter((x) => x !== k) : [...prefs.inds, k] })} />
                     ))}
                   </>
@@ -1506,31 +1543,39 @@ export default function FullChart({ symbol }: { symbol: string }) {
 
             {sheet === "cmp" && (
               <>
-                <Head>Compare with</Head>
+                <Head>Compare with · up to {MAX_CMP}</Head>
                 <p className="px-3 pb-2 text-xs text-[var(--ink3)]">
-                  {view === "price" ? "Both drawn as % change from the left edge of the chart." : "Drawn on the same axis as this company's ratio."}
+                  {view === "price" ? "Each drawn as % change from the left edge of the chart. Tap again to take one off." : "Drawn on the same axis as this company's ratio."}
                 </p>
-                <button onClick={() => { setCmpSym(null); setSheet(null); }}
-                  className={`w-full min-h-[46px] px-3 rounded-xl text-left text-[15px] ${!cmpSym ? "text-[var(--accent-ink)] bg-[var(--accent-soft)] font-semibold" : "text-[var(--ink)] active:bg-[var(--card2)]"}`}>
-                  None
-                </button>
+                {cmps.length > 0 && (
+                  <button onClick={() => { setCmps([]); setCmpErr(null); }}
+                    className="w-full min-h-[44px] px-3 rounded-xl text-left text-[15px] text-[var(--ink)] active:bg-[var(--card2)]">
+                    Clear all
+                  </button>
+                )}
+                {etfDoc?.index?.chart && (
+                  <>
+                    <Head>Its index</Head>
+                    <CmpRow sym={etfDoc.index.chart} name={`${etfDoc.index.label}${etfDoc.index.chart.endsWith("-INR") ? " (₹)" : ""}`}
+                      tag="Index" cmps={cmps} onToggle={toggleCmp} />
+                  </>
+                )}
+                {(etfDoc?.same.length ?? 0) > 0 && <Head>Same index</Head>}
+                {etfDoc?.same.slice(0, 8).map((q) => (
+                  <CmpRow key={q.s} sym={q.s} name={q.name} tag={q.s} cmps={cmps} onToggle={toggleCmp} />
+                ))}
                 {peerList.length > 0 && <Head>Peers</Head>}
                 {peerList.map((q) => (
-                  <button key={q.sym} onClick={() => { setCmpSym(q.sym); setSheet(null); }}
-                    className={`w-full min-h-[46px] px-3 rounded-xl flex items-baseline justify-between gap-3 text-left ${cmpSym === q.sym ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink)] active:bg-[var(--card2)]"}`}>
-                    <span className="text-[15px] truncate">{q.nm}</span><span className="text-xs text-[var(--ink3)] shrink-0">{q.sym}</span>
-                  </button>
+                  <CmpRow key={q.sym} sym={q.sym} name={q.nm} tag={q.sym} cmps={cmps} onToggle={toggleCmp} />
                 ))}
-                <Head>Any company</Head>
+                <Head>Any company or ETF</Head>
                 <div className="px-3 pb-2">
                   <input value={cmpQ} onChange={(e) => setCmpQ(e.target.value)} placeholder="Search by name or symbol"
                     className="w-full rounded-xl border border-[var(--line)] bg-[var(--card2)] px-3 py-2.5 text-[15px] text-[var(--ink)] placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)]" />
                 </div>
                 {hits.map((c) => (
-                  <button key={c.symbol} onClick={() => { setCmpSym(c.symbol); setCmpQ(""); setSheet(null); }}
-                    className="w-full min-h-[44px] px-3 rounded-xl flex items-baseline justify-between gap-3 text-left text-[var(--ink)] active:bg-[var(--card2)]">
-                    <span className="text-[15px] truncate">{c.name || c.symbol}</span><span className="text-xs text-[var(--ink3)] shrink-0">{c.symbol}</span>
-                  </button>
+                  <CmpRow key={c.symbol} sym={c.symbol} name={c.name || c.symbol} tag={c.symbol} cmps={cmps}
+                    onToggle={(sym, nm) => { toggleCmp(sym, nm); setCmpQ(""); }} />
                 ))}
                 {cmpErr && <p className="px-3 py-2 text-xs text-[var(--neg)]">{cmpErr}</p>}
               </>

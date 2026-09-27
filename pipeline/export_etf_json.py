@@ -15,6 +15,7 @@ Usage:  python export_etf_json.py
 """
 import bisect
 import json
+import re
 from collections import Counter
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
@@ -233,6 +234,34 @@ def main() -> None:
 
     DIR_OUT.mkdir(parents=True, exist_ok=True)
     CHART_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Each underlying index as a chart file of its own, so the full-screen chart
+    # can draw an ETF over the index it tracks. A foreign index is in rupees
+    # (that day's rate), as a rupee investor's ETF sees it.
+    idx_chart: dict[tuple, str] = {}
+    for e in etfs:
+        itick, fxtick, ilabel = e[10], e[11], e[12]
+        if not itick or itick not in idx or (itick, fxtick) in idx_chart:
+            continue
+        if fxtick and fxtick not in idx:
+            continue
+        slug = "IDX-" + re.sub(r"[^A-Z0-9]", "", itick.upper().removesuffix(".NS")) + ("-INR" if fxtick else "")
+        ds, vs = idx[itick]
+        pts = []
+        for d, v in zip(ds, vs):
+            if fxtick:
+                fx = at_or_before(*idx[fxtick], d)
+                if not fx:
+                    continue
+                v = v * fx
+            pts.append([_day(d), _px(v), _px(v), _px(v), _px(v), 0])
+        if not pts:
+            continue
+        doc_i = {"s": slug, "name": f"{ilabel}{' (₹)' if fxtick else ''}", "d": pts}
+        _normalise(doc_i)
+        doc_i["asof"] = ds[-1]
+        (CHART_DIR / f"{slug}.json").write_text(json.dumps(doc_i, separators=(",", ":"), allow_nan=False), encoding="utf-8")
+        idx_chart[(itick, fxtick)] = slug
     listing = []
     splits_seen = rescaled = flattened = 0
     docs: dict[str, dict] = {}
@@ -309,7 +338,7 @@ def main() -> None:
             "isin": isin,
             "listed": listed,
             "amfi_code": code,
-            "index": {"label": ilabel, "ticker": itick, "fx": fxtick} if itick else None,
+            "index": {"label": ilabel, "ticker": itick, "fx": fxtick, "chart": idx_chart.get((itick, fxtick))} if itick else None,
             "price": round(prices[-1][1], 2) if prices else None,
             "price_date": prices[-1][0] if prices else None,
             "nav": nav_series[-1][1] if nav_series else None,
@@ -382,7 +411,8 @@ def main() -> None:
     print(f"ETFs: {len(listing)} exported, {len(with_prem)} with a same-day premium, "
           f"{sum(1 for x in listing if x['thin'])} thinly traded, {charts} candle files "
           f"({wicks} corrupt monthly wicks trimmed); {splits_seen} unit splits adjusted, "
-          f"{rescaled} price bars rescaled to match, {flattened} untraded or spiked days flattened")
+          f"{rescaled} price bars rescaled to match, {flattened} untraded or spiked days flattened; "
+          f"{len(idx_chart)} index charts")
 
     # Into the search index as well, so an ETF can be searched for, and a
     # portfolio or watchlist holding one keeps its price - they left the
