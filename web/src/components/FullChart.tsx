@@ -3,11 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  createChart, createTextWatermark, createSeriesMarkers,
+  createChart, createTextWatermark,
   CandlestickSeries, BarSeries, LineSeries, AreaSeries, HistogramSeries,
   CrosshairMode, PriceScaleMode, LineStyle, LineType,
   type IChartApi, type ISeriesApi, type SeriesType, type UTCTimestamp, type MouseEventParams,
-  type Time, type SeriesMarker, type ISeriesPrimitive, type SeriesAttachedParameter,
+  type Time, type ISeriesPrimitive, type SeriesAttachedParameter,
   type IPrimitivePaneView, type PrimitiveHoveredItem,
 } from "lightweight-charts";
 import { loadIndex } from "@/lib/index-data";
@@ -268,24 +268,29 @@ function roundRect(ctx: Ctx, x: number, y: number, w: number, h: number, r: numb
   ctx.closePath();
 }
 
-/** A fiscal quarter's span of candles, first day to last. */
-type QSpan = { key: number; from: number; to: number; color: string };
-
-/** Fiscal quarters as solid tinted blocks behind the chart. Drawn as one
- *  column per candle, as they first were, the gaps between candles showed
- *  through and the tint came out as fine stripes. */
-class QuarterBands implements ISeriesPrimitive<Time> {
+/** A hairline down the whole pane on each event date, behind everything. */
+class EventLines implements ISeriesPrimitive<Time> {
   private chart: SeriesAttachedParameter<Time>["chart"] | null = null;
   private readonly view: IPrimitivePaneView;
-  private readonly spans: QSpan[];
+  private readonly days: number[];
+  private readonly colour: string;
 
-  constructor(spans: QSpan[]) {
-    this.spans = spans;
+  constructor(days: number[], colour: string) {
+    this.days = days; this.colour = colour;
     this.view = {
       zOrder: () => "bottom",
       renderer: () => ({
         draw: () => {},
-        drawBackground: (target) => target.useMediaCoordinateSpace(({ context, mediaSize }) => this.draw(context, mediaSize.height)),
+        drawBackground: (target) => target.useBitmapCoordinateSpace(({ context, bitmapSize, horizontalPixelRatio }) => {
+          const ts = this.chart?.timeScale();
+          if (!ts) return;
+          context.fillStyle = this.colour;
+          const w = Math.max(1, Math.round(horizontalPixelRatio));
+          for (const d of this.days) {
+            const x = ts.timeToCoordinate(toTime(d));
+            if (x !== null) context.fillRect(Math.round(x * horizontalPixelRatio) - (w >> 1), 0, w, bitmapSize.height);
+          }
+        }),
       }),
     };
   }
@@ -293,21 +298,86 @@ class QuarterBands implements ISeriesPrimitive<Time> {
   attached(param: SeriesAttachedParameter<Time>) { this.chart = param.chart; }
   detached() { this.chart = null; }
   paneViews() { return [this.view]; }
+}
 
-  private draw(ctx: Ctx, h: number) {
-    const chart = this.chart;
-    if (!chart) return;
-    const ts = chart.timeScale();
-    // Half a candle's width either side, so one quarter's block ends exactly
-    // where the next one's begins.
-    const half = ts.options().barSpacing / 2;
-    for (const q of this.spans) {
-      const a = ts.timeToCoordinate(toTime(q.from));
-      const b = ts.timeToCoordinate(toTime(q.to));
-      if (a === null || b === null) continue;
-      const x0 = Math.round(a - half), x1 = Math.round(b + half);
-      ctx.fillStyle = q.color;
-      ctx.fillRect(x0, 0, x1 - x0, h);
+/** A quarterly figure drawn as a block exactly as wide as its quarter - from
+ *  the day the previous quarter ended to the day this one did - so a quarter's
+ *  earnings sit over the months that earned them (the owner's call,
+ *  27-Sep-2026). The library draws a bar one fixed width at one date; these are
+ *  drawn by hand over a hidden copy of the series, which still sets the axis
+ *  and answers the crosshair. The chart spaces its data points evenly, so a day
+ *  that falls between two points is placed in proportion between them. */
+type PBar = { from: number; to: number; v: number; color: string; label?: string; labelColor?: string };
+
+class PeriodBars implements ISeriesPrimitive<Time> {
+  private chart: SeriesAttachedParameter<Time>["chart"] | null = null;
+  private series: SeriesAttachedParameter<Time>["series"] | null = null;
+  private readonly view: IPrimitivePaneView;
+  private readonly bars: PBar[];
+  private readonly days: number[];
+  private readonly font: string;
+
+  constructor(bars: PBar[], days: number[], font: string) {
+    this.bars = bars; this.days = days; this.font = font;
+    this.view = {
+      zOrder: () => "normal",
+      renderer: () => ({ draw: (target) => target.useMediaCoordinateSpace(({ context, mediaSize }) => this.draw(context, mediaSize.width)) }),
+    };
+  }
+
+  attached(param: SeriesAttachedParameter<Time>) { this.chart = param.chart; this.series = param.series; }
+  detached() { this.chart = null; this.series = null; }
+  paneViews() { return [this.view]; }
+
+  private xAt(day: number): number | null {
+    const ts = this.chart!.timeScale();
+    const d = this.days, n = d.length;
+    if (!n) return null;
+    const at = (i: number) => ts.timeToCoordinate(toTime(d[i]));
+    const i = day < d[0] ? 0 : atOrBefore(d, day);
+    const xi = at(i);
+    if (xi === null) return null;
+    if (i + 1 < n) {
+      const xj = at(i + 1);
+      return xj === null ? xi : xi + ((day - d[i]) / (d[i + 1] - d[i])) * (xj - xi);
+    }
+    // Past the last point: the last gap's spacing, carried on.
+    const xp = n > 1 ? at(n - 2) : null;
+    return xp === null ? xi : xi + ((day - d[i]) / (d[i] - d[n - 2])) * (xi - xp);
+  }
+
+  private draw(ctx: Ctx, width: number) {
+    const series = this.series;
+    if (!this.chart || !series) return;
+    const y0 = series.priceToCoordinate(0);
+    if (y0 === null) return;
+    const rects: { x0: number; x1: number; y: number; b: PBar }[] = [];
+    for (const b of this.bars) {
+      const x0 = this.xAt(b.from), x1 = this.xAt(b.to), y = series.priceToCoordinate(b.v);
+      if (x0 === null || x1 === null || y === null || x1 < 0 || x0 > width) continue;
+      rects.push({ x0, x1, y, b });
+    }
+    for (const r of rects) {
+      // A pixel's gap where one quarter meets the next.
+      const left = Math.round(r.x0) + 1, right = Math.round(r.x1);
+      ctx.fillStyle = r.b.color;
+      ctx.fillRect(left, Math.min(r.y, y0), Math.max(1, right - left), Math.max(1, Math.abs(y0 - r.y)));
+    }
+    // Growth labels all or none, as on the company chart: only when every
+    // block on screen has room for one, so a thinned row never reads as
+    // missing data.
+    const labelled = rects.filter((r) => r.b.label);
+    if (labelled.length && rects.every((r) => r.x1 - r.x0 >= 30)) {
+      ctx.save();
+      ctx.font = `600 10px ${this.font}`;
+      ctx.textAlign = "center";
+      for (const r of labelled) {
+        const neg = r.b.v < 0;
+        ctx.fillStyle = r.b.labelColor ?? "#888";
+        ctx.textBaseline = neg ? "top" : "bottom";
+        ctx.fillText(r.b.label!, (r.x0 + r.x1) / 2, neg ? Math.max(r.y, y0) + 3 : Math.min(r.y, y0) - 3);
+      }
+      ctx.restore();
     }
   }
 }
@@ -530,13 +600,11 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [canFull, setCanFull] = useState(false);
   // The company chart's own switches, same defaults.
   const [peWin, setPeWin] = useState("ttm");
-  const [showQ, setShowQ] = useState(false);
   // Events are on by default in the full view - the owner chose to see them.
   const [showDates, setShowDates] = useState(true);
   const [showChg, setShowChg] = useState(true);
   const [epsCmp, setEpsCmp] = useState<"yoy" | "prev">("yoy");
   const [showCA, setShowCA] = useState(true);
-  const [shadeQ, setShadeQ] = useState(true);
   const [evPop, setEvPop] = useState<{ title: string; items: { text: string; sub?: string; color: string }[] } | null>(null);
   const [caOn, setCaOn] = useState<Record<string, boolean>>({ dividend: true, bonus: true, split: true, rights: true, buyback: true, other: true });
   const [hidden, setHidden] = useState<Record<string, boolean>>({});
@@ -694,8 +762,18 @@ export default function FullChart({ symbol }: { symbol: string }) {
         locale: "en-IN",
         timeFormatter: (t: Time) => dateOf(Math.round((t as number) / DAY), view === "price" && interval !== "m" ? "day" : "month"),
       },
-      handleScale: { axisPressedMouseMove: true, pinch: true, mouseWheel: true },
-      handleScroll: { horzTouchDrag: true, vertTouchDrag: false, mouseWheel: true, pressedMouseMove: true },
+      // Drag either axis to stretch it, as a trading terminal does; double-tap
+      // an axis, or the reset button, to fit it again.
+      handleScale: {
+        axisPressedMouseMove: { time: true, price: true },
+        axisDoubleClickReset: { time: true, price: true },
+        pinch: true, mouseWheel: true,
+      },
+      // Vertical touch drags belong to the chart. Left to the browser (as they
+      // were), an up-down drag on the price axis was taken for page scrolling
+      // before the chart saw it, so the price axis could not be stretched by
+      // finger while the time axis could.
+      handleScroll: { horzTouchDrag: true, vertTouchDrag: true, mouseWheel: true, pressedMouseMove: true },
     });
     chartRef.current = chart;
     const cleanups: (() => void)[] = [];
@@ -857,7 +935,17 @@ export default function FullChart({ symbol }: { symbol: string }) {
         priceScaleId: "left", priceLineVisible: false, lastValueVisible: false, priceFormat: fmt((x) => Math.round(x).toLocaleString("en-IN")),
         visible: !isHidden("sales"),
       });
-      s.setData(pts(qd, sales).map((d) => ({ ...d, color: alpha(p.bar, 0.8) })));
+      // Hidden, with each quarter's sales drawn over it as a quarter-wide block.
+      s.setData(pts(qd, sales).map((d) => ({ ...d, color: "rgba(0, 0, 0, 0)" })));
+      if (!isHidden("sales")) {
+        const sd = qd.filter((_, i) => sales[i] !== null && sales[i] !== undefined);
+        s.attachPrimitive(new PeriodBars(sd.map((d, i) => ({
+          from: i > 0 && d - sd[i - 1] < 120 ? sd[i - 1] : d - 91,
+          to: d,
+          v: sales[qd.indexOf(d)] as number,
+          color: alpha(p.bar, 0.8),
+        })), qd, p.font));
+      }
       const pctFmt = fmt((x) => `${Math.round(x)}%`);
       const margin = (k: "gpm" | "opm" | "npm", color: string) => {
         const arr = tq[k] ?? [];
@@ -963,34 +1051,25 @@ export default function FullChart({ symbol }: { symbol: string }) {
         const bs = chart.addSeries(HistogramSeries, {
           priceLineVisible: false, lastValueVisible: false, priceFormat: fmt((x) => (view === "ev" || view === "ps" ? Math.round(x).toLocaleString("en-IN") : ratio(x))),
         }, 1);
-        const colour = (b: Bar) => {
-          const base = showQ && view === "pe" && b.q ? p.q[b.q] ?? p.vol : p.vol;
-          return alpha(base, b.v < 0 ? 0.55 : 0.85);
-        };
-        bs.setData(bars.map((b) => ({ time: toTime(b.day), value: b.v, color: colour(b) })));
+        // Hidden: this series only sets the axis and answers the crosshair.
+        // The blocks are drawn over it, each as wide as its quarter.
+        bs.setData(bars.map((b) => ({ time: toTime(b.day), value: b.v, color: "rgba(0, 0, 0, 0)" })));
+        bs.attachPrimitive(new PeriodBars(
+          bars.map((b, i) => ({
+            from: i > 0 && b.day - bars[i - 1].day < 120 ? bars[i - 1].day : b.day - 91,
+            to: b.day,
+            v: b.v,
+            // EPS in its fiscal quarter's colour (the owner's call); the other
+            // figures - EBITDA, sales, book value - in one.
+            color: alpha(view === "pe" && b.q ? p.q[b.q] ?? p.vol : p.vol, b.v < 0 ? 0.55 : 0.85),
+            label: view === "pe" && showChg && b.chg && b.chg.kind !== "none" ? growthText(b.chg) : undefined,
+            labelColor: growthCol(b.chg, p),
+          })),
+          [...new Set([...bd, ...barDays])].sort((a, b) => a - b),
+          p.font,
+        ));
         chart.panes()[0]?.setStretchFactor(3);
         chart.panes()[1]?.setStretchFactor(1.3);
-        if (view === "pe" && showChg) {
-          // All or none, like the company chart: labels only when every bar on
-          // screen has room for one, otherwise a thinned row reads as missing data.
-          const all: SeriesMarker<Time>[] = bars
-            .filter((b) => b.chg && b.chg.kind !== "none")
-            .map((b) => ({
-              time: toTime(b.day), position: b.v < 0 ? "belowBar" : "aboveBar", shape: "circle",
-              size: 0, color: growthCol(b.chg, p), text: growthText(b.chg),
-            }));
-          const api = createSeriesMarkers(bs, []);
-          const fit = () => {
-            const vr = chart.timeScale().getVisibleRange();
-            if (!vr) return;
-            const f = Math.round((vr.from as number) / DAY), t = Math.round((vr.to as number) / DAY);
-            const n = barDays.filter((d) => d >= f && d <= t).length;
-            api.setMarkers(n > 0 && el.clientWidth / n >= 34 ? all : []);
-          };
-          chart.timeScale().subscribeVisibleTimeRangeChange(fit);
-          cleanups.push(() => chart.timeScale().unsubscribeVisibleTimeRangeChange(fit));
-          requestAnimationFrame(fit);
-        }
       }
       const names: Record<string, string> = { pe: "PE", ev: "EV/EBITDA", pb: "P/B", ps: "MCap/Sales" };
       legendAt = (day) => {
@@ -1047,38 +1126,13 @@ export default function FullChart({ symbol }: { symbol: string }) {
       }
       evs.sort((x, y) => x.day - y.day);
 
-      // 1. Quarters as tinted blocks behind the chart, first candle of each
-      //    fiscal quarter to its last. The series only carries the layer.
-      // Fiscal quarters mark a company's results season - nothing to an ETF.
-      if (shadeQ && company) {
-        const spans: QSpan[] = [];
-        for (const d of anchorDays) {
-          const dt = new Date(d * DAY * 1000);
-          const m = dt.getUTCMonth() + 1;
-          const q = fyQ(m);
-          const key = (m >= 4 ? dt.getUTCFullYear() : dt.getUTCFullYear() - 1) * 10 + q;
-          const last = spans[spans.length - 1];
-          if (last && last.key === key) last.to = d;
-          else spans.push({ key, from: d, to: d, color: alpha(p.q[q], 0.1) });
-        }
-        const sh = chart.addSeries(LineSeries, {
-          priceScaleId: "shade", color: "rgba(0, 0, 0, 0)", lineVisible: false, priceLineVisible: false,
-          lastValueVisible: false, crosshairMarkerVisible: false,
-          autoscaleInfoProvider: () => ({ priceRange: { minValue: -1, maxValue: 1 } }),
-        });
-        chart.priceScale("shade").applyOptions({ scaleMargins: { top: 0, bottom: 0 }, visible: false });
-        sh.setData(anchorDays.map((d) => ({ time: toTime(d), value: 0 })));
-        sh.attachPrimitive(new QuarterBands(spans));
-      }
       if (evs.length) {
-        // 2. A faint line through the whole chart on each event date - a
-        //    full-height bar on a hidden axis, also behind the chart.
-        const ln = chart.addSeries(HistogramSeries, { priceScaleId: "ev", priceLineVisible: false, lastValueVisible: false, base: 0 });
-        chart.priceScale("ev").applyOptions({ scaleMargins: { top: 0, bottom: 0 }, visible: false });
-        const seen = new Map<number, string>();
-        for (const e of evs) if (!seen.has(e.day)) seen.set(e.day, e.color);
-        ln.setData([...seen].map(([d, c]) => ({ time: toTime(d), value: 1, color: alpha(c, 0.35) })));
-        ln.setSeriesOrder(shadeQ ? 1 : 0);
+        // 2. A faint line through the whole chart on each event date. Drawn a
+        //    pixel wide and in one neutral colour: as a histogram bar in the
+        //    quarter's colour it was a candle wide, which on the monthly
+        //    valuation charts made every date a coloured stripe.
+        const lineDays = [...new Set(evs.map((e) => e.day))];
+        const lineColour = alpha(p.ink3, 0.35);
         // 3. The timeline band along the foot. An axis of its own with a fixed
         //    range, so a row of identical values still has somewhere to sit (a
         //    separate pane got zero height and blanked the chart).
@@ -1089,6 +1143,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
         });
         chart.priceScale("strip").applyOptions({ scaleMargins: { top: 0.93, bottom: 0.02 }, visible: false });
         flat.setData(anchorDays.map((d) => ({ time: toTime(d), value: 0 })));
+        flat.attachPrimitive(new EventLines(lineDays, lineColour));
         const marks: TlMark[] = [];
         for (const e of evs) {
           const v: TlEv = { kind: e.kind, tag: e.tag, color: e.color };
@@ -1187,7 +1242,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
     };
     // `range` is applied below without a rebuild.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, company, view, interval, prefs, peWin, showQ, showDates, showChg, epsCmp, showCA, caOn, hidden, cmps, themeKey, symbol, shadeQ, etfDoc]);
+  }, [file, company, view, interval, prefs, peWin, showDates, showChg, epsCmp, showCA, caOn, hidden, cmps, themeKey, symbol, etfDoc]);
 
   const applyRange = () => {
     const chart = chartRef.current, sp = spanRef.current;
@@ -1246,7 +1301,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
   // Only switches that draw something here: an ETF has no results or
   // corporate actions, and counting them told it "3 on" with one showing.
   const evOn = (showCA && (company?.actions?.length ?? 0) > 0 ? 1 : 0) + (showDates && (company?.quarters?.length ?? 0) > 0 ? 1 : 0);
-  const nLayers = view === "price" ? prefs.inds.length + evOn : evOn + (showQ ? 1 : 0);
+  const nLayers = view === "price" ? prefs.inds.length + evOn : evOn;
   // Counted against the chart's window as it is NOW, read when the sheet
   // renders. A copy kept in state lagged a step behind a range change, so the
   // sheet said "2 in view" over a chart showing 4.
@@ -1501,16 +1556,14 @@ export default function FullChart({ symbol }: { symbol: string }) {
                 {view === "pe" && (
                   <>
                     <Head>Earnings</Head>
-                    <Toggle on={showQ} label="Colour bars by quarter" sub="Q1 Apr–Jun · Q2 Jul–Sep · Q3 Oct–Dec · Q4 Jan–Mar" onClick={() => setShowQ(!showQ)} />
-                    {showQ && (
-                      <div className="px-3 pb-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--ink3)]">
-                        {[1, 2, 3, 4].map((n) => (
-                          <span key={n} className="inline-flex items-center gap-1">
-                            <i className="inline-block w-3 h-3 rounded-sm" style={{ background: `var(--q${n})` }} />{Q_LABEL[n]}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                    {/* The EPS blocks are always in their quarter's colour. */}
+                    <div className="px-3 pb-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--ink3)]">
+                      {[1, 2, 3, 4].map((n) => (
+                        <span key={n} className="inline-flex items-center gap-1">
+                          <i className="inline-block w-3 h-3 rounded-sm" style={{ background: `var(--q${n})` }} />{Q_LABEL[n]}
+                        </span>
+                      ))}
+                    </div>
                     <Toggle on={showChg} label="Growth %" sub="Printed over each bar when there is room for every one" onClick={() => setShowChg(!showChg)} />
                     {showChg && (
                       <div className="px-3 pb-2">
@@ -1529,7 +1582,6 @@ export default function FullChart({ symbol }: { symbol: string }) {
                 {(company?.actions?.length ?? 0) > 0 && (
                   <Toggle on={showCA} label="Corporate actions" sub="Dividends, bonuses, splits and rights, on their ex-date" onClick={() => setShowCA(!showCA)} />
                 )}
-                {company && <Toggle on={shadeQ} label="Quarter bands" sub="Each fiscal quarter tinted in its colour behind the chart" onClick={() => setShadeQ(!shadeQ)} />}
                 {showCA && (
                   <div className="pl-6">
                     {CA_ORDER.filter((k) => (company?.actions ?? []).some((a) => (CA_LABEL[a.kind] ? a.kind : "other") === k)).map((k) => (

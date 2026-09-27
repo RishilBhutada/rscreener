@@ -869,7 +869,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
           <button
             onClick={() => setShowQ(!showQ)}
-            title="Colour the EPS bars by quarter and mark the day each result was declared"
+            title="Mark the day each result was declared, and offer the single-quarter earnings views"
             className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium border ${
               showQ
                 ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
@@ -952,7 +952,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
               ))}
             </div>
           )}
-          {showQ && (
+          {view === "pe" && (
             <div className="flex items-center gap-2.5 flex-wrap text-[var(--ink3)]">
               {[1, 2, 3, 4].map((n) => (
                 <span key={n} className="inline-flex items-center gap-1">
@@ -960,6 +960,10 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                   {Q_LABEL[n]}
                 </span>
               ))}
+            </div>
+          )}
+          {showQ && (
+            <div className="flex items-center gap-2.5 flex-wrap text-[var(--ink3)]">
               {showDates && (
                 <span className="inline-flex items-center gap-1">
                   <i className="inline-block w-4 border-t-2 border-dashed border-[var(--ink3)]" />
@@ -1055,8 +1059,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             q.announced && toT(q.announced) >= t0 && toT(q.announced) <= t1 ? (
               <g key={`ql${i}`}>
                 <line x1={x(toT(q.announced))} x2={x(toT(q.announced))} y1={MT} y2={MT + plotH}
-                  stroke={Q_COLOUR[q.q] ?? "var(--q1)"} strokeWidth="1.4" strokeDasharray="4 3" opacity="0.9" />
-                <circle cx={x(toT(q.announced))} cy={MT + 3} r="3" fill={Q_COLOUR[q.q] ?? "var(--q1)"}>
+                  stroke="var(--ink3)" strokeWidth="1.2" strokeDasharray="4 3" opacity="0.8" />
+                <circle cx={x(toT(q.announced))} cy={MT + 3} r="3" fill="var(--ink3)">
                   <title>{`${Q_LABEL[q.q] ?? `Q${q.q}`} results declared ${q.announced}`}</title>
                 </circle>
               </g>
@@ -1083,7 +1087,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             // sizes fits; below that the tooltip still carries every figure.
             const widest = Math.max(0, ...s.data.map((d) => (d.chg ? growthText(d.chg).length : 0)));
             const narrowest = Math.min(...s.data.map((d) =>
-              showQ && d.from !== undefined && d.to !== undefined
+              d.from !== undefined && d.to !== undefined
                 ? Math.max(1, x(d.to!) - x(d.from!))
                 : bw));
             let chgFont = widest === 0 ? 0
@@ -1103,10 +1107,11 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                   // quarter it covers and painted that quarter's colour; the two
                   // meet edge to edge because one quarter ends the day before the
                   // next begins. Otherwise it stays a plain centred bar.
-                  const spanned = showQ && d.from !== undefined && d.to !== undefined;
+                  const spanned = d.from !== undefined && d.to !== undefined;
                   const bx = spanned ? x(d.from!) : x(d.t) - bw / 2;
                   const bwid = spanned ? Math.max(1, x(d.to!) - x(d.from!)) : bw;
-                  const fill = showQ && d.q ? (Q_COLOUR[d.q] ?? s.color) : s.color;
+                  // EPS bars always in their fiscal quarter's colour.
+                  const fill = d.q ? (Q_COLOUR[d.q] ?? s.color) : s.color;
                   const loss = d.v < 0;
                   const chgTxt = d.chg ? growthText(d.chg) : "";
                   const labelFits = showChg && chgTxt !== "" && chgFont > 0;
