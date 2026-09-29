@@ -444,7 +444,7 @@ function BackButton() {
   );
 }
 
-export default function TopNav({ active }: { active?: "home" | "screens" | "sectors" | "calendar" | "portfolio" | "watchlists" | "others" | "etfs" | "status" | "settings" }) {
+export default function TopNav({ active }: { active?: "home" | "screens" | "sectors" | "calendar" | "portfolio" | "watchlists" | "others" | "etfs" | "commodities" | "status" | "settings" }) {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<Lite[]>([]);
@@ -511,6 +511,7 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
     ["watchlists", "Watchlists", "/watchlists"],
     ["sectors", "Sectors", "/sectors"],
     ["etfs", "ETFs", "/etfs"],
+    ["commodities", "Commodities", "/commodities"],
     ["others", "Others", "/others"],
     ["calendar", "Calendar", "/calendar"],
     ["portfolio", "Portfolio", "/portfolio"],

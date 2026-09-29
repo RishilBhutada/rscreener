@@ -13,3 +13,5 @@ web/public/etf/
 web/public/etfs.json
 web/public/etf-val/
 web/public/calendar.json
+web/public/commodities.json
+web/public/commodity/

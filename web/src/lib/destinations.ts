@@ -29,6 +29,9 @@ export const DESTINATIONS: { key: string; label: string; href: string; icon: str
   // Exchange-traded funds against what they hold - price vs NAV vs index.
   { key: "etfs", label: "ETFs", href: "/etfs",
     icon: "M12 4 3.5 8.5 12 13l8.5-4.5zM3.5 12.5 12 17l8.5-4.5M3.5 16.5 12 21l8.5-4.5" },
+  // MCX futures: every expiry side by side, and each against the world price.
+  { key: "commodities", label: "Commodities", href: "/commodities",
+    icon: "M3.5 19h8l-1.2-5h-5.6zM12.5 19h8l-1.2-5h-5.6zM8 12h8l-1.2-5H9.2z" },
   { key: "sectors", label: "Sectors", href: "/sectors",
     icon: "M4.5 4.5h6v6h-6zM13.5 4.5h6v6h-6zM4.5 13.5h6v6h-6zM13.5 13.5h6v6h-6z" },
   { key: "calendar", label: "Calendar", href: "/calendar",

@@ -226,6 +226,20 @@ jobs:
           else
             echo "ETFs are refreshed by the nightly run"
           fi
+      - name: Refresh MCX commodity futures (every expiry, and the world contract beside each)
+        # Every night with the prices, and on any run while the database has no
+        # commodity tables yet, so the publish that ships the page has data.
+        # About a minute: ~165 contracts' daily bars from Upstox's public API,
+        # ~60 CME contracts and USD/INR from Yahoo.
+        env:
+          RSCREENER_STEP_MINUTES: "10"
+        run: |
+          have=$(python -c "import sqlite3; c=sqlite3.connect('data/rscreener.db'); print(1 if c.execute(\"SELECT 1 FROM sqlite_master WHERE name='commodity_bars'\").fetchone() else 0)")
+          if [ "${{ steps.plan.outputs.prices }}" = "1" ] || [ "$have" = "0" ]; then
+            bash pipeline/guarded_fetch.sh python pipeline/fetch_commodities.py
+          else
+            echo "Commodities are refreshed by the nightly run"
+          fi
       - name: Refresh concall/rating documents (whole universe, rotating)
         if: steps.plan.outputs.earnings == '1'
         # 480 of 2,357 companies covered, and capped at the top 500 it would have
@@ -373,6 +387,10 @@ jobs:
         # only by the nightly fetch, straight into the site folder, so each code
         # publish rebuilt the site from the repo's month-old copy.
         run: python pipeline/export_calendar_json.py
+      - name: Write the commodities page and one file per MCX contract type
+        # web/public/commodities.json and web/public/commodity/<ROOT>.json -
+        # every expiry, the premium between them, and MCX against the world.
+        run: python pipeline/export_commodities_json.py
       - name: Tell the owner's phone about ETF premiums crossing his lines
         # alerts/etf_premium.txt holds the lines. Scheduled runs only: they are
         # the ones with a new day's NAVs, and a code publish re-running the
