@@ -227,19 +227,12 @@ jobs:
             echo "ETFs are refreshed by the nightly run"
           fi
       - name: Refresh MCX commodity futures (every expiry, and the world contract beside each)
-        # Every night with the prices, and on any run while the database has no
-        # commodity tables yet, so the publish that ships the page has data.
-        # About a minute: ~165 contracts' daily bars from Upstox's public API,
-        # ~60 CME contracts and USD/INR from Yahoo.
+        # On EVERY run, publish-only included: about a minute - ~165 contracts'
+        # daily bars from Upstox's public API, ~60 CME contracts and USD/INR
+        # from Yahoo - so any run that publishes also brings them current.
         env:
           RSCREENER_STEP_MINUTES: "10"
-        run: |
-          have=$(python -c "import sqlite3; c=sqlite3.connect('data/rscreener.db'); print(1 if c.execute(\"SELECT 1 FROM sqlite_master WHERE name='commodity_bars'\").fetchone() else 0)")
-          if [ "${{ steps.plan.outputs.prices }}" = "1" ] || [ "$have" = "0" ]; then
-            bash pipeline/guarded_fetch.sh python pipeline/fetch_commodities.py
-          else
-            echo "Commodities are refreshed by the nightly run"
-          fi
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_commodities.py
       - name: Refresh concall/rating documents (whole universe, rotating)
         if: steps.plan.outputs.earnings == '1'
         # 480 of 2,357 companies covered, and capped at the top 500 it would have
@@ -315,6 +308,17 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "20"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols @data/nse_symbols.txt --max-age-hours 4320 --limit 200 --quarters-back 0 --sleep 0.3 --max-minutes 75
+      - name: Top up every price with the exchanges' own closes (NSE, BSE, Nifty indices)
+        # Yahoo's daily history trails the market by a session or two: the
+        # 28-Sep run ended every chart and 284 of 351 ETF prices on the 25th.
+        # NSE's and BSE's bhavcopy for each session is out the same evening, so
+        # the last ten days are read from them and every company, ETF and Nifty
+        # index gets the sessions its stored history is missing. On EVERY run,
+        # publish-only included - about twenty small files, half a minute - and
+        # after every other fetcher, since those replace whole histories.
+        env:
+          RSCREENER_STEP_MINUTES: "5"
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_bhavcopy.py --days 10
       - name: Save the fetched data back to the data-db release
         # Placed BEFORE the publish guards, deliberately. It used to sit after
         # them, which deadlocked: a guard failure skipped the upload, so the next
