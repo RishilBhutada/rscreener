@@ -21,6 +21,14 @@ import price_periods
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
 CHART = "https://query2.finance.yahoo.com/v8/finance/chart/{sym}?range={rng}&interval={itv}&events=split"
+# By date instead of by range: Yahoo quietly turns range=max into MONTHLY bars
+# for a long history whatever interval is asked for, but answers a date span
+# at the interval asked - Reliance's weekly bars reach back to 1996 this way.
+CHART_SPAN = "https://query2.finance.yahoo.com/v8/finance/chart/{sym}?period1={p1}&period2={p2}&interval={itv}&events=split"
+# How deep each series goes (the owner's pick, 30-Sep-2026): weekly back to
+# listing, daily five years - the full-screen chart shows all of it; the
+# company files keep their old depth (export_company_json.py).
+DAILY_YEARS = 5
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     "Accept": "*/*",
@@ -88,11 +96,14 @@ def splits_of(session: requests.Session, sym: str) -> list[tuple[str, float]]:
     return sorted(out)
 
 
-def series(session: requests.Session, sym: str, rng: str, itv: str) -> list[tuple]:
+def series(session: requests.Session, sym: str, rng: str | None, itv: str, since: int | None = None) -> list[tuple]:
     """Yahoo chart API directly - yfinance's own session gets rate-limited here.
     Returns (date, open, high, low, close, volume) tuples (OHLC feed the
-    Yang-Zhang volatility estimator; open/high/low may be None on gap rows)."""
-    r = session.get(CHART.format(sym=sym, rng=rng, itv=itv), timeout=25)
+    Yang-Zhang volatility estimator; open/high/low may be None on gap rows).
+    `since` (a unix time) asks for a date span instead of a range."""
+    url = (CHART_SPAN.format(sym=sym, p1=since, p2=int(time.time()), itv=itv) if since is not None
+           else CHART.format(sym=sym, rng=rng, itv=itv))
+    r = session.get(url, timeout=40)
     r.raise_for_status()
     result = (r.json().get("chart", {}).get("result") or [None])[0]
     if not result:
@@ -191,8 +202,9 @@ def main() -> None:
             # so weekly is requested with an explicit span.
             tick = tickers.get(sym, f"{sym}.NS")
             monthly, _sp = drop_spikes(series(session, tick, "max", "1mo"))  # ~30y, drives Max + bands
-            weekly, _ = drop_spikes(series(session, tick, "5y", "1wk"))   # 3Yr/5Yr density
-            daily = series(session, tick, "2y", "1d")       # 1M/6M/1Yr + DMA + volatility
+            weekly, _ = drop_spikes(series(session, tick, None, "1wk", since=0))   # back to listing
+            daily = series(session, tick, None, "1d",                            # 5 years
+                           since=int(time.time()) - DAILY_YEARS * 366 * 86400)
             if not monthly and not weekly and not daily:
                 raise ValueError("no price history returned")
             # One row per week and per month, labelled by the day its close is

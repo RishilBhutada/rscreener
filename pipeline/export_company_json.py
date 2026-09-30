@@ -9,7 +9,7 @@ import argparse
 import json
 import math
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import price_adjust
@@ -745,11 +745,18 @@ def main() -> None:
     prices_by_symbol: dict[str, dict] = {}
     if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='prices'").fetchone():
         pr = pd.read_sql("SELECT symbol, freq, date, close, volume FROM prices ORDER BY date", con)
+        # The company page keeps the depth it was built for - two years of
+        # daily and five of weekly - though the store now holds five years of
+        # daily and weekly back to listing for the full-screen chart. Every
+        # extra year here is weight on a phone that never draws it.
+        keep_days = {"daily": 731, "weekly": 1830}
         for (sym_key, freq), grp in pr.groupby(["symbol", "freq"]):
-            prices_by_symbol.setdefault(sym_key, {})[freq] = [
-                [d, c, None if pd.isna(v) else int(v)]
-                for d, c, v in zip(grp["date"], grp["close"], grp["volume"])
-            ]
+            rows = [[d, c, None if pd.isna(v) else int(v)]
+                    for d, c, v in zip(grp["date"], grp["close"], grp["volume"])]
+            if freq in keep_days and rows:
+                cut = (date.fromisoformat(rows[-1][0][:10]) - timedelta(days=keep_days[freq])).isoformat()
+                rows = [r for r in rows if r[0] >= cut]
+            prices_by_symbol.setdefault(sym_key, {})[freq] = rows
     shp_by_symbol: dict[str, dict] = {}
     if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='shareholding'").fetchone():
         shp = pd.read_sql("SELECT symbol, date, promoter, public, employee_trusts FROM shareholding ORDER BY date", con)
