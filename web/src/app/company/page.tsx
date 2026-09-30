@@ -40,7 +40,7 @@ type Shareholding = {
 };
 type Pt = [string, number] | [string, number, number | null];
 type Prices = { monthly?: Pt[]; weekly?: Pt[]; daily?: Pt[] };
-type PeBand = { series: [string, number][]; median_5y: number };
+type PeBand = { series: [string, number][]; median_5y: number | null };
 type ScreenData = { rows: Row[] };
 
 

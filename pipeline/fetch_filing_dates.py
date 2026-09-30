@@ -27,6 +27,7 @@ from pathlib import Path
 import requests
 
 import budget
+import nse_session
 
 from db_lib import retry as db_retry
 from fetch_results_history import INDEX_API, INTEGRATED_API, get_retry
@@ -55,7 +56,7 @@ def _iso(stamp: str | None) -> str | None:
 
 
 def rows_from_integrated(session, sym: str) -> list[tuple]:
-    body = get_retry(session, INTEGRATED_API.format(sym=sym), tries=2).json()
+    body = get_retry(session, INTEGRATED_API.format(sym=nse_session.q(sym)), tries=2).json()
     rows = body if isinstance(body, list) else (body.get("resultBody") or body.get("data") or [])
     out = []
     for r in rows:
@@ -72,7 +73,7 @@ def rows_from_legacy(session, sym: str) -> list[tuple]:
     out = []
     for period in ("Quarterly", "Annual"):
         try:
-            body = get_retry(session, INDEX_API.format(sym=sym, period=period), tries=2).json()
+            body = get_retry(session, INDEX_API.format(sym=nse_session.q(sym), period=period), tries=2).json()
         except Exception:  # noqa: BLE001
             continue
         rows = body if isinstance(body, list) else (body.get("resultBody") or body.get("data") or [])
@@ -97,6 +98,8 @@ def main() -> None:
     symbols = [s.strip().upper() for s in raw.split(",") if s.strip()]
 
     con = sqlite3.connect(DB, timeout=180)
+
+    nse_session.requeue_amp(con, "filing_dates_log")
     con.execute("PRAGMA busy_timeout=180000")
     # Only switch journal mode if it isn't already WAL. Re-declaring it takes an
     # EXCLUSIVE lock that busy_timeout does not wait out, so running this while

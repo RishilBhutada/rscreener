@@ -12,6 +12,8 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+import price_adjust
+
 import pandas as pd
 
 from export_json import freshen_prices
@@ -463,12 +465,21 @@ def corporate_actions(con: sqlite3.Connection) -> dict[str, list[dict]]:
     if not _table_exists(con, "corporate_actions"):
         return {}
     out: dict[str, list[dict]] = {}
+    adjusted = price_adjust.events(con)
     for sym, ex, kind, detail, subject in con.execute(
         "SELECT symbol, ex_date, kind, detail, subject FROM corporate_actions ORDER BY ex_date"
     ):
         if ex:
             if kind == "dividend" and subject:
                 detail = dividend_detail(subject) or detail
+            # A demerger the charts were adjusted for says so on its own marker -
+            # a smooth line with a "Demerger" tag on it otherwise reads as a
+            # contradiction.
+            f = dict(adjusted.get(sym, [])).get(ex)
+            if f:
+                subject = (f"{subject or 'Demerger'} - prices and per-share figures before this date are "
+                           f"shown x{f:.3f}, the share of value the company kept (NSE's special pre-open "
+                           f"price over the previous close)")
             out.setdefault(sym, []).append(
                 {"date": ex, "kind": kind, "detail": detail, "subject": subject})
     return out
@@ -642,6 +653,10 @@ def main() -> None:
         print(f"rebuilding {len(only)} symbol(s) only")
 
     con = sqlite3.connect(DB, timeout=180)
+
+    # Prices before a demerger on the continuing company's base (price_adjust.py).
+
+    price_adjust.install(con)
     # The per-company statements lookup further down runs once for each of
     # ~3,900 companies, and `statements` had no index on symbol: every lookup
     # scanned all 3.7 million rows. 363 ms apiece - about fifteen of a publish's

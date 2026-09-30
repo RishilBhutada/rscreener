@@ -58,6 +58,7 @@ def main() -> None:
     # generous busy-timeout: the results-history backfill may hold the write
     # lock; both writers commit often, so waiting our turn always succeeds
     con = sqlite3.connect(DB, timeout=180)
+    nse_session.requeue_amp(con, "shp_fetch_log")
     con.execute(
         "CREATE TABLE IF NOT EXISTS shareholding (symbol TEXT, date TEXT, promoter REAL, public REAL, employee_trusts REAL)"
     )
@@ -90,7 +91,7 @@ def main() -> None:
             # Three attempts with a fresh handshake between them. A single try
             # recorded 301 companies as having no shareholding pattern when what
             # they had was a dropped connection.
-            r = nse_session.get(s, API.format(sym=sym))
+            r = nse_session.get(s, API.format(sym=nse_session.q(sym)))
             rows = r.json()
             recs = []
             for row in rows:

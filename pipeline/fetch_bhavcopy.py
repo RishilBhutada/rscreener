@@ -136,6 +136,77 @@ def extend(label: str, last: dict[str, tuple[str, float]], files: list[tuple[str
         print(f"  held: {m}")
 
 
+def demerger_factors(con: sqlite3.Connection, nse: requests.Session, bse: requests.Session) -> None:
+    """What each demerging company kept, from the exchange's own files: the
+    ex-date's OPEN - the price NSE's special pre-open session discovered for
+    the parent alone - over the previous session's close. Worked out once per
+    event into price_adjust (see price_adjust.py for how it is applied)."""
+    con.execute("""CREATE TABLE IF NOT EXISTS price_adjust (
+        symbol TEXT, ex_date TEXT, kind TEXT, factor REAL, prev_close REAL, ex_open REAL,
+        source TEXT, applied INTEGER, note TEXT, PRIMARY KEY (symbol, ex_date))""")
+    if not con.execute("SELECT 1 FROM sqlite_master WHERE name='corporate_actions'").fetchone():
+        return
+    todo = con.execute("""
+        SELECT DISTINCT a.symbol, a.ex_date FROM corporate_actions a
+        WHERE (lower(a.subject) LIKE '%demerg%' OR lower(coalesce(a.detail,'')) LIKE '%demerg%')
+          AND NOT EXISTS (SELECT 1 FROM price_adjust p WHERE p.symbol=a.symbol AND p.ex_date=a.ex_date)
+        ORDER BY a.ex_date""").fetchall()
+    if not todo:
+        return
+    code = {s: str(c) for s, c in con.execute("SELECT SYMBOL, BSE_CODE FROM universe WHERE BSE_CODE IS NOT NULL")}
+    cache: dict[tuple[str, str], dict | None] = {}
+
+    def day_file(src: str, d: datetime) -> dict | None:
+        k = (src, d.strftime("%Y%m%d"))
+        if k not in cache:
+            try:
+                cache[k] = read_nse(nse, d) if src == "NSE" else read_bse(bse, d)
+            except Exception:  # noqa: BLE001 - a missing day is a missing day
+                cache[k] = None
+            time.sleep(0.3)
+        return cache[k]
+
+    done = 0
+    for sym, ex in todo:
+        exd = datetime.strptime(ex, "%Y-%m-%d")
+        result = None
+        for src, key in (("NSE", sym), ("BSE", code.get(sym))):
+            if not key:
+                continue
+            f_ex = day_file(src, exd)
+            row = f_ex.get(key) if f_ex else None
+            if not row:
+                continue
+            prev = None
+            for back in range(1, 8):          # the session before, across weekends and holidays
+                f_prev = day_file(src, exd - timedelta(days=back))
+                if f_prev and f_prev.get(key):
+                    prev = num(f_prev[key].get("ClsPric"))
+                    break
+            prev = prev or num(row.get("PrvsClsgPric"))
+            opn = num(row.get("OpnPric"))
+            if prev and opn:
+                result = (src, prev, opn)
+                break
+        if not result:
+            con.execute("INSERT OR REPLACE INTO price_adjust VALUES (?,?,?,?,?,?,?,?,?)",
+                        (sym, ex, "demerger", None, None, None, None, 0, "no exchange file for the ex-date"))
+            continue
+        src, prev, opn = result
+        f = opn / prev
+        # Under a 3% gap the parent's price move on the day is noise the size of
+        # what left it. At the other end, 95% can genuinely leave: Kesoram kept
+        # 5% when its cement business went to UltraTech. Past 99% is a wrong row.
+        ok = 0.01 < f < 0.97
+        con.execute("INSERT OR REPLACE INTO price_adjust VALUES (?,?,?,?,?,?,?,?,?)",
+                    (sym, ex, "demerger", round(f, 6), prev, opn, src, 1 if ok else 0,
+                     None if ok else f"open/previous close {f:.3f} - too close to 1 (or too far) to call a demerger"))
+        done += 1
+        print(f"  demerger {sym} {ex}: {src} open {opn} / previous close {prev} = {f:.3f}{'' if ok else ' (not applied)'}")
+    con.commit()
+    print(f"demergers: {done} of {len(todo)} new events worked out from the exchange files")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=10, help="calendar days back to read")
@@ -144,6 +215,10 @@ def main() -> None:
     nse = nse_session.new_session()
     bse = requests.Session()
     bse.headers.update({**nse_session.HEADERS, "Referer": "https://www.bseindia.com/"})
+    try:
+        demerger_factors(con, nse, bse)
+    except Exception as e:  # noqa: BLE001 - the closes below matter more
+        print(f"demergers: not worked out this run - {e}")
 
     nse_files, bse_files, idx_files = [], [], []
     for d in sessions(args.days):

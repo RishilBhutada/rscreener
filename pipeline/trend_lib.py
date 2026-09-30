@@ -19,6 +19,8 @@ from statistics import median
 
 import pandas as pd
 
+import price_adjust
+
 # yfinance income-statement item -> our field name
 YF_INCOME_MAP = {
     "Total Revenue": "revenue",
@@ -420,6 +422,25 @@ def net_debt_series(con: sqlite3.Connection) -> dict[str, list]:
     return out
 
 
+def filed_eps_on_todays_base(pat, eps, sh_now) -> float | None:
+    """The filing's own EPS, when the share count it was written against shows
+    no split or bonus since - so it needs no adjustment at all.
+
+    For symbols whose split history cannot be trusted, EPS fell back to PAT /
+    today's shares. PAT is the whole group's profit, outside shareholders'
+    share of subsidiaries included, so for Vedanta - 38% of Hindustan Zinc
+    belongs to others - that read 20.28 a share where the filing says 14.02,
+    and every P/E came out a third too low. A split or bonus since the filing
+    SHRINKS the filing's count (PAT/EPS) below today's; outside shareholders
+    only ever ENLARGE it. So a count at or above today's, within reason, is a
+    filing on today's base, and its EPS is used as filed.
+    """
+    if not pat or not eps or not sh_now:
+        return None
+    implied = pat / eps
+    return eps if 0.95 * sh_now <= implied <= 2.5 * sh_now else None
+
+
 def effective_shares(pat, eps, factor: float, sh_now: float | None = None):
     """Share count at a past date, expressed on the ADJUSTED-price basis.
 
@@ -751,6 +772,8 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None,
                     for item_ in items_:
                         row_.pop(item_, None)
     splits = split_factors(con)
+    price_adjust.ensure(con)
+    dmg = price_adjust.events(con)   # demergers, applied as the prices are
     known = splits_trustworthy(con, shares)
     bal = balance_equity(con)
     out: dict[str, dict] = {}
@@ -767,6 +790,7 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None,
             return round(num / den * 100, 2) if (num is not None and den) else None
 
         ev = splits.get(symbol)
+        dm = dmg.get(symbol)
 
         def adj_eps(p):
             """As-filed EPS put on today's share base, to match the adjusted price.
@@ -783,13 +807,16 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None,
             if symbol in known:
                 return None if e is None else round(e / adj_factor(ev, p), 2)
             pat_v = periods[p].get("pat")
+            own = filed_eps_on_todays_base(pat_v, e, sh)
+            if own is not None:
+                return round(own, 2)
             if pat_v is not None and sh:
                 return round(pat_v / sh, 2)
             return None if e is None else round(e / adj_factor(ev, p), 2)
 
         rev = [periods[p].get("revenue") for p in ordered]
         pat = [periods[p].get("pat") for p in ordered]
-        eps = [adj_eps(p) for p in ordered]
+        eps = [None if (x := adj_eps(p)) is None else round(x * price_adjust.factor_at(dm, p), 2) for p in ordered]
         exp = [periods[p].get("total_expenses") for p in ordered]
         deriv = [_derive(periods[p]) for p in ordered]
         ebitda = [d["ebitda"] for d in deriv]
@@ -808,7 +835,10 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None,
             # without falling back to a second source for them
             "interest": [_cr(periods[p2].get("finance_cost")) for p2 in ordered],
             "depreciation": [_cr(periods[p2].get("depreciation")) for p2 in ordered],
-            "book_value": [round(e / sh, 2) if (pd.notna(e) and sh) else None for e in equity],
+            # Before a demerger, per-share figures sit on the continuing
+            # company's base, as the price does (price_adjust.py).
+            "book_value": [round(e / sh * price_adjust.factor_at(dm, p2), 2) if (pd.notna(e) and sh) else None
+                           for e, p2 in zip(equity, ordered)],
             "opm": [pct(ebitda[i], rev[i]) for i in range(len(ordered))],
             "gpm": [pct(gp[i], rev[i]) for i in range(len(ordered))],
             "npm": [pct(pat[i], rev[i]) for i in range(len(ordered))],
@@ -891,11 +921,23 @@ def _median(vals: list[float]) -> float:
     return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
 
 
+BAND_MIN_LINE = 4      # points before a ratio line is drawn at all
+BAND_MIN_MEDIAN = 12   # points before a median of them means anything
+
+
 def _band(series: list[list], round_to: int = 1) -> dict | None:
     """Median is taken over the trailing 5 years by DATE, so it means the same
-    thing whether the series is weekly or monthly."""
-    if len(series) < 12:
+    thing whether the series is weekly or monthly.
+
+    A young listing gets its LINE as soon as there are a few points, and its
+    median only from twelve. Pine Labs had one twelve-month EPS figure and nine
+    weekly P/E points, and the old single threshold of twelve hid the line as
+    well as the median: the company page said it had a P/E of 152 and the
+    P/E chart said nothing at all."""
+    if len(series) < BAND_MIN_LINE:
         return None
+    if len(series) < BAND_MIN_MEDIAN:
+        return {"series": series, "median_5y": None}
     end = series[-1][0]
     cutoff = f"{int(end[:4]) - 5}{end[4:]}"
     last5y = [v for d, v in series if d >= cutoff] or [v for _, v in series]
@@ -914,6 +956,7 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
     if not (_table_exists(con, "prices") and _table_exists(con, "results_history")):
         return {}
     netdebt = netdebt or {}
+    price_adjust.ensure(con)
     splits = split_factors(con)
     known = splits_trustworthy(con, shares)
     q = pd.read_sql(
@@ -978,7 +1021,10 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                     eps /= adj_factor(ev, pe)
             else:
                 pat_v, sh_now = s.get("pat"), shares.get(sym)
-                if pat_v is not None and sh_now:
+                own = filed_eps_on_todays_base(pat_v, eps, sh_now)
+                if own is not None:
+                    eps = own
+                elif pat_v is not None and sh_now:
                     eps = pat_v / sh_now
             flows.append((pe, eps, (rev / 1e7 if rev is not None else None),
                           (ebitda / 1e7 if ebitda is not None else None),
@@ -1043,6 +1089,20 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
             if trust:
                 merged.update(ybal)          # newer, and audited, where it checks out
             equity_by_sym[sym] = sorted(merged.items())
+
+    # Demergers (price_adjust.py): the prices read below are already scaled
+    # before each ex-date, so everything they are divided into is scaled by
+    # the same factor - earnings, sales, EBITDA, net worth. A ratio before the
+    # date then reads exactly as it did; a trailing twelve months spanning it
+    # counts the old quarters at the continuing company's share of them.
+    for sym, evs in price_adjust.events(con).items():
+        if sym in flow_by_sym:
+            flow_by_sym[sym] = [
+                (pe_, *(None if v is None else v * price_adjust.factor_at(evs, pe_) for v in (e_, r_, b_)), *rest)
+                for pe_, e_, r_, b_, *rest in flow_by_sym[sym]]
+        if sym in equity_by_sym:
+            equity_by_sym[sym] = [(d_, v_ * price_adjust.factor_at(evs, d_) if v_ is not None else None)
+                                  for d_, v_ in equity_by_sym[sym]]
 
     # weekly gives ~1,100 points over 20+ years (screener.in serves the same
     # density); fall back to monthly for symbols whose weekly history is short

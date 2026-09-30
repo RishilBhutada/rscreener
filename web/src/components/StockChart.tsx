@@ -8,7 +8,8 @@ type Pt = [string, number] | [string, number, number | null];
 export type ChartPrices = { monthly?: Pt[]; weekly?: Pt[]; daily?: Pt[] };
 export type ChartBand = {
   series: [string, number][];
-  median_5y: number;
+  /** Null for a young listing: the line is drawn from 4 points, a median of them only from 12. */
+  median_5y: number | null;
   /** shorter earnings windows, annualised, aligned index-for-index with `series` */
   alt?: Record<string, (number | null)[]>;
   alt_median_5y?: Record<string, number>;
@@ -477,10 +478,11 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       if (!band) return;
       const pts = xy(band.series.filter((p) => toT(p[0]) >= cutoff));
       defs.push({ key: `${view}_line`, label: lineLabel, color: "var(--accent)", kind: "line", axis: "R", data: pts, fmt: lineFmt });
-      if (pts.length) {
+      const med = band.median_5y;
+      if (pts.length && med !== null && med !== undefined) {
         defs.push({
-          key: `${view}_median`, label: `${medianLabel} = ${band.median_5y}`, color: "var(--chart-axis)", kind: "dashed", axis: "R",
-          data: [{ t: pts[0].t, v: band.median_5y }, { t: pts[pts.length - 1].t, v: band.median_5y }], fmt: lineFmt,
+          key: `${view}_median`, label: `${medianLabel} = ${med}`, color: "var(--chart-axis)", kind: "dashed", axis: "R",
+          data: [{ t: pts[0].t, v: med }, { t: pts[pts.length - 1].t, v: med }], fmt: lineFmt,
         });
       }
       if (bars.length) defs.push({ key: `${view}_bar`, label: barLabel, color: "var(--chart-vol)", kind: "bars", axis: "L", data: bars, fmt: barFmt });

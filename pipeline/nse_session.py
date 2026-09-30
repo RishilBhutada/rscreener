@@ -34,6 +34,33 @@ HOME = "https://www.nseindia.com"
 RETRY_STATUS = {429, 500, 502, 503, 504}
 
 
+# Symbols with "&" in them (M&M, M&MFIN, J&KBANK, GMRP&UI...) went into NSE's
+# query strings unencoded until 30-Sep-2026. "symbol=M&M&period=Quarterly"
+# reads as symbol "M" plus a stray parameter, NSE answered with nothing, and
+# every fetcher logged that as a success: no quarterly results, shareholding,
+# corporate actions or filings for any of them - M&M included - and no error
+# anywhere to say so.
+AMP_FIXED_AT = "2026-09-30 12:00:00"
+
+
+def q(sym: str) -> str:
+    """A symbol made safe for an NSE query string."""
+    return requests.utils.quote(sym, safe="")
+
+
+def requeue_amp(con, table: str) -> None:
+    """Forget the empty "successes" a fetcher logged for &-symbols before the
+    fix, so its own oldest-first rotation takes them next. Idempotent: a
+    symbol fetched after the fix has a later stamp and is left alone."""
+    try:
+        n = con.execute(f"DELETE FROM {table} WHERE symbol LIKE '%&%' AND fetched_at < ?", (AMP_FIXED_AT,)).rowcount
+        con.commit()
+    except Exception:  # noqa: BLE001 - a missing table has nothing to forget
+        return
+    if n:
+        print(f"  re-queued {n} symbols with '&' in them (fetched before their names were encoded)")
+
+
 def new_session() -> requests.Session:
     s = requests.Session()
     s.headers.update(HEADERS)

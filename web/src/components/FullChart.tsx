@@ -1109,7 +1109,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
         visible: !isHidden("line"),
       });
       main.setData(bd.map((d, i) => ({ time: toTime(d), value: bv[i] })));
-      if (!isHidden("median")) {
+      if (!isHidden("median") && median !== null && median !== undefined) {
         main.createPriceLine({
           price: median, color: p.axisCol, lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: true,
           title: `Median ${ratio(median)}`,
@@ -1195,7 +1195,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
         const i = day === null ? bd.length - 1 : atOrBefore(bd, day);
         const items: LItem[] = [];
         if (!isHidden("line")) items.push({ label: names[view] + (view === "pe" && peWin !== "ttm" ? " (1Q×4)" : ""), value: ratio(bv[i]), color: p.accent });
-        if (!isHidden("median")) items.push({ label: "Median", value: ratio(median) });
+        if (!isHidden("median") && median !== null && median !== undefined) items.push({ label: "Median", value: ratio(median) });
         if (bars.length && !isHidden("bars")) {
           const j = atOrBefore(barDays, bd[i]);
           const b = bars[j];

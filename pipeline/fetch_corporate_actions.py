@@ -109,6 +109,8 @@ def main() -> None:
     symbols = [s.strip().upper() for s in raw.split(",") if s.strip()]
 
     con = sqlite3.connect(DB, timeout=180)
+
+    nse_session.requeue_amp(con, "ca_fetch_log")
     con.execute("PRAGMA busy_timeout=180000")
     db_retry(lambda: con.execute(
         "CREATE TABLE IF NOT EXISTS corporate_actions "
@@ -143,7 +145,7 @@ def main() -> None:
         if budget.stop(i - 1, len(due)):
             break
         try:
-            body = nse_session.get(session, API.format(sym=sym), timeout=30).json()
+            body = nse_session.get(session, API.format(sym=nse_session.q(sym)), timeout=30).json()
             rows = body if isinstance(body, list) else (body.get("data") or [])
             out = []
             for r in rows:

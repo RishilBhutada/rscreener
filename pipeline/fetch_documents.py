@@ -50,6 +50,8 @@ def main() -> None:
     s = nse_session.new_session()
 
     con = sqlite3.connect(DB, timeout=180)
+
+    nse_session.requeue_amp(con, "docs_fetch_log")
     con.execute(
         "CREATE TABLE IF NOT EXISTS documents (symbol TEXT, doc_type TEXT, from_yr TEXT, to_yr TEXT, url TEXT)"
     )
@@ -71,7 +73,7 @@ def main() -> None:
         if budget.stop(i - 1, len(symbols)):
             break
         try:
-            r = nse_session.get(s, API.format(sym=sym))
+            r = nse_session.get(s, API.format(sym=nse_session.q(sym)))
             body = r.json()
             data = body.get("data", body if isinstance(body, list) else [])
             rows = [

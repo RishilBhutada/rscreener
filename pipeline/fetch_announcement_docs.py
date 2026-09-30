@@ -53,6 +53,8 @@ def main() -> None:
     symbols = [s.strip().upper() for s in raw.split(",") if s.strip()]
 
     con = sqlite3.connect(DB, timeout=180)
+
+    nse_session.requeue_amp(con, "anndocs_fetch_log")
     con.execute(
         "CREATE TABLE IF NOT EXISTS announcement_docs (symbol TEXT, doc_type TEXT, date TEXT, title TEXT, url TEXT)"
     )
@@ -87,7 +89,7 @@ def main() -> None:
         if budget.stop(i - 1, len(symbols)):
             break
         try:
-            r = nse_session.get(s, API.format(sym=sym), timeout=30)
+            r = nse_session.get(s, API.format(sym=nse_session.q(sym)), timeout=30)
             rows = r.json()
             buckets: dict[str, list] = {"concall": [], "rating": []}
             for a in rows:

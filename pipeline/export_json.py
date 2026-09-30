@@ -16,6 +16,8 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+import price_adjust
+
 import pandas as pd
 
 from ratios_lib import compute_ratios, derived_roe, latest_annual_items, latest_promoter
@@ -430,6 +432,8 @@ def freshen_prices(con, df):
 
 def main() -> None:
     con = sqlite3.connect(DB, timeout=180)
+    # Prices before a demerger on the continuing company's base (price_adjust.py).
+    price_adjust.install(con)
     df = pd.read_sql("SELECT * FROM fundamentals", con)
     # Fund units stay out of the company table - see fund_units.py. Snapshots
     # fetched while they were in the universe are still stored.

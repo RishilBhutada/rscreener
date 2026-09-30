@@ -26,6 +26,8 @@ import json
 import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
+
+import price_adjust
 import fund_units
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -121,6 +123,8 @@ def _normalise(doc: dict) -> None:
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+    # Prices before a demerger on the continuing company's base (price_adjust.py).
+    price_adjust.install(con)
     rows = con.execute(
         "SELECT symbol, freq, date, open, high, low, close, volume FROM prices "
         "WHERE close IS NOT NULL ORDER BY symbol, freq, date"

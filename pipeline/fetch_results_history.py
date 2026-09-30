@@ -26,6 +26,7 @@ from pathlib import Path
 import requests
 
 import budget
+import nse_session
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
@@ -311,7 +312,7 @@ def integrated_filings(session, sym: str) -> list[dict]:
     derived as the first day of that quarter. Consolidated wins over standalone.
     """
     try:
-        body = get_retry(session, INTEGRATED_API.format(sym=sym), tries=3).json()
+        body = get_retry(session, INTEGRATED_API.format(sym=nse_session.q(sym)), tries=3).json()
     except Exception:
         return []
     rows = body.get("data", []) if isinstance(body, dict) else (body or [])
@@ -412,6 +413,8 @@ def main() -> None:
     # timeout + WAL let several fetchers (and an export) share the DB instead of
     # failing instantly with "database is locked"
     con = sqlite3.connect(DB, timeout=180)
+    nse_session.requeue_amp(con, "results_fetch_log")
+    nse_session.requeue_amp(con, "results_fetch_log_full")
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA busy_timeout=180000")
     con.execute(
@@ -471,7 +474,7 @@ def main() -> None:
         try:
             filings = []
             for period in ("Annual", "Quarterly"):
-                r = get_retry(s, INDEX_API.format(sym=sym, period=period))
+                r = get_retry(s, INDEX_API.format(sym=nse_session.q(sym), period=period))
                 body = r.json()
                 rows = body if isinstance(body, list) else body.get("data", [])
                 for f in pick_filings(rows, args.quarters_back, period):
