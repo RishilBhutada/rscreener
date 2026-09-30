@@ -1,0 +1,25 @@
+name: NCDEX login check
+
+# A one-minute test of the owner's Angel One login, run by hand: log in, ask
+# for one NCDEX contract's quote and daily candles, print what came back, log
+# out. Stores nothing and publishes nothing - the nightly run does the real
+# read. Read-only: fetch_ncdex.py contains no order, GTT or funds call.
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - run: python pipeline/fetch_ncdex.py --check
+        env:
+          ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_CODE: ${{ secrets.ANGEL_CLIENT_CODE }}
+          ANGEL_PIN: ${{ secrets.ANGEL_PIN }}
+          ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}

@@ -14,19 +14,26 @@ does not depend on it. Nothing here prints them, or the session token.
 READ-ONLY BY CONSTRUCTION. The only SmartAPI calls in this file are login,
 logout, daily candles and market quotes. No order, GTT, funds or position
 endpoint appears here, and none may be added: the app never places, changes
-or cancels anything, whatever account it can see.
+or cancels anything, whatever account it can see. (Angel's static-IP rule,
+from 1-Apr-2026, covers orders and GTT only; data calls need none.)
 
-Two ways to the prices, tried in this order, and the log says which worked:
-  1. Daily candles (historical API): each contract's life so far - open,
-     high, low, close, volume; no open interest.
-  2. Today's quote (market-data API, FULL mode): one bar a day with open
-     interest, stored as it comes, so history builds from here.
-Angel does not document either for NCDEX; the first run finds out.
+Two ways to the prices, and the log says which worked:
+  1. Daily candles (historical API): each contract's life so far. Angel's
+     release notes list free history for NSE, NFO, BSE, BFO, CDS and MCX -
+     not NCDEX - so this is expected to be refused, and stops after three
+     refusals rather than asking 96 times.
+  2. The day's quote (market-data API, FULL mode, "all exchanges"): one bar
+     per contract per session, with open interest. Stored every run, so the
+     history builds a session a night from the first run on.
 
 Stored beside MCX in the commodity tables, keyed "NCDEX|<token>", under
 "<NAME>_NCDEX" contract types - Kapas and Cotton trade on both exchanges.
 
-Usage:  python fetch_ncdex.py [--days 400]
+Usage:
+  python fetch_ncdex.py [--days 400]     the nightly read
+  python fetch_ncdex.py --check          log in, ask for one contract both
+                                         ways, print what came back, store
+                                         nothing - a one-minute test
 """
 import argparse
 import base64
@@ -41,24 +48,27 @@ from pathlib import Path
 
 import requests
 
-from commodities_lib import NCDEX_SUFFIX
-from fetch_commodities import schema
-
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
 IST = timezone(timedelta(hours=5, minutes=30))
 MASTER = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
+# Routes as Angel's own Python library (angel-one/smartapi-python) has them.
 API = "https://apiconnect.angelone.in"
 LOGIN = API + "/rest/auth/angelbroking/user/v1/loginByPassword"
 LOGOUT = API + "/rest/secure/angelbroking/user/v1/logout"
 CANDLES = API + "/rest/secure/angelbroking/historical/v1/getCandleData"
-QUOTE = API + "/rest/secure/angelbroking/market/v1/quote/"
+QUOTE = API + "/rest/secure/angelbroking/market/v1/quote"
 SECRETS = ("ANGEL_API_KEY", "ANGEL_CLIENT_CODE", "ANGEL_PIN", "ANGEL_TOTP_SECRET")
+NCDEX_SUFFIX = "_NCDEX"      # as commodities_lib; repeated so --check needs no pipeline imports
+# NCDEX's agri session closes at 17:00 IST and the rest by 21:00; a quote
+# for today taken before then is a session still in progress.
+SESSION_OVER = 21
 
 
 def totp(secret: str, at: float | None = None) -> str:
     """The six-digit code an authenticator app shows (RFC 6238, 30 seconds)."""
-    key = base64.b32decode(secret.replace(" ", "").upper() + "=" * (-len(secret.replace(" ", "")) % 8))
+    s = secret.replace(" ", "").upper()
+    key = base64.b32decode(s + "=" * (-len(s) % 8))
     digest = hmac.new(key, struct.pack(">Q", int((at or time.time()) // 30)), hashlib.sha1).digest()
     o = digest[-1] & 0x0F
     return f"{(struct.unpack('>I', digest[o:o + 4])[0] & 0x7FFFFFFF) % 1_000_000:06d}"
@@ -110,9 +120,8 @@ class Angel:
         return (j.get("data") or {}).get("fetched") or []
 
 
-def contracts(con: sqlite3.Connection, today: str) -> list[dict]:
-    """Every live NCDEX future in Angel's public instrument file, recorded
-    add-only like MCX's, so an expired contract's history stays findable."""
+def live_futures(today: str) -> list[dict]:
+    """Every live NCDEX future in Angel's public instrument file."""
     r = requests.get(MASTER, timeout=120)
     r.raise_for_status()
     out = []
@@ -123,18 +132,83 @@ def contracts(con: sqlite3.Connection, today: str) -> list[dict]:
             expiry = datetime.strptime(x["expiry"], "%d%b%Y").date().isoformat()
         except (KeyError, ValueError):
             continue
-        if expiry < today:
-            continue
-        key, root = f"NCDEX|{x['token']}", f"{x['name']}{NCDEX_SUFFIX}"
+        if expiry >= today:
+            out.append({"key": f"NCDEX|{x['token']}", "token": str(x["token"]), "name": x.get("name") or "",
+                        "root": f"{x.get('name')}{NCDEX_SUFFIX}", "expiry": expiry, "symbol": x.get("symbol"),
+                        "lot": int(float(x.get("lotsize") or 0)), "tick": float(x.get("tick_size") or 0) / 100})
+    return out
+
+
+def record(con: sqlite3.Connection, live: list[dict], today: str) -> None:
+    """Add-only, like MCX's: an expired contract keeps its row, which is how
+    its history stays findable."""
+    for c in live:
         con.execute("""
             INSERT INTO commodity_contracts VALUES (?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(key) DO UPDATE SET last_seen=excluded.last_seen, lot=excluded.lot, tick=excluded.tick""",
-            (key, "NCDEX", root, expiry, None, int(float(x.get("lotsize") or 0)),
-             float(x.get("tick_size") or 0) / 100, None, x.get("symbol"), today, today))
-        out.append({"key": key, "token": str(x["token"]), "root": root})
+            (c["key"], "NCDEX", c["root"], c["expiry"], None, c["lot"], c["tick"], None, c["symbol"], today, today))
     con.commit()
-    print(f"NCDEX: {len(out)} live futures in Angel's instrument file")
+
+
+def trade_day(q: dict) -> str | None:
+    """The session a quote belongs to, from the exchange's own timestamp."""
+    for f in ("exchTradeTime", "exchFeedTime"):
+        for fmt in ("%d-%b-%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%d-%m-%Y %H:%M:%S", "%d-%b-%Y %H:%M"):
+            try:
+                return datetime.strptime(str(q.get(f)), fmt).date().isoformat()
+            except ValueError:
+                continue
+    return None
+
+
+def all_quotes(api: Angel, tokens: list[str]) -> list[dict]:
+    """Fifty to a call; one at a time if Angel will not take a batch (its
+    announcement once said a single token per exchange)."""
+    out: list[dict] = []
+    try:
+        for i in range(0, len(tokens), 50):
+            out += api.quotes(tokens[i:i + 50])
+            time.sleep(1.0)
+        return out
+    except Exception as e:  # noqa: BLE001
+        print(f"  quotes: a batch was refused ({e}) - asking one contract at a time")
+    out = []
+    for t in tokens:
+        try:
+            out += api.quotes([t])
+        except Exception:  # noqa: BLE001 - one contract's refusal is that contract's
+            pass
+        time.sleep(1.0)
     return out
+
+
+def by_quotes(api: Angel, con: sqlite3.Connection, live: list[dict]) -> int:
+    """Each contract's bar for the latest session, from its quote. A run can
+    start hours late (GitHub has begun the 22:00 run at 03:41), so the date is
+    the exchange's trade time; only a quote dated TODAY before 21:00 IST is a
+    session still in progress, and is left for the next run."""
+    now = datetime.now(IST)
+    today = now.date().isoformat()
+    key_of = {c["token"]: c["key"] for c in live}
+    stored = unfinished = 0
+    for q in all_quotes(api, list(key_of)):
+        key = key_of.get(str(q.get("symbolToken")))
+        ltp = q.get("ltp")
+        if not key or not ltp or ltp <= 0 or not q.get("tradeVolume"):
+            continue
+        day = trade_day(q) or (today if now.hour >= SESSION_OVER else None)
+        if day is None or (day == today and now.hour < SESSION_OVER):
+            unfinished += 1
+            continue
+        oi = q.get("opnInterest")
+        con.execute("INSERT OR REPLACE INTO commodity_bars VALUES (?,?,?,?,?,?,?,?)",
+                    (key, day, q.get("open") or ltp, q.get("high") or ltp, q.get("low") or ltp, ltp,
+                     int(q.get("tradeVolume") or 0), int(oi) if oi is not None else None))
+        stored += 1
+    con.commit()
+    if unfinished:
+        print(f"  quotes: {unfinished} contracts' session not over yet - left for the next run")
+    return stored
 
 
 def by_candles(api: Angel, con: sqlite3.Connection, live: list[dict], today: str, days: int) -> int:
@@ -150,7 +224,7 @@ def by_candles(api: Angel, con: sqlite3.Connection, live: list[dict], today: str
         except Exception as e:  # noqa: BLE001
             failed += 1
             # Three refusals before a single success: the API does not serve
-            # NCDEX, and asking 95 more times will not change that.
+            # NCDEX history, and asking 93 more times will not change that.
             if not stored and failed >= 3:
                 raise RuntimeError(f"first {failed} contracts refused - {e}") from None
             continue
@@ -166,76 +240,86 @@ def by_candles(api: Angel, con: sqlite3.Connection, live: list[dict], today: str
     return stored
 
 
-def trade_day(q: dict, fallback: str) -> str:
-    """The session a quote belongs to, from the exchange's own timestamp."""
-    for f in ("exchTradeTime", "exchFeedTime"):
-        for fmt in ("%d-%b-%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%d-%m-%Y %H:%M:%S"):
-            try:
-                return datetime.strptime(str(q.get(f)), fmt).date().isoformat()
-            except ValueError:
-                continue
-    return fallback
-
-
-def by_quotes(api: Angel, con: sqlite3.Connection, live: list[dict]) -> int:
-    """Today's bar for each contract, from the day's quote. Stored only after
-    NCDEX's agri session has closed, dated by the exchange's own trade time."""
-    now = datetime.now(IST)
-    if now.hour < 21:
-        print("  quotes: before 21:00 IST the day is not over - nothing stored")
-        return 0
-    key_of = {c["token"]: c["key"] for c in live}
-    stored = 0
-    tokens = list(key_of)
-    for i in range(0, len(tokens), 50):
-        for q in api.quotes(tokens[i:i + 50]):
-            key = key_of.get(str(q.get("symbolToken")))
-            ltp = q.get("ltp")
-            if not key or not ltp or ltp <= 0 or not q.get("tradeVolume"):
-                continue
-            day = trade_day(q, now.date().isoformat())
-            con.execute("INSERT OR REPLACE INTO commodity_bars VALUES (?,?,?,?,?,?,?,?)",
-                        (key, day, q.get("open") or ltp, q.get("high") or ltp, q.get("low") or ltp, ltp,
-                         int(q.get("tradeVolume") or 0), int(q.get("opnInterest") or 0)))
-            stored += 1
-        time.sleep(1.0)          # one quote call a second
-    con.commit()
-    return stored
-
-
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--days", type=int, default=400, help="how far back a contract's first read reaches")
-    args = ap.parse_args()
+def login_from_env() -> Angel | None:
     missing = [k for k in SECRETS if not os.environ.get(k)]
     if missing:
-        print(f"NCDEX skipped: the Angel One login is not set up ({len(missing)} of 4 secrets missing).")
-        return
-    today = datetime.now(IST).date().isoformat()
-    con = sqlite3.connect(DB, timeout=180)
-    schema(con)
-    live = contracts(con, today)
-    if not live:
-        return
+        print(f"NCDEX skipped: the Angel One login is not set up ({len(missing)} of 4 secrets missing: {', '.join(missing)}).")
+        return None
     api = Angel(os.environ["ANGEL_API_KEY"])
     try:
         api.login(os.environ["ANGEL_CLIENT_CODE"], os.environ["ANGEL_PIN"], os.environ["ANGEL_TOTP_SECRET"])
     except Exception as e:  # noqa: BLE001 - say why, never with what
         print(f"NCDEX: Angel One refused the login - {e}")
-        return
+        return None
     print("NCDEX: logged in to Angel One (read-only calls only)")
+    return api
+
+
+def check() -> None:
+    """One contract, both ways, printed - nothing stored."""
+    today = datetime.now(IST).date().isoformat()
+    live = live_futures(today)
+    print(f"instrument file: {len(live)} live NCDEX futures")
+    if not live:
+        return
+    pick = min((c for c in live if c["name"] == "GUARSEED10"), key=lambda c: c["expiry"], default=live[0])
+    print(f"test contract: {pick['symbol']} (token {pick['token']}), expiry {pick['expiry']}")
+    api = login_from_env()
+    if not api:
+        return
+    try:
+        try:
+            q = api.quotes([pick["token"]])
+            if q:
+                x = q[0]
+                print("  quote: OK - " + ", ".join(f"{k} {x.get(k)}" for k in (
+                    "ltp", "open", "high", "low", "close", "tradeVolume", "opnInterest", "exchTradeTime")))
+            else:
+                print("  quote: answered, but with no data for this contract")
+        except Exception as e:  # noqa: BLE001
+            print(f"  quote: refused - {e}")
+        try:
+            now = datetime.now(IST)
+            rows = api.candles(pick["token"], now - timedelta(days=30), now)
+            print(f"  daily candles: OK - {len(rows)} days" + (f", latest {rows[-1]}" if rows else ""))
+        except Exception as e:  # noqa: BLE001
+            print(f"  daily candles: refused - {e}")
+    finally:
+        api.logout()
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--days", type=int, default=400, help="how far back a contract's first candle read reaches")
+    ap.add_argument("--check", action="store_true", help="test the login and both routes on one contract; store nothing")
+    args = ap.parse_args()
+    if args.check:
+        check()
+        return
+    if not all(os.environ.get(k) for k in SECRETS):
+        login_from_env()      # prints which are missing
+        return
+    from fetch_commodities import schema   # the pipeline's tables - not needed by --check
+    today = datetime.now(IST).date().isoformat()
+    con = sqlite3.connect(DB, timeout=180)
+    schema(con)
+    live = live_futures(today)
+    record(con, live, today)
+    print(f"NCDEX: {len(live)} live futures in Angel's instrument file")
+    api = login_from_env() if live else None
+    if not api:
+        con.close()
+        return
     try:
         try:
             n = by_candles(api, con, live, today, args.days)
             print(f"  daily candles: {n} of {len(live)} contracts stored")
         except Exception as e:  # noqa: BLE001
-            n = 0
             print(f"  daily candles: refused - {e}")
         try:
-            q = by_quotes(api, con, live)
-            print(f"  today's quotes: {q} contracts stored")
+            print(f"  quotes: {by_quotes(api, con, live)} contracts stored")
         except Exception as e:  # noqa: BLE001
-            print(f"  today's quotes: refused - {e}")
+            print(f"  quotes: refused - {e}")
     finally:
         api.logout()
         con.close()
