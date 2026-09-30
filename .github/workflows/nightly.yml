@@ -156,6 +156,10 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "50"
         run: python pipeline/fetch_fundamentals.py --all --snapshot-only --max-age-hours 20 --sleep 0.5
+      # Symbol lists are QUOTED wherever they are pasted into a command: a hand-aimed
+      # run for M&M or J&KBANK otherwise hands bash an "&", which backgrounds half
+      # the command and runs the rest as nonsense (30-Sep-2026: "M,GMRP: command
+      # not found"). The nightly run reads @files and never met it.
       - name: Refresh annual and quarterly statements (rotating)
         if: steps.plan.outputs.prices == '1'
         # ROCE, the margins, book value and both growth figures are computed
@@ -171,7 +175,7 @@ jobs:
         # Monthly per company, 500 a night, inside the run's shared deadline.
         env:
           RSCREENER_STEP_MINUTES: "20"
-        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_fundamentals.py --symbols ${{ steps.plan.outputs.target }} --statements --max-age-hours 720 --limit 500 --sleep 0.4
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_fundamentals.py --symbols "${{ steps.plan.outputs.target }}" --statements --max-age-hours 720 --limit 500 --sleep 0.4
       - name: Refresh upcoming events calendar
         # On EVERY run, publish-only included: two NSE calls, seconds. Events
         # are stored in the database and the page is exported from it, so a
@@ -207,7 +211,7 @@ jobs:
         # universe at this sleep, against a 6-hour job limit.
         env:
           RSCREENER_STEP_MINUTES: "45"
-        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_prices.py --symbols ${{ steps.plan.outputs.target }} --max-age-hours 20 --sleep 0.25
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_prices.py --symbols "${{ steps.plan.outputs.target }}" --max-age-hours 20 --sleep 0.25
       - name: Refresh ETFs (list, official NAVs, NSE prices, index series)
         # Every night with the prices; and on ANY run while the database lacks
         # the newest ETF table (the monthly bars the full-screen chart added),
@@ -261,7 +265,7 @@ jobs:
         # company, inside the run's shared deadline.
         env:
           RSCREENER_STEP_MINUTES: "10"
-        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_documents.py --symbols ${{ steps.plan.outputs.nse_target }} --max-age-hours 720 --limit 400 --sleep 0.35
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_documents.py --symbols "${{ steps.plan.outputs.nse_target }}" --max-age-hours 720 --limit 400 --sleep 0.35
       - name: Keep as-filed earnings CURRENT across the whole universe
         if: steps.plan.outputs.earnings == '1'
         # This was `--symbols @data/top500.txt --limit 25`: 25 names a night out of
@@ -275,7 +279,7 @@ jobs:
         # up weekly, so steady state is ~340 a night and the cap never binds.
         env:
           RSCREENER_STEP_MINUTES: "40"
-        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols ${{ steps.plan.outputs.nse_target }} --max-age-hours 168 --limit 800 --quarters-back ${{ steps.plan.outputs.qb }} --sleep 0.25
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols "${{ steps.plan.outputs.nse_target }}" --max-age-hours 168 --limit 800 --quarters-back ${{ steps.plan.outputs.qb }} --sleep 0.25
       - name: Refresh corporate actions (dividends, bonuses, splits, rights)
         if: steps.plan.outputs.actions == '1'
         # One index call per symbol against the same NSE host as the filing dates,
@@ -284,7 +288,7 @@ jobs:
         # "2:1 split", and NSE labels it correctly.
         env:
           RSCREENER_STEP_MINUTES: "9"
-        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_corporate_actions.py --symbols ${{ steps.plan.outputs.nse_target }} --max-age-hours 336 --limit 800 --sleep 0.2
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_corporate_actions.py --symbols "${{ steps.plan.outputs.nse_target }}" --max-age-hours 336 --limit 800 --sleep 0.2
       - name: Record when each set of results was ANNOUNCED
         if: steps.plan.outputs.earnings == '1'
         # Drives the quarter-coloured EPS bars and result markers on the charts,
@@ -295,7 +299,7 @@ jobs:
         # per symbol, so this is cheap next to a results re-fetch.
         env:
           RSCREENER_STEP_MINUTES: "20"
-        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_filing_dates.py --symbols ${{ steps.plan.outputs.nse_target }} --max-age-hours 168 --limit 900 --sleep 0.2
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_filing_dates.py --symbols "${{ steps.plan.outputs.nse_target }}" --max-age-hours 168 --limit 900 --sleep 0.2
       - name: Annual reports for the BSE-only half of the universe
         # 2,700 of 5,069 companies are listed only on BSE, and every document on
         # a company page came from NSE's archive - so every one of them had an
