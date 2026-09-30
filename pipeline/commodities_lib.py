@@ -51,11 +51,35 @@ ROOTS: dict[str, tuple[str, str, str, str]] = {
     "MCXBULLDEX": ("MCX Bulldex", "Indices", "points", "MCXBULLDEX"),
     "MCXMETLDEX": ("MCX Metldex", "Indices", "points", "MCXMETLDEX"),
 }
-GROUPS = ["Bullion", "Energy", "Base metals", "Agri", "Indices", "Other"]
+# NCDEX contract types, stored as "<NAME>_NCDEX" so that Kapas and Cotton,
+# which trade on both exchanges, stay apart. The quoted unit is NCDEX's
+# contract specification as best known here - not yet checked against it.
+NCDEX_SUFFIX = "_NCDEX"
+NCDEX_ROOTS: dict[str, tuple[str, str]] = {
+    "GUARSEED10": ("Guar Seed", "₹ per quintal"), "GUARGUM5": ("Guar Gum", "₹ per quintal"),
+    "GUARKORMA": ("Guar Korma", "₹ per quintal"), "JEERAUNJHA": ("Jeera", "₹ per quintal"),
+    "JEERAMINI": ("Jeera Mini", "₹ per quintal"), "DHANIYA": ("Dhaniya", "₹ per quintal"),
+    "TMCFGRNZM": ("Turmeric", "₹ per quintal"), "CASTOR": ("Castor Seed", "₹ per quintal"),
+    "CASTOROIL": ("Castor Oil", "₹ per 10 kg"), "COCUDAKL": ("Cottonseed Oilcake", "₹ per quintal"),
+    "COTWASOIL": ("Cotton Wash Oil", "₹ per 10 kg"), "SUNOIL": ("Sunflower Oil", "₹ per 10 kg"),
+    "BAJRA": ("Bajra", "₹ per quintal"), "BARLEYJPR": ("Barley", "₹ per quintal"),
+    "MAIZE": ("Maize", "₹ per quintal"), "GROUNDNUT": ("Groundnut", "₹ per quintal"),
+    "SESAMESEED": ("Sesame Seed", "₹ per quintal"), "ISABGOL": ("Isabgol", "₹ per quintal"),
+    "PEPPER": ("Pepper", "₹ per quintal"), "YELLOWP": ("Yellow Peas", "₹ per quintal"),
+    "KAPAS": ("Kapas", "₹ per 20 kg"), "COTTON": ("Cotton", "₹ per bale"), "STEEL": ("Steel", "₹ per tonne"),
+    "RAINCHNNAI": ("Rain Index Chennai", "points"), "RAINMUMBAI": ("Rain Index Mumbai", "points"),
+}
+
+GROUPS = ["Bullion", "Energy", "Base metals", "Agri", "NCDEX", "Indices", "Other"]
 
 
 def describe(root: str) -> tuple[str, str, str, str]:
-    """(name, group, quoted as, family) - a contract MCX adds later still lists."""
+    """(name, group, quoted as, family) - a contract either exchange adds
+    later still lists, under its own code."""
+    if root.endswith(NCDEX_SUFFIX):
+        base = root[: -len(NCDEX_SUFFIX)]
+        name, quoted = NCDEX_ROOTS.get(base, (base.title(), "₹"))
+        return name, "NCDEX", quoted, root
     return ROOTS.get(root, (root.title(), "Other", "₹", root))
 
 

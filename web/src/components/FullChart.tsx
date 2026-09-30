@@ -11,6 +11,7 @@ import {
   type IPrimitivePaneView, type PrimitiveHoveredItem,
 } from "lightweight-charts";
 import { loadIndex } from "@/lib/index-data";
+import { levelsOf, SENS, type Levels, type Sens } from "@/lib/levels";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import {
   workingFor, growth, growthText, PE_WINDOWS, CA_LABEL, CA_ORDER, Q_LABEL,
@@ -480,23 +481,131 @@ class TimelineMarks implements ISeriesPrimitive<Time> {
   }
 }
 
+/** Blue, apart from every other line on the chart: indigo is the 200 DMA,
+ *  cyan the NAV and the first comparison. */
+const TREND_COLOUR = "#60a5fa";
+
+/** Support and resistance bands, volume shelves and trend lines over the price
+ *  pane (lib/levels). Handed new levels each time the window moves, without
+ *  the chart being rebuilt. Bands and shelves sit behind the candles; the
+ *  trend lines and the turn counts in front of them. */
+class LevelsLayer implements ISeriesPrimitive<Time> {
+  private chart: SeriesAttachedParameter<Time>["chart"] | null = null;
+  private series: SeriesAttachedParameter<Time>["series"] | null = null;
+  private redraw: (() => void) | null = null;
+  private data: Levels | null = null;
+  private show: LvPrefs = LV_DEFAULT;
+  private readonly views: IPrimitivePaneView[];
+  private readonly p: Pal;
+
+  constructor(p: Pal) {
+    this.p = p;
+    this.views = [
+      {
+        zOrder: () => "bottom",
+        renderer: () => ({
+          draw: () => {},
+          drawBackground: (target) => target.useMediaCoordinateSpace(({ context, mediaSize }) => this.back(context, mediaSize.width)),
+        }),
+      },
+      {
+        zOrder: () => "normal",
+        renderer: () => ({ draw: (target) => target.useMediaCoordinateSpace(({ context, mediaSize }) => this.front(context, mediaSize.width)) }),
+      },
+    ];
+  }
+
+  attached(param: SeriesAttachedParameter<Time>) { this.chart = param.chart; this.series = param.series; this.redraw = param.requestUpdate; }
+  detached() { this.chart = null; this.series = null; this.redraw = null; }
+  paneViews() { return this.views; }
+
+  set(data: Levels | null, show: LvPrefs) { this.data = data; this.show = show; this.redraw?.(); }
+
+  private tone(side: "sup" | "res" | "in") { return side === "sup" ? this.p.pos : side === "res" ? this.p.neg : this.p.ink3; }
+
+  private back(ctx: Ctx, width: number) {
+    const s = this.series, d = this.data;
+    if (!s || !d) return;
+    if (this.show.vol && d.shelves.length) {
+      const mx = Math.max(...d.shelves.map((b) => b.v));
+      for (const b of d.shelves) {
+        const y1 = s.priceToCoordinate(b.hi), y2 = s.priceToCoordinate(b.lo);
+        if (y1 === null || y2 === null || !mx) continue;
+        const w = (b.v / mx) * width * 0.18;
+        ctx.fillStyle = alpha(this.p.bar, b.peak ? 0.55 : 0.22);
+        ctx.fillRect(width - w, y1, w, Math.max(1, y2 - y1 - 1));
+      }
+    }
+    if (this.show.zones) {
+      for (const z of d.zones) {
+        const y1 = s.priceToCoordinate(z.hi), y2 = s.priceToCoordinate(z.lo);
+        if (y1 === null || y2 === null) continue;
+        ctx.fillStyle = alpha(this.tone(z.side), 0.14);
+        ctx.fillRect(0, y1, width, Math.max(2, y2 - y1));
+      }
+    }
+  }
+
+  private front(ctx: Ctx, width: number) {
+    const s = this.series, d = this.data, ts = this.chart?.timeScale();
+    if (!s || !d || !ts) return;
+    ctx.save();
+    ctx.font = `600 10px ${this.p.font}`;
+    ctx.textBaseline = "middle";
+    if (this.show.zones) {
+      for (const z of d.zones) {
+        const y1 = s.priceToCoordinate(z.hi), y2 = s.priceToCoordinate(z.lo);
+        if (y1 === null || y2 === null) continue;
+        const y = (y1 + y2) / 2, col = this.tone(z.side);
+        // A hairline from the zone's most recent turn to the right edge, its
+        // turn count at that turn - the legend holds the top-left corner.
+        const x0 = Math.max(0, ts.timeToCoordinate(toTime(z.lastDay)) ?? 0);
+        ctx.strokeStyle = alpha(col, 0.7);
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(width, y); ctx.stroke();
+        ctx.fillStyle = col;
+        ctx.fillText(`${z.turns}×`, Math.min(x0 + 3, width - 60), Math.min(y1, y2) - 6);
+      }
+    }
+    if (this.show.trend) {
+      for (const t of d.trends) {
+        const x0 = ts.timeToCoordinate(toTime(t.d0)), x1 = ts.timeToCoordinate(toTime(t.d1));
+        const y0 = s.priceToCoordinate(t.v0), y1 = s.priceToCoordinate(t.v1);
+        if (x0 === null || x1 === null || y0 === null || y1 === null) continue;
+        ctx.strokeStyle = TREND_COLOUR;
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+}
+
 function growthCol(g: Growth | undefined, p: Pal): string {
   if (!g || g.kind === "none") return p.ink3;
   if (g.kind === "pct") return g.pct >= 0 ? p.pos : p.neg;
   return g.kind === "toProfit" || g.kind === "betterLoss" ? p.pos : p.neg;
 }
 
-type Prefs = { kind: Kind; inds: Ind[]; log: boolean };
+/** Auto levels (lib/levels): off until asked for, then all three layers. */
+type LvPrefs = { on: boolean; zones: boolean; trend: boolean; vol: boolean; sens: Sens };
+const LV_DEFAULT: LvPrefs = { on: false, zones: true, trend: true, vol: true, sens: "med" };
+type Prefs = { kind: Kind; inds: Ind[]; log: boolean; lv: LvPrefs };
 const PREF_KEY = "rs_fullchart";
 function loadPrefs(): Prefs {
-  const dflt: Prefs = { kind: "candles", inds: ["vol", "dma50", "dma200"], log: false };
+  const dflt: Prefs = { kind: "candles", inds: ["vol", "dma50", "dma200"], log: false, lv: LV_DEFAULT };
   try {
     const p = JSON.parse(localStorage.getItem(PREF_KEY) || "null");
     if (!p) return dflt;
+    const lv = p.lv ?? {};
     return {
       kind: KINDS.some(([k]) => k === p.kind) ? p.kind : "candles",
       inds: Array.isArray(p.inds) ? p.inds.filter((x: string) => INDS.some(([k]) => k === x)) : dflt.inds,
       log: !!p.log,
+      lv: {
+        on: !!lv.on, zones: lv.zones !== false, trend: lv.trend !== false, vol: lv.vol !== false,
+        sens: SENS.some(([k]) => k === lv.sens) ? lv.sens : "med",
+      },
     };
   } catch {
     return dflt;
@@ -592,7 +701,9 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [view, setView] = useState<View>("price");
   const [range, setRange] = useState<Range>("1Y");
   const [interval, setIv] = useState<Interval>("d");
-  const [prefs, setPrefs] = useState<Prefs>({ kind: "candles", inds: ["vol", "dma50", "dma200"], log: false });
+  const [prefs, setPrefs] = useState<Prefs>({ kind: "candles", inds: ["vol", "dma50", "dma200"], log: false, lv: LV_DEFAULT });
+  // The levels on screen, for the legend's one-line summary.
+  const [lvl, setLvl] = useState<Levels | null>(null);
   const [sheet, setSheet] = useState<null | "type" | "layers" | "cmp">(null);
   const [legend, setLegend] = useState<LegendData | null>(null);
   const [themeKey, setThemeKey] = useState(0);
@@ -791,6 +902,8 @@ export default function FullChart({ symbol }: { symbol: string }) {
     let anchorDays: number[] = [];
     let legendAt: (day: number | null) => LegendData | null = () => null;
     let keyWin = `${view}`;
+    let levelLayer: LevelsLayer | null = null;
+    let levelRows: Row[] = [];
 
     if (view === "price") {
       keyWin = `price:${interval}`;
@@ -835,6 +948,12 @@ export default function FullChart({ symbol }: { symbol: string }) {
           main.setData(ohlc(prefs.kind === "heikin" ? heikinAshi(rows) : rows));
       }
       anchor = main; anchorDays = days;
+      // Levels are prices; over a comparison the axis is % change instead.
+      if (prefs.lv.on && !comparing) {
+        levelLayer = new LevelsLayer(p);
+        main.attachPrimitive(levelLayer);
+        levelRows = rows;
+      }
 
       // An ETF's NAV as a line over its candles. A weekly or monthly candle
       // takes the NAV of the last valued day inside it - the day its close is
@@ -1198,6 +1317,19 @@ export default function FullChart({ symbol }: { symbol: string }) {
       visTimer = setTimeout(() => {
         const vr = chart.timeScale().getVisibleRange();
         if (vr) setVis({ from: Math.round((vr.from as number) / DAY), to: Math.round((vr.to as number) / DAY) });
+        // Levels from the bars on screen - zoom out and they are the longer
+        // view's levels. Under 30 bars in view, the last 60 stand in.
+        if (levelLayer) {
+          let lv: Levels | null = null;
+          if (vr) {
+            const f = Math.round((vr.from as number) / DAY), t = Math.round((vr.to as number) / DAY);
+            let win = levelRows.filter((r) => r[0] >= f && r[0] <= t);
+            if (win.length < 30) win = levelRows.slice(-60);
+            lv = levelsOf(win.map(([d, o, h, l, c, v]) => ({ t: d, o, h, l, c, v })), prefs.lv.sens);
+          }
+          levelLayer.set(lv, prefs.lv);
+          setLvl(lv);
+        } else setLvl(null);
       }, 150);
     };
     chart.timeScale().subscribeVisibleTimeRangeChange(onVis);
@@ -1295,6 +1427,25 @@ export default function FullChart({ symbol }: { symbol: string }) {
   })();
 
   const L = legend;
+  // One line under the legend while levels are on: the nearest of each.
+  const lvOn = view === "price" && prefs.lv.on && cmps.length === 0;
+  const lvLine: LItem[] = [];
+  if (lvOn && lvl) {
+    const lp = (x: number) => x.toLocaleString("en-IN", { maximumFractionDigits: x >= 1000 ? 0 : x >= 100 ? 1 : 2 });
+    const band = (lo: number, hi: number, n: number) => `${lp(lo)}–${lp(hi)} ·${n}×`;
+    const s = lvl.zones.find((z) => z.side === "sup"), r = lvl.zones.find((z) => z.side === "res");
+    const inz = lvl.zones.find((z) => z.side === "in");
+    if (prefs.lv.zones) {
+      if (s) lvLine.push({ label: "Support", value: band(s.lo, s.hi, s.turns), color: "var(--chart-pos)" });
+      if (inz) lvLine.push({ label: "In zone", value: band(inz.lo, inz.hi, inz.turns), color: "var(--ink2)" });
+      if (r) lvLine.push({ label: "Resistance", value: band(r.lo, r.hi, r.turns), color: "var(--chart-neg)" });
+    }
+    if (prefs.lv.trend) {
+      for (const t of lvl.trends) {
+        lvLine.push({ label: t.kind === "up" ? "Rising line" : "Falling line", value: `${lp(t.v1)} ·${t.touches}×`, color: TREND_COLOUR });
+      }
+    }
+  }
   const tone = (x: number | null | undefined) => (x == null ? "text-[var(--ink2)]" : x >= 0 ? "text-[var(--pos)]" : "text-[var(--neg)]");
   const indOn = (k: Ind) => prefs.inds.includes(k);
   const kindLabel = KINDS.find(([k]) => k === prefs.kind)?.[1] ?? "Candles";
@@ -1432,6 +1583,16 @@ export default function FullChart({ symbol }: { symbol: string }) {
                 </span>
               )}
             </p>
+            {lvLine.length > 0 && (
+              <p className="flex flex-wrap gap-x-2">
+                {lvLine.map((it) => (
+                  <span key={it.label}>
+                    <span className="text-[var(--ink3)]">{it.label} </span>
+                    <span style={{ color: it.color }}>{it.value}</span>
+                  </span>
+                ))}
+              </p>
+            )}
             {L.events && L.events.length > 0 && (
               <p className="flex flex-wrap gap-x-2">
                 {L.events.map((e, i) => (
@@ -1495,6 +1656,14 @@ export default function FullChart({ symbol }: { symbol: string }) {
           <button onClick={() => setSheet("layers")} className={pill(nLayers > 0)}>
             {view === "price" ? "Indicators" : "Layers"}{nLayers > 0 ? ` · ${nLayers}` : ""}
           </button>
+          {view === "price" && (
+            <button onClick={() => savePrefs({ ...prefs, lv: { ...prefs.lv, on: !prefs.lv.on } })}
+              aria-pressed={prefs.lv.on} disabled={cmps.length > 0}
+              title={cmps.length > 0 ? "Levels are prices - off while comparing" : "Support, resistance and trend lines"}
+              className={`${pill(prefs.lv.on && cmps.length === 0, cmps.length > 0)}`}>
+              Levels
+            </button>
+          )}
           <button onClick={() => setSheet("cmp")} className={pill(cmps.length > 0)} aria-label="Compare with other charts">
             <svg viewBox="0 0 24 24" className="w-[18px] h-[18px] inline-block" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M7 4v16M17 4v16M4 8l3-4 3 4M14 16l3 4 3-4" />
@@ -1542,6 +1711,36 @@ export default function FullChart({ symbol }: { symbol: string }) {
                         sub={cmps.length > 0 && k !== "vol" && k !== "rsi" ? "Hidden while comparing - averages mean nothing once rebased" : undefined}
                         onClick={() => savePrefs({ ...prefs, inds: indOn(k) ? prefs.inds.filter((x) => x !== k) : [...prefs.inds, k] })} />
                     ))}
+                    <Head>
+                      <span className="inline-flex items-center gap-1">
+                        Levels
+                        <InfoTip title="Levels">
+                          <p>Worked out from the bars on screen, so they change as you zoom. They show where the price turned before - not where it will turn next.</p>
+                          <p><b>Support / resistance</b>: prices where it turned at least twice. Green below today&apos;s price, red above; the number is how many turns.</p>
+                          <p><b>Trend lines</b>: the line through past turns that price has touched most (three or more) without closing through it.</p>
+                          <p><b>Volume shelves</b>: bars on the right, longest where the most shares changed hands.</p>
+                          <p><b>Sensitivity</b>: High counts smaller turns, so more and weaker levels; Low only the big ones.</p>
+                        </InfoTip>
+                      </span>
+                    </Head>
+                    <Toggle on={prefs.lv.on} label="Show levels"
+                      sub={cmps.length > 0 ? "Off while comparing - levels are prices, the axis is % change" : undefined}
+                      onClick={() => savePrefs({ ...prefs, lv: { ...prefs.lv, on: !prefs.lv.on } })} />
+                    {prefs.lv.on && (
+                      <div className="pl-6">
+                        <Toggle on={prefs.lv.zones} label="Support / resistance" dot="var(--chart-pos)"
+                          onClick={() => savePrefs({ ...prefs, lv: { ...prefs.lv, zones: !prefs.lv.zones } })} />
+                        <Toggle on={prefs.lv.trend} label="Trend lines" dot={TREND_COLOUR}
+                          onClick={() => savePrefs({ ...prefs, lv: { ...prefs.lv, trend: !prefs.lv.trend } })} />
+                        <Toggle on={prefs.lv.vol} label="Volume shelves" dot="var(--chart-bar)"
+                          onClick={() => savePrefs({ ...prefs, lv: { ...prefs.lv, vol: !prefs.lv.vol } })} />
+                        <div className="px-3 pt-1 pb-2 flex items-center gap-3">
+                          <span className="text-[15px] text-[var(--ink)] flex-1">Sensitivity</span>
+                          <Seg value={prefs.lv.sens} options={SENS.map(([k, label]) => [k, label] as [Sens, string])}
+                            onChange={(v) => savePrefs({ ...prefs, lv: { ...prefs.lv, sens: v } })} />
+                        </div>
+                      </div>
+                    )}
                   </>
                 ) : (
                   <>

@@ -49,7 +49,7 @@ export default function CommoditiesPage() {
             <p>MCX futures: the same commodity trades for several delivery months at once, each at its own price.</p>
             <p><b>Next expiry</b> is how far the second month sits above the first. Above zero, later delivery costs more — usually the interest and storage on holding the metal. Below zero, the market wants it now.</p>
             <p><b>vs World</b> is MCX against the same month on COMEX or NYMEX, in rupees at the day&apos;s dollar rate. For gold and silver most of the gap is import duty; for crude and gas, which MCX settles on the US price, it should be near zero.</p>
-            <p>Prices are MCX&apos;s own daily closes, from Upstox&apos;s public data; world prices from Yahoo. NCDEX is not here: its website refuses automated reading and no open source carries it.</p>
+            <p>MCX prices are its own daily closes, from Upstox&apos;s public data; world prices from Yahoo. NCDEX prices come through your Angel One login, read-only - they appear once its keys are saved in GitHub.</p>
           </InfoTip>
         </h1>
 

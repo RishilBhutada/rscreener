@@ -95,8 +95,9 @@ def load_bars(session: requests.Session, con: sqlite3.Connection, live: list[str
     days after that. Contracts that expired in the past fortnight get one
     more read, for their final days."""
     recent = (datetime.fromisoformat(today) - timedelta(days=14)).date().isoformat()
+    have = set(live)
     keys = live + [k for (k,) in con.execute(
-        "SELECT key FROM commodity_contracts WHERE expiry < ? AND expiry >= ?", (today, recent)) if k not in set(live)]
+        "SELECT key FROM commodity_contracts WHERE exchange='MCX' AND expiry < ? AND expiry >= ?", (today, recent)) if k not in have]
     last = dict(con.execute("SELECT key, MAX(date) FROM commodity_bars GROUP BY key"))
     ok = empty = bad = 0
     for i, key in enumerate(keys):
@@ -129,7 +130,8 @@ def load_bars(session: requests.Session, con: sqlite3.Connection, live: list[str
 def load_world(session: requests.Session, con: sqlite3.Connection, sleep: float) -> None:
     """The matching CME contract for every live MCX contract that has one,
     the rolling front month for the long view, and USD/INR."""
-    live = con.execute("SELECT root, expiry FROM commodity_contracts WHERE last_seen = (SELECT MAX(last_seen) FROM commodity_contracts)").fetchall()
+    live = con.execute("""SELECT root, expiry FROM commodity_contracts WHERE exchange='MCX'
+        AND last_seen = (SELECT MAX(last_seen) FROM commodity_contracts WHERE exchange='MCX')""").fetchall()
     months = sorted({t for r, e in live if (t := world_ticker(r, e))})
     fronts = sorted({world_front(r) for r in WORLD})
     for i, (t, rng) in enumerate([(FX, "5y")] + [(t, "5y") for t in fronts] + [(t, "2y") for t in months]):

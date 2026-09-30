@@ -89,7 +89,7 @@ function TermCurve({ doc }: { doc: CommodityDoc }) {
         ))}
       </svg>
       <p className="text-[11px] text-[var(--ink3)] flex gap-3">
-        <span><i className="inline-block w-3 h-0.5 mr-1 align-middle bg-[var(--accent)]" />MCX</span>
+        <span><i className="inline-block w-3 h-0.5 mr-1 align-middle bg-[var(--accent)]" />{doc.exchange}</span>
         {wpts.length > 1 && <span><i className="inline-block w-3 mr-1 align-middle border-t-2 border-dashed border-[var(--chart-alt)]" />{doc.world?.label}, same months</span>}
       </p>
     </div>
@@ -98,6 +98,7 @@ function TermCurve({ doc }: { doc: CommodityDoc }) {
 
 function Expiries({ doc, pick, onPick }: { doc: CommodityDoc; pick: string; onPick: (e: string) => void }) {
   const hasWorld = doc.curve.some((r) => r.world);
+  const hasOI = doc.curve.some((r) => r.oi !== null);
   const num = (v: number) => v.toLocaleString("en-IN", { maximumFractionDigits: v >= 1000 ? 0 : 2 });
   return (
     <table className="w-full table-fixed text-[12.5px] tabular-nums">
@@ -107,7 +108,7 @@ function Expiries({ doc, pick, onPick }: { doc: CommodityDoc; pick: string; onPi
           <th className="w-[24%] px-1 py-1.5 text-right font-medium">Price ₹</th>
           <th className="px-1 py-1.5 text-right font-medium">vs nearest</th>
           {hasWorld && <th className="px-1 py-1.5 text-right font-medium">vs World</th>}
-          <th className="pl-1 pr-3 py-1.5 text-right font-medium">OI</th>
+          {hasOI && <th className="pl-1 pr-3 py-1.5 text-right font-medium">OI</th>}
         </tr>
       </thead>
       <tbody>
@@ -135,10 +136,12 @@ function Expiries({ doc, pick, onPick }: { doc: CommodityDoc; pick: string; onPi
             {hasWorld && (
               <td className="px-1 py-2 text-right">{r.world && r.fresh ? signed(r.world.prem) : <span className="text-[var(--ink3)]">—</span>}</td>
             )}
-            <td className="pl-1 pr-3 py-2 text-right text-[var(--ink2)]">
-              {r.oi.toLocaleString("en-IN")}
-              {r.oi_chg !== null && r.fresh && <span className={`block text-[11px] ${signClass(r.oi_chg)}`}>{r.oi_chg > 0 ? "+" : ""}{r.oi_chg.toLocaleString("en-IN")}</span>}
-            </td>
+            {hasOI && (
+              <td className="pl-1 pr-3 py-2 text-right text-[var(--ink2)]">
+                {r.oi === null ? "—" : r.oi.toLocaleString("en-IN")}
+                {r.oi_chg !== null && r.fresh && <span className={`block text-[11px] ${signClass(r.oi_chg)}`}>{r.oi_chg > 0 ? "+" : ""}{r.oi_chg.toLocaleString("en-IN")}</span>}
+              </td>
+            )}
           </tr>
         ))}
       </tbody>
@@ -161,7 +164,7 @@ function CommodityView() {
     if (!sym) return;
     let live = true;
     fetch(`${BASE}/commodity/${encodeURIComponent(sym)}.json`)
-      .then((r) => { if (!r.ok) throw new Error(r.status === 404 ? `No MCX contract called ${sym}` : `HTTP ${r.status}`); return r.json(); })
+      .then((r) => { if (!r.ok) throw new Error(r.status === 404 ? `No commodity contract called ${sym}` : `HTTP ${r.status}`); return r.json(); })
       .then((d: CommodityDoc) => { if (live) { setDoc(d); setPick(d.active); } })
       .catch((e) => { if (live) setError({ s: sym, msg: String(e.message ?? e) }); });
     fetch(`${BASE}/commodities.json`).then((r) => (r.ok ? r.json() : null))
@@ -185,9 +188,9 @@ function CommodityView() {
         <div className="flex items-baseline gap-2 flex-wrap">
           <h1 className="text-xl font-bold">{doc.name}</h1>
           <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink3)] border border-[var(--line2)] rounded px-1.5">{doc.group}</span>
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink3)]">MCX · {doc.s}</span>
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink3)]">{doc.exchange} · {doc.code ?? doc.s}</span>
         </div>
-        <p className="text-sm text-[var(--ink2)]">{doc.quoted} · one contract is {lotText(doc.mult, doc.quoted)}</p>
+        <p className="text-sm text-[var(--ink2)]">{doc.quoted}{doc.mult ? ` · one contract is ${lotText(doc.mult, doc.quoted)}` : ""}</p>
       </header>
 
       <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] px-3 py-3">
@@ -202,11 +205,15 @@ function CommodityView() {
           {doc.world
             ? <Stat label="vs World" value={act.world ? signed(act.world.prem) : "—"} sub={doc.world.label} />
             : <Stat label="Expires" value={dayLabel(act.expiry)} sub={`${act.days} days`} />}
-          <Stat label="Open interest" value={act.oi.toLocaleString("en-IN")}
-            sub={act.oi_chg !== null ? `${act.oi_chg > 0 ? "+" : ""}${act.oi_chg.toLocaleString("en-IN")} on the day` : undefined} />
+          {act.oi !== null
+            ? <Stat label="Open interest" value={act.oi.toLocaleString("en-IN")}
+                sub={act.oi_chg !== null ? `${act.oi_chg > 0 ? "+" : ""}${act.oi_chg.toLocaleString("en-IN")} on the day` : undefined} />
+            : <Stat label="Months trading" value={String(doc.curve.filter((r) => r.fresh).length)} sub={`of ${doc.curve.length} listed`} />}
           <Stat label="Day high" value={rupees(act.high)} sub={`low ${rupees(act.low)}`} />
           <Stat label="Volume" value={act.vol.toLocaleString("en-IN")} sub="contracts" />
-          <Stat label="One contract" value={rupeesShort(act.value)} sub={lotText(doc.mult, doc.quoted)} />
+          {act.value !== null && doc.mult
+            ? <Stat label="One contract" value={rupeesShort(act.value)} sub={lotText(doc.mult, doc.quoted)} />
+            : <Stat label="Last trade" value={dayLabel(act.date)} sub={`${act.days} days to expiry`} />}
         </div>
       </section>
 
@@ -301,12 +308,16 @@ function CommodityView() {
 
       <Card title="About">
         <dl className="px-3 pb-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
-          <dt className="text-[var(--ink3)]">Exchange</dt><dd>MCX · {doc.s}</dd>
+          <dt className="text-[var(--ink3)]">Exchange</dt><dd>{doc.exchange} · {doc.code ?? doc.s}</dd>
           <dt className="text-[var(--ink3)]">Quoted</dt><dd>{doc.quoted}</dd>
-          <dt className="text-[var(--ink3)]">Contract</dt><dd>{lotText(doc.mult, doc.quoted)}</dd>
+          {doc.mult ? <><dt className="text-[var(--ink3)]">Contract</dt><dd>{lotText(doc.mult, doc.quoted)}</dd></> : null}
           {doc.tick > 0 && <><dt className="text-[var(--ink3)]">Tick</dt><dd>₹{doc.tick}</dd></>}
           <dt className="text-[var(--ink3)]">Sources</dt>
-          <dd>MCX daily closes via Upstox&apos;s public data{doc.world ? " · world prices and USD/INR via Yahoo" : ""}. Not checked against MCX&apos;s bhavcopy.</dd>
+          <dd>
+            {doc.exchange === "NCDEX"
+              ? "NCDEX daily prices via Angel One's SmartAPI, on your own login, read-only. Units per NCDEX's contract specifications as known here, not yet checked. Not checked against NCDEX's bhavcopy."
+              : <>MCX daily closes via Upstox&apos;s public data{doc.world ? " · world prices and USD/INR via Yahoo" : ""}. Not checked against MCX&apos;s bhavcopy.</>}
+          </dd>
         </dl>
       </Card>
     </div>

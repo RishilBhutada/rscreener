@@ -233,6 +233,19 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "10"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_commodities.py
+      - name: Refresh NCDEX futures through the owner's Angel One login (read-only)
+        # No open source carries NCDEX, so its prices come from Angel One's
+        # SmartAPI on the owner's own account - login, candles and quotes only;
+        # nothing in fetch_ncdex.py can place or change an order. The four
+        # secrets are the owner's, set by him in Settings > Secrets > Actions,
+        # and reach this step alone. Until they exist it logs "skipped".
+        env:
+          RSCREENER_STEP_MINUTES: "8"
+          ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
+          ANGEL_CLIENT_CODE: ${{ secrets.ANGEL_CLIENT_CODE }}
+          ANGEL_PIN: ${{ secrets.ANGEL_PIN }}
+          ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_ncdex.py
       - name: Refresh concall/rating documents (whole universe, rotating)
         if: steps.plan.outputs.earnings == '1'
         # 480 of 2,357 companies covered, and capped at the top 500 it would have

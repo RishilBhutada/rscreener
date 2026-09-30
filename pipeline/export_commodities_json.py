@@ -25,7 +25,7 @@ from collections import defaultdict
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from commodities_lib import FX, GROUPS, WORLD, describe, world_front, world_ticker
+from commodities_lib import FX, GROUPS, NCDEX_SUFFIX, WORLD, describe, world_front, world_ticker
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
@@ -66,10 +66,14 @@ def main() -> None:
     if not con.execute("SELECT 1 FROM sqlite_master WHERE name='commodity_bars'").fetchone():
         print("no commodity tables yet - nothing to write")
         return
-    newest_seen = con.execute("SELECT MAX(last_seen) FROM commodity_contracts").fetchone()[0]
-    contracts = {k: {"key": k, "root": root, "expiry": exp, "mult": mult, "tick": tick, "live": seen == newest_seen}
-                 for k, root, exp, mult, tick, seen in con.execute(
-                     "SELECT key, root, expiry, mult, tick, last_seen FROM commodity_contracts")}
+    # "Live" is judged per exchange: NCDEX is read on its own schedule (only
+    # once the owner's Angel login exists), and MCX's newer read must not
+    # make every NCDEX contract look delisted.
+    newest_seen = dict(con.execute("SELECT exchange, MAX(last_seen) FROM commodity_contracts GROUP BY exchange"))
+    contracts = {k: {"key": k, "root": root, "expiry": exp, "mult": mult, "tick": tick, "exchange": ex,
+                     "live": seen == newest_seen.get(ex)}
+                 for k, ex, root, exp, mult, tick, seen in con.execute(
+                     "SELECT key, exchange, root, expiry, mult, tick, last_seen FROM commodity_contracts")}
     # Only days the contract actually traded. On a day nobody traded it, the
     # feed still carries a bar - open, high, low and close all one reference
     # number, volume zero - and those numbers sat as far as 18% from the
@@ -124,8 +128,11 @@ def main() -> None:
                 "key": c["key"], "expiry": c["expiry"], "days": day_no(c["expiry"]) - day_no(asof),
                 "date": d, "fresh": d == asof, "expiring": day_no(c["expiry"]) - day_no(asof) < EXPIRING_DAYS, "open": o, "high": h, "low": lo, "close": close,
                 "chg": r2((close / prev[4] - 1) * 100) if prev else None,
-                "vol": vol if d == asof else 0, "oi": oi, "oi_chg": oi - prev[6] if prev else None,
-                "value": round(close * (c["mult"] or 0)),
+                # Open interest is None where the source has none (Angel's
+                # daily candles), not zero.
+                "vol": vol if d == asof else 0, "oi": oi,
+                "oi_chg": oi - prev[6] if prev and oi is not None and prev[6] is not None else None,
+                "value": round(close * c["mult"]) if c["mult"] else None,
             }
             wt = world_ticker(root, c["expiry"])
             wi = world_inr(root, wt, d)
@@ -139,7 +146,7 @@ def main() -> None:
                 gap = day_no(r["expiry"]) - day_no(front["expiry"])
                 r["prem_front"] = r2((r["close"] / front["close"] - 1) * 100)
                 r["carry_pa"] = r2(r["prem_front"] * 365 / gap, 1) if gap > 0 else None
-        active = max(fresh, key=lambda r: r["oi"]) if fresh else curve[0]
+        active = max(fresh, key=lambda r: (r["oi"] or 0, r["vol"])) if fresh else curve[0]
         nxt = next((r for r in fresh if front and r["expiry"] > front["expiry"]), None)
 
         # Each live contract's life, and the world contract beside it.
@@ -157,7 +164,7 @@ def main() -> None:
         on_day: dict[str, list[tuple[str, float]]] = defaultdict(list)
         for c in cs:
             for b in bars[c["key"]]:
-                if day_no(c["expiry"]) - day_no(b[0]) >= EXPIRING_DAYS and b[6] >= MIN_OI:
+                if day_no(c["expiry"]) - day_no(b[0]) >= EXPIRING_DAYS and (b[6] is None or b[6] >= MIN_OI):
                     on_day[b[0]].append((c["expiry"], b[4]))
         spread = []
         for d in sorted(on_day):
@@ -180,7 +187,8 @@ def main() -> None:
 
         w = WORLD.get(root)
         doc = {
-            "s": root, "name": name, "group": group, "quoted": quoted, "family": family, "exchange": "MCX",
+            "s": root, "code": root.removesuffix(NCDEX_SUFFIX), "name": name, "group": group, "quoted": quoted,
+            "family": family, "exchange": live[0]["exchange"],
             "asof": asof, "mult": live[0]["mult"], "tick": live[0]["tick"],
             "active": active["expiry"], "front": front["expiry"] if front else None,
             "world": {"label": w["label"], "unit": w["unit"], "front": world_front(root)} if w else None,
@@ -193,7 +201,8 @@ def main() -> None:
             "expiry": active["expiry"], "date": active["date"], "close": active["close"], "chg": active["chg"],
             "next_prem": nxt.get("prem_front") if nxt else None, "carry_pa": nxt.get("carry_pa") if nxt else None,
             "world_prem": active.get("world", {}).get("prem"),
-            "oi": sum(r["oi"] for r in fresh), "vol": sum(r["vol"] for r in fresh), "n": len(curve),
+            "oi": sum(r["oi"] or 0 for r in fresh), "vol": sum(r["vol"] for r in fresh), "n": len(curve),
+            "exchange": live[0]["exchange"],
         })
     con.close()
     items.sort(key=lambda x: (GROUPS.index(x["group"]) if x["group"] in GROUPS else 99, x["family"], x["s"] != x["family"], -x["oi"]))

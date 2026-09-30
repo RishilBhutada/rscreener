@@ -48,8 +48,10 @@ export default function CommodityChart({ bars, worldLabel }: { bars: Bar[]; worl
   const boxRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const hasWorld = !!worldLabel && bars.some((b) => b[7] !== null);
+  // NCDEX's daily candles carry no open interest; nothing is drawn as zero.
+  const hasOI = bars.some((b) => b[6] !== null);
   const [choice, setLower] = useState<Lower>("world");
-  const lower: Lower = hasWorld ? choice : "oi";
+  const lower: Lower | null = hasWorld ? choice : hasOI ? "oi" : null;
   const [range, setRange] = useState<Range>("All");
   const [at, setAt] = useState<Bar | null>(null);
   const [themeKey, setThemeKey] = useState(0);
@@ -108,12 +110,12 @@ export default function CommodityChart({ bars, worldLabel }: { bars: Bar[]; worl
         priceFormat: { type: "custom", formatter: (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(1)}%`, minMove: 0.01 },
       }, 1);
       prem.setData(bars.filter((b) => b[7]).map((b) => ({ time: toTime(b[0]), value: (b[4] / (b[7] as number) - 1) * 100 })));
-    } else {
+    } else if (lower === "oi") {
       const oi = chart.addSeries(HistogramSeries, {
         color: alpha(p.vol, 0.8), priceLineVisible: false, lastValueVisible: true,
         priceFormat: { type: "volume" },
       }, 1);
-      oi.setData(bars.map((b) => ({ time: toTime(b[0]), value: b[6] })));
+      oi.setData(bars.filter((b) => b[6] !== null).map((b) => ({ time: toTime(b[0]), value: b[6] as number })));
     }
     chart.panes()[0]?.setStretchFactor(2.4);
     chart.panes()[1]?.setStretchFactor(1);
@@ -148,7 +150,7 @@ export default function CommodityChart({ bars, worldLabel }: { bars: Bar[]; worl
           <div className="flex flex-wrap gap-x-3">
             <span>O {inr(at[1])}</span><span>H {inr(at[2])}</span><span>L {inr(at[3])}</span>
             <span className="font-semibold">C {inr(at[4])}</span>
-            <span className="text-[var(--ink3)]">OI {at[6].toLocaleString("en-IN")}</span>
+            {at[6] !== null && <span className="text-[var(--ink3)]">OI {at[6].toLocaleString("en-IN")}</span>}
             {hasWorld && (
               <span>
                 <i className="inline-block w-2.5 mr-1 align-middle border-t-2 border-dashed border-[var(--chart-alt)]" />
@@ -170,7 +172,7 @@ export default function CommodityChart({ bars, worldLabel }: { bars: Bar[]; worl
           ))}
         </div>
         <div role="radiogroup" aria-label="Lower pane" className="ml-auto flex items-center gap-1">
-          {([["world", "vs World"], ["oi", "OI"]] as const).filter(([k]) => k !== "world" || hasWorld).map(([k, label]) => (
+          {([["world", "vs World"], ["oi", "OI"]] as const).filter(([k]) => (k !== "world" || hasWorld) && (k !== "oi" || hasOI)).map(([k, label]) => (
             <button key={k} role="radio" aria-checked={lower === k} onClick={() => setLower(k)}
               className={`min-h-[34px] px-2.5 rounded-lg text-[13px] font-semibold ${lower === k ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)] active:bg-[var(--card2)]"}`}>
               {label}

@@ -5,7 +5,7 @@ export type CommodityListItem = {
   s: string; name: string; group: string; quoted: string; family: string;
   expiry: string; date: string; close: number; chg: number | null;
   next_prem: number | null; carry_pa: number | null; world_prem: number | null;
-  oi: number; vol: number; n: number;
+  oi: number; vol: number; n: number; exchange?: string;
 };
 
 export type WorldQuote = { ticker: string; usd: number; fx: number; inr: number; prem: number };
@@ -13,16 +13,18 @@ export type WorldQuote = { ticker: string; usd: number; fx: number; inr: number;
 export type CurveRow = {
   key: string; expiry: string; days: number; date: string; fresh: boolean; expiring: boolean;
   open: number; high: number; low: number; close: number; chg: number | null;
-  vol: number; oi: number; oi_chg: number | null; value: number;
+  /** Null where the source carries no open interest (NCDEX's daily candles),
+   *  and no contract value where the contract size is not on record. */
+  vol: number; oi: number | null; oi_chg: number | null; value: number | null;
   prem_front?: number | null; carry_pa?: number | null; world?: WorldQuote;
 };
 
 /** day, open, high, low, close, volume, open interest, world price in MCX rupees */
-export type Bar = [number, number, number, number, number, number, number, number | null];
+export type Bar = [number, number, number, number, number, number, number | null, number | null];
 
 export type CommodityDoc = {
-  s: string; name: string; group: string; quoted: string; family: string; exchange: string;
-  asof: string; mult: number; tick: number; active: string; front: string | null;
+  s: string; code?: string; name: string; group: string; quoted: string; family: string; exchange: string;
+  asof: string; mult: number | null; tick: number; active: string; front: string | null;
   world: { label: string; unit: string; front: string } | null;
   curve: CurveRow[];
   world_curve: { expiry: string; usd: number; prem_first: number }[];
@@ -32,7 +34,7 @@ export type CommodityDoc = {
   untraded: number;
 };
 
-export const GROUP_ORDER = ["Bullion", "Energy", "Base metals", "Agri", "Indices", "Other"];
+export const GROUP_ORDER = ["Bullion", "Energy", "Base metals", "Agri", "NCDEX", "Indices", "Other"];
 
 export function rupees(v: number | null | undefined, digits = 2): string {
   if (v === null || v === undefined) return "—";
