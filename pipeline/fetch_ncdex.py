@@ -65,9 +65,32 @@ NCDEX_SUFFIX = "_NCDEX"      # as commodities_lib; repeated so --check needs no 
 SESSION_OVER = 21
 
 
+def clean_secret(secret: str) -> str:
+    """The setup key as typed or pasted, without the spaces, line breaks,
+    dashes and padding that copying adds - a pasted key arrived with one."""
+    return "".join(ch for ch in secret if not ch.isspace() and ch not in "-=").upper()
+
+
+def secret_problem(secret: str) -> str | None:
+    """Why a setup key cannot be one, in words that never show the key."""
+    s = clean_secret(secret)
+    if not s:
+        return "ANGEL_TOTP_SECRET is empty"
+    if s.isdigit() and len(s) <= 8:
+        return (f"ANGEL_TOTP_SECRET is a {len(s)}-digit number - that is the code the authenticator app shows, "
+                "which changes every 30 seconds. It needs the setup text under the QR code instead "
+                "(letters A-Z and digits 2-7, usually 16-32 characters)")
+    bad = [ch for ch in s if ch not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"]
+    if bad:
+        kinds = sorted({"the digits 0, 1, 8 or 9" if ch in "0189" else "symbols or punctuation" for ch in bad})
+        return (f"ANGEL_TOTP_SECRET ({len(s)} characters) has {len(bad)} that a setup key never contains - "
+                f"{' and '.join(kinds)}. Re-copy the text under the QR code")
+    return None
+
+
 def totp(secret: str, at: float | None = None) -> str:
     """The six-digit code an authenticator app shows (RFC 6238, 30 seconds)."""
-    s = secret.replace(" ", "").upper()
+    s = clean_secret(secret)
     key = base64.b32decode(s + "=" * (-len(s) % 8))
     digest = hmac.new(key, struct.pack(">Q", int((at or time.time()) // 30)), hashlib.sha1).digest()
     o = digest[-1] & 0x0F
@@ -245,9 +268,13 @@ def login_from_env() -> Angel | None:
     if missing:
         print(f"NCDEX skipped: the Angel One login is not set up ({len(missing)} of 4 secrets missing: {', '.join(missing)}).")
         return None
-    api = Angel(os.environ["ANGEL_API_KEY"])
+    problem = secret_problem(os.environ["ANGEL_TOTP_SECRET"])
+    if problem:
+        print(f"NCDEX: not logging in - {problem}.")
+        return None
+    api = Angel(os.environ["ANGEL_API_KEY"].strip())
     try:
-        api.login(os.environ["ANGEL_CLIENT_CODE"], os.environ["ANGEL_PIN"], os.environ["ANGEL_TOTP_SECRET"])
+        api.login(os.environ["ANGEL_CLIENT_CODE"].strip(), os.environ["ANGEL_PIN"].strip(), os.environ["ANGEL_TOTP_SECRET"])
     except Exception as e:  # noqa: BLE001 - say why, never with what
         print(f"NCDEX: Angel One refused the login - {e}")
         return None
