@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   createChart, createTextWatermark,
@@ -81,10 +81,6 @@ const fyQ = (month: number) => (month >= 4 && month <= 6 ? 1 : month >= 7 && mon
 const RANGES: Range[] = ["1M", "3M", "6M", "YTD", "1Y", "2Y", "3Y", "5Y", "10Y", "MAX"];
 const RANGE_DAYS: Record<Range, number> = {
   "1M": 31, "3M": 92, "6M": 183, YTD: 0, "1Y": 366, "2Y": 731, "3Y": 1096, "5Y": 1827, "10Y": 3653, MAX: Infinity,
-};
-/** The candle each range opens on, the way Kite picks it. */
-const AUTO: Record<Range, Interval> = {
-  "1M": "d", "3M": "d", "6M": "d", YTD: "d", "1Y": "d", "2Y": "d", "3Y": "w", "5Y": "w", "10Y": "m", MAX: "m",
 };
 const INTERVALS: [Interval, string][] = [["d", "D"], ["w", "W"], ["m", "M"]];
 /** 50 and 200 trading days expressed in each candle's own bars - the same
@@ -812,34 +808,17 @@ export default function FullChart({ symbol }: { symbol: string }) {
     ev: !!company?.ev_band, pb: !!company?.pb_band, ps: !!company?.ps_band,
   };
 
-  // How far back each candle size reaches, for greying out the ones that
-  // cannot cover the chosen range.
-  const span = useMemo(() => {
-    const s = (rows?: Row[]) => (rows && rows.length > 1 ? rows[rows.length - 1][0] - rows[0][0] : 0);
-    return { d: s(file?.d), w: s(file?.w), m: s(file?.m) } as Record<Interval, number>;
-  }, [file]);
   const rangeDays = (r: Range, last: number) => {
     if (r !== "YTD") return RANGE_DAYS[r];
     const y = new Date(last * DAY * 1000).getUTCFullYear();
     return last - Math.floor(Date.UTC(y, 0, 1) / 1000 / DAY);
   };
-  const lastDaily = file?.d?.[file.d.length - 1]?.[0] ?? file?.w?.[file.w.length - 1]?.[0] ?? 0;
-  const covers = (iv: Interval, r: Range) => {
-    if (!file?.[iv]?.length) return false;
-    if (r === "MAX") return span[iv] >= Math.max(span.d, span.w, span.m) - 45;
-    // A size that reaches all the history there is covers any range longer
-    // than that history. A ten-month-old gold contract (or listing) otherwise
-    // failed "1Y" on every size, opened on monthly candles, and greyed out D/W/M.
-    if (span[iv] + 45 >= Math.max(span.d, span.w, span.m)) return true;
-    return span[iv] + 10 >= rangeDays(r, lastDaily);
-  };
+  // A range button only moves the window over the data already drawn; the
+  // candle size is the reader's own choice and stays put (the owner's call,
+  // 30-Sep-2026). A range longer than the data simply shows all of it.
   const pickRange = (r: Range) => {
     setRange(r);
     kept.current = null;
-    if (view === "price") {
-      const next = covers(AUTO[r], r) ? AUTO[r] : (["d", "w", "m"] as Interval[]).find((iv) => covers(iv, r)) ?? "m";
-      setIv(next);
-    }
   };
   const pickView = (v: View) => {
     setView(v);
@@ -850,16 +829,6 @@ export default function FullChart({ symbol }: { symbol: string }) {
     if (v !== "price" && ["1M", "3M", "6M", "YTD", "1Y"].includes(range)) setRange("5Y");
   };
 
-  // One rule, checked after every change rather than on each path that can
-  // break it: the candle size on screen must cover the range on screen.
-  // PE -> Price used to leave daily candles under a "5Y" label, because the
-  // valuation views move the range and only the price view moved the candle.
-  useEffect(() => {
-    if (view !== "price" || !file || covers(interval, range)) return;
-    const next = covers(AUTO[range], range) ? AUTO[range] : (["d", "w", "m"] as Interval[]).find((iv) => covers(iv, range)) ?? "m";
-    if (next !== interval) { kept.current = null; setIv(next); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, range, interval, file]);
 
   const isHidden = (k: string) => !!hidden[`${view}:${k}`];
 
@@ -1664,11 +1633,11 @@ export default function FullChart({ symbol }: { symbol: string }) {
             <>
               <div role="radiogroup" aria-label="Candle size" className="flex items-center rounded-lg bg-[var(--card2)] p-0.5 shrink-0">
                 {INTERVALS.map(([iv, label]) => {
-                  const ok = covers(iv, range);
+                  const ok = !!file?.[iv]?.length;
                   return (
                     <button key={iv} role="radio" aria-checked={interval === iv} disabled={!ok}
                       onClick={() => { kept.current = null; setIv(iv); }}
-                      title={ok ? undefined : iv === "d" ? "Daily candles go back about two years" : "Weekly candles go back about five years"}
+                      title={ok ? `${iv === "d" ? "Daily" : iv === "w" ? "Weekly" : "Monthly"} candles from ${dateOf(file![iv]![0][0], "month")}` : undefined}
                       className={`min-h-[30px] w-8 rounded-md text-[13px] font-semibold ${
                         !ok ? "text-[var(--ink3)] opacity-35" : interval === iv ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>
                       {label}
