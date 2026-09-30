@@ -33,7 +33,9 @@ const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const DAY = 86400;
 
 type Row = [number, number, number, number, number, number]; // day, o, h, l, c, v
-type ChartFile = { s: string; name?: string; asof?: string | null; d?: Row[]; w?: Row[]; m?: Row[] };
+/** `name` and `exch` come with files that have no company behind them - a
+ *  commodity contract says what it is and that it trades on MCX. */
+type ChartFile = { s: string; name?: string; exch?: string; asof?: string | null; d?: Row[]; w?: Row[]; m?: Row[] };
 /** Something drawn over the chart: a peer, another ETF, an index. */
 type Cmp = { sym: string; name: string; file: ChartFile | null; co: Company | null };
 const MAX_CMP = 3;
@@ -255,7 +257,8 @@ function alpha(color: string, a: number): string {
 }
 
 /** One date on the timeline band: every event on it. */
-type TlEv = { kind: "ca" | "res"; tag: string; color: string };
+/** `type` is what a merged tag counts: "res", or the corporate action's kind. */
+type TlEv = { kind: "ca" | "res"; type: string; tag: string; color: string };
 type TlMark = { day: number; evs: TlEv[] };
 type Ctx = CanvasRenderingContext2D;
 
@@ -269,15 +272,16 @@ function roundRect(ctx: Ctx, x: number, y: number, w: number, h: number, r: numb
   ctx.closePath();
 }
 
-/** A hairline down the whole pane on each event date, behind everything. */
+/** A hairline down the whole pane on each event date, behind everything -
+ *  in the quarter's colour on a results date and white on a corporate
+ *  action's (the owner's call, 30-Sep-2026), so the line alone says which. */
 class EventLines implements ISeriesPrimitive<Time> {
   private chart: SeriesAttachedParameter<Time>["chart"] | null = null;
   private readonly view: IPrimitivePaneView;
-  private readonly days: number[];
-  private readonly colour: string;
+  private readonly lines: { day: number; colour: string }[];
 
-  constructor(days: number[], colour: string) {
-    this.days = days; this.colour = colour;
+  constructor(lines: { day: number; colour: string }[]) {
+    this.lines = lines;
     this.view = {
       zOrder: () => "bottom",
       renderer: () => ({
@@ -285,11 +289,12 @@ class EventLines implements ISeriesPrimitive<Time> {
         drawBackground: (target) => target.useBitmapCoordinateSpace(({ context, bitmapSize, horizontalPixelRatio }) => {
           const ts = this.chart?.timeScale();
           if (!ts) return;
-          context.fillStyle = this.colour;
           const w = Math.max(1, Math.round(horizontalPixelRatio));
-          for (const d of this.days) {
-            const x = ts.timeToCoordinate(toTime(d));
-            if (x !== null) context.fillRect(Math.round(x * horizontalPixelRatio) - (w >> 1), 0, w, bitmapSize.height);
+          for (const l of this.lines) {
+            const x = ts.timeToCoordinate(toTime(l.day));
+            if (x === null) continue;
+            context.fillStyle = l.colour;
+            context.fillRect(Math.round(x * horizontalPixelRatio) - (w >> 1), 0, w, bitmapSize.height);
           }
         }),
       }),
@@ -440,7 +445,8 @@ class TimelineMarks implements ISeriesPrimitive<Time> {
     ctx.font = `600 10px ${p.font}`;
     // Room for the widest a grouped tag can get ("₹31 +12"), so a group never
     // runs into the next one.
-    const half = (tag: string) => ctx.measureText(`${tag} +99`).width / 2 + 5;
+    // Room for the tag and the corner badge a merged tag can carry.
+    const half = (tag: string) => ctx.measureText(tag).width / 2 + 11;
     type Group = { x: number; hw: number; evs: TlEv[]; days: number[] };
     const lanes: Group[][] = [[], []];
     for (const m of this.marks) {
@@ -463,7 +469,11 @@ class TimelineMarks implements ISeriesPrimitive<Time> {
       const y = both ? (lane === 0 ? mid - 9 : mid + 9) : mid;
       for (const g of row) {
         const e = g.evs[0];
-        const label = g.evs.length > 1 ? `${e.tag} +${g.evs.length - 1}` : e.tag;
+        const label = e.tag;
+        // Tags merged for want of room show how many KINDS they hold, in a
+        // corner badge - a dividend and a bonus is 2; two dividends need none
+        // (the owner's call, 30-Sep-2026). A tap still lists every event.
+        const kinds = new Set(g.evs.map((x) => x.type)).size;
         const w = ctx.measureText(label).width + 10;
         const t = alpha(e.color, 0.16);
         ctx.fillStyle = t === e.color ? p.card2 : t;
@@ -474,6 +484,17 @@ class TimelineMarks implements ISeriesPrimitive<Time> {
         ctx.stroke();
         ctx.fillStyle = e.color;
         ctx.fillText(label, g.x, y + 0.5);
+        if (kinds > 1) {
+          const bx = g.x + w / 2 - 1, by = y - 8;
+          ctx.beginPath();
+          ctx.arc(bx, by, 6, 0, Math.PI * 2);
+          ctx.fillStyle = p.ink;
+          ctx.fill();
+          ctx.font = `700 8.5px ${p.font}`;
+          ctx.fillStyle = p.bg;
+          ctx.fillText(String(kinds), bx, by + 0.5);
+          ctx.font = `600 10px ${p.font}`;
+        }
         this.placed.push({ days: g.days, x0: g.x - w / 2, y0: y - 8, x1: g.x + w / 2, y1: y + 8 });
       }
     });
@@ -536,14 +557,6 @@ class LevelsLayer implements ISeriesPrimitive<Time> {
         ctx.fillRect(width - w, y1, w, Math.max(1, y2 - y1 - 1));
       }
     }
-    if (this.show.zones) {
-      for (const z of d.zones) {
-        const y1 = s.priceToCoordinate(z.hi), y2 = s.priceToCoordinate(z.lo);
-        if (y1 === null || y2 === null) continue;
-        ctx.fillStyle = alpha(this.tone(z.side), 0.14);
-        ctx.fillRect(0, y1, width, Math.max(2, y2 - y1));
-      }
-    }
   }
 
   private front(ctx: Ctx, width: number) {
@@ -554,17 +567,18 @@ class LevelsLayer implements ISeriesPrimitive<Time> {
     ctx.textBaseline = "middle";
     if (this.show.zones) {
       for (const z of d.zones) {
-        const y1 = s.priceToCoordinate(z.hi), y2 = s.priceToCoordinate(z.lo);
-        if (y1 === null || y2 === null) continue;
-        const y = (y1 + y2) / 2, col = this.tone(z.side);
-        // A hairline from the zone's most recent turn to the right edge, its
-        // turn count at that turn - the legend holds the top-left corner.
+        // A level is a line, not a band (the owner's call, 30-Sep-2026): drawn
+        // across the chart at the middle of the turns it groups, its turn
+        // count at the most recent of them - the legend holds the top-left.
+        const y = s.priceToCoordinate((z.lo + z.hi) / 2);
+        if (y === null) continue;
+        const col = this.tone(z.side);
         const x0 = Math.max(0, ts.timeToCoordinate(toTime(z.lastDay)) ?? 0);
-        ctx.strokeStyle = alpha(col, 0.7);
-        ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(width, y); ctx.stroke();
+        ctx.strokeStyle = alpha(col, 0.9);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
         ctx.fillStyle = col;
-        ctx.fillText(`${z.turns}×`, Math.min(x0 + 3, width - 60), Math.min(y1, y2) - 6);
+        ctx.fillText(`${z.turns}×`, Math.min(x0 + 3, width - 60), y - 7);
       }
     }
     if (this.show.trend) {
@@ -790,8 +804,8 @@ export default function FullChart({ symbol }: { symbol: string }) {
     return () => { mo.disconnect(); document.removeEventListener("fullscreenchange", onFs); };
   }, []);
 
-  const name = company?.snapshot?.name || etfDoc?.name || index.find((r) => r.symbol === symbol)?.name || "";
-  const exch = company?.exchange === "BSE" ? "BSE" : "NSE";
+  const name = company?.snapshot?.name || etfDoc?.name || file?.name || index.find((r) => r.symbol === symbol)?.name || "";
+  const exch = file?.exch ?? (company?.exchange === "BSE" ? "BSE" : "NSE");
   const tq = company?.trend?.quarterly ?? null;
   const avail: Record<View, boolean> = {
     price: true, pe: !!company?.pe_band, sales: !!tq?.periods?.length,
@@ -813,6 +827,10 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const covers = (iv: Interval, r: Range) => {
     if (!file?.[iv]?.length) return false;
     if (r === "MAX") return span[iv] >= Math.max(span.d, span.w, span.m) - 45;
+    // A size that reaches all the history there is covers any range longer
+    // than that history. A ten-month-old gold contract (or listing) otherwise
+    // failed "1Y" on every size, opened on monthly candles, and greyed out D/W/M.
+    if (span[iv] + 45 >= Math.max(span.d, span.w, span.m)) return true;
     return span[iv] + 10 >= rangeDays(r, lastDaily);
   };
   const pickRange = (r: Range) => {
@@ -925,25 +943,28 @@ export default function FullChart({ symbol }: { symbol: string }) {
       const pf = fmt(axis);
       switch (prefs.kind) {
         case "bars":
-          main = chart.addSeries(BarSeries, { upColor: p.pos, downColor: p.neg, thinBars: false, priceFormat: pf });
+          main = chart.addSeries(BarSeries, { upColor: p.pos, downColor: p.neg, thinBars: false, priceFormat: pf, priceLineVisible: false });
           main.setData(ohlc(rows)); break;
         case "line":
-          main = chart.addSeries(LineSeries, { color: p.accent, lineWidth: 2, priceFormat: pf });
+          main = chart.addSeries(LineSeries, { color: p.accent, lineWidth: 2, priceFormat: pf, priceLineVisible: false });
           main.setData(value(rows)); break;
         case "area":
           main = chart.addSeries(AreaSeries, {
-            lineColor: p.accent, lineWidth: 2, topColor: alpha(p.accent, 0.3), bottomColor: alpha(p.accent, 0), priceFormat: pf,
+            lineColor: p.accent, lineWidth: 2, topColor: alpha(p.accent, 0.3), bottomColor: alpha(p.accent, 0), priceFormat: pf, priceLineVisible: false,
           });
           main.setData(value(rows)); break;
         case "hollow":
           main = chart.addSeries(CandlestickSeries, {
             upColor: "rgba(0, 0, 0, 0)", downColor: p.neg, borderVisible: true, priceFormat: pf,
-            borderUpColor: p.pos, borderDownColor: p.neg, wickUpColor: p.pos, wickDownColor: p.neg,
+            borderUpColor: p.pos, borderDownColor: p.neg, wickUpColor: p.pos, wickDownColor: p.neg, priceLineVisible: false,
           });
           main.setData(ohlc(rows)); break;
         default:
           main = chart.addSeries(CandlestickSeries, {
             upColor: p.pos, downColor: p.neg, borderVisible: false, wickUpColor: p.pos, wickDownColor: p.neg, priceFormat: pf,
+            // The last price stays as the axis label; the dashed line across the
+            // chart went - event lines and a faint grid are the only lines.
+            priceLineVisible: false,
           });
           main.setData(ohlc(prefs.kind === "heikin" ? heikinAshi(rows) : rows));
       }
@@ -1218,7 +1239,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
     // Result dates and corporate actions. Collected once, then drawn in the
     // chosen style - and listed in the legend for the bar under the finger in
     // every style, so the details are never only in a label that may overlap.
-    type Ev = { day: number; kind: "ca" | "res"; tag: string; label: string; text: string; sub?: string; color: string };
+    type Ev = { day: number; kind: "ca" | "res"; type: string; tag: string; label: string; text: string; sub?: string; color: string };
     const evs: Ev[] = [];
     let tl: TimelineMarks | null = null;
     if (anchor && anchorDays.length) {
@@ -1230,7 +1251,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
           if (d === null) continue;
           const label = a.detail ? `${CA_LABEL[k]} ${a.detail}` : CA_LABEL[k];
           evs.push({
-            day: d, kind: "ca", tag: caTag(k, a.detail), label,
+            day: d, kind: "ca", type: k, tag: caTag(k, a.detail), label,
             text: `${label} · ex-date ${dateOf(dayOf(a.date))}`, sub: a.subject ?? undefined, color: p.ca[k],
           });
         }
@@ -1240,18 +1261,25 @@ export default function FullChart({ symbol }: { symbol: string }) {
           if (!q.announced) continue;
           const d = snap(anchorDays, dayOf(q.announced));
           if (d === null) continue;
-          evs.push({ day: d, kind: "res", tag: `Q${q.q}`, label: `Q${q.q} results`, text: `${Q_LABEL[q.q] ?? `Q${q.q}`} results declared ${dateOf(dayOf(q.announced))}`, color: p.q[q.q] ?? p.q[1] });
+          evs.push({ day: d, kind: "res", type: "res", tag: `Q${q.q}`, label: `Q${q.q} results`, text: `${Q_LABEL[q.q] ?? `Q${q.q}`} results declared ${dateOf(dayOf(q.announced))}`, color: p.q[q.q] ?? p.q[1] });
         }
       }
       evs.sort((x, y) => x.day - y.day);
 
       if (evs.length) {
-        // 2. A faint line through the whole chart on each event date. Drawn a
-        //    pixel wide and in one neutral colour: as a histogram bar in the
-        //    quarter's colour it was a candle wide, which on the monthly
-        //    valuation charts made every date a coloured stripe.
-        const lineDays = [...new Set(evs.map((e) => e.day))];
-        const lineColour = alpha(p.ink3, 0.35);
+        // 2. A line through the whole chart on each event date, a pixel wide,
+        //    in the colour of its own tag - a results date in its quarter's,
+        //    a dividend, bonus, split, rights or buyback in theirs - and an
+        //    "Other" action (a demerger, say) in white. The owner's call,
+        //    30-Sep-2026. (As a histogram bar it was a candle wide, which on
+        //    the monthly valuation charts made every date a stripe.) A day
+        //    with several takes the results colour, else the first action's.
+        const lineOf = new Map<number, string>();
+        for (const e of evs) {
+          const colour = e.type === "other" ? alpha(p.ink, 0.8) : alpha(e.color, 0.9);
+          if (e.kind === "res" || !lineOf.has(e.day)) lineOf.set(e.day, colour);
+        }
+        const eventLines = [...lineOf].map(([day, colour]) => ({ day, colour }));
         // 3. The timeline band along the foot. An axis of its own with a fixed
         //    range, so a row of identical values still has somewhere to sit (a
         //    separate pane got zero height and blanked the chart).
@@ -1262,10 +1290,10 @@ export default function FullChart({ symbol }: { symbol: string }) {
         });
         chart.priceScale("strip").applyOptions({ scaleMargins: { top: 0.93, bottom: 0.02 }, visible: false });
         flat.setData(anchorDays.map((d) => ({ time: toTime(d), value: 0 })));
-        flat.attachPrimitive(new EventLines(lineDays, lineColour));
+        flat.attachPrimitive(new EventLines(eventLines));
         const marks: TlMark[] = [];
         for (const e of evs) {
-          const v: TlEv = { kind: e.kind, tag: e.tag, color: e.color };
+          const v: TlEv = { kind: e.kind, type: e.type, tag: e.tag, color: e.color };
           const last = marks[marks.length - 1];
           if (last && last.day === e.day) last.evs.push(v);
           else marks.push({ day: e.day, evs: [v] });
@@ -1432,7 +1460,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const lvLine: LItem[] = [];
   if (lvOn && lvl) {
     const lp = (x: number) => x.toLocaleString("en-IN", { maximumFractionDigits: x >= 1000 ? 0 : x >= 100 ? 1 : 2 });
-    const band = (lo: number, hi: number, n: number) => `${lp(lo)}–${lp(hi)} ·${n}×`;
+    const band = (lo: number, hi: number, n: number) => `${lp((lo + hi) / 2)} ·${n}×`;
     const s = lvl.zones.find((z) => z.side === "sup"), r = lvl.zones.find((z) => z.side === "res");
     const inz = lvl.zones.find((z) => z.side === "in");
     if (prefs.lv.zones) {

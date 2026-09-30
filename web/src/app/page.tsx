@@ -163,8 +163,8 @@ export default function Home() {
               else if (e.key === "Enter" && matches[hi]) go(matches[hi].symbol);
               else if (e.key === "Escape") setQ("");
             }}
-            placeholder="Search a company, ETF or symbol"
-            aria-label="Search a company or ETF"
+            placeholder="Search a company, ETF or commodity"
+            aria-label="Search a company, ETF or commodity"
             autoComplete="off"
             className="w-full rounded-xl border border-[var(--line2)] bg-[var(--card)] pl-11 pr-4 py-3.5 text-base
                        text-[var(--ink)] placeholder:text-[var(--ink3)]

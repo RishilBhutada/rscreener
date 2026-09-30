@@ -22,11 +22,11 @@ const SpreadChart = dynamic(() => import("@/components/SpreadChart"), {
   loading: () => <div className="rs-skel h-[250px]" aria-busy="true" aria-label="Loading chart" />,
 });
 
-function Card({ title, tip, children }: { title: string; tip?: React.ReactNode; children: React.ReactNode }) {
+function Card({ title, tip, action, children }: { title: string; tip?: React.ReactNode; action?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
       <h2 className="px-3 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)] flex items-center gap-1">
-        {title}{tip}
+        {title}{tip}{action && <span className="ml-auto normal-case tracking-normal flex gap-1.5">{action}</span>}
       </h2>
       {children}
     </section>
@@ -237,7 +237,25 @@ function CommodityView() {
         <TermCurve doc={doc} />
       </Card>
 
-      <Card title={`Chart · ${expiryLabel(pick)}`} tip={
+      <Card title={`Chart · ${expiryLabel(pick)}`} action={doc.charts && (
+        <>
+          {[[doc.charts.by_expiry[pick], "Full view", `${expiryLabel(pick)} contract full screen - candles, indicators, levels`],
+            [doc.charts.continuous, "Continuous", "The front month, rolling to the next before expiry - full screen"]]
+            .filter(([s]) => s).map(([s, label, hint]) => (
+              <Link key={label} href={`/chart?s=${encodeURIComponent(s as string)}`} title={hint}
+                // Remembered so the full chart's back arrow returns here.
+                onClick={() => { try { sessionStorage.setItem("rs_chart_from", location.pathname + location.search); } catch { /* private mode */ } }}
+                className="rs-press inline-flex items-center gap-1.5 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold text-[var(--accent-ink)] bg-[var(--accent-soft)]">
+                {label === "Full view" && (
+                  <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+                  </svg>
+                )}
+                {label}
+              </Link>
+            ))}
+        </>
+      )} tip={
         <InfoTip title="Chart">
           <p>The {expiryLabel(pick)} contract&apos;s daily candles over its life so far.{doc.world ? ` Dashed: ${doc.world.label} for the same delivery month, in rupees at each day's USD/INR.` : ""}</p>
           <p><b>vs World</b>: MCX over that world price each day. <b>OI</b>: open interest, the contracts still outstanding - rising with price means new buyers, rising as it falls means new sellers.</p>

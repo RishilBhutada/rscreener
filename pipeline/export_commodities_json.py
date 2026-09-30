@@ -26,6 +26,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from commodities_lib import FX, GROUPS, NCDEX_SUFFIX, WORLD, describe, world_front, world_ticker
+from export_chart_json import OUT as CHART_DIR, _day, _normalise, _px
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
@@ -59,6 +60,19 @@ class Series:
     def at(self, d: str) -> tuple[str, float] | None:
         i = bisect.bisect_right(self.d, d)
         return (self.d[i - 1], self.v[i - 1]) if i else None
+
+
+def write_chart(sym: str, name: str, exch: str, rows: list[tuple]) -> None:
+    """One full-screen chart file: daily candles, weekly and monthly folded
+    from them by the companies' own builder."""
+    if not rows:
+        return
+    doc = {"s": sym, "name": name, "exch": exch,
+           "d": [[_day(d), _px(o), _px(h), _px(lo), _px(c), int(v or 0)] for d, o, h, lo, c, v, _oi in rows]}
+    _normalise(doc)
+    doc["asof"] = rows[-1][0]
+    CHART_DIR.mkdir(parents=True, exist_ok=True)
+    (CHART_DIR / f"{sym}.json").write_text(json.dumps(doc, separators=(",", ":"), allow_nan=False), encoding="utf-8")
 
 
 def main() -> None:
@@ -185,8 +199,29 @@ def main() -> None:
             for w in wcurve:
                 w["prem_first"] = r2((w["usd"] / base - 1) * 100)
 
+        # Candle files for the full-screen chart (charts/<SYMBOL>.json, the
+        # companies' format), so a commodity gets everything that chart does -
+        # candles, indicators, levels, ranges, compare. One per live contract,
+        # "<ROOT>-<MON><YY>", and one continuous series, "<ROOT>1!" as on
+        # TradingView: each day, the nearest contract not yet in its last
+        # EXPIRING_DAYS, so it rolls to the next month before delivery.
+        exch = live[0]["exchange"]
+        chart_of = {}
+        for c in live:
+            sym = f"{root}-{date.fromisoformat(c['expiry']).strftime('%b%y').upper()}"
+            write_chart(sym, f"{name} {date.fromisoformat(c['expiry']).strftime('%b %y')}", exch, bars[c["key"]])
+            chart_of[c["expiry"]] = sym
+        front_by_day: dict[str, tuple] = {}
+        for c in cs:                                   # nearest expiry first
+            for b in bars[c["key"]]:
+                if b[0] not in front_by_day and day_no(c["expiry"]) - day_no(b[0]) >= EXPIRING_DAYS:
+                    front_by_day[b[0]] = b
+        cont = f"{root}1!"
+        write_chart(cont, f"{name} - continuous (front month)", exch, [front_by_day[d] for d in sorted(front_by_day)])
+
         w = WORLD.get(root)
         doc = {
+            "charts": {"continuous": cont, "by_expiry": chart_of},
             "s": root, "code": root.removesuffix(NCDEX_SUFFIX), "name": name, "group": group, "quoted": quoted,
             "family": family, "exchange": live[0]["exchange"],
             "asof": asof, "mult": live[0]["mult"], "tick": live[0]["tick"],
@@ -211,6 +246,17 @@ def main() -> None:
         "asof": max((x["date"] for x in items), default=None),
         "items": items,
     }, separators=(",", ":"), ensure_ascii=False, allow_nan=False), encoding="utf-8")
+    # Into the search index, flagged 2 in the 11th column (ETFs are 1) so a
+    # search for "gold" or "crude" opens the commodity page.
+    ix_path = ROOT / "web" / "public" / "index.json"
+    if ix_path.exists() and items:
+        ix = json.loads(ix_path.read_text(encoding="utf-8"))
+        have = {r[0] for r in ix.get("rows", [])}
+        add = [[x["s"], f"{x['name']} futures", x["exchange"], x["close"], None, 0, None, None, None, None, 2]
+               for x in items if x["s"] not in have]
+        ix["rows"] = ix.get("rows", []) + add
+        ix_path.write_text(json.dumps(ix, ensure_ascii=False, allow_nan=False, separators=(",", ":")), encoding="utf-8")
+        print(f"  search index: {len(add)} commodities added")
     print(f"commodities: {len(items)} contract types written, as of {max((x['date'] for x in items), default='-')}")
 
 

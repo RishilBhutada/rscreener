@@ -32,6 +32,8 @@ export type CommodityDoc = {
   /** day, next over nearest %, the same a year */
   spread: [number, number, number | null][];
   untraded: number;
+  /** Full-screen chart files: the continuous front month, and one per contract. */
+  charts?: { continuous: string; by_expiry: Record<string, string> };
 };
 
 export const GROUP_ORDER = ["Bullion", "Energy", "Base metals", "Agri", "NCDEX", "Indices", "Other"];

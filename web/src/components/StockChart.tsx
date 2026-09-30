@@ -1048,7 +1048,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             const text = a.detail ? `${CA_LABEL[k]} ${a.detail}` : CA_LABEL[k];
             return (
               <g key={`ca${i}`}>
-                <line x1={cx} x2={cx} y1={MT + 10} y2={MT + plotH} stroke={col} strokeWidth="1.5" opacity="0.95" />
+                {/* Each line in its own tag's colour, as on the full chart; an "Other" action (a demerger) white. */}
+                <line x1={cx} x2={cx} y1={MT + 10} y2={MT + plotH} stroke={k === "other" ? "var(--ink)" : col} strokeWidth="1" opacity="0.85" />
                 <circle cx={cx} cy={MT + 10} r="3.2" fill={col} />
                 <text x={cx} y={MT + 4} textAnchor="middle" fontSize={FS - (isMobile ? 5 : 1)} fill={col}>
                   {text}
@@ -1061,8 +1062,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             q.announced && toT(q.announced) >= t0 && toT(q.announced) <= t1 ? (
               <g key={`ql${i}`}>
                 <line x1={x(toT(q.announced))} x2={x(toT(q.announced))} y1={MT} y2={MT + plotH}
-                  stroke="var(--ink3)" strokeWidth="1.2" strokeDasharray="4 3" opacity="0.8" />
-                <circle cx={x(toT(q.announced))} cy={MT + 3} r="3" fill="var(--ink3)">
+                  stroke={Q_COLOUR[q.q] ?? "var(--ink3)"} strokeWidth="1" opacity="0.9" />
+                <circle cx={x(toT(q.announced))} cy={MT + 3} r="3" fill={Q_COLOUR[q.q] ?? "var(--ink3)"}>
                   <title>{`${Q_LABEL[q.q] ?? `Q${q.q}`} results declared ${q.announced}`}</title>
                 </circle>
               </g>

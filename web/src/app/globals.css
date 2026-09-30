@@ -29,7 +29,7 @@
   --chart-line2: #7c3aed;
   --chart-alt: #0891b2;
   --chart-axis: #94a3b8;
-  --chart-grid: #e5e8ee;
+  --chart-grid: #eef0f3;   /* very faint, the owner's call 30-Sep-2026: the only lines besides events */
   /* Quarter colours, fixed per Indian fiscal quarter and repeating every year, so
      the same quarter always reads the same. Q3 is red by the owner's choice - it
      marks the quarter, not a loss. */
@@ -74,7 +74,7 @@
   --chart-line2: #a78bfa;
   --chart-alt: #22d3ee;
   --chart-axis: #64748b;
-  --chart-grid: #223048;
+  --chart-grid: #151d29;
   --q1: #5d82ad;
   --q2: #4e8a6b;
   --q3: #a86259;
@@ -129,7 +129,7 @@
   --warn-soft: #221b0c;
   --warn-line: #5c481b;
   --chart-axis: #6e6e6e;
-  --chart-grid: #1c1c1c;
+  --chart-grid: #0f0f0f;
   --chart-value: #b3b3b3;
   --chart-vol: #2a3346;
   --accent-fill-ink: #000000;
