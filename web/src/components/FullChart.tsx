@@ -1495,13 +1495,14 @@ export default function FullChart({ symbol }: { symbol: string }) {
         </button>
         <div className="min-w-0 flex-1">
           <p className="text-[15px] font-bold leading-tight truncate">
-            {symbol}
-            <span className="ml-1.5 text-[10px] font-semibold rounded px-1 py-0.5 bg-[var(--card2)] text-[var(--ink3)] align-middle">{exch}</span>
-            {name && <span className="ml-1.5 text-xs font-medium text-[var(--ink3)]">{name}</span>}
+            {symbol.startsWith("^") ? name || symbol.slice(1) : symbol}
+            <span className="ml-1.5 text-[10px] font-semibold rounded px-1 py-0.5 bg-[var(--card2)] text-[var(--ink3)] align-middle">{symbol.startsWith("^") ? `${exch} INDEX` : exch}</span>
+            {name && !symbol.startsWith("^") && <span className="ml-1.5 text-xs font-medium text-[var(--ink3)]">{name}</span>}
           </p>
           {lastD && (
             <p className="text-xs leading-tight tabular-nums">
-              <span className="font-semibold text-[var(--ink)]">₹{price(lastD[4])}</span>
+              {/* An index is in points, not rupees. */}
+              <span className="font-semibold text-[var(--ink)]">{symbol.startsWith("^") ? "" : "₹"}{price(lastD[4])}</span>
               {dayChg !== null && prevD && (
                 <span className={`ml-1.5 font-medium ${tone(dayChg)}`}>
                   {dayChg >= 0 ? "+" : ""}{price(dayChg)} ({dayChg >= 0 ? "+" : ""}{((dayChg / prevD[4]) * 100).toFixed(2)}%)

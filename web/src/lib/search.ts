@@ -77,7 +77,21 @@ function wordGap(toks: string[], qt: string[]): boolean {
   return true;
 }
 
+/** The indices people mean when they type "nifty" or "sensex", first. */
+const TOP_INDICES = ["^NIFTY50", "^SENSEX", "^NIFTYBANK", "^NIFTYNEXT50", "^INDIAVIX", "^NIFTY500", "^NIFTYMIDCAP150"];
+
+/** Indices rank above any company within a tier - "nifty" means the index
+ *  before NIFTYBEES - and the main ones above the rest. */
+function rank(r: Indexed): number {
+  if (!r.symbol.startsWith("^")) return r.mcap || 0;
+  const i = TOP_INDICES.indexOf(r.symbol);
+  return i >= 0 ? 2e15 - i : 1e15;
+}
+
 function tier(r: Indexed, ql: string, qsq: string, qt: string[]): number {
+  // A market's name finds everything on it: "ncdex", "mcx", "index".
+  if ((ql === "ncdex" || ql === "mcx") && (r.exchange ?? "").toLowerCase() === ql) return 1;
+  if ((ql === "index" || ql === "indices") && r.symbol.startsWith("^")) return 1;
   // Compared against the SQUASHED symbol as well as the raw one. Testing found
   // that "m&m" returned MMTC, MMFL and MMP but not Mahindra & Mahindra: the
   // query squashes to "mm" while the symbol stayed "m&m", so the company whose
@@ -99,7 +113,7 @@ export function search(index: SearchIndex, query: string, limit = 15):
   const scored: [number, number, string, Indexed][] = [];
   for (const r of index) {
     const t = tier(r, ql, qsq, qt);
-    if (t < 9) scored.push([t, -(r.mcap || 0), r.symbol, r]);
+    if (t < 9) scored.push([t, -rank(r), r.symbol, r]);
   }
   scored.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2].localeCompare(b[2]));
   return { hits: scored.slice(0, limit).map((s) => s[3]), total: scored.length };

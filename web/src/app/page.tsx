@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
+import Markets from "@/components/Markets";
 import { loadIndex, symbolHref } from "@/lib/index-data";
 import { loadRecent } from "@/lib/store";
 import { allWatched, loadLists } from "@/lib/watchlists";
@@ -163,8 +164,8 @@ export default function Home() {
               else if (e.key === "Enter" && matches[hi]) go(matches[hi].symbol);
               else if (e.key === "Escape") setQ("");
             }}
-            placeholder="Search a company, ETF or commodity"
-            aria-label="Search a company, ETF or commodity"
+            placeholder="Search a company, index, ETF or commodity"
+            aria-label="Search a company, index, ETF or commodity"
             autoComplete="off"
             className="w-full rounded-xl border border-[var(--line2)] bg-[var(--card)] pl-11 pr-4 py-3.5 text-base
                        text-[var(--ink)] placeholder:text-[var(--ink3)]
@@ -182,7 +183,9 @@ export default function Home() {
                     i === hi ? "bg-[var(--accent-soft)]" : "hover:bg-[var(--card2)]"}`}
                 >
                   <span className="font-semibold text-[var(--ink)] truncate">{m.name || m.symbol}</span>
-                  <span className="text-[var(--ink3)] text-xs shrink-0">{m.symbol}</span>
+                  <span className="text-[var(--ink3)] text-xs shrink-0">
+                    {m.symbol.startsWith("^") ? "INDEX" : m.exchange === "MCX" || m.exchange === "NCDEX" ? `${m.symbol.replace(/_NCDEX$/, "")} · ${m.exchange}` : m.symbol}
+                  </span>
                 </button>
               ))}
             </div>
@@ -194,6 +197,8 @@ export default function Home() {
             row repeated the same companies the priced list below shows - the
             watchlist appeared twice on one screen. */}
         {watch.length === 0 && <Chips title="Start with" syms={SUGGESTED} />}
+
+        <Markets />
 
         {/* This was a grid of seven tiles - Watchlists, Screener, Sectors, IPO,
             Calendar, Portfolio, Data - every one of them already a link in the

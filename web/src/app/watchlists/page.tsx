@@ -6,6 +6,7 @@ import TopNav from "@/components/TopNav";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { LiteRow, loadIndex, symbolHref } from "@/lib/index-data";
 import { shortName } from "@/lib/names";
+import { buildIndex, search } from "@/lib/search";
 import { loadPortfolio } from "@/lib/portfolio";
 import {
   WatchState, createList, deleteList, loadLists, moveSymbol, removeFrom,
@@ -44,6 +45,7 @@ function readSort(): Sort {
 
 function kindOf(r: LiteRow | undefined): string {
   if (!r) return "";
+  if (r.index) return "INDEX";
   if (r.commodity) return "FUT";
   if (r.etf) return "ETF";
   return "";
@@ -113,22 +115,15 @@ export default function WatchlistsPage() {
     });
   }, [active, bySymbol, sort, editing, dragOrder]);
 
-  // Search: symbol or name, biggest first, ETFs and commodities included.
+  // Search: the matcher the top bar uses - companies, indices, ETFs, MCX and
+  // NCDEX alike; "ncdex", "mcx" or "index" lists everything on that market.
+  const searchIndex = useMemo(() => buildIndex(rows), [rows]);
   const results = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = query.trim();
     if (!q) return [];
-    return rows
-      .map((r) => {
-        const sym = r.symbol.toLowerCase(), nm = r.name.toLowerCase();
-        const score = sym === q ? -1 : sym.startsWith(q) ? 0 : nm.startsWith(q) ? 1 : nm.includes(` ${q}`) ? 2
-          : sym.includes(q) || nm.includes(q) ? 3 : 9;
-        return [score, r] as const;
-      })
-      .filter(([s]) => s < 9)
-      .sort((a, b) => a[0] - b[0] || (b[1].mcap ?? 0) - (a[1].mcap ?? 0))
-      .slice(0, 40)
-      .map(([, r]) => r);
-  }, [query, rows]);
+    if (q.length < 2) return rows.filter((r) => r.symbol.toLowerCase().startsWith(q.toLowerCase())).slice(0, 40);
+    return search(searchIndex, q, 60).hits as LiteRow[];
+  }, [query, rows, searchIndex]);
 
   const stats = useMemo(() => {
     const present = (active?.symbols ?? []).map((s) => bySymbol.get(s)).filter((r): r is LiteRow => !!r && !r.commodity);
@@ -285,10 +280,10 @@ export default function WatchlistsPage() {
                     className="w-full flex items-center gap-3 min-h-[56px] py-2 text-left active:bg-[var(--card2)]">
                     <div className="flex-1 min-w-0">
                       <p className="text-[14px] font-medium text-[var(--ink)] truncate">
-                        {shownSymbol(r.symbol)}
+                        {r.index ? r.name : shownSymbol(r.symbol)}
                         <span className="ml-2 text-[10px] font-semibold text-[var(--ink3)]">{r.exchange}{kindOf(r) && ` ${kindOf(r)}`}</span>
                       </p>
-                      <p className="text-[12px] text-[var(--ink3)] truncate">{shortName(r.name, r.symbol)}</p>
+                      <p className="text-[12px] text-[var(--ink3)] truncate">{r.index ? "Market index" : shortName(r.name, r.symbol)}</p>
                     </div>
                     <span aria-label={on ? `On ${active.name} - tap to remove` : `Add to ${active.name}`}
                       className={`shrink-0 w-8 h-8 rounded-full inline-flex items-center justify-center border ${
@@ -338,7 +333,7 @@ export default function WatchlistsPage() {
                           className="flex-1 min-w-0 flex items-center gap-3 py-2.5 text-left active:bg-[var(--card2)] disabled:active:bg-transparent">
                           <div className="flex-1 min-w-0">
                             <p className="flex items-center gap-1.5 text-[15px] font-medium text-[var(--ink)]">
-                              <span className="truncate">{shownSymbol(sym)}</span>
+                              <span className="truncate">{r?.index ? r.name : shownSymbol(sym)}</span>
                               {qty !== undefined && (
                                 <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-semibold text-[var(--accent-ink)]" title={`You hold ${qty}`}>
                                   <Icon name="bag" size={11} />{qty.toLocaleString("en-IN")}
@@ -396,7 +391,14 @@ export default function WatchlistsPage() {
           <p className="text-[11px] text-[var(--ink3)]">
             {shownSymbol(sheetSym)}{sheetRow?.exchange && ` · ${sheetRow.exchange}`}{asof && ` · Close ${shortDay(asof)}`}
           </p>
-          {sheetRow && !sheetRow.commodity && (
+          {sheetRow && sheetRow.index && (
+            <div className="grid grid-cols-3 gap-3 py-2">
+              <Stat label="1M" value={sheetRow.ret_1m === undefined ? "—" : `${signed(sheetRow.ret_1m, 1)}%`} className={tone(sheetRow.ret_1m)} />
+              <Stat label="P/E" value={sheetRow.pe === undefined ? "—" : sheetRow.pe.toFixed(1)} />
+              <Stat label="Div yield" value={sheetRow.div_yield === undefined ? "—" : `${sheetRow.div_yield.toFixed(2)}%`} />
+            </div>
+          )}
+          {sheetRow && !sheetRow.commodity && !sheetRow.index && (
             <div className="grid grid-cols-3 gap-3 py-2">
               <Stat label="1M" value={sheetRow.ret_1m === undefined ? "—" : `${signed(sheetRow.ret_1m, 1)}%`} className={tone(sheetRow.ret_1m)} />
               <Stat label="P/E" value={sheetRow.pe === undefined ? "—" : sheetRow.pe.toFixed(1)} />

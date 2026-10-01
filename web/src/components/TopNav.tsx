@@ -444,7 +444,7 @@ function BackButton() {
   );
 }
 
-export default function TopNav({ active }: { active?: "home" | "screens" | "sectors" | "calendar" | "portfolio" | "watchlists" | "others" | "etfs" | "commodities" | "status" | "settings" }) {
+export default function TopNav({ active }: { active?: "home" | "screens" | "sectors" | "calendar" | "portfolio" | "watchlists" | "others" | "etfs" | "commodities" | "indices" | "status" | "settings" }) {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<Lite[]>([]);
@@ -545,8 +545,8 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
               else if (e.key === "Enter" && matches[hi]) go(matches[hi].symbol);
               else if (e.key === "Escape") (e.target as HTMLElement).blur();
             }}
-            placeholder="Search a company, ETF or commodity"
-            aria-label="Search a company, ETF or commodity"
+            placeholder="Search a company, index, ETF or commodity"
+            aria-label="Search a company, index, ETF or commodity"
             className="w-full text-sm bg-[var(--card2)] border border-[var(--line)] rounded-full px-4 py-2.5 sm:py-1.5 focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:bg-[var(--card)]"
           />
           {(matches.length > 0 || suggestion || (ql.trim().length >= 2 && idx)) && (
@@ -559,11 +559,13 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
                   className={`block w-full text-left px-4 py-2 text-sm ${i === hi ? "bg-[var(--accent-soft)]" : ""}`}
                 >
                   <span className="font-semibold text-[var(--ink)]">{m.name || m.symbol}</span>
-                  <span className="text-[var(--ink3)] ml-2 text-xs">{m.symbol.replace(/_NCDEX$/, "")}</span>
+                  {!m.symbol.startsWith("^") && <span className="text-[var(--ink3)] ml-2 text-xs">{m.symbol.replace(/_NCDEX$/, "")}</span>}
                   {/* Half the companies here are BSE-only now. Saying which is
                       the difference between "this page has no filings yet" and
                       "this company files nowhere this app can read". */}
-                  {(m.exchange === "BSE" || m.exchange === "MCX" || m.exchange === "NCDEX") && (
+                  {m.symbol.startsWith("^") ? (
+                    <span className="ml-1.5 text-[11px] rounded px-1 py-0.5 bg-[var(--card2)] text-[var(--ink3)]">INDEX</span>
+                  ) : (m.exchange === "BSE" || m.exchange === "MCX" || m.exchange === "NCDEX") && (
                     <span className="ml-1.5 text-[11px] rounded px-1 py-0.5 bg-[var(--card2)] text-[var(--ink3)]">{m.exchange}</span>
                   )}
                 </button>

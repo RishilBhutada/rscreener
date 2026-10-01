@@ -78,3 +78,35 @@ export const FIELD_CATALOG: FieldDef[] = [
 ];
 
 export const FIELD_GROUPS = [...new Set(FIELD_CATALOG.map((f) => f.group))];
+
+/** What the screener can screen besides companies. Each has its own fields,
+ *  read from the same files its list page uses. */
+export type Universe = "companies" | "indices" | "commodities";
+
+export const INDEX_FIELDS: FieldDef[] = [
+  { key: "price", label: "Level", group: "Level", unit: "", desc: "The index's latest close, in points" },
+  { key: "ret_1d", label: "Day change", group: "Level", unit: "%", desc: "The last session's close against the one before", short: "Day" },
+  { key: "from_ath", label: "From all-time high", group: "Level", unit: "%", desc: "How far below its highest close (negative = below)", short: "From high" },
+  { key: "members", label: "Companies", group: "Level", unit: "", desc: "How many companies the index holds" },
+  { key: "ret_1m", label: "Return 1 month", group: "Returns", unit: "%", desc: "Price change over the last month", short: "1M" },
+  { key: "ret_1y", label: "Return 1 year", group: "Returns", unit: "%", desc: "Price change over the last year", short: "1Y" },
+  { key: "pe", label: "P/E", group: "Valuation", unit: "x", desc: "The index's P/E as NSE publishes it" },
+  { key: "pb", label: "P/B", group: "Valuation", unit: "x", desc: "The index's price to book as NSE publishes it" },
+  { key: "div_yield", label: "Dividend yield", group: "Valuation", unit: "%", desc: "The index's dividend yield as NSE publishes it", short: "Div yield" },
+  { key: "pe_pct", label: "P/E against its 10 years", group: "Valuation", unit: "%", desc: "Share of the last ten years' days on which the P/E was lower than now: 90 means dearer than on 90% of days", short: "P/E pctile" },
+];
+
+export const COMMODITY_FIELDS: FieldDef[] = [
+  { key: "price", label: "Price", group: "Price", unit: "₹", desc: "The most traded month's latest close" },
+  { key: "ret_1d", label: "Day change", group: "Price", unit: "%", desc: "The last session's close against the one before", short: "Day" },
+  { key: "next_prem", label: "Next expiry premium", group: "Curve", unit: "%", desc: "The second month's price over the nearest's", short: "Next" },
+  { key: "carry_pa", label: "Carry, a year", group: "Curve", unit: "%", desc: "That premium spread over the days between the two expiries, as % a year", short: "Carry/yr" },
+  { key: "world_prem", label: "vs World", group: "Comparison", unit: "%", desc: "MCX against the same month on COMEX or NYMEX, in rupees", short: "vs World" },
+  { key: "spot_prem", label: "vs Spot", group: "Comparison", unit: "%", desc: "NCDEX against the mandi price at its delivery centre", short: "vs Spot" },
+  { key: "oi", label: "Open interest", group: "Activity", unit: "", desc: "Contracts outstanding across the months trading", short: "OI" },
+  { key: "vol", label: "Volume", group: "Activity", unit: "", desc: "Contracts traded on the latest day", short: "Vol" },
+];
+
+export function catalogFor(u: Universe): FieldDef[] {
+  return u === "indices" ? INDEX_FIELDS : u === "commodities" ? COMMODITY_FIELDS : FIELD_CATALOG;
+}

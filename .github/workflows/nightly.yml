@@ -250,6 +250,14 @@ jobs:
           ANGEL_PIN: ${{ secrets.ANGEL_PIN }}
           ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_ncdex.py
+      - name: Refresh every NSE index and the Sensex (candles, valuation, members)
+        # On every run, publish-only included: NSE's daily index file for the
+        # days since the last stored (seconds), the Sensex from Yahoo, and -
+        # once per index, then never again - its history since launch from
+        # NSE Indices. Member lists are re-read weekly.
+        env:
+          RSCREENER_STEP_MINUTES: "15"
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_indices.py
       - name: Refresh the mandi (spot) price beside each NCDEX contract
         # Agmarknet, the Government of India's mandi-price service: about a
         # dozen open requests, every run. Its CAPTCHA-guarded reports are not
@@ -419,6 +427,10 @@ jobs:
         # web/public/commodities.json and web/public/commodity/<ROOT>.json -
         # every expiry, the premium between them, and MCX against the world.
         run: python pipeline/export_commodities_json.py
+      - name: Write the indices page and one file per index
+        # web/public/indices.json, idx/<SYM>.json, their valuation and chart
+        # files, and a row each in the search index.
+        run: python pipeline/export_indices_json.py
       - name: Tell the owner's phone about ETF premiums crossing his lines
         # alerts/etf_premium.txt holds the lines. Scheduled runs only: they are
         # the ones with a new day's NAVs, and a code publish re-running the
