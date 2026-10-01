@@ -239,24 +239,41 @@ function declaredLabel(d: string | null | undefined): string | null {
   return new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
 }
 
+/** Columns a statement table opens with: the latest twelve periods, as
+ *  screener.in shows. Reliance's quarterly table carries 85 quarters back to
+ *  2005, a thousand cells most visits never look at. */
+const RECENT_PERIODS = 12;
+
 function StatementTable({ title, stmt, subtitle, boldRows }: { title: string; stmt: Stmt; subtitle?: string; boldRows?: string[] }) {
+  const [all, setAll] = useState(false);
+  const total = stmt.periods.length;
+  const from = all ? 0 : Math.max(0, total - RECENT_PERIODS);
+  const periods = stmt.periods.slice(from);
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
-      <div className="px-4 pt-3.5 pb-2">
-        <h2 className="text-base font-semibold text-[var(--ink)]">{title}</h2>
-        <p className="text-xs text-[var(--ink3)] mt-0.5">{subtitle ?? "Figures in ₹ Crores"}</p>
+      <div className="px-4 pt-3.5 pb-2 flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <h2 className="text-base font-semibold text-[var(--ink)]">{title}</h2>
+          <p className="text-xs text-[var(--ink3)] mt-0.5">{subtitle ?? "Figures in ₹ Crores"}</p>
+        </div>
+        {total > RECENT_PERIODS && (
+          <button type="button" onClick={() => setAll(!all)}
+            className="shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold text-[var(--accent-ink)] bg-[var(--accent-soft)]">
+            {all ? `Last ${RECENT_PERIODS}` : `All ${total}`}
+          </button>
+        )}
       </div>
       {/* Opens on the NEWEST period. These tables carry up to twenty years of
           columns oldest-first, so the page landed on 2005 and the reader had to
           drag sideways every time to reach the year he was actually asking
           about. The pinned label column stays put either way. */}
-      <div className="overflow-x-auto" ref={(el) => { if (el) el.scrollLeft = el.scrollWidth; }}>
+      <div key={from} className="overflow-x-auto" ref={(el) => { if (el) el.scrollLeft = el.scrollWidth; }}>
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="text-xs text-[var(--ink3)] border-y border-[var(--line)]">
               <th className="px-3 py-2 text-left font-medium sticky left-0 bg-[var(--card)]"> </th>
-              {stmt.periods.map((p, i) => {
-                const dec = declaredLabel(stmt.declared?.[i]);
+              {periods.map((p, i) => {
+                const dec = declaredLabel(stmt.declared?.[from + i]);
                 return (
                   <th key={p} className="px-3 py-2 text-right font-medium whitespace-nowrap">
                     {periodLabel(p)}
@@ -272,7 +289,7 @@ function StatementTable({ title, stmt, subtitle, boldRows }: { title: string; st
               return (
                 <tr key={it.label} className="border-b border-[var(--line)] hover:bg-[var(--card2)]">
                   <td className={`px-3 py-2 sm:py-1.5 truncate max-w-[42vw] sm:max-w-none sm:whitespace-nowrap sticky left-0 bg-[var(--card)] ${bold ? "font-semibold text-[var(--ink)]" : "text-[var(--ink2)]"}`}>{it.label}</td>
-                  {it.values.map((v, i) => (
+                  {it.values.slice(from).map((v, i) => (
                     <td key={i} className={`px-3 py-2 sm:py-1.5 text-right whitespace-nowrap tabular-nums ${bold ? "font-semibold" : ""} ${typeof v === "number" && v < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
                       {fmtNum(v, it.label.includes("EPS") || it.label.includes("%") ? 2 : 0)}
                     </td>
@@ -1065,8 +1082,8 @@ function ValuationHistory({ company }: { company: Company }) {
                     about four years. "2% of 42 months" invites a conclusion
                     that "42 months since 2023-03" does not. */}
                 <span>
-                  {r.short} was lower than this in <strong className="text-[var(--ink2)]">{r.pct}%</strong>{" "}
-                  of {r.n} months since {r.from} · median {fmtNum(r.median)}
+                  {r.short} was lower than this on <strong className="text-[var(--ink2)]">{r.pct}%</strong>{" "}
+                  of {r.n.toLocaleString("en-IN")} readings since {periodLabel(`${r.from}-01`)} · median {fmtNum(r.median)}
                 </span>
                 <span>High {fmtNum(r.hi)}</span>
               </div>
@@ -1365,11 +1382,6 @@ function CompanyView() {
   useEffect(() => {
     const el = pager.current;
     if (!el || mode !== "swipe") return;
-
-    const paneAt = (i: number) => {
-      const id = paneIds[i];
-      return id ? (Array.from(el.children).find((c) => c.id === id) as HTMLElement | undefined) : undefined;
-    };
 
     let startX = 0, startY = 0, startScroll = 0, startIndex = 0;
     let axis: "x" | "y" | null = null;

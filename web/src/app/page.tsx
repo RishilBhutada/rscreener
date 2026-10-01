@@ -99,7 +99,7 @@ export default function Home() {
     return hit ? shortName(hit.name, sym) : sym;
   };
 
-  const Chips = ({ title, syms, more }: {
+  const chips = ({ title, syms, more }: {
     title: string;
     syms: string[];
     /** optional link on the right of the heading, e.g. "Manage lists" */
@@ -171,6 +171,16 @@ export default function Home() {
                        text-[var(--ink)] placeholder:text-[var(--ink3)]
                        focus:outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent-soft)]"
           />
+          {/* A typo names its own fix: "relaince" offers Reliance Industries. */}
+          {matches.length === 0 && suggestion && (
+            <div className="absolute left-0 right-0 top-full mt-1 bg-[var(--card)] border border-[var(--line2)] rounded-xl shadow-lg z-20 px-4 py-2.5 text-sm">
+              <span className="text-[var(--ink3)]">Did you mean </span>
+              <button onClick={() => go(suggestion.symbol)} className="font-semibold text-[var(--accent-ink)]">
+                {suggestion.name || suggestion.symbol}
+              </button>
+              <span className="text-[var(--ink3)]">?</span>
+            </div>
+          )}
           {matches.length > 0 && (
             <div className="absolute left-0 right-0 top-full mt-1 bg-[var(--card)] border border-[var(--line2)]
                             rounded-xl shadow-lg overflow-hidden z-20">
@@ -192,11 +202,11 @@ export default function Home() {
           )}
         </div>
 
-        <Chips title="Recent" syms={recent} />
+        {chips({ title: "Recent", syms: recent })}
         {/* Suggestions only for somebody with no watchlist yet. With one, this
             row repeated the same companies the priced list below shows - the
             watchlist appeared twice on one screen. */}
-        {watch.length === 0 && <Chips title="Start with" syms={SUGGESTED} />}
+        {watch.length === 0 && chips({ title: "Start with", syms: SUGGESTED })}
 
         <Markets />
 

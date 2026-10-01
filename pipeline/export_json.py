@@ -443,6 +443,30 @@ def freshen_prices(con, df):
     return df, fresh
 
 
+def week52_range(con) -> dict[str, tuple[float, float]]:
+    """Each symbol's 52-week high and low from the daily bars stored.
+
+    The snapshot's own figures stop moving when the snapshot does: on
+    1-Oct-2026 Reliance closed at Rs 1,167.7 under a "52-week low" of Rs 1,182,
+    and its page said the price was "0% up the range". The bars are refreshed
+    every night. A day's high or low more than 20% outside that day's close is
+    a bad tick and the close stands in for it."""
+    newest = con.execute("SELECT MAX(date) FROM prices WHERE freq='daily'").fetchone()[0]
+    if not newest:
+        return {}
+    since = (pd.Timestamp(newest) - pd.Timedelta(days=365)).strftime("%Y-%m-%d")
+    stale = (pd.Timestamp(newest) - pd.Timedelta(days=7)).strftime("%Y-%m-%d")
+    out = {}
+    for sym, hi, lo, last in con.execute(
+        "SELECT symbol, "
+        "MAX(CASE WHEN high IS NOT NULL AND high <= close * 1.2 THEN high ELSE close END), "
+        "MIN(CASE WHEN low IS NOT NULL AND low >= close * 0.8 AND low > 0 THEN low ELSE close END), "
+        "MAX(date) FROM prices WHERE freq='daily' AND date >= ? AND close > 0 GROUP BY symbol", (since,)):
+        if hi and lo and last >= stale:
+            out[sym] = (float(hi), float(lo))
+    return out
+
+
 def main() -> None:
     con = sqlite3.connect(DB, timeout=180)
     # Prices before a demerger on the continuing company's base (price_adjust.py).
@@ -456,6 +480,11 @@ def main() -> None:
     if before != len(df):
         print(f"  left out {before - len(df)} fund units (ETFs and scheme units) - not companies")
     df, price_asof = freshen_prices(con, df)  # never show a price older than the series we hold
+    rng = week52_range(con)
+    # The day's close always sits inside its own range.
+    df["wk52_high"] = [max(rng[s][0], p) if s in rng and p else h for s, p, h in zip(df["symbol"], df["price"], df["wk52_high"])]
+    df["wk52_low"] = [min(rng[s][1], p) if s in rng and p else lo for s, p, lo in zip(df["symbol"], df["price"], df["wk52_low"])]
+    print(f"  52-week range: {len(rng)} symbols from their daily bars, the rest from the snapshot")
     n_universe = pd.read_sql("SELECT COUNT(*) n FROM universe", con)["n"][0]
     shares_by_symbol = {
         r["symbol"]: r["market_cap"] / r["price"]
@@ -494,10 +523,7 @@ def main() -> None:
     for fk in SCREEN_FIELDS:
         df[fk] = df["symbol"].map(lambda s, k=fk: extra_fields.get(s, {}).get(k))
     print("  screener fields: " + ", ".join(f"{k} {int(df[k].notna().sum())}" for k in SCREEN_FIELDS))
-    df["off_52w_high"] = df.apply(lambda r: round((r["price"] / r["wk52_high"] - 1) * 100, 1) if r["price"] and r["wk52_high"] else None, axis=1)
     df["avg_npm_5y"] = df["symbol"].map(lambda s: avg_npm_5y(trends.get(s, {}).get("annual")))
-    for key in ("ret_1m", "ret_3m", "ret_6m", "ret_1y", "ret_3y", "ret_5y"):
-        df[key] = df["symbol"].map(lambda s, k=key: returns_by_symbol.get(s, {}).get(k))
     df["off_52w_high"] = [
         round((p / h - 1) * 100, 1) if p and h else None
         for p, h in zip(df["price"], df["wk52_high"])

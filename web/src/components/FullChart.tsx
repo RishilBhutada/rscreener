@@ -76,7 +76,6 @@ function caTag(k: string, detail?: string | null): string {
   return "Other";
 }
 /** Indian fiscal quarter of a calendar month: Apr-Jun is Q1. */
-const fyQ = (month: number) => (month >= 4 && month <= 6 ? 1 : month >= 7 && month <= 9 ? 2 : month >= 10 ? 3 : 4);
 
 const RANGES: Range[] = ["1M", "3M", "6M", "YTD", "1Y", "2Y", "3Y", "5Y", "10Y", "MAX"];
 const RANGE_DAYS: Record<Range, number> = {

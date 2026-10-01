@@ -119,15 +119,6 @@ const Check = ({ size }: { size?: number }) => (
   <Icon size={size}><path d="m4.5 12.5 5 5 10-11" /></Icon>
 );
 
-/** Six lobes and a hub. Eight is the usual choice and turns to mush below 20px;
- *  six keeps daylight between the teeth at the 18px this renders at. */
-const Gear = ({ size }: { size?: number }) => (
-  <Icon size={size}>
-    <path d="M10.3 3.4a1 1 0 0 1 1-.85h1.4a1 1 0 0 1 1 .85l.2 1.35c.55.19 1.06.48 1.5.85l1.3-.5a1 1 0 0 1 1.2.44l.7 1.2a1 1 0 0 1-.2 1.25l-1.05.87c.06.29.09.6.09.91s-.03.62-.09.91l1.05.87a1 1 0 0 1 .2 1.25l-.7 1.2a1 1 0 0 1-1.2.44l-1.3-.5c-.44.37-.95.66-1.5.85l-.2 1.35a1 1 0 0 1-1 .85h-1.4a1 1 0 0 1-1-.85l-.2-1.35a5.6 5.6 0 0 1-1.5-.85l-1.3.5a1 1 0 0 1-1.2-.44l-.7-1.2a1 1 0 0 1 .2-1.25l1.05-.87a5.5 5.5 0 0 1 0-1.82l-1.05-.87a1 1 0 0 1-.2-1.25l.7-1.2a1 1 0 0 1 1.2-.44l1.3.5c.44-.37.95-.66 1.5-.85z" />
-    <circle cx="12" cy="12" r="2.5" />
-  </Icon>
-);
-
 /** Fetch the app again - but only when there is something to fetch.
  *
  *  The APK is a thin shell around the live site, so an update needs no

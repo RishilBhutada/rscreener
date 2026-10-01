@@ -672,7 +672,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     }
 
     return defs;
-  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, showQ, epsCmp, quarters, cmp, symbol]);
+  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, epsCmp, quarters, cmp, symbol, exchange, years]);
 
   // With the quarterly-results overlay on, the per-quarter EPS bars are already
   // on screen. Keeping the summed TTM bars too puts two different quantities in
@@ -696,7 +696,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const mkAxis = (axis: "L" | "R") => {
     const vals = axisVals(axis);
     if (!vals.length) return null;
-    let lo = Math.min(...vals), hi = Math.max(...vals);
+    let lo = Math.min(...vals);
+    const hi = Math.max(...vals);
     if (axis === "L") {
       // Earnings compound ~40x over 20 years. Anchored at zero the early bars
       // collapse into invisible slivers and the series reads as "line goes up"
