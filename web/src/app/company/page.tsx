@@ -5,7 +5,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
-import { titleCase } from "@/lib/names";
+import { shortName, titleCase } from "@/lib/names";
 import StockChart, { CorpAction, Quarter } from "@/components/StockChart";
 import { Row } from "@/lib/query";
 import { loadNote, pushRecent, saveNote } from "@/lib/store";
@@ -1895,7 +1895,7 @@ function CompanyView() {
                 </tr>
                 {peers.map((p) => (
                   <tr key={String(p.symbol)} className="border-b border-[var(--line)] hover:bg-[var(--card2)]">
-                    <td className="px-3 py-1.5"><Link className="font-medium text-[var(--accent-ink)] hover:underline" href={`/company?s=${encodeURIComponent(String(p.symbol))}`}>{titleCase(String(p.name ?? "")) || String(p.symbol)}</Link></td>
+                    <td className="px-3 py-1.5"><Link className="font-medium text-[var(--accent-ink)] hover:underline" href={`/company?s=${encodeURIComponent(String(p.symbol))}`}>{shortName(String(p.name ?? ""), String(p.symbol)) || String(p.symbol)}</Link></td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.price as number)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.pe as number)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.mcap as number, 0)}</td>

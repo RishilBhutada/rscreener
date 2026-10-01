@@ -73,6 +73,7 @@ export default function WatchlistsPage() {
   const [nameText, setNameText] = useState("");
   const [noteText, setNoteText] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [dragOrder, setDragOrder] = useState<string[] | null>(null);
   const [drag, setDrag] = useState<{ sym: string; dy: number } | null>(null);
   const dragRef = useRef<{ sym: string; startY: number; rowH: number; order: string[] } | null>(null);
@@ -488,6 +489,21 @@ export default function WatchlistsPage() {
           <SheetAction icon="edit" onClick={() => { setSort({ k: "manual", d: -1 }); setQuery(""); setEditing(true); setSheet(null); }}>
             Edit and reorder
           </SheetAction>
+          <div className="flex items-center">
+            <div className="flex-1">
+              <SheetAction icon="page" onClick={() => {
+                // Company filings only: the hourly checker reads NSE announcements.
+                const syms = active.symbols.filter((x) => !x.startsWith("^") && !x.endsWith("_NCDEX") && !bySymbol.get(x)?.commodity && !bySymbol.get(x)?.etf);
+                navigator.clipboard?.writeText(syms.join(String.fromCharCode(10))).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1800); }, () => {});
+              }}>
+                {copied ? "Copied" : "Copy for phone alerts"}
+              </SheetAction>
+            </div>
+            <InfoTip title="Phone alerts" className="mr-3">
+              <p>Your phone is told within the hour when a company here files an announcement with NSE - results, dividends, board meetings. The checker reads alerts/watchlist.txt in the Rscreener repository, not this list.</p>
+              <p>This copies the list&apos;s companies, one per line, to paste into that file - the GitHub app on your phone can edit it.</p>
+            </InfoTip>
+          </div>
           {confirmDelete ? (
             <div className="flex items-center gap-2 px-3 min-h-[46px]">
               <span className="flex-1 text-[13px] text-[var(--neg)]">Delete {active.name} and its {active.symbols.length}?</span>

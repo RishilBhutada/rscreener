@@ -2,9 +2,9 @@
 
 import { CloseGlyph } from "@/components/Glyphs";
 import { useCallback, useEffect, useState } from "react";
+import { loadIndex as loadLite } from "@/lib/index-data";
 
 
-const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 type Pick = { symbol: string; name: string; mcap: number; exchange?: string };
 let INDEX: Pick[] | null = null;
@@ -41,12 +41,11 @@ function rank(rows: Pick[], q: string): Pick[] {
 
 async function loadIndex(): Promise<Pick[]> {
   if (INDEX) return INDEX;
-  const d = await (await fetch(`${BASE}/data.json`)).json();
-  INDEX = (d.rows as Record<string, unknown>[]).map((r) => ({
-    symbol: String(r.symbol),
-    name: String(r.name ?? ""),
-    mcap: (r.mcap as number) ?? 0,
-    exchange: r.exchange as string | undefined,
+  // The search index, not the 1.4 MB company table: the picker needs a name,
+  // a size and an exchange per company and nothing else.
+  const d = await loadLite();
+  INDEX = d.rows.filter((r) => !r.etf && !r.commodity && !r.index).map((r) => ({
+    symbol: r.symbol, name: r.name, mcap: r.mcap ?? 0, exchange: r.exchange,
   }));
   return INDEX;
 }

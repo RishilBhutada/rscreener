@@ -3,6 +3,7 @@
 import { CheckGlyph, ChevronGlyph } from "@/components/Glyphs";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import InfoTip from "@/components/InfoTip";
+import { loadIndex } from "@/lib/index-data";
 import Link from "next/link";
 
 type Pt = [string, number] | [string, number, number | null];
@@ -430,10 +431,12 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
 
   useEffect(() => {
     if (!pickAny || allCos.length) return;
-    fetch(`${CHART_BASE}/data.json`)
-      .then((r) => r.json())
-      .then((d) => setAllCos((d.rows as Record<string, unknown>[]).map((r) => ({
-        symbol: String(r.symbol), name: String(r.name ?? ""), mcap: (r.mcap as number) ?? 0,
+    // The search index, not the 1.4 MB company table: a name and a size per
+    // company is all the picker needs. Companies only - no ETFs, contracts or
+    // indices, which have no P/E or EPS to compare.
+    loadIndex()
+      .then((d) => setAllCos(d.rows.filter((r) => !r.etf && !r.commodity && !r.index).map((r) => ({
+        symbol: r.symbol, name: r.name, mcap: r.mcap ?? 0,
       }))))
       .catch(() => { /* the peer list still works without it */ });
   }, [pickAny, allCos.length]);
