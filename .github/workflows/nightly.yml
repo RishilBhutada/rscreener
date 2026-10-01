@@ -423,6 +423,15 @@ jobs:
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: python alerts/etf_premium.py
+      - name: Tell the owner's phone which companies entered or left his saved screens
+        # alerts/screens.txt holds the screens; alerts/screen_state.json holds
+        # last night's matches and is committed with the scoreboard below.
+        # Scheduled runs only, for the same reason as the ETF alert.
+        if: github.event_name == 'schedule'
+        continue-on-error: true
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python alerts/screen_alerts.py
       - name: Score the data and record the score
         # Runs every night, after the export and before the guards, so the score
         # describes what is about to be published. Appending to a history file
@@ -444,6 +453,9 @@ jobs:
           git config user.name  "rscreener-nightly"
           git config user.email "actions@github.com"
           git add pipeline/scorecard_history.json pipeline/depth_baseline.json 2>/dev/null || true
+          # On its own line: it does not exist until a screen is listed, and a
+          # missing path makes git add refuse the other two as well.
+          git add alerts/screen_state.json 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "no change to the scoreboard or the ratchet"
           else

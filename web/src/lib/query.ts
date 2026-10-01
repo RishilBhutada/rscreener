@@ -42,6 +42,16 @@ const ALIASES: Record<string, string> = {
   return_3y: "ret_3y",
   return_5y: "ret_5y",
   down_from_high: "off_52w_high",
+  day_change: "ret_1d",
+  change: "ret_1d",
+  rsi: "rsi14",
+  dma50: "vs_dma50",
+  dma200: "vs_dma200",
+  golden_cross: "dma50_200",
+  volume_surge: "vol_surge",
+  fscore: "f_score",
+  piotroski: "f_score",
+  promoter_change: "promoter_chg_qtr",
 };
 
 export const NUMERIC_FIELDS = [
@@ -55,7 +65,16 @@ export const NUMERIC_FIELDS = [
   "median_pe_5y", "avg_npm_5y",
   "ret_1m", "ret_3m", "ret_6m", "ret_1y", "ret_3y", "ret_5y", "off_52w_high",
   "volatility_1y", "volatility_30d",
+  "ret_1d", "vs_dma50", "vs_dma200", "dma50_200", "rsi14", "vol_surge",
+  "qtr_sales_yoy", "qtr_profit_yoy", "qtr_sales_qoq", "qtr_profit_qoq",
+  "promoter_chg_qtr", "promoter_chg_1y", "f_score",
 ];
+
+/** The catalogue name a typed field resolves to ("dy" -> "div_yield"). */
+export function canonicalField(name: string): string {
+  const k = name.trim().toLowerCase();
+  return ALIASES[k] ?? k;
+}
 
 export function isValidRatioName(name: string): string | null {
   const n = name.trim().toLowerCase();

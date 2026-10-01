@@ -135,7 +135,10 @@ def compute_ratios(snap: dict, items: dict[str, float]) -> dict[str, float | Non
     dividends = items.get("Cash Dividends Paid")  # negative in cash-flow terms
 
     ev = mcap + (debt or 0) - (cash or 0) if mcap is not None else None
-    roce = _div(ebit, cap_employed)
+    # No return on capital where there is no capital: with capital employed at
+    # or below zero, a loss divided by it reads as a high positive ROCE -
+    # SpiceJet showed 84% on 30-Sep-2026 and topped the Magic Formula list.
+    roce = _div(ebit, cap_employed) if cap_employed is not None and cap_employed > 0 else None
     peg = _div(pe, eg * 100) if pe is not None and eg is not None and eg > 0 else None
 
     def rnd(v, d=2):

@@ -1,0 +1,8 @@
+# Rscreener screen alerts - one saved screen per line:  NAME | QUERY | SECTORS
+# Each night, after the data refresh, your phone is told which companies
+# newly pass the screen and which have dropped out. SECTORS is optional
+# (comma separated, as the app names them).
+# Easiest: in the app, Screener > Saved > a screen's "..." > "Copy for phone
+# alerts", then paste the line here (the GitHub app on your phone can edit
+# this file). The next nightly run uses it; the first night only records.
+# This is a data alert, not a buy or sell signal.

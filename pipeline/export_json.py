@@ -23,6 +23,7 @@ import pandas as pd
 from ratios_lib import compute_ratios, derived_roe, latest_annual_items, latest_promoter
 from trend_lib import avg_npm_5y, build_trends, cagr_pct, ratio_bands
 import fund_units
+import screen_fields
 
 
 def clean_nan(o):
@@ -49,6 +50,11 @@ RENAME = {
     "earnings_growth": "earn_growth",
 }
 
+# Worked out in screen_fields.py; named here so the export and its column
+# list cannot drift apart.
+SCREEN_FIELDS = ["vs_dma50", "vs_dma200", "dma50_200", "rsi14", "vol_surge",
+                 "qtr_sales_yoy", "qtr_profit_yoy", "qtr_sales_qoq", "qtr_profit_qoq",
+                 "promoter_chg_qtr", "promoter_chg_1y", "f_score"]
 RETURN_ANCHORS = {"ret_1m": 1, "ret_3m": 3, "ret_6m": 6, "ret_1y": 12, "ret_3y": 36, "ret_5y": 60}
 
 
@@ -463,6 +469,12 @@ def main() -> None:
     returns_by_symbol = price_returns(con)
     vol_by_symbol = volatility_fields(con)
     roe_calc = derived_roe(con)
+    # Screener fields worked out from stored prices, filings and holdings.
+    extra_fields: dict[str, dict] = {}
+    for part in (screen_fields.technicals(con), screen_fields.quarter_growth(trends),
+                 screen_fields.promoter_changes(con), screen_fields.piotroski(con)):
+        for sym, vals in part.items():
+            extra_fields.setdefault(sym, {}).update(vals)
     con.close()
 
     # computed ratios need RAW rupee values - run before any unit conversion
@@ -479,6 +491,9 @@ def main() -> None:
         df[vk] = df["symbol"].map(lambda s, k=vk: vol_by_symbol.get(s, {}).get(k))
     for rk in [*RETURN_ANCHORS, "ret_1d"]:
         df[rk] = df["symbol"].map(lambda s, k=rk: returns_by_symbol.get(s, {}).get(k))
+    for fk in SCREEN_FIELDS:
+        df[fk] = df["symbol"].map(lambda s, k=fk: extra_fields.get(s, {}).get(k))
+    print("  screener fields: " + ", ".join(f"{k} {int(df[k].notna().sum())}" for k in SCREEN_FIELDS))
     df["off_52w_high"] = df.apply(lambda r: round((r["price"] / r["wk52_high"] - 1) * 100, 1) if r["price"] and r["wk52_high"] else None, axis=1)
     df["avg_npm_5y"] = df["symbol"].map(lambda s: avg_npm_5y(trends.get(s, {}).get("annual")))
     for key in ("ret_1m", "ret_3m", "ret_6m", "ret_1y", "ret_3y", "ret_5y"):
@@ -696,6 +711,7 @@ def main() -> None:
         "median_pe_5y", "avg_npm_5y",
         "ret_1d", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "ret_3y", "ret_5y", "off_52w_high",
         "volatility_1y", "volatility_30d", "vol_method",
+        *SCREEN_FIELDS,
         "shares_out", "price_date", "bars30", "exchange",
     ]
     df = df[keep]
