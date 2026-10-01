@@ -1,5 +1,6 @@
 "use client";
 
+import { CloseGlyph } from "@/components/Glyphs";
 import { useCallback, useEffect, useState } from "react";
 
 
@@ -288,8 +289,8 @@ export default function RefreshPanel() {
                         <button
                           onClick={() => setPicked(picked.filter((x) => x !== s))}
                           aria-label={`Remove ${s}`}
-                          className="w-4 h-4 leading-none rounded-full hover:bg-[var(--card)] text-[var(--ink2)]"
-                        >×</button>
+                          className="w-4 h-4 inline-flex items-center justify-center rounded-full hover:bg-[var(--card)] text-[var(--ink2)]"
+                        ><CloseGlyph size={11} /></button>
                       </span>
                     ))}
                     <button onClick={() => setPicked([])}

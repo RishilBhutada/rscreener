@@ -56,6 +56,7 @@ const PATHS = {
   trash: "M5 7h14M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3",
   edit: "M4 20h4L19 9l-4-4L4 16zM14 6l4 4",
   upload: "M12 16V4M7 9l5-5 5 5M5 20h14",
+  download: "M12 4v12M7 11l5 5 5-5M5 20h14",
 } as const;
 
 export function Icon({ name, size = 18, className = "" }: { name: keyof typeof PATHS; size?: number; className?: string }) {

@@ -482,8 +482,12 @@ def main() -> None:
     df, price_asof = freshen_prices(con, df)  # never show a price older than the series we hold
     rng = week52_range(con)
     # The day's close always sits inside its own range.
-    df["wk52_high"] = [max(rng[s][0], p) if s in rng and p else h for s, p, h in zip(df["symbol"], df["price"], df["wk52_high"])]
-    df["wk52_low"] = [min(rng[s][1], p) if s in rng and p else lo for s, p, lo in zip(df["symbol"], df["price"], df["wk52_low"])]
+    def _f(v):
+        return float(v) if v is not None and v == v else None
+    df["wk52_high"] = [max(rng[s][0], p) if s in rng and p else (max(_f(h), p) if _f(h) and p else _f(h))
+                       for s, p, h in zip(df["symbol"], df["price"], df["wk52_high"])]
+    df["wk52_low"] = [min(rng[s][1], p) if s in rng and p else (min(_f(lo), p) if _f(lo) and p else _f(lo))
+                      for s, p, lo in zip(df["symbol"], df["price"], df["wk52_low"])]
     print(f"  52-week range: {len(rng)} symbols from their daily bars, the rest from the snapshot")
     n_universe = pd.read_sql("SELECT COUNT(*) n FROM universe", con)["n"][0]
     shares_by_symbol = {

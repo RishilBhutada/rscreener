@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronGlyph } from "@/components/Glyphs";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -1645,7 +1646,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
                   );
                 })}
               </div>
-              <button onClick={() => setSheet("type")} className={pill(prefs.log)}>{kindLabel}{prefs.log ? " · Log" : ""} ▾</button>
+              <button onClick={() => setSheet("type")} className={pill(prefs.log)}>{kindLabel}{prefs.log ? " · Log" : ""} <ChevronGlyph size={11} /></button>
             </>
           ) : view === "pe" && company?.pe_band?.alt?.q1 ? (
             <Seg value={peWin} options={PE_WINDOWS.map(([k, label]) => [k, label] as [string, string])} onChange={(v) => { kept.current = null; setPeWin(v); }} />

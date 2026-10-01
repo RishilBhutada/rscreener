@@ -1,5 +1,6 @@
 "use client";
 
+import { StarGlyph } from "@/components/Glyphs";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
@@ -54,7 +55,7 @@ export default function CalendarPage() {
             </button>
             <button onClick={() => setWatchOnly(!watchOnly)}
               className={`rounded-full px-3.5 py-2 sm:py-1 border ${watchOnly ? "bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
-              ★ My watchlist
+              <StarGlyph filled={watchOnly} size={13} className="mr-1" />My watchlist
             </button>
           </div>
         </div>

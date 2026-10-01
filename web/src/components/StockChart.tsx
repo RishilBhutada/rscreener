@@ -1,5 +1,6 @@
 "use client";
 
+import { CheckGlyph, ChevronGlyph } from "@/components/Glyphs";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import InfoTip from "@/components/InfoTip";
 import Link from "next/link";
@@ -879,7 +880,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                 : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
             }`}
           >
-            {showQ ? "✓ " : ""}Quarterly results
+            {showQ && <CheckGlyph className="mr-1" />}Quarterly results
           </button>
           {showQ && (
             <button
@@ -891,7 +892,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                   : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
               }`}
             >
-              {showDates ? "✓ " : ""}Result dates
+              {showDates && <CheckGlyph className="mr-1" />}Result dates
             </button>
           )}
           {view === "pe" && (
@@ -905,7 +906,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                     : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
                 }`}
               >
-                {showChg ? "✓ " : ""}Growth %
+                {showChg && <CheckGlyph className="mr-1" />}Growth %
               </button>
               {showChg && (
                 <div className="flex items-center gap-0.5 rounded-lg border border-[var(--line)] p-0.5">
@@ -1271,7 +1272,7 @@ function ChartShell({
           {moreItems.length > 0 && (
             <div className="relative">
               <button onClick={() => setMoreOpen(!moreOpen)} className={btn(!!activeMore)}>
-                {activeMore ? activeMore[1] : "More"} <span className="text-[11px]">▾</span>
+                {activeMore ? activeMore[1] : "More"} <ChevronGlyph size={11} />
               </button>
               {moreOpen && <div className="fixed inset-0 z-10" onClick={() => setMoreOpen(false)} />}
               {moreOpen && (

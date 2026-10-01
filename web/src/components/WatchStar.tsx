@@ -1,5 +1,6 @@
 "use client";
 
+import { CheckGlyph, StarGlyph } from "@/components/Glyphs";
 import { useEffect, useRef, useState } from "react";
 import {
   WatchState, createList, inAnyList, listsWith, loadLists, toggleIn,
@@ -57,11 +58,11 @@ export default function WatchStar({ symbol, size = "lg" }: { symbol: string; siz
         aria-label={on ? `${symbol} is on a watchlist` : `Add ${symbol} to a watchlist`}
         aria-expanded={single ? undefined : open}
         title={single ? (on ? "On your watchlist — click to remove" : "Add to your watchlist") : "Choose which lists this belongs on"}
-        className={`${size === "lg" ? "text-2xl" : "text-lg"} leading-none ${
-          on ? "text-[var(--accent)]" : "text-[var(--line2)] hover:text-[var(--accent)]"
+        className={`inline-flex items-center justify-center ${size === "lg" ? "w-10 h-10" : "w-8 h-8"} ${
+          on ? "text-[var(--accent)]" : "text-[var(--ink3)] hover:text-[var(--accent)]"
         }`}
       >
-        ★
+        <StarGlyph filled={on} size={size === "lg" ? 22 : 18} />
       </button>
 
       {open && !single && (
@@ -86,7 +87,7 @@ export default function WatchStar({ symbol, size = "lg" }: { symbol: string; siz
                   mine.has(l.id)
                     ? "bg-[var(--accent-fill)] border-[var(--accent-fill)] text-[var(--accent-fill-ink)]"
                     : "border-[var(--line2)]"
-                }`}>{mine.has(l.id) ? "✓" : ""}</span>
+                }`}>{mine.has(l.id) ? <CheckGlyph size={11} /> : null}</span>
                 <span className="flex-1 text-[var(--ink)]">{l.name}</span>
                 <span className="text-xs text-[var(--ink3)]">{l.symbols.length}</span>
               </button>

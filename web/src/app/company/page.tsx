@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronGlyph, ExternalGlyph } from "@/components/Glyphs";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -13,6 +14,7 @@ import { loadSectionMode, SectionMode } from "@/components/Settings";
 import { isRefreshLoad } from "@/components/TopNav";
 import { applyOrder, loadOrder } from "@/lib/order";
 import InfoTip, { InfoPart } from "@/components/InfoTip";
+import { IconButton, dayMove, signed as signedNum, tone } from "@/components/QuoteUI";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -768,7 +770,7 @@ function DocumentsByYear({ docs }: { docs: NonNullable<Company["documents"]> }) 
                 </span>
               </span>
               <span className="text-xs text-[var(--ink3)] shrink-0">
-                {n} {n === 1 ? "document" : "documents"} {open ? "▾" : "▸"}
+                {n} {n === 1 ? "document" : "documents"} <ChevronGlyph dir={open ? "down" : "right"} />
               </span>
             </button>
             {open && (
@@ -778,7 +780,7 @@ function DocumentsByYear({ docs }: { docs: NonNullable<Company["documents"]> }) 
                     {g.reports.map((r) => (
                       <a key={r.url} href={r.url} target="_blank" rel="noopener noreferrer"
                          className="text-xs font-semibold bg-[var(--card2)] hover:bg-[var(--accent-soft)] border border-[var(--line)] rounded-full px-3 py-1.5">
-                        Annual report {r.from}–{String(r.to).slice(-2)} ↗
+                        Annual report {r.from}–{String(r.to).slice(-2)} <ExternalGlyph size={11} />
                       </a>
                     ))}
                   </div>
@@ -1693,38 +1695,52 @@ function CompanyView() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--ink)]">{titleCase(String(s.name ?? "")) || symbol} <span className="text-[var(--accent-ink)]">({symbol})</span></h1>
-          <p className="text-sm text-[var(--ink3)]">
+      {/* Name, then the ticker and where it sits on one quiet line; the
+          export is an icon beside the star, not a button above the price. */}
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-2xl font-bold text-[var(--ink)] leading-tight">{titleCase(String(s.name ?? "")) || symbol}</h1>
+          <p className="text-sm text-[var(--ink3)] mt-0.5">
+            <span className="font-semibold text-[var(--ink2)]">{symbol}</span>
+            {company.exchange ? ` · ${company.exchange}` : ""}
+            {" · "}
             {s.sector ? (
               <Link href={`/sectors?s=${encodeURIComponent(String(s.sector))}`} className="hover:text-[var(--accent-ink)] hover:underline">{String(s.sector)}</Link>
             ) : "—"}
-            {" · "}{String(s.industry ?? "—")}
+            {s.industry ? ` · ${String(s.industry)}` : ""}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={exportCompanyCsv}
-            className="text-xs font-semibold bg-[var(--card2)] hover:bg-[var(--accent-soft)] border border-[var(--line)] rounded-lg px-3 py-1.5"
-          >
-            Export CSV
-          </button>
+        <div className="flex items-center gap-1 shrink-0">
+          <IconButton name="download" label="Export to Excel (CSV)" onClick={exportCompanyCsv} />
           <WatchStar symbol={symbol} />
         </div>
       </div>
 
-      {price !== null && (
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <span className="text-3xl font-bold text-[var(--ink)] tabular-nums">₹ {fmtNum(price)}</span>
-          {off !== null && (
-            <span className={`text-sm font-semibold ${off < 0 ? "text-[var(--neg)]" : "text-[var(--pos)]"}`}>
-              {off < 0 ? "" : "+"}{off.toFixed(1)}% from 52w high
-            </span>
-          )}
-          <PriceAsOf row={fullRow} snapshot={s} />
-        </div>
-      )}
+      {price !== null && (() => {
+        // The day's move first, as a broker shows it; the distance from the
+        // year's high is the second line.
+        const chg = num(fullRow, "ret_1d");
+        return (
+          <div>
+            <div className="flex flex-wrap items-baseline gap-x-2.5">
+              <span className="text-3xl font-bold text-[var(--ink)] tabular-nums">₹ {fmtNum(price)}</span>
+              {chg !== null && (
+                <span className={`text-[15px] font-semibold tabular-nums ${tone(chg)}`}>
+                  {signedNum(dayMove(price, chg))} ({signedNum(chg)}%)
+                </span>
+              )}
+            </div>
+            <p className="flex flex-wrap items-baseline gap-x-2 mt-0.5">
+              {off !== null && (
+                <span className={`text-xs font-medium ${off < 0 ? "text-[var(--neg)]" : "text-[var(--pos)]"}`}>
+                  {off < 0 ? "" : "+"}{off.toFixed(1)}% from 52-week high ·
+                </span>
+              )}
+              <PriceAsOf row={fullRow} snapshot={s} />
+            </p>
+          </div>
+        );
+      })()}
 
       {/* Built once: four tables share it, and they must not disagree. */}
       <nav ref={sectionNav} className="sticky top-0 sm:top-14 z-20 -mx-4 px-4 bg-[var(--card)] border-y border-[var(--line)] flex gap-1 overflow-x-auto text-sm font-medium py-2 sm:py-1.5 [scrollbar-width:none]">
@@ -1967,10 +1983,10 @@ function CompanyView() {
         {company.documents && <DocumentsByYear docs={company.documents} />}
         <div className="flex gap-4 flex-wrap text-sm">
           <a href={`https://www.nseindia.com/get-quotes/equity?symbol=${encodeURIComponent(symbol)}`} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-ink)] font-semibold hover:underline">
-            All NSE filings &amp; announcements ↗
+            All NSE filings &amp; announcements <ExternalGlyph />
           </a>
           <a href={`https://www.screener.in/company/${encodeURIComponent(symbol)}/`} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-ink)] font-semibold hover:underline">
-            Cross-check on Screener.in ↗
+            Cross-check on Screener.in <ExternalGlyph />
           </a>
         </div>
       </section>
