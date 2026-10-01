@@ -26,6 +26,8 @@ export type LiteRow = {
   etf?: boolean;
   /** An MCX or NCDEX contract type - its page is the commodity page. */
   commodity?: boolean;
+  /** The last session's change, close on close, in %. */
+  ret_1d?: number;
 };
 
 export type LiteIndex = {
@@ -80,6 +82,7 @@ export function loadIndex(): Promise<LiteIndex> {
         div_yield: (r[9] as number) ?? undefined,
         etf: r[10] === 1 ? true : undefined,
         commodity: r[10] === 2 ? true : undefined,
+        ret_1d: (r[11] as number) ?? undefined,
       }));
       for (const r of rows) {
         if (r.etf) etfs.add(r.symbol);

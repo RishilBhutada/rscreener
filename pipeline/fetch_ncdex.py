@@ -213,12 +213,16 @@ def by_quotes(api: Angel, con: sqlite3.Connection, live: list[dict]) -> int:
     now = datetime.now(IST)
     today = now.date().isoformat()
     key_of = {c["token"]: c["key"] for c in live}
+    root_of = {c["key"]: c["root"][: -len(NCDEX_SUFFIX)] for c in live}
     stored = unfinished = 0
-    for q in all_quotes(api, list(key_of)):
+    quotes = all_quotes(api, list(key_of))
+    traded: set[str] = set()
+    for q in quotes:
         key = key_of.get(str(q.get("symbolToken")))
         ltp = q.get("ltp")
         if not key or not ltp or ltp <= 0 or not q.get("tradeVolume"):
             continue
+        traded.add(root_of[key])
         day = trade_day(q) or (today if now.hour >= SESSION_OVER else None)
         if day is None or (day == today and now.hour < SESSION_OVER):
             unfinished += 1
@@ -231,6 +235,12 @@ def by_quotes(api: Angel, con: sqlite3.Connection, live: list[dict]) -> int:
     con.commit()
     if unfinished:
         print(f"  quotes: {unfinished} contracts' session not over yet - left for the next run")
+    # A quote with no trade is a contract nobody dealt in that session; it gets
+    # no bar, because its last price is not that day's price.
+    quiet = sorted(set(root_of.values()) - traded)
+    print(f"  quotes: {len(quotes)} of {len(key_of)} contracts answered; "
+          f"{len(set(root_of.values())) - len(quiet)} contract types traded"
+          + (f", no trades in {len(quiet)}: {' '.join(quiet)}" if quiet else ""))
     return stored
 
 

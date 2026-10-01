@@ -4,14 +4,37 @@ const PORTFOLIO_KEY = "rscreener_portfolio";
 
 export function loadPortfolio(): Holding[] {
   try {
-    return JSON.parse(localStorage.getItem(PORTFOLIO_KEY) ?? "[]");
+    const raw = JSON.parse(localStorage.getItem(PORTFOLIO_KEY) ?? "[]") as Holding[];
+    // One row per symbol. Sync unions two devices' arrays at sign-in, so a
+    // holding edited on one device arrives twice; the later copy wins.
+    const by = new Map<string, Holding>();
+    for (const h of Array.isArray(raw) ? raw : []) {
+      if (h && typeof h.symbol === "string" && h.qty > 0) by.set(h.symbol, h);
+    }
+    return Array.from(by.values());
   } catch {
     return [];
   }
 }
 
 export function savePortfolio(holdings: Holding[]): void {
-  localStorage.setItem(PORTFOLIO_KEY, JSON.stringify(holdings));
+  try {
+    localStorage.setItem(PORTFOLIO_KEY, JSON.stringify(holdings));
+  } catch { /* private mode or quota - the page must not break over it */ }
+}
+
+/** Add a holding, or replace the one already held under that symbol. */
+export function upsertHolding(h: Holding): Holding[] {
+  const list = loadPortfolio().filter((x) => x.symbol !== h.symbol);
+  const next = [...list, h];
+  savePortfolio(next);
+  return next;
+}
+
+export function removeHolding(symbol: string): Holding[] {
+  const next = loadPortfolio().filter((x) => x.symbol !== symbol);
+  savePortfolio(next);
+  return next;
 }
 
 const SYMBOL_COLS = /^(symbol|scrip|instrument|tradingsymbol|stock ?name|name of instrument)$/i;

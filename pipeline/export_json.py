@@ -147,6 +147,10 @@ def price_returns(con: sqlite3.Connection) -> dict[str, dict]:
         con,
     )
     out: dict[str, dict] = {}
+    # The day's move is withheld where the daily series stopped more than a
+    # week before the newest close anywhere: a suspended share's last move is
+    # not today's.
+    newest = pd.Timestamp(px.loc[px["freq"] == "daily", "date"].max()) if len(px) else None
 
     def nearest(dates: list, want) -> int | None:
         if not dates:
@@ -188,6 +192,9 @@ def price_returns(con: sqlite3.Connection) -> dict[str, dict]:
                     base = mc[i]
             if base:
                 res[key] = round((last_c / base - 1) * 100, 1)
+        # The watchlist's day change, close on close, as a broker shows it.
+        if use_daily and dc[-2] and newest is not None and last_d >= newest - pd.Timedelta(days=7):
+            res["ret_1d"] = round((last_c / dc[-2] - 1) * 100, 2)
         if res:
             out[sym] = res
     return out
@@ -470,7 +477,7 @@ def main() -> None:
     df["median_pe_5y"] = df["symbol"].map(lambda s: pe_by_symbol.get(s, {}).get("median_5y"))
     for vk in ("volatility_1y", "volatility_30d", "vol_method"):
         df[vk] = df["symbol"].map(lambda s, k=vk: vol_by_symbol.get(s, {}).get(k))
-    for rk in RETURN_ANCHORS:
+    for rk in [*RETURN_ANCHORS, "ret_1d"]:
         df[rk] = df["symbol"].map(lambda s, k=rk: returns_by_symbol.get(s, {}).get(k))
     df["off_52w_high"] = df.apply(lambda r: round((r["price"] / r["wk52_high"] - 1) * 100, 1) if r["price"] and r["wk52_high"] else None, axis=1)
     df["avg_npm_5y"] = df["symbol"].map(lambda s: avg_npm_5y(trends.get(s, {}).get("annual")))
@@ -687,7 +694,7 @@ def main() -> None:
         "roce", "ev_ebitda", "ps", "peg", "int_coverage", "div_payout",
         "debtor_days", "inventory_days", "promoter_holding",
         "median_pe_5y", "avg_npm_5y",
-        "ret_1m", "ret_3m", "ret_6m", "ret_1y", "ret_3y", "ret_5y", "off_52w_high",
+        "ret_1d", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "ret_3y", "ret_5y", "off_52w_high",
         "volatility_1y", "volatility_30d", "vol_method",
         "shares_out", "price_date", "bars30", "exchange",
     ]
@@ -747,11 +754,14 @@ def main() -> None:
         # offers Reliance Industries before Reliance Power. The four ratios are
         # here because the watchlist table shows exactly those columns, and one
         # index serving four pages beats a second file or a 5.6 MB download.
+        # kind: 0 company, 1 ETF, 2 commodity (those two files append their
+        # own rows). ret_1d is the day's change in %, for the watchlist.
         "fields": ["symbol", "name", "exchange", "price", "ret_1m", "mcap",
-                   "pe", "roe", "roce", "div_yield"],
+                   "pe", "roe", "roce", "div_yield", "kind", "ret_1d"],
         "rows": [[r.get("symbol"), r.get("name"), r.get("exchange"),
                   r.get("price"), r.get("ret_1m"), r.get("mcap"),
-                  r.get("pe"), r.get("roe"), r.get("roce"), r.get("div_yield")]
+                  r.get("pe"), r.get("roe"), r.get("roce"), r.get("div_yield"),
+                  0, r.get("ret_1d")]
                  for r in payload["rows"]],
     }), ensure_ascii=False, allow_nan=False, separators=(",", ":")), encoding="utf-8")
     ikb = idx.stat().st_size / 1024

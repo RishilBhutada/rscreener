@@ -252,7 +252,7 @@ def main() -> None:
     if ix_path.exists() and items:
         ix = json.loads(ix_path.read_text(encoding="utf-8"))
         have = {r[0] for r in ix.get("rows", [])}
-        add = [[x["s"], f"{x['name']} futures", x["exchange"], x["close"], None, 0, None, None, None, None, 2]
+        add = [[x["s"], f"{x['name']} futures", x["exchange"], x["close"], None, 0, None, None, None, None, 2, x["chg"]]
                for x in items if x["s"] not in have]
         ix["rows"] = ix.get("rows", []) + add
         ix_path.write_text(json.dumps(ix, ensure_ascii=False, allow_nan=False, separators=(",", ":")), encoding="utf-8")

@@ -54,6 +54,7 @@ ROOTS: dict[str, tuple[str, str, str, str]] = {
 # NCDEX contract types, stored as "<NAME>_NCDEX" so that Kapas and Cotton,
 # which trade on both exchanges, stay apart. The quoted unit is NCDEX's
 # contract specification as best known here - not yet checked against it.
+# Pepper trades near ₹700, which is a price per kg, not per quintal.
 NCDEX_SUFFIX = "_NCDEX"
 NCDEX_ROOTS: dict[str, tuple[str, str]] = {
     "GUARSEED10": ("Guar Seed", "₹ per quintal"), "GUARGUM5": ("Guar Gum", "₹ per quintal"),
@@ -65,7 +66,7 @@ NCDEX_ROOTS: dict[str, tuple[str, str]] = {
     "BAJRA": ("Bajra", "₹ per quintal"), "BARLEYJPR": ("Barley", "₹ per quintal"),
     "MAIZE": ("Maize", "₹ per quintal"), "GROUNDNUT": ("Groundnut", "₹ per quintal"),
     "SESAMESEED": ("Sesame Seed", "₹ per quintal"), "ISABGOL": ("Isabgol", "₹ per quintal"),
-    "PEPPER": ("Pepper", "₹ per quintal"), "YELLOWP": ("Yellow Peas", "₹ per quintal"),
+    "PEPPER": ("Pepper", "₹ per kg"), "YELLOWP": ("Yellow Peas", "₹ per quintal"),
     "KAPAS": ("Kapas", "₹ per 20 kg"), "COTTON": ("Cotton", "₹ per bale"), "STEEL": ("Steel", "₹ per tonne"),
     "RAINCHNNAI": ("Rain Index Chennai", "points"), "RAINMUMBAI": ("Rain Index Mumbai", "points"),
 }

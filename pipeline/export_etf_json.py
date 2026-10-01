@@ -422,6 +422,8 @@ def main() -> None:
             "pe": (doc["valuation"] or {}).get("pe"),
             "r1y_price": doc["ret_price"].get("1y"), "r1y_nav": doc["ret_nav"].get("1y"),
             "r1m_price": doc["ret_price"].get("1m"),
+            "r1d_price": round((prices[-1][1] / prices[-2][1] - 1) * 100, 2)
+                         if len(prices) >= 2 and prices[-2][1] else None,
             "index": ilabel})
 
     # Same-index comparison, then every file is written.
@@ -461,11 +463,9 @@ def main() -> None:
     if ix_path.exists():
         ix = json.loads(ix_path.read_text(encoding="utf-8"))
         have = {r[0] for r in ix.get("rows", [])}
-        add = [[x["s"], x["name"], "NSE", x["price"], x["r1m_price"], 0, None, None, None, None, 1]
+        add = [[x["s"], x["name"], "NSE", x["price"], x["r1m_price"], 0, None, None, None, None, 1, x["r1d_price"]]
                for x in listing if x["s"] not in have]
         ix["rows"] = ix.get("rows", []) + add
-        if "etf" not in ix.get("fields", []):
-            ix["fields"] = ix.get("fields", []) + ["etf"]
         ix_path.write_text(json.dumps(ix, ensure_ascii=False, allow_nan=False, separators=(",", ":")), encoding="utf-8")
         print(f"  search index: {len(add)} ETFs added")
 

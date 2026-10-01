@@ -1,386 +1,523 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { PointerEvent as RPointerEvent, TouchEvent as RTouchEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
-import { loadIndex, symbolHref } from "@/lib/index-data";
-import { Row } from "@/lib/query";
+import InfoTip, { InfoDialog } from "@/components/InfoTip";
+import { LiteRow, loadIndex, symbolHref } from "@/lib/index-data";
 import { shortName } from "@/lib/names";
+import { loadPortfolio } from "@/lib/portfolio";
 import {
-  WatchState, addTo, createList, deleteList, loadLists, moveSymbol,
-  removeFrom, renameList, reorderList, setActive, setListNote,
+  WatchState, createList, deleteList, loadLists, moveSymbol, removeFrom,
+  renameList, reorderList, reorderSymbols, setActive, setListNote, toggleIn,
 } from "@/lib/watchlists";
+import {
+  Chips, Icon, IconButton, SheetAction, Stat, dayMove, money, shortDay, shownSymbol, signed, tone,
+} from "@/components/QuoteUI";
 
-const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+/** Watchlists, laid out like a broker's market watch: the lists as tabs, a
+ *  search that adds as you go, one line per instrument with the price and the
+ *  day's move, and everything else in a sheet a tap away. Read-only - there
+ *  is no buy or sell here, by design. */
 
-type Data = { generated_at: string; rows: Row[]; price_asof?: string };
-
-function fmt(v: number | null | undefined, dec = 2): string {
-  if (v === null || v === undefined || Number.isNaN(v)) return "—";
-  return v.toLocaleString("en-IN", { maximumFractionDigits: dec });
-}
-
-function crore(v: number | null | undefined): string {
-  if (v === null || v === undefined || Number.isNaN(v)) return "—";
-  if (v >= 100000) return `${(v / 100000).toFixed(2)}L Cr`;
-  return v.toLocaleString("en-IN", { maximumFractionDigits: 0 });
-}
-
-/** Columns the table can show. Kept small deliberately - a watchlist is for
- *  glancing at, and every column added is a column of noise on a phone. */
-// data.json already stores roe / roce / div_yield AS PERCENTAGES (TCS roe is
-// 47.74, not 0.4774). Multiplying by 100 here printed "4,774%" - and defaulting
-// a missing value to 0 first printed RELIANCE's absent ROE as a confident "0".
-// A number we do not have is a dash.
-const COLS: { key: string; label: string; num: boolean; fmt: (r: Row) => string }[] = [
-  { key: "price", label: "Price ₹", num: true, fmt: (r) => fmt(r.price as number) },
-  { key: "pe", label: "P/E", num: true, fmt: (r) => fmt(r.pe as number, 1) },
-  { key: "roe", label: "ROE %", num: true, fmt: (r) => fmt(r.roe as number, 1) },
-  { key: "roce", label: "ROCE %", num: true, fmt: (r) => fmt(r.roce as number, 1) },
-  { key: "div_yield", label: "Div Yld %", num: true, fmt: (r) => fmt(r.div_yield as number, 2) },
-  { key: "mcap", label: "MCap ₹Cr", num: true, fmt: (r) => crore(r.mcap as number) },
+type SortKey = "manual" | "az" | "chg" | "price" | "mcap";
+type Sort = { k: SortKey; d: 1 | -1 };
+const SORT_KEY = "rs_wl_sort";
+const SORTS: [SortKey, string][] = [
+  ["manual", "My order"], ["az", "A–Z"], ["chg", "Change %"], ["price", "Price"], ["mcap", "Market cap"],
 ];
 
+type Sheet =
+  | { kind: "symbol"; sym: string }
+  | { kind: "list" }
+  | { kind: "new" }
+  | { kind: "sort" }
+  | null;
+
+function readSort(): Sort {
+  try {
+    const s = JSON.parse(localStorage.getItem(SORT_KEY) ?? "null") as Sort | null;
+    if (s && SORTS.some(([k]) => k === s.k) && (s.d === 1 || s.d === -1)) return s;
+  } catch { /* private mode */ }
+  return { k: "manual", d: -1 };
+}
+
+function kindOf(r: LiteRow | undefined): string {
+  if (!r) return "";
+  if (r.commodity) return "FUT";
+  if (r.etf) return "ETF";
+  return "";
+}
+
+function chartHref(sym: string, r: LiteRow | undefined): string {
+  return `/chart?s=${encodeURIComponent(r?.commodity ? `${sym}1!` : sym)}`;
+}
+
+function rememberReturn() {
+  // The full chart's back arrow comes back here, not to the company page.
+  try { sessionStorage.setItem("rs_chart_from", location.pathname + location.search); } catch { /* private mode */ }
+}
+
 export default function WatchlistsPage() {
-  const [data, setData] = useState<Data | null>(null);
+  const [rows, setRows] = useState<LiteRow[]>([]);
+  const [asof, setAsof] = useState<string | null>(null);
   const [state, setState] = useState<WatchState>({ lists: [], activeId: "" });
+  const [held, setHeld] = useState<Map<string, number>>(new Map());
   const [ready, setReady] = useState(false);
-  const [adding, setAdding] = useState("");
-  const [renaming, setRenaming] = useState<string | null>(null);
-  const [renameText, setRenameText] = useState("");
-  const [noteFor, setNoteFor] = useState<string | null>(null);
+  const [sort, setSortState] = useState<Sort>({ k: "manual", d: -1 });
+  const [query, setQuery] = useState("");
+  const [sheet, setSheet] = useState<Sheet>(null);
+  const [editing, setEditing] = useState(false);
+  const [nameText, setNameText] = useState("");
   const [noteText, setNoteText] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [sortKey, setSortKey] = useState<string>("");
-  const [sortDir, setSortDir] = useState<1 | -1>(-1);
-  const [moving, setMoving] = useState<string | null>(null);
-  const addRef = useRef<HTMLInputElement>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [dragOrder, setDragOrder] = useState<string[] | null>(null);
+  const [drag, setDrag] = useState<{ sym: string; dy: number } | null>(null);
+  const dragRef = useRef<{ sym: string; startY: number; rowH: number; order: string[] } | null>(null);
+  const swipeRef = useRef<{ x: number; y: number } | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // A watchlist shows six columns for a handful of symbols. It
-    // used to download every field of every company in India to fill them.
     loadIndex()
-      .then((d) => setData({ generated_at: d.generated_at ?? "", rows: d.rows as unknown as Row[] }))
+      .then((d) => { setRows(d.rows); setAsof(d.price_modal ?? d.price_asof); })
       .catch(() => {});
     setState(loadLists());
+    setHeld(new Map(loadPortfolio().map((h) => [h.symbol, h.qty])));
+    setSortState(readSort());
     setReady(true);
   }, []);
 
-  const bySymbol = useMemo(() => {
-    const m = new Map<string, Row>();
-    for (const r of data?.rows ?? []) m.set(String(r.symbol), r);
-    return m;
-  }, [data]);
-
+  const bySymbol = useMemo(() => new Map(rows.map((r) => [r.symbol, r])), [rows]);
   const active = state.lists.find((l) => l.id === state.activeId) ?? state.lists[0];
 
-  const rows = useMemo(() => {
-    if (!active) return [];
-    const out = active.symbols.map((s) => ({ symbol: s, row: bySymbol.get(s) }));
-    if (!sortKey) return out;
-    return [...out].sort((a, b) => {
-      const av = (a.row?.[sortKey] as number) ?? -Infinity;
-      const bv = (b.row?.[sortKey] as number) ?? -Infinity;
-      return (av - bv) * sortDir;
-    });
-  }, [active, bySymbol, sortKey, sortDir]);
+  const setSort = (s: Sort) => {
+    setSortState(s);
+    try { localStorage.setItem(SORT_KEY, JSON.stringify(s)); } catch { /* private mode */ }
+  };
 
-  // Suggestions for the add box: match on symbol or name, skip anything already
-  // on this list, and cap the list so it never covers the table below it.
-  const suggestions = useMemo(() => {
-    const q = adding.trim().toLowerCase();
-    if (q.length < 2 || !active) return [];
-    const has = new Set(active.symbols);
-    return (data?.rows ?? [])
-      .filter((r) => !has.has(String(r.symbol)))
+  const shown = useMemo(() => {
+    if (!active) return [];
+    if (editing || sort.k === "manual") return dragOrder ?? active.symbols;
+    const val = (s: string): number | string | null => {
+      const r = bySymbol.get(s);
+      if (sort.k === "az") return shownSymbol(s);
+      if (!r) return null;
+      return sort.k === "chg" ? r.ret_1d ?? null : sort.k === "price" ? r.price ?? null : r.mcap || null;
+    };
+    return [...active.symbols].sort((a, b) => {
+      const av = val(a), bv = val(b);
+      if (av === null) return bv === null ? 0 : 1;      // unknowns last, whichever way
+      if (bv === null) return -1;
+      if (typeof av === "string") return av.localeCompare(String(bv)) * (sort.d === 1 ? 1 : -1);
+      return ((av as number) - (bv as number)) * sort.d;
+    });
+  }, [active, bySymbol, sort, editing, dragOrder]);
+
+  // Search: symbol or name, biggest first, ETFs and commodities included.
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return rows
       .map((r) => {
-        const sym = String(r.symbol).toLowerCase();
-        const nm = String(r.name ?? "").toLowerCase();
-        const score = sym.startsWith(q) ? 0 : nm.startsWith(q) ? 1 : nm.includes(` ${q}`) ? 2 : sym.includes(q) || nm.includes(q) ? 3 : 9;
+        const sym = r.symbol.toLowerCase(), nm = r.name.toLowerCase();
+        const score = sym === q ? -1 : sym.startsWith(q) ? 0 : nm.startsWith(q) ? 1 : nm.includes(` ${q}`) ? 2
+          : sym.includes(q) || nm.includes(q) ? 3 : 9;
         return [score, r] as const;
       })
       .filter(([s]) => s < 9)
-      .sort((a, b) => a[0] - b[0] || ((b[1].mcap as number) ?? 0) - ((a[1].mcap as number) ?? 0))
-      .slice(0, 7)
+      .sort((a, b) => a[0] - b[0] || (b[1].mcap ?? 0) - (a[1].mcap ?? 0))
+      .slice(0, 40)
       .map(([, r]) => r);
-  }, [adding, data, active]);
+  }, [query, rows]);
 
-  const add = (sym: string) => {
-    if (!active) return;
-    setState(addTo(active.id, [sym]));
-    setAdding("");
-    addRef.current?.focus();
-  };
-
-  const clickSort = (k: string) => {
-    if (sortKey === k) setSortDir(sortDir === 1 ? -1 : 1);
-    else { setSortKey(k); setSortDir(-1); }
-  };
-
-  // Totals give the list a shape - a watchlist of twelve companies with a median
-  // P/E of 68 is a different thing from one with a median of 14, and that is not
-  // visible from twelve separate numbers.
   const stats = useMemo(() => {
-    const present = rows.map((r) => r.row).filter(Boolean) as Row[];
-    const med = (k: string) => {
-      const v = present.map((r) => r[k] as number).filter((x) => typeof x === "number" && isFinite(x)).sort((a, b) => a - b);
-      if (!v.length) return null;
+    const present = (active?.symbols ?? []).map((s) => bySymbol.get(s)).filter((r): r is LiteRow => !!r && !r.commodity);
+    const med = (k: "pe" | "roe" | "roce") => {
+      const v = present.map((r) => r[k]).filter((x): x is number => typeof x === "number" && Number.isFinite(x)).sort((a, b) => a - b);
+      if (v.length < 2) return null;
       const m = Math.floor(v.length / 2);
-      // Even count: the middle two averaged. Taking the upper one made a list of
-      // two companies report the higher of them as "the median", which is a
-      // wrong number rather than an imprecise one.
       return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
     };
-    // Keyed off COLS rather than a hand-written list, so adding a column can
-    // never leave the footer silently one cell out of step with the header.
-    const medians: Record<string, number | null> = {};
-    for (const c of COLS) medians[c.key] = med(c.key);
-    return { n: present.length, missing: rows.length - present.length, medians };
-  }, [rows]);
+    const up = present.filter((r) => (r.ret_1d ?? 0) > 0).length;
+    const down = present.filter((r) => (r.ret_1d ?? 0) < 0).length;
+    return { n: present.length, pe: med("pe"), roe: med("roe"), roce: med("roce"), up, down };
+  }, [active, bySymbol]);
+
+  // ── drag to reorder (edit mode) ──
+  const dragStart = (e: RPointerEvent<HTMLElement>, sym: string) => {
+    if (!active) return;
+    e.preventDefault();
+    const li = e.currentTarget.closest("li");
+    dragRef.current = { sym, startY: e.clientY, rowH: li?.getBoundingClientRect().height || 60, order: [...(dragOrder ?? active.symbols)] };
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* a synthetic or already-ended pointer */ }
+    setDrag({ sym, dy: 0 });
+  };
+  const dragMove = (e: RPointerEvent<HTMLElement>) => {
+    const d = dragRef.current;
+    if (!d) return;
+    let dy = e.clientY - d.startY;
+    const i = d.order.indexOf(d.sym);
+    if (dy > d.rowH / 2 && i < d.order.length - 1) {
+      [d.order[i], d.order[i + 1]] = [d.order[i + 1], d.order[i]];
+      d.startY += d.rowH; dy -= d.rowH;
+      setDragOrder([...d.order]);
+    } else if (dy < -d.rowH / 2 && i > 0) {
+      [d.order[i], d.order[i - 1]] = [d.order[i - 1], d.order[i]];
+      d.startY -= d.rowH; dy += d.rowH;
+      setDragOrder([...d.order]);
+    }
+    setDrag({ sym: d.sym, dy });
+  };
+  const dragEnd = () => {
+    const d = dragRef.current;
+    if (!d) return;
+    if (d && active) setState(reorderSymbols(active.id, d.order));
+    dragRef.current = null;
+    setDrag(null);
+    setDragOrder(null);
+  };
+
+  // ── swipe sideways between lists, as a broker app does ──
+  const swipeStart = (e: RTouchEvent) => {
+    if (editing || query) return;
+    swipeRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  };
+  const swipeEnd = (e: RTouchEvent) => {
+    const s = swipeRef.current;
+    swipeRef.current = null;
+    if (!s || !active) return;
+    const dx = e.changedTouches[0].clientX - s.x, dy = e.changedTouches[0].clientY - s.y;
+    if (Math.abs(dx) < 70 || Math.abs(dx) < 2 * Math.abs(dy)) return;
+    const i = state.lists.findIndex((l) => l.id === active.id);
+    const j = i + (dx < 0 ? 1 : -1);
+    if (j >= 0 && j < state.lists.length) setState(setActive(state.lists[j].id));
+  };
+
+  const openList = () => {
+    if (!active) return;
+    setNameText(active.name);
+    setNoteText(active.note ?? "");
+    setConfirmDelete(false);
+    setSheet({ kind: "list" });
+  };
+
+  const sheetSym = sheet?.kind === "symbol" ? sheet.sym : null;
+  const sheetRow = sheetSym ? bySymbol.get(sheetSym) : undefined;
 
   return (
     <div className="min-h-screen bg-[var(--bg)]">
       <TopNav active="watchlists" />
-      <main className="max-w-6xl mx-auto px-4 py-6">
-        <div className="flex items-baseline justify-between flex-wrap gap-2 mb-1">
-          <h1 className="text-2xl font-bold text-[var(--ink)]">Watchlists</h1>
-          {data?.price_asof && (
-            <span className="text-xs text-[var(--ink3)]">Prices as of {data.price_asof}</span>
-          )}
-        </div>
-        <p className="text-sm text-[var(--ink2)] mb-5">
-          Keep separate lists for separate questions — what you own, what you are researching,
-          what you decided against and want to check you were right about.
-        </p>
-
-        {/* ── the lists themselves ── */}
-        <div className="flex flex-wrap items-center gap-2 mb-4">
-          {state.lists.map((l) => {
-            const on = l.id === active?.id;
-            return (
-              <button
-                key={l.id}
-                onClick={() => setState(setActive(l.id))}
-                className={`group rounded-xl px-3 py-2 text-sm border transition-colors ${
-                  on
-                    ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)] font-semibold"
-                    : "bg-[var(--card)] text-[var(--ink2)] border-[var(--line)] hover:border-[var(--line2)]"
-                }`}
-              >
-                {l.name}
-                <span className={`ml-2 text-xs ${on ? "opacity-80" : "text-[var(--ink3)]"}`}>{l.symbols.length}</span>
-              </button>
-            );
-          })}
-          <button
-            onClick={() => {
-              const s = createList(`List ${state.lists.length + 1}`);
-              setState(s);
-              setRenaming(s.activeId);
-              setRenameText(s.lists[s.lists.length - 1].name);
-            }}
-            className="rounded-xl px-3 py-2 text-sm border border-dashed border-[var(--line2)] text-[var(--ink2)] hover:bg-[var(--card2)]"
-          >
-            + New list
-          </button>
+      <main className="max-w-2xl mx-auto px-4 pt-4 pb-24">
+        <div className="flex items-center gap-2 mb-3">
+          <h1 className="text-[22px] font-bold tracking-tight text-[var(--ink)]">Watchlists</h1>
+          <InfoTip title="Watchlists">
+            <p>Keep separate lists for separate questions — what you own, what you are researching, what you decided against and want to check you were right about.</p>
+            <p>Prices are each day&apos;s closing prices from the nightly refresh, not live. The change is close against the previous close.</p>
+            <p>Tap a row for its figures, chart and list options. Swipe sideways to move between lists. A briefcase marks something you hold in Portfolio.</p>
+          </InfoTip>
+          {asof && <span className="ml-auto text-[11px] text-[var(--ink3)] tabular-nums">Close {shortDay(asof)}</span>}
         </div>
 
-        {ready && active && (
-          <div className="bg-[var(--card)] border border-[var(--line)] rounded-2xl overflow-hidden">
-            {/* ── header for the open list ── */}
-            <div className="px-4 py-3 border-b border-[var(--line)] flex flex-wrap items-center gap-2">
-              {renaming === active.id ? (
-                <input
-                  autoFocus
-                  value={renameText}
-                  onChange={(e) => setRenameText(e.target.value)}
-                  onBlur={() => { setState(renameList(active.id, renameText)); setRenaming(null); }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") { setState(renameList(active.id, renameText)); setRenaming(null); }
-                    if (e.key === "Escape") setRenaming(null);
-                  }}
-                  className="text-lg font-semibold bg-[var(--card2)] border border-[var(--accent-line)] rounded-lg px-2 py-1 outline-none"
-                />
+        {/* ── the lists as tabs ── */}
+        <div className="flex items-center border-b border-[var(--line)] mb-3">
+          <div className="flex-1 flex overflow-x-auto [scrollbar-width:none]" role="tablist" aria-label="Watchlists">
+            {state.lists.map((l) => {
+              const on = l.id === active?.id;
+              return (
+                <button key={l.id} role="tab" aria-selected={on}
+                  onClick={() => (on ? openList() : (setState(setActive(l.id)), setEditing(false)))}
+                  className={`shrink-0 px-3 pt-1 pb-2 -mb-px border-b-2 text-[14px] whitespace-nowrap ${
+                    on ? "border-[var(--accent)] text-[var(--accent-ink)] font-semibold" : "border-transparent text-[var(--ink2)]"}`}>
+                  {l.name}
+                  <span className="ml-1.5 text-[11px] opacity-70 tabular-nums">{l.symbols.length}</span>
+                </button>
+              );
+            })}
+          </div>
+          <IconButton name="plus" label="New watchlist" onClick={() => { setNameText(""); setSheet({ kind: "new" }); }} />
+          <IconButton name="more" label="This list's options" onClick={openList} />
+        </div>
+
+        {/* ── search and add ── */}
+        {active && !editing && (
+          <div className="flex items-center gap-1 mb-2">
+            <label className="flex-1 flex items-center gap-2 h-11 px-3 rounded-xl border border-[var(--line)] bg-[var(--card)] focus-within:border-[var(--accent-line)]">
+              <Icon name="search" className="text-[var(--ink3)] shrink-0" />
+              <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Escape") setQuery(""); }}
+                placeholder="Search & add" aria-label={`Search and add to ${active.name}`}
+                className="flex-1 min-w-0 bg-transparent outline-none text-[14px] text-[var(--ink)] placeholder:text-[var(--ink3)]" />
+              {query ? (
+                <button type="button" onClick={() => setQuery("")} aria-label="Clear search" className="p-1 -m-1 text-[var(--ink3)]">
+                  <Icon name="close" size={16} />
+                </button>
               ) : (
-                <button
-                  onClick={() => { setRenaming(active.id); setRenameText(active.name); }}
-                  title="Click to rename"
-                  className="text-lg font-semibold text-[var(--ink)] hover:text-[var(--accent-ink)]"
-                >
-                  {active.name}
-                </button>
+                <span className="text-[11px] text-[var(--ink3)] tabular-nums">{active.symbols.length}</span>
               )}
-              <span className="text-sm text-[var(--ink3)]">
-                {active.symbols.length} {active.symbols.length === 1 ? "company" : "companies"}
-                {stats.missing > 0 && ` · ${stats.missing} not in the dataset`}
-              </span>
-              <div className="ml-auto flex items-center gap-1 text-xs">
-                <button onClick={() => setState(reorderList(active.id, -1))} title="Move this list left"
-                  className="rounded-lg px-2 py-1.5 text-[var(--ink2)] hover:bg-[var(--card2)]">←</button>
-                <button onClick={() => setState(reorderList(active.id, 1))} title="Move this list right"
-                  className="rounded-lg px-2 py-1.5 text-[var(--ink2)] hover:bg-[var(--card2)]">→</button>
-                <button
-                  onClick={() => { setNoteFor(noteFor === active.id ? null : active.id); setNoteText(active.note ?? ""); }}
-                  className="rounded-lg px-2 py-1.5 text-[var(--ink2)] hover:bg-[var(--card2)]"
-                >
-                  {active.note ? "Edit note" : "Add note"}
-                </button>
-                {confirmDelete === active.id ? (
-                  <>
-                    <span className="text-[var(--neg)]">Delete this list?</span>
-                    <button onClick={() => { setState(deleteList(active.id)); setConfirmDelete(null); }}
-                      className="rounded-lg px-2 py-1.5 font-semibold text-[var(--neg)] hover:bg-[var(--neg-soft)]">Yes, delete</button>
-                    <button onClick={() => setConfirmDelete(null)}
-                      className="rounded-lg px-2 py-1.5 text-[var(--ink2)] hover:bg-[var(--card2)]">Keep</button>
-                  </>
-                ) : (
-                  <button onClick={() => setConfirmDelete(active.id)}
-                    className="rounded-lg px-2 py-1.5 text-[var(--ink2)] hover:bg-[var(--card2)]">Delete</button>
-                )}
-              </div>
-            </div>
+            </label>
+            <IconButton name="sliders" label="Sort and edit" onClick={() => setSheet({ kind: "sort" })} active={sort.k !== "manual"} />
+          </div>
+        )}
 
-            {noteFor === active.id && (
-              <div className="px-4 py-3 border-b border-[var(--line)] bg-[var(--card2)]">
-                <textarea
-                  autoFocus
-                  value={noteText}
-                  onChange={(e) => setNoteText(e.target.value)}
-                  onBlur={() => { setState(setListNote(active.id, noteText)); setNoteFor(null); }}
-                  placeholder="Why does this list exist? What are you watching for?"
-                  rows={2}
-                  className="w-full text-sm bg-[var(--card)] border border-[var(--line)] rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-[var(--accent)]"
-                />
-              </div>
-            )}
-            {active.note && noteFor !== active.id && (
-              <div className="px-4 py-2 border-b border-[var(--line)] text-sm text-[var(--ink2)] italic">{active.note}</div>
-            )}
+        {editing && active && (
+          <div className="flex items-center justify-between h-11 mb-2">
+            <p className="text-[13px] text-[var(--ink2)]">Drag <Icon name="handle" size={14} className="inline -mt-0.5" /> to reorder</p>
+            <button type="button" onClick={() => setEditing(false)}
+              className="rs-press min-h-[36px] px-4 rounded-full text-[13px] font-semibold bg-[var(--accent-fill)] text-[var(--accent-fill-ink)]">
+              Done
+            </button>
+          </div>
+        )}
 
-            {/* ── add a company ── */}
-            <div className="px-4 py-3 border-b border-[var(--line)] relative">
-              <input
-                ref={addRef}
-                value={adding}
-                onChange={(e) => setAdding(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && suggestions[0]) add(String(suggestions[0].symbol));
-                  if (e.key === "Escape") setAdding("");
-                }}
-                placeholder="Add a company to this list…"
-                className="w-full sm:max-w-md text-sm bg-[var(--card2)] border border-[var(--line)] rounded-full px-4 py-2 outline-none focus:ring-2 focus:ring-[var(--accent)]"
-              />
-              {suggestions.length > 0 && (
-                <div className="absolute z-30 mt-1 w-full sm:max-w-md bg-[var(--card)] border border-[var(--line)] rounded-xl shadow-xl overflow-hidden">
-                  {suggestions.map((r) => (
-                    <button
-                      key={String(r.symbol)}
-                      onMouseDown={(e) => { e.preventDefault(); add(String(r.symbol)); }}
-                      className="block w-full text-left px-4 py-2 text-sm hover:bg-[var(--accent-soft)]"
-                    >
-                      <span className="font-semibold text-[var(--ink)]">{shortName(String(r.name ?? ""), String(r.symbol))}</span>
-                      <span className="text-[var(--ink3)] ml-2 text-xs">{String(r.symbol)}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+        {active?.note && !query && !editing && (
+          <p className="text-[12px] text-[var(--ink3)] italic mb-2 px-1">{active.note}</p>
+        )}
 
-            {/* ── the companies ── */}
+        {/* ── search results ── */}
+        {active && query && !editing && (
+          <ul className="divide-y divide-[var(--line)]">
+            {results.length === 0 && <li className="py-10 text-center text-[13px] text-[var(--ink3)]">Nothing matches &ldquo;{query}&rdquo;</li>}
+            {results.map((r) => {
+              const on = active.symbols.includes(r.symbol);
+              return (
+                <li key={r.symbol}>
+                  <button type="button" onClick={() => setState(toggleIn(active.id, r.symbol))}
+                    className="w-full flex items-center gap-3 min-h-[56px] py-2 text-left active:bg-[var(--card2)]">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[14px] font-medium text-[var(--ink)] truncate">
+                        {shownSymbol(r.symbol)}
+                        <span className="ml-2 text-[10px] font-semibold text-[var(--ink3)]">{r.exchange}{kindOf(r) && ` ${kindOf(r)}`}</span>
+                      </p>
+                      <p className="text-[12px] text-[var(--ink3)] truncate">{shortName(r.name, r.symbol)}</p>
+                    </div>
+                    <span aria-label={on ? `On ${active.name} - tap to remove` : `Add to ${active.name}`}
+                      className={`shrink-0 w-8 h-8 rounded-full inline-flex items-center justify-center border ${
+                        on ? "bg-[var(--accent-fill)] border-[var(--accent-fill)] text-[var(--accent-fill-ink)]"
+                           : "border-[var(--line2)] text-[var(--accent-ink)]"}`}>
+                      <Icon name={on ? "check" : "plus"} size={16} />
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {/* ── the list ── */}
+        {ready && active && (!query || editing) && (
+          <div onTouchStart={swipeStart} onTouchEnd={swipeEnd}>
             {active.symbols.length === 0 ? (
-              <div className="px-4 py-12 text-center">
-                <p className="text-[var(--ink2)] mb-1">Nothing on this list yet.</p>
-                <p className="text-sm text-[var(--ink3)]">
-                  Add one above, or star a company from the{" "}
-                  <Link href="/screens" className="text-[var(--accent-ink)] underline">screener</Link>.
-                </p>
+              <div className="py-16 text-center">
+                <p className="text-[15px] text-[var(--ink2)] mb-1">{active.name} is empty</p>
+                <button type="button" onClick={() => searchRef.current?.focus()} className="text-[13px] text-[var(--accent-ink)] font-semibold">
+                  Search to add
+                </button>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-[var(--card2)] text-[var(--ink2)]">
-                    <tr>
-                      <th className="text-left font-semibold px-3 py-2">Company</th>
-                      {COLS.map((c) => (
-                        <th key={c.key} onClick={() => clickSort(c.key)}
-                          className="text-right font-semibold px-3 py-2 cursor-pointer whitespace-nowrap hover:text-[var(--accent-ink)]">
-                          {c.label}{sortKey === c.key ? (sortDir === 1 ? " ↑" : " ↓") : ""}
-                        </th>
-                      ))}
-                      <th className="px-3 py-2" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map(({ symbol, row }) => (
-                      <tr key={symbol} className="border-t border-[var(--line)] hover:bg-[var(--card2)]">
-                        <td className="px-3 py-2">
-                          <Link href={symbolHref(symbol)} className="font-medium text-[var(--ink)] hover:text-[var(--accent-ink)]">
-                            {row ? shortName(String(row.name ?? ""), symbol) : symbol}
-                          </Link>
-                          <span className="text-[var(--ink3)] text-xs ml-2">{symbol}</span>
-                          {!row && <span className="text-[var(--ink3)] text-xs ml-2">· not in the dataset</span>}
-                        </td>
-                        {COLS.map((c) => (
-                          <td key={c.key} className="text-right px-3 py-2 tabular-nums text-[var(--ink2)] whitespace-nowrap">
-                            {row ? c.fmt(row) : "—"}
-                          </td>
-                        ))}
-                        <td className="px-3 py-2 text-right whitespace-nowrap">
-                          {state.lists.length > 1 && (
-                            <select
-                              value=""
-                              onChange={(e) => { if (e.target.value) { setState(moveSymbol(active.id, e.target.value, symbol)); setMoving(null); } }}
-                              title="Move to another list"
-                              className="text-xs bg-transparent border border-[var(--line)] rounded-md px-1 py-0.5 mr-1 text-[var(--ink2)]"
-                            >
-                              <option value="">Move to…</option>
-                              {state.lists.filter((l) => l.id !== active.id).map((l) => (
-                                <option key={l.id} value={l.id}>{l.name}</option>
-                              ))}
-                            </select>
+              <ul className="divide-y divide-[var(--line)]">
+                {shown.map((sym) => {
+                  const r = bySymbol.get(sym);
+                  const chg = r?.ret_1d ?? null;
+                  const move = dayMove(r?.price, chg);
+                  const qty = held.get(sym);
+                  const dragging = drag?.sym === sym;
+                  return (
+                    <li key={sym}
+                      style={dragging ? { transform: `translateY(${drag.dy}px)`, position: "relative", zIndex: 10 } : undefined}
+                      className={dragging ? "bg-[var(--card)] shadow-[0_8px_24px_rgba(0,0,0,0.25)] rounded-lg" : ""}>
+                      <div className="flex items-center min-h-[62px]">
+                        {editing && (
+                          <span onPointerDown={(e) => dragStart(e, sym)} onPointerMove={dragMove}
+                            onPointerUp={dragEnd} onPointerCancel={dragEnd} onLostPointerCapture={dragEnd}
+                            aria-label={`Drag ${sym} to reorder`} role="button"
+                            className="shrink-0 w-10 h-12 -ml-2 inline-flex items-center justify-center text-[var(--ink3)] cursor-grab touch-none">
+                            <Icon name="handle" />
+                          </span>
+                        )}
+                        <button type="button" disabled={editing} onClick={() => setSheet({ kind: "symbol", sym })}
+                          className="flex-1 min-w-0 flex items-center gap-3 py-2.5 text-left active:bg-[var(--card2)] disabled:active:bg-transparent">
+                          <div className="flex-1 min-w-0">
+                            <p className="flex items-center gap-1.5 text-[15px] font-medium text-[var(--ink)]">
+                              <span className="truncate">{shownSymbol(sym)}</span>
+                              {qty !== undefined && (
+                                <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-semibold text-[var(--accent-ink)]" title={`You hold ${qty}`}>
+                                  <Icon name="bag" size={11} />{qty.toLocaleString("en-IN")}
+                                </span>
+                              )}
+                            </p>
+                            <p className="text-[11px] text-[var(--ink3)] truncate">
+                              {r ? <>{r.exchange}{kindOf(r) && ` ${kindOf(r)}`} · {shortName(r.name, sym)}</> : "Not in today's data"}
+                            </p>
+                          </div>
+                          {!editing && (
+                            <div className="shrink-0 text-right">
+                              <p className={`text-[15px] font-medium tabular-nums ${tone(chg)}`}>{money(r?.price)}</p>
+                              <p className="text-[11px] tabular-nums text-[var(--ink3)]">
+                                {chg === null ? "—" : <>{signed(move)} <span className={tone(chg)}>({signed(chg)}%)</span></>}
+                              </p>
+                            </div>
                           )}
-                          <button
-                            onClick={() => setState(removeFrom(active.id, symbol))}
-                            title={`Remove ${symbol} from ${active.name}`}
-                            aria-label={`Remove ${symbol} from ${active.name}`}
-                            className="text-[var(--ink3)] hover:text-[var(--neg)] px-1"
-                          >
-                            ✕
+                        </button>
+                        {editing && (
+                          <button type="button" onClick={() => setState(removeFrom(active.id, sym))}
+                            aria-label={`Remove ${sym} from ${active.name}`}
+                            className="shrink-0 w-10 h-10 inline-flex items-center justify-center text-[var(--ink3)] active:text-[var(--neg)]">
+                            <Icon name="trash" />
                           </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  {stats.n > 1 && (
-                    <tfoot className="bg-[var(--card2)] text-[var(--ink2)]">
-                      <tr className="border-t border-[var(--line)]">
-                        <td className="px-3 py-2 font-semibold whitespace-nowrap">
-                          Median of {stats.n}
-                        </td>
-                        {COLS.map((c) => (
-                          <td key={c.key} className="text-right px-3 py-2 tabular-nums font-semibold whitespace-nowrap">
-                            {/* median of a price or a market cap says nothing about a
-                                list of mixed companies; the ratios are the point */}
-                            {["pe", "roe", "roce", "div_yield"].includes(c.key) && stats.medians[c.key] !== null
-                              ? c.fmt({ [c.key]: stats.medians[c.key] } as unknown as Row)
-                              : ""}
-                          </td>
-                        ))}
-                        <td className="px-3 py-2" />
-                      </tr>
-                    </tfoot>
-                  )}
-                </table>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            {stats.n > 1 && !editing && (
+              <div className="mt-3 pt-3 border-t border-[var(--line)] grid grid-cols-4 gap-2 text-center">
+                <Stat label="Up / down" value={<><span className="text-[var(--pos)]">{stats.up}</span> / <span className="text-[var(--neg)]">{stats.down}</span></>} />
+                <Stat label="Median P/E" value={stats.pe === null ? "—" : stats.pe.toFixed(1)} />
+                <Stat label="Median ROE" value={stats.roe === null ? "—" : `${stats.roe.toFixed(1)}%`} />
+                <Stat label="Median ROCE" value={stats.roce === null ? "—" : `${stats.roce.toFixed(1)}%`} />
               </div>
             )}
           </div>
         )}
-
-        {ready && state.lists.length === 0 && (
-          <p className="text-[var(--ink2)]">No lists yet — create one above.</p>
-        )}
-        {moving && null}
       </main>
+
+      {/* ── one instrument ── */}
+      {sheetSym && active && (
+        <InfoDialog title={sheetRow ? shortName(sheetRow.name, sheetSym) : shownSymbol(sheetSym)} onClose={() => setSheet(null)}>
+          <div className="flex items-baseline flex-wrap gap-x-2">
+            <span className="text-[24px] font-semibold tabular-nums text-[var(--ink)]">{money(sheetRow?.price)}</span>
+            <span className={`text-[13px] tabular-nums ${tone(sheetRow?.ret_1d)}`}>
+              {signed(dayMove(sheetRow?.price, sheetRow?.ret_1d))} ({signed(sheetRow?.ret_1d)}%)
+            </span>
+          </div>
+          <p className="text-[11px] text-[var(--ink3)]">
+            {shownSymbol(sheetSym)}{sheetRow?.exchange && ` · ${sheetRow.exchange}`}{asof && ` · Close ${shortDay(asof)}`}
+          </p>
+          {sheetRow && !sheetRow.commodity && (
+            <div className="grid grid-cols-3 gap-3 py-2">
+              <Stat label="1M" value={sheetRow.ret_1m === undefined ? "—" : `${signed(sheetRow.ret_1m, 1)}%`} className={tone(sheetRow.ret_1m)} />
+              <Stat label="P/E" value={sheetRow.pe === undefined ? "—" : sheetRow.pe.toFixed(1)} />
+              <Stat label="Market cap" value={sheetRow.mcap ? `₹${money(sheetRow.mcap, 0)} Cr` : "—"} />
+              <Stat label="ROE" value={sheetRow.roe === undefined ? "—" : `${sheetRow.roe.toFixed(1)}%`} />
+              <Stat label="ROCE" value={sheetRow.roce === undefined ? "—" : `${sheetRow.roce.toFixed(1)}%`} />
+              <Stat label="Div yield" value={sheetRow.div_yield === undefined ? "—" : `${sheetRow.div_yield.toFixed(2)}%`} />
+            </div>
+          )}
+          {held.has(sheetSym) && (
+            <p className="text-[12px] text-[var(--accent-ink)] inline-flex items-center gap-1">
+              <Icon name="bag" size={13} /> You hold {held.get(sheetSym)?.toLocaleString("en-IN")} in Portfolio
+            </p>
+          )}
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <Link href={symbolHref(sheetSym)}
+              className="rs-press inline-flex items-center justify-center gap-2 min-h-[44px] rounded-xl bg-[var(--accent-fill)] text-[var(--accent-fill-ink)] text-[14px] font-semibold">
+              <Icon name="page" size={16} /> Overview
+            </Link>
+            <Link href={chartHref(sheetSym, sheetRow)} onClick={rememberReturn}
+              className="rs-press inline-flex items-center justify-center gap-2 min-h-[44px] rounded-xl border border-[var(--line2)] text-[var(--ink)] text-[14px] font-semibold">
+              <Icon name="chart" size={16} /> Chart
+            </Link>
+          </div>
+          {state.lists.length > 1 && (
+            <div className="pt-2">
+              <p className="text-[11px] uppercase tracking-wide text-[var(--ink3)] mb-1.5">Move to</p>
+              <div className="flex flex-wrap gap-2">
+                {state.lists.filter((l) => l.id !== active.id).map((l) => (
+                  <button key={l.id} type="button"
+                    onClick={() => { setState(moveSymbol(active.id, l.id, sheetSym)); setSheet(null); }}
+                    className="rs-press min-h-[34px] px-3 rounded-full border border-[var(--line)] text-[13px] text-[var(--ink)]">
+                    {l.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="pt-1">
+            <SheetAction icon="trash" danger onClick={() => { setState(removeFrom(active.id, sheetSym)); setSheet(null); }}>
+              Remove from {active.name}
+            </SheetAction>
+          </div>
+        </InfoDialog>
+      )}
+
+      {/* ── sort and edit ── */}
+      {sheet?.kind === "sort" && (
+        <InfoDialog title="Sort" onClose={() => setSheet(null)}>
+          <Chips value={sort.k} options={SORTS}
+            onChange={(k) => setSort({ k, d: k === sort.k ? (sort.d === 1 ? -1 : 1) : k === "az" ? 1 : -1 })} />
+          {sort.k !== "manual" && (
+            <button type="button" onClick={() => setSort({ ...sort, d: sort.d === 1 ? -1 : 1 })}
+              className="text-[13px] text-[var(--accent-ink)] font-semibold">
+              {sort.k === "az" ? (sort.d === 1 ? "A to Z" : "Z to A") : sort.d === -1 ? "Highest first" : "Lowest first"} · Reverse
+            </button>
+          )}
+          <div className="pt-2 border-t border-[var(--line)]">
+            <SheetAction icon="edit" onClick={() => { setSort({ k: "manual", d: -1 }); setQuery(""); setEditing(true); setSheet(null); }}>
+              Edit {active?.name ?? "list"}
+            </SheetAction>
+          </div>
+        </InfoDialog>
+      )}
+
+      {/* ── this list ── */}
+      {sheet?.kind === "list" && active && (
+        <InfoDialog title={active.name} onClose={() => setSheet(null)}>
+          <label className="block">
+            <span className="text-[11px] text-[var(--ink3)]">Name</span>
+            <input value={nameText} onChange={(e) => setNameText(e.target.value)}
+              onBlur={() => setState(renameList(active.id, nameText))}
+              onKeyDown={(e) => { if (e.key === "Enter") { setState(renameList(active.id, nameText)); setSheet(null); } }}
+              className="mt-1 w-full h-10 px-3 rounded-lg border border-[var(--line)] bg-[var(--card2)] text-[14px] text-[var(--ink)] outline-none focus:border-[var(--accent-line)]" />
+          </label>
+          <label className="block">
+            <span className="text-[11px] text-[var(--ink3)]">Note</span>
+            <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} rows={2}
+              onBlur={() => setState(setListNote(active.id, noteText))}
+              placeholder="What is this list for?"
+              className="mt-1 w-full px-3 py-2 rounded-lg border border-[var(--line)] bg-[var(--card2)] text-[13px] text-[var(--ink)] outline-none focus:border-[var(--accent-line)]" />
+          </label>
+          <div className="grid grid-cols-2 gap-1">
+            <SheetAction icon="handle" onClick={() => setState(reorderList(active.id, -1))}>Move tab left</SheetAction>
+            <SheetAction icon="handle" onClick={() => setState(reorderList(active.id, 1))}>Move tab right</SheetAction>
+          </div>
+          <SheetAction icon="edit" onClick={() => { setSort({ k: "manual", d: -1 }); setQuery(""); setEditing(true); setSheet(null); }}>
+            Edit and reorder
+          </SheetAction>
+          {confirmDelete ? (
+            <div className="flex items-center gap-2 px-3 min-h-[46px]">
+              <span className="flex-1 text-[13px] text-[var(--neg)]">Delete {active.name} and its {active.symbols.length}?</span>
+              <button type="button" onClick={() => { setState(deleteList(active.id)); setSheet(null); }}
+                className="rs-press min-h-[34px] px-3 rounded-full bg-[var(--neg)] text-white text-[13px] font-semibold">Delete</button>
+              <button type="button" onClick={() => setConfirmDelete(false)}
+                className="rs-press min-h-[34px] px-3 rounded-full border border-[var(--line)] text-[13px]">Keep</button>
+            </div>
+          ) : (
+            <SheetAction icon="trash" danger onClick={() => setConfirmDelete(true)}>Delete list</SheetAction>
+          )}
+        </InfoDialog>
+      )}
+
+      {/* ── a new list ── */}
+      {sheet?.kind === "new" && (
+        <InfoDialog title="New watchlist" onClose={() => setSheet(null)}>
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            setState(createList(nameText || `Watchlist ${state.lists.length + 1}`));
+            setEditing(false); setQuery(""); setSheet(null);
+          }} className="space-y-3">
+            <input autoFocus value={nameText} onChange={(e) => setNameText(e.target.value)}
+              placeholder={`Watchlist ${state.lists.length + 1}`} aria-label="Name"
+              className="w-full h-11 px-3 rounded-lg border border-[var(--line)] bg-[var(--card2)] text-[14px] text-[var(--ink)] outline-none focus:border-[var(--accent-line)]" />
+            <button type="submit"
+              className="rs-press w-full min-h-[44px] rounded-xl bg-[var(--accent-fill)] text-[var(--accent-fill-ink)] text-[14px] font-semibold">
+              Create
+            </button>
+          </form>
+        </InfoDialog>
+      )}
     </div>
   );
 }

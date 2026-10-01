@@ -124,6 +124,21 @@ export function reorderList(id: string, dir: -1 | 1): WatchState {
   return save({ ...s, lists });
 }
 
+/** A list's symbols in the order given - the edit screen's drag. Anything
+ *  the given order leaves out keeps its place at the end, so a sync landing
+ *  mid-drag cannot lose a symbol. */
+export function reorderSymbols(listId: string, symbols: string[]): WatchState {
+  const s = loadLists();
+  return save({
+    ...s,
+    lists: s.lists.map((l) => {
+      if (l.id !== listId) return l;
+      const keep = symbols.filter((x) => l.symbols.includes(x));
+      return { ...l, symbols: [...keep, ...l.symbols.filter((x) => !keep.includes(x))] };
+    }),
+  });
+}
+
 /** Which lists a symbol currently sits on. */
 export function listsWith(symbol: string, s: WatchState = loadLists()): string[] {
   return s.lists.filter((l) => l.symbols.includes(symbol)).map((l) => l.id);
