@@ -11,7 +11,7 @@ const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 type Data = { generated_at: string; asof: string | null; items: CommodityListItem[] };
 
-const SHOWS = [["next", "Next expiry"], ["world", "vs World"], ["chg", "Day"]] as const;
+const SHOWS = [["next", "Next expiry"], ["world", "vs World / Spot"], ["chg", "Day"]] as const;
 type Show = (typeof SHOWS)[number][0];
 
 export default function CommoditiesPage() {
@@ -34,7 +34,11 @@ export default function CommoditiesPage() {
   }, [data, minis]);
 
   const cell = (x: CommodityListItem) => {
-    if (show === "world") return [signed(x.world_prem), x.world_prem === null ? "text-[var(--ink3)]" : "text-[var(--ink)]"];
+    if (show === "world") {
+      // MCX against the world; NCDEX, which has no world contract, against its mandi.
+      const v = x.world_prem ?? x.spot_prem ?? null;
+      return [signed(v), v === null ? "text-[var(--ink3)]" : "text-[var(--ink)]"];
+    }
     if (show === "chg") return [signed(x.chg, 2), signClass(x.chg)];
     return [signed(x.next_prem, 2), x.next_prem === null ? "text-[var(--ink3)]" : "text-[var(--ink)]"];
   };
@@ -49,7 +53,8 @@ export default function CommoditiesPage() {
             <p>MCX futures: the same commodity trades for several delivery months at once, each at its own price.</p>
             <p><b>Next expiry</b> is how far the second month sits above the first. Above zero, later delivery costs more — usually the interest and storage on holding the metal. Below zero, the market wants it now.</p>
             <p><b>vs World</b> is MCX against the same month on COMEX or NYMEX, in rupees at the day&apos;s dollar rate. For gold and silver most of the gap is import duty; for crude and gas, which MCX settles on the US price, it should be near zero.</p>
-            <p>MCX prices are its own daily closes, from Upstox&apos;s public data; world prices from Yahoo. NCDEX prices come through your Angel One login, read-only - they appear once its keys are saved in GitHub.</p>
+            <p>For NCDEX the same column is the contract against the physical (mandi) price at its delivery centre - Unjha for jeera, Deesa for castor - from Agmarknet. Most of that gap is grade and place.</p>
+            <p>MCX prices are its own daily closes, from Upstox&apos;s public data; world prices from Yahoo. NCDEX prices come through your Angel One login, read-only.</p>
           </InfoTip>
         </h1>
 

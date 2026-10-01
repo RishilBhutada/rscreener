@@ -5,10 +5,14 @@ export type CommodityListItem = {
   s: string; name: string; group: string; quoted: string; family: string;
   expiry: string; date: string; close: number; chg: number | null;
   next_prem: number | null; carry_pa: number | null; world_prem: number | null;
+  /** NCDEX: the most traded month over its delivery centre's mandi price. */
+  spot_prem?: number | null;
   oi: number; vol: number; n: number; exchange?: string;
 };
 
 export type WorldQuote = { ticker: string; usd: number; fx: number; inr: number; prem: number };
+/** The mandi's price that day, in the contract's quoted unit. */
+export type SpotQuote = { date: string; price: number; prem: number };
 
 export type CurveRow = {
   key: string; expiry: string; days: number; date: string; fresh: boolean; expiring: boolean;
@@ -16,16 +20,19 @@ export type CurveRow = {
   /** Null where the source carries no open interest (NCDEX's daily candles),
    *  and no contract value where the contract size is not on record. */
   vol: number; oi: number | null; oi_chg: number | null; value: number | null;
-  prem_front?: number | null; carry_pa?: number | null; world?: WorldQuote;
+  prem_front?: number | null; carry_pa?: number | null; world?: WorldQuote; spot?: SpotQuote;
 };
 
-/** day, open, high, low, close, volume, open interest, world price in MCX rupees */
+/** day, open, high, low, close, volume, open interest, and the comparison
+ *  price: the world contract in MCX rupees, or for NCDEX the mandi's price */
 export type Bar = [number, number, number, number, number, number, number | null, number | null];
 
 export type CommodityDoc = {
   s: string; code?: string; name: string; group: string; quoted: string; family: string; exchange: string;
   asof: string; mult: number | null; tick: number; active: string; front: string | null;
   world: { label: string; unit: string; front: string } | null;
+  /** NCDEX: the delivery centre's mandi price, from Agmarknet. */
+  spot?: { label: string; source: string; date: string; price: number; series: [number, number][] } | null;
   curve: CurveRow[];
   world_curve: { expiry: string; usd: number; prem_first: number }[];
   hist: Record<string, Bar[]>;

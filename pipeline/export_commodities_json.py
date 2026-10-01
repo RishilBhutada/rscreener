@@ -11,6 +11,9 @@ Three comparisons, each between prices from the SAME day:
     same delivery month, in rupees at that day's USD/INR. A contract whose
     last trade is days old is shown with its date and left out of both.
   - Front against next, day by day, for as long as the store reaches.
+  - NCDEX against the mandi. Each contract against the physical price at its
+    delivery centre that day (fetch_spot.py, from Agmarknet), in the
+    contract's own unit - the agri counterpart of MCX against the world.
 
 A close is "fresh" only if it is from the newest day the contract type
 traded; an untraded far month keeps its last close, and a premium worked out
@@ -25,7 +28,7 @@ from collections import defaultdict
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from commodities_lib import FX, GROUPS, NCDEX_SUFFIX, WORLD, describe, world_front, world_ticker
+from commodities_lib import FX, GROUPS, NCDEX_SUFFIX, SPOT, WORLD, describe, world_front, world_ticker
 from export_chart_json import OUT as CHART_DIR, _day, _normalise, _px
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,6 +37,7 @@ LIST_OUT = ROOT / "web" / "public" / "commodities.json"
 DIR_OUT = ROOT / "web" / "public" / "commodity"
 EPOCH = date(1970, 1, 1)
 WORLD_MAX_GAP = 4      # days between an MCX close and the world close it is set against
+SPOT_MAX_GAP = 4       # the same for an NCDEX close and the mandi price
 # A contract in its last days is in delivery: few trade it and its close
 # drifts to where the metal can be delivered, not where the market is. It is
 # shown, flagged, but never the base the other expiries are measured from.
@@ -104,6 +108,20 @@ def main() -> None:
     for t, rows in wrows.items():
         world[t] = Series(rows)
     fx = world.get(FX)
+    # Mandi prices, already in each contract's quoted unit.
+    spot: dict[str, Series] = {}
+    if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='commodity_spot'").fetchone():
+        srows: dict[str, list] = defaultdict(list)
+        for r, d, v in con.execute("SELECT root, date, price FROM commodity_spot WHERE price > 0"):
+            m = SPOT.get(r.removesuffix(NCDEX_SUFFIX))
+            if m:
+                srows[r].append((d, v * m.get("per_q", 1.0)))
+        spot = {r: Series(rows) for r, rows in srows.items()}
+
+    def spot_at(root: str, d: str) -> tuple[str, float] | None:
+        s_ = spot.get(root)
+        hit = s_.at(d) if s_ else None
+        return hit if hit and day_no(d) - day_no(hit[0]) <= SPOT_MAX_GAP else None
 
     def world_inr(root: str, ticker: str | None, d: str) -> tuple[float, float, float] | None:
         """(world price in its own unit, USD/INR, in MCX rupees) for day d."""
@@ -152,6 +170,13 @@ def main() -> None:
             wi = world_inr(root, wt, d)
             if wi:
                 row["world"] = {"ticker": wt, "usd": r2(wi[0], 3), "fx": r2(wi[1], 3), "inr": r2(wi[2]), "prem": r2((close / wi[2] - 1) * 100)}
+            sp = spot_at(root, d)
+            if sp:
+                prem = (close / sp[1] - 1) * 100
+                # No "% a year" here: most of a futures-to-mandi gap is grade and
+                # place (a contract's specified quality against whatever arrived
+                # at the mandi), not time, and annualising it reads as nonsense.
+                row["spot"] = {"date": sp[0], "price": r2(sp[1]), "prem": r2(prem)}
             curve.append(row)
         fresh = [r for r in curve if r["fresh"]]
         front = next((r for r in fresh if not r["expiring"]), None)
@@ -170,7 +195,10 @@ def main() -> None:
             rows = []
             for d, o, h, lo, close, vol, oi in bars[c["key"]]:
                 wi = world_inr(root, wt, d)
-                rows.append([day_no(d), o, h, lo, close, vol, oi, r2(wi[2]) if wi else None])
+                # The comparison price: the world contract in rupees, or for
+                # NCDEX the mandi's price that day.
+                cmp_ = wi[2] if wi else (sp[1] if (sp := spot_at(root, d)) else None)
+                rows.append([day_no(d), o, h, lo, close, vol, oi, r2(cmp_)])
             hist[c["expiry"]] = rows
 
         # Front over next, each day both traded - from every contract stored,
@@ -220,6 +248,12 @@ def main() -> None:
         write_chart(cont, f"{name} - continuous (front month)", exch, [front_by_day[d] for d in sorted(front_by_day)])
 
         w = WORLD.get(root)
+        sm = SPOT.get(root.removesuffix(NCDEX_SUFFIX)) if root.endswith(NCDEX_SUFFIX) else None
+        ss = spot.get(root)
+        spot_doc = {
+            "label": sm["label"], "source": "Agmarknet", "date": ss.d[-1], "price": r2(ss.v[-1]),
+            "series": [[day_no(d), r2(v)] for d, v in zip(ss.d, ss.v)],
+        } if sm and ss and ss.d else None
         doc = {
             "charts": {"continuous": cont, "by_expiry": chart_of},
             "s": root, "code": root.removesuffix(NCDEX_SUFFIX), "name": name, "group": group, "quoted": quoted,
@@ -227,6 +261,7 @@ def main() -> None:
             "asof": asof, "mult": live[0]["mult"], "tick": live[0]["tick"],
             "active": active["expiry"], "front": front["expiry"] if front else None,
             "world": {"label": w["label"], "unit": w["unit"], "front": world_front(root)} if w else None,
+            "spot": spot_doc,
             "curve": curve, "world_curve": wcurve, "hist": hist, "spread": spread,
             "untraded": sum(1 for c in contracts.values() if c["root"] == root and c["live"] and not bars.get(c["key"])),
         }
@@ -236,6 +271,7 @@ def main() -> None:
             "expiry": active["expiry"], "date": active["date"], "close": active["close"], "chg": active["chg"],
             "next_prem": nxt.get("prem_front") if nxt else None, "carry_pa": nxt.get("carry_pa") if nxt else None,
             "world_prem": active.get("world", {}).get("prem"),
+            "spot_prem": active.get("spot", {}).get("prem"),
             "oi": sum(r["oi"] or 0 for r in fresh), "vol": sum(r["vol"] for r in fresh), "n": len(curve),
             "exchange": live[0]["exchange"],
         })

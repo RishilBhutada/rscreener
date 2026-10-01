@@ -71,6 +71,44 @@ NCDEX_ROOTS: dict[str, tuple[str, str]] = {
     "RAINCHNNAI": ("Rain Index Chennai", "points"), "RAINMUMBAI": ("Rain Index Mumbai", "points"),
 }
 
+# One NCDEX contract in its quoted unit. Angel's instrument file gives the
+# lot in tonnes (jeera 3, castor 5, pepper 1, cottonseed oilcake 10), which
+# puts every contract between about Rs 3 and 11 lakh - NCDEX's usual size.
+# Kapas and cotton are left out: their lot of "1" is not tonnes.
+PER_TONNE = {"₹ per quintal": 10, "₹ per kg": 1000, "₹ per 10 kg": 100, "₹ per tonne": 1}
+NO_MULT = {"KAPAS", "COTTON", "RAINCHNNAI", "RAINMUMBAI"}
+
+
+def ncdex_mult(base: str, lot: float | None) -> float | None:
+    if not lot or base in NO_MULT:
+        return None
+    f = PER_TONNE.get(NCDEX_ROOTS.get(base, ("", ""))[1])
+    return lot * f if f else None
+
+
+# The physical (mandi) price each NCDEX contract is set against: the
+# contract's own delivery centre where its mandi reports to Agmarknet, the
+# Government of India's market-price service. Agmarknet prices are in rupees
+# per quintal; `per_q` turns one into the contract's quoted unit.
+#   cmdt     Agmarknet commodity id
+#   market   Agmarknet market id, with its state - or None to use the
+#            state's arrival-weighted average (Kerala for pepper, whose
+#            Kochi trade is not an APMC market)
+#   variety  part of the variety name to keep, where a mandi reports several
+SPOT: dict[str, dict] = {
+    "JEERAUNJHA": {"cmdt": 38, "market": 58, "state": 11, "label": "Unjha mandi"},
+    "JEERAMINI": {"cmdt": 38, "market": 58, "state": 11, "label": "Unjha mandi"},
+    "GUARSEED10": {"cmdt": 342, "market": 267, "state": 29, "label": "Jodhpur mandi"},
+    "TMCFGRNZM": {"cmdt": 35, "market": 14, "state": 32, "label": "Nizamabad mandi", "variety": "finger"},
+    "DHANIYA": {"cmdt": 92, "market": 268, "state": 29, "label": "Kota mandi"},
+    "CASTOR": {"cmdt": 106, "market": 50, "state": 11, "label": "Deesa mandi"},
+    "ISABGOL": {"cmdt": 212, "market": 58, "state": 11, "label": "Unjha mandi"},
+    "SESAMESEED": {"cmdt": 11, "market": 60, "state": 11, "label": "Rajkot mandi"},
+    "KAPAS": {"cmdt": 15, "market": 60, "state": 11, "label": "Rajkot mandi", "per_q": 1 / 5},
+    "BAJRA": {"cmdt": 28, "market": 263, "state": 29, "label": "Jaipur mandi"},
+    "PEPPER": {"cmdt": 34, "market": None, "state": 17, "label": "Kerala average", "per_q": 1 / 100},
+}
+
 GROUPS = ["Bullion", "Energy", "Base metals", "Agri", "NCDEX", "Indices", "Other"]
 
 

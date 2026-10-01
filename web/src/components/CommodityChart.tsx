@@ -44,7 +44,11 @@ function alpha(color: string, a: number): string {
 const inr = (v: number | null | undefined) =>
   v === null || v === undefined ? "—" : `₹${v.toLocaleString("en-IN", { maximumFractionDigits: v >= 1000 ? 0 : 2 })}`;
 
-export default function CommodityChart({ bars, worldLabel }: { bars: Bar[]; worldLabel: string | null }) {
+export default function CommodityChart({ bars, worldLabel, cmpTab = "vs World" }: {
+  bars: Bar[]; worldLabel: string | null;
+  /** The lower pane's name: "vs World" for MCX, "vs Spot" for NCDEX's mandi price. */
+  cmpTab?: string;
+}) {
   const boxRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const hasWorld = !!worldLabel && bars.some((b) => b[7] !== null);
@@ -172,7 +176,7 @@ export default function CommodityChart({ bars, worldLabel }: { bars: Bar[]; worl
           ))}
         </div>
         <div role="radiogroup" aria-label="Lower pane" className="ml-auto flex items-center gap-1">
-          {([["world", "vs World"], ["oi", "OI"]] as const).filter(([k]) => (k !== "world" || hasWorld) && (k !== "oi" || hasOI)).map(([k, label]) => (
+          {([["world", cmpTab], ["oi", "OI"]] as const).filter(([k]) => (k !== "world" || hasWorld) && (k !== "oi" || hasOI)).map(([k, label]) => (
             <button key={k} role="radio" aria-checked={lower === k} onClick={() => setLower(k)}
               className={`min-h-[34px] px-2.5 rounded-lg text-[13px] font-semibold ${lower === k ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)] active:bg-[var(--card2)]"}`}>
               {label}

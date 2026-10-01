@@ -48,7 +48,7 @@ function lotText(mult: number, quoted: string): string {
   const basis = quoted.replace(/^₹ per /, "");
   if (quoted === "points") return `${mult} × index`;
   if (/^\d/.test(basis)) return `${mult.toLocaleString("en-IN")} × ${basis}`;
-  const plural = mult !== 1 && ["barrel", "tonne", "bale"].includes(basis) ? "s" : "";
+  const plural = mult !== 1 && ["barrel", "tonne", "bale", "quintal"].includes(basis) ? "s" : "";
   return `${mult.toLocaleString("en-IN")} ${basis}${plural}`;
 }
 
@@ -62,9 +62,12 @@ function TermCurve({ doc }: { doc: CommodityDoc }) {
   const wBase = front.world?.usd;
   const wpts = wBase ? doc.curve.filter((r) => r.world && r.expiry >= front.expiry && !r.expiring)
     .map((r) => ({ d: r.days, y: ((r.world as NonNullable<CurveRow["world"]>).usd / wBase - 1) * 100 })) : [];
-  if (pts.length < 2) return null;
-  const W = 340, H = 150, L = 34, R = 10, T = 12, B = 26;
-  const xs = [...pts, ...wpts].map((p) => p.d), ys = [0, ...pts.map((p) => p.y), ...wpts.map((p) => p.y)];
+  // The mandi's price, as a point at day zero: where the curve starts from.
+  const sp = front.spot ? { d: 0, y: (front.spot.price / front.close - 1) * 100 } : null;
+  if (pts.length < 2 && !sp) return null;
+  const W = 340, H = 150, L = 34, R = 10, T = 14, B = 26;
+  const xs = [...pts, ...wpts, ...(sp ? [sp] : [])].map((p) => p.d);
+  const ys = [0, ...pts.map((p) => p.y), ...wpts.map((p) => p.y), ...(sp ? [sp.y] : [])];
   const x0 = Math.min(...xs), x1 = Math.max(...xs);
   let y0 = Math.min(...ys), y1 = Math.max(...ys);
   const pad = Math.max((y1 - y0) * 0.15, 0.2); y0 -= pad; y1 += pad;
@@ -80,6 +83,13 @@ function TermCurve({ doc }: { doc: CommodityDoc }) {
           <text key={i} x={L - 4} y={Y(v) + 3} textAnchor="end" fontSize="9" fill="var(--ink3)">{signed(v, 1)}</text>
         ))}
         {wpts.length > 1 && <path d={path(wpts)} fill="none" stroke="var(--chart-alt)" strokeWidth="1.5" strokeDasharray="4 3" />}
+        {sp && (
+          <g>
+            <path d={path([sp, pts[0]])} fill="none" stroke="var(--chart-alt)" strokeWidth="1.5" strokeDasharray="4 3" />
+            <circle cx={X(sp.d)} cy={Y(sp.y)} r="3.5" fill="var(--card)" stroke="var(--chart-alt)" strokeWidth="2" />
+            <text x={X(sp.d) + 6} y={Y(sp.y) - 6} fontSize="9" fill="var(--chart-alt)">Spot</text>
+          </g>
+        )}
         <path d={path(pts)} fill="none" stroke="var(--accent)" strokeWidth="2" />
         {pts.map((p) => (
           <g key={p.label}>
@@ -91,6 +101,7 @@ function TermCurve({ doc }: { doc: CommodityDoc }) {
       <p className="text-[11px] text-[var(--ink3)] flex gap-3">
         <span><i className="inline-block w-3 h-0.5 mr-1 align-middle bg-[var(--accent)]" />{doc.exchange}</span>
         {wpts.length > 1 && <span><i className="inline-block w-3 mr-1 align-middle border-t-2 border-dashed border-[var(--chart-alt)]" />{doc.world?.label}, same months</span>}
+        {sp && <span><i className="inline-block w-2 h-2 mr-1 align-middle rounded-full border-2 border-[var(--chart-alt)]" />{doc.spot?.label} spot</span>}
       </p>
     </div>
   );
@@ -98,6 +109,7 @@ function TermCurve({ doc }: { doc: CommodityDoc }) {
 
 function Expiries({ doc, pick, onPick }: { doc: CommodityDoc; pick: string; onPick: (e: string) => void }) {
   const hasWorld = doc.curve.some((r) => r.world);
+  const hasSpot = !hasWorld && doc.curve.some((r) => r.spot);
   const hasOI = doc.curve.some((r) => r.oi !== null);
   const num = (v: number) => v.toLocaleString("en-IN", { maximumFractionDigits: v >= 1000 ? 0 : 2 });
   return (
@@ -108,6 +120,7 @@ function Expiries({ doc, pick, onPick }: { doc: CommodityDoc; pick: string; onPi
           <th className="w-[24%] px-1 py-1.5 text-right font-medium">Price ₹</th>
           <th className="px-1 py-1.5 text-right font-medium">vs nearest</th>
           {hasWorld && <th className="px-1 py-1.5 text-right font-medium">vs World</th>}
+          {hasSpot && <th className="px-1 py-1.5 text-right font-medium">vs Spot</th>}
           {hasOI && <th className="pl-1 pr-3 py-1.5 text-right font-medium">OI</th>}
         </tr>
       </thead>
@@ -135,6 +148,9 @@ function Expiries({ doc, pick, onPick }: { doc: CommodityDoc; pick: string; onPi
             </td>
             {hasWorld && (
               <td className="px-1 py-2 text-right">{r.world && r.fresh ? signed(r.world.prem) : <span className="text-[var(--ink3)]">—</span>}</td>
+            )}
+            {hasSpot && (
+              <td className="px-1 py-2 text-right">{r.spot && r.fresh ? signed(r.spot.prem) : <span className="text-[var(--ink3)]">—</span>}</td>
             )}
             {hasOI && (
               <td className="pl-1 pr-3 py-2 text-right text-[var(--ink2)]">
@@ -204,7 +220,9 @@ function CommodityView() {
             sub={next ? `${expiryLabel(next.expiry)}${next.carry_pa != null ? ` · ${signed(next.carry_pa, 1)}/yr` : ""}` : "one expiry trading"} />
           {doc.world
             ? <Stat label="vs World" value={act.world ? signed(act.world.prem) : "—"} sub={doc.world.label} />
-            : <Stat label="Expires" value={dayLabel(act.expiry)} sub={`${act.days} days`} />}
+            : doc.spot
+              ? <Stat label="vs Spot" value={act.spot ? signed(act.spot.prem) : "—"} sub={doc.spot.label} />
+              : <Stat label="Expires" value={dayLabel(act.expiry)} sub={`${act.days} days`} />}
           {act.oi !== null
             ? <Stat label="Open interest" value={act.oi.toLocaleString("en-IN")}
                 sub={act.oi_chg !== null ? `${act.oi_chg > 0 ? "+" : ""}${act.oi_chg.toLocaleString("en-IN")} on the day` : undefined} />
@@ -219,7 +237,7 @@ function CommodityView() {
 
       <Card title="Expiries" tip={
         <InfoTip title="Expiries">
-          <p>Every delivery month MCX has open for {doc.name}, nearest first. Tap one to chart it. The dot marks the most traded month.</p>
+          <p>Every delivery month {doc.exchange} has open for {doc.name}, nearest first. Tap one to chart it. The dot marks the most traded month.</p>
           <p><b>vs nearest</b>: the price over the nearest month&apos;s. Below it, that premium spread over the days between the two expiries, as % a year - for metals, roughly the interest and storage the later buyer is paying for.</p>
           <p>A month in its last {5} days is <b>expiring</b>: it is in delivery, few trade it, and it is not used as the base. A grey price last traded on the date shown and is left out of the comparisons.</p>
           {doc.untraded > 0 && <p>{doc.untraded} more month{doc.untraded > 1 ? "s are" : " is"} listed but not traded yet.</p>}
@@ -231,6 +249,7 @@ function CommodityView() {
       <Card title="The curve" tip={
         <InfoTip title="The curve">
           <p>Each month&apos;s premium over the nearest, plotted by days to expiry. Rising: later delivery costs more (contango). Falling: the market pays up to have it now (backwardation) - for gas and electricity, mostly the season.</p>
+          {doc.spot && <p>Hollow dot: today&apos;s {doc.spot.label} price, where the curve starts from. A curve rising from it means later delivery costs more than buying in the mandi now.</p>}
           {doc.world && <p>Dashed: {doc.world.label} for the same delivery months, over its own nearest. Where MCX rises faster, the Indian later month carries more than the world&apos;s - Indian interest rates and the rupee&apos;s expected fall against the dollar both push it up.</p>}
         </InfoTip>
       }>
@@ -257,8 +276,8 @@ function CommodityView() {
         </>
       )} tip={
         <InfoTip title="Chart">
-          <p>The {expiryLabel(pick)} contract&apos;s daily candles over its life so far.{doc.world ? ` Dashed: ${doc.world.label} for the same delivery month, in rupees at each day's USD/INR.` : ""}</p>
-          <p><b>vs World</b>: MCX over that world price each day. <b>OI</b>: open interest, the contracts still outstanding - rising with price means new buyers, rising as it falls means new sellers.</p>
+          <p>The {expiryLabel(pick)} contract&apos;s daily candles over its life so far.{doc.world ? ` Dashed: ${doc.world.label} for the same delivery month, in rupees at each day's USD/INR.` : doc.spot ? ` Dashed: the ${doc.spot.label} price each day.` : ""}</p>
+          <p>{doc.spot && !doc.world ? <><b>vs Spot</b>: the contract over that mandi price each day.</> : <><b>vs World</b>: MCX over that world price each day.</>} <b>OI</b>: open interest, the contracts still outstanding - rising with price means new buyers, rising as it falls means new sellers.</p>
         </InfoTip>
       }>
         <div className="flex gap-1 px-2 pb-1 overflow-x-auto [scrollbar-width:none]">
@@ -269,7 +288,8 @@ function CommodityView() {
             </button>
           ))}
         </div>
-        <CommodityChart key={pick} bars={bars} worldLabel={pickRow?.world || bars.some((b) => b[7] !== null) ? doc.world?.label ?? null : null} />
+        <CommodityChart key={pick} bars={bars} cmpTab={doc.spot && !doc.world ? "vs Spot" : "vs World"}
+          worldLabel={pickRow?.world || pickRow?.spot || bars.some((b) => b[7] !== null) ? doc.world?.label ?? doc.spot?.label ?? null : null} />
       </Card>
 
       {doc.spread.length > 5 && (
@@ -299,6 +319,24 @@ function CommodityView() {
             <dt className="text-[var(--ink3)]">MCX</dt><dd>{rupees(act.close)}</dd>
             <dt className="text-[var(--ink3)]">Gap</dt>
             <dd className="font-semibold">{signed(act.world.prem)} <span className="font-normal text-[var(--ink3)]">({rupees(act.close - act.world.inr)})</span></dd>
+          </dl>
+        </Card>
+      )}
+
+      {doc.spot && act.spot && (
+        <Card title="Spot price" tip={
+          <InfoTip title="Spot price">
+            <p>The physical price {doc.spot.label === "Kerala average" ? "across Kerala's pepper markets, weighted by what arrived" : `at ${doc.spot.label.replace(/ mandi$/, "")}, the contract's delivery centre`}, as reported to Agmarknet, the Government of India&apos;s mandi-price service, in the contract&apos;s unit.</p>
+            <p>What is left between the two is mostly grade and place: a contract specifies a quality and delivery terms, while a mandi&apos;s price averages whatever arrived that day. A steady gap is normal; a gap that suddenly widens or closes is the news.</p>
+            <p>Mandi prices are as reported, not checked. The history starts in late September 2026 and grows by a day each night.</p>
+          </InfoTip>
+        }>
+          <dl className="px-3 pb-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm tabular-nums">
+            <dt className="text-[var(--ink3)]">{doc.spot.label}</dt>
+            <dd>{rupees(act.spot.price)} <span className="text-[var(--ink3)]">{doc.quoted.replace(/^₹ /, "")} · {dayLabel(act.spot.date)}</span></dd>
+            <dt className="text-[var(--ink3)]">{doc.exchange} {expiryLabel(act.expiry)}</dt><dd>{rupees(act.close)}</dd>
+            <dt className="text-[var(--ink3)]">Gap</dt>
+            <dd className="font-semibold">{signed(act.spot.prem)} <span className="font-normal text-[var(--ink3)]">({rupees(act.close - act.spot.price)})</span></dd>
           </dl>
         </Card>
       )}
@@ -333,7 +371,7 @@ function CommodityView() {
           <dt className="text-[var(--ink3)]">Sources</dt>
           <dd>
             {doc.exchange === "NCDEX"
-              ? "NCDEX daily prices via Angel One's SmartAPI, on your own login, read-only. Units per NCDEX's contract specifications as known here, not yet checked. Not checked against NCDEX's bhavcopy."
+              ? `NCDEX daily prices via Angel One's SmartAPI, on your own login, read-only${doc.spot ? " · mandi prices via Agmarknet (Government of India)" : ""}. Not checked against NCDEX's bhavcopy.`
               : <>MCX daily closes via Upstox&apos;s public data{doc.world ? " · world prices and USD/INR via Yahoo" : ""}. Not checked against MCX&apos;s bhavcopy.</>}
           </dd>
         </dl>

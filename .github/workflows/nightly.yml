@@ -250,6 +250,13 @@ jobs:
           ANGEL_PIN: ${{ secrets.ANGEL_PIN }}
           ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_ncdex.py
+      - name: Refresh the mandi (spot) price beside each NCDEX contract
+        # Agmarknet, the Government of India's mandi-price service: about a
+        # dozen open requests, every run. Its CAPTCHA-guarded reports are not
+        # used. No login.
+        env:
+          RSCREENER_STEP_MINUTES: "3"
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_spot.py
       - name: Refresh concall/rating documents (whole universe, rotating)
         if: steps.plan.outputs.earnings == '1'
         # 480 of 2,357 companies covered, and capped at the top 500 it would have

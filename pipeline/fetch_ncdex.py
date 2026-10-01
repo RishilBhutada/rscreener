@@ -165,11 +165,14 @@ def live_futures(today: str) -> list[dict]:
 def record(con: sqlite3.Connection, live: list[dict], today: str) -> None:
     """Add-only, like MCX's: an expired contract keeps its row, which is how
     its history stays findable."""
+    from commodities_lib import ncdex_mult   # here, so --check imports nothing of the pipeline
     for c in live:
+        mult = ncdex_mult(c["root"][: -len(NCDEX_SUFFIX)], c["lot"])
         con.execute("""
             INSERT INTO commodity_contracts VALUES (?,?,?,?,?,?,?,?,?,?,?)
-            ON CONFLICT(key) DO UPDATE SET last_seen=excluded.last_seen, lot=excluded.lot, tick=excluded.tick""",
-            (c["key"], "NCDEX", c["root"], c["expiry"], None, c["lot"], c["tick"], None, c["symbol"], today, today))
+            ON CONFLICT(key) DO UPDATE SET last_seen=excluded.last_seen, lot=excluded.lot, tick=excluded.tick,
+                                           mult=excluded.mult""",
+            (c["key"], "NCDEX", c["root"], c["expiry"], mult, c["lot"], c["tick"], None, c["symbol"], today, today))
     con.commit()
 
 
