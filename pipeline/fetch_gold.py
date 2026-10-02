@@ -6,7 +6,10 @@
   - Every FOMC decision date, past and scheduled: federalreserve.gov's
     meeting calendar (2021 onwards) - enough to measure gold's reaction to
     the Fed from the first run.
-  - Gold headlines: the GDELT news API, built for programs.
+  - Gold headlines: the GDELT news API, built for programs, and the RSS
+    feeds publishers put out for readers' apps (each feed's robots.txt
+    allows it). GDELT often refuses GitHub's shared runners; the feeds
+    keep the page fed when it does.
   - COMEX gold's daily closes (Yahoo GC=F) and its history from 2020, to
     measure how gold moved around each event.
 
@@ -15,12 +18,15 @@ and yesterday's rows stand.
 
 Usage:  python fetch_gold.py
 """
+import html
 import json
 import re
 import sqlite3
 import time
 from datetime import date, datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import requests
@@ -34,6 +40,13 @@ UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like 
 FF = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 FED = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
 GDELT = "https://api.gdeltproject.org/api/v2/doc/doc"
+FEEDS = [
+    "https://economictimes.indiatimes.com/markets/commodities/rssfeeds/1808152121.cms",
+    "https://economictimes.indiatimes.com/markets/commodities/news/rssfeeds/50991765.cms",
+    "https://www.business-standard.com/rss/markets/commodities-10608.rss",
+    "https://www.thehindubusinessline.com/markets/gold/feeder/default.rss",
+    "https://www.fxstreet.com/rss/news",
+]
 YAHOO = "https://query2.finance.yahoo.com/v8/finance/chart/GC%3DF?period1={p1}&period2={p2}&interval=1d"
 NY = ZoneInfo("America/New_York")
 MONTHS = {m: i + 1 for i, m in enumerate(["january", "february", "march", "april", "may", "june", "july",
@@ -125,41 +138,85 @@ def fomc_dates(con, today: str) -> None:
     print(f"FOMC: {n} decision dates from {FED}")
 
 
-def headlines(con) -> None:
+def save_headline(con, url: str, seen: datetime, title: str, domain: str) -> bool:
+    title = re.sub(r"\s+", " ", html.unescape(title)).strip()
+    if not url or not title or not re.search(r"gold|bullion", title, flags=re.I):
+        return False
+    now = datetime.now(timezone.utc)
+    if seen < now - timedelta(days=7):
+        return False
+    seen = min(seen, now)  # a feed that mislabels its time zone is not news from the future
+    con.execute("INSERT OR IGNORE INTO gold_news VALUES (?,?,?,?)",
+                (url, seen.strftime("%Y-%m-%dT%H:%M:%SZ"), title, domain.removeprefix("www.")))
+    return True
+
+
+def gdelt(con) -> int:
     q = ('("gold price" OR "gold prices" OR bullion OR "gold reserves" OR "gold import" OR "gold demand" '
          'OR "gold ETF" OR "gold rate") sourcelang:english')
     params = {"query": q, "mode": "artlist", "format": "json", "maxrecords": 150, "timespan": "3d", "sort": "datedesc"}
-    for attempt in range(2):
+    for wait in (15, 30, None):
         r = requests.get(GDELT, params=params, headers={"User-Agent": UA}, timeout=60)
-        if r.status_code == 429 and attempt == 0:
-            time.sleep(10)
-            continue
-        break
+        if r.status_code != 429 or wait is None:
+            break
+        time.sleep(wait)
     if r.status_code != 200:
-        print(f"headlines: HTTP {r.status_code} - keeping what is stored")
-        return
+        print(f"headlines: GDELT HTTP {r.status_code}")
+        return 0
     try:
         arts = r.json().get("articles") or []
     except ValueError:
-        print("headlines: not JSON - keeping what is stored")
-        return
+        print("headlines: GDELT answered without JSON")
+        return 0
     n = 0
     for a in arts:
-        title = re.sub(r"\s+", " ", (a.get("title") or "")).strip()
-        title = re.sub(r"\s+([,.:;!?'])", r"\1", title)
-        if not title or not re.search(r"gold|bullion", title, flags=re.I):
-            continue
         try:
-            seen = datetime.strptime(a.get("seendate", ""), "%Y%m%dT%H%M%SZ").strftime("%Y-%m-%dT%H:%M:%SZ")
+            seen = datetime.strptime(a.get("seendate", ""), "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
         except ValueError:
             continue
-        con.execute("INSERT OR IGNORE INTO gold_news VALUES (?,?,?,?)", (a.get("url"), seen, title, a.get("domain") or ""))
-        n += 1
+        n += save_headline(con, a.get("url") or "", seen, a.get("title") or "", a.get("domain") or "")
+    return n
+
+
+def feed_date(s: str) -> datetime | None:
+    s = s.strip()
+    try:
+        d = parsedate_to_datetime(s)
+    except (TypeError, ValueError):
+        try:
+            d = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
+def rss(con) -> int:
+    def tag(item: str, name: str) -> str:
+        m = re.search(rf"<{name}[^>]*>(.*?)</{name}>", item, flags=re.S)
+        return re.sub(r"<!\[CDATA\[|\]\]>", "", m.group(1)).strip() if m else ""
+    n = 0
+    for url in FEEDS:
+        try:
+            r = requests.get(url, headers={"User-Agent": UA}, timeout=40)
+            r.raise_for_status()
+        except requests.RequestException as e:
+            print(f"headlines: {urlparse(url).netloc} {type(e).__name__}")
+            continue
+        for item in re.findall(r"<item\b.*?</item>", r.content.decode("utf-8", "replace"), flags=re.S):
+            link, seen = html.unescape(tag(item, "link")), feed_date(tag(item, "pubDate"))
+            if seen:
+                n += save_headline(con, link, seen, tag(item, "title"), urlparse(link).netloc)
+        time.sleep(1)
+    return n
+
+
+def headlines(con) -> None:
+    g, f = gdelt(con), rss(con)
     # A week is all the page shows; older headlines go.
     cut = (datetime.now(timezone.utc) - timedelta(days=21)).strftime("%Y-%m-%dT%H:%M:%SZ")
     con.execute("DELETE FROM gold_news WHERE seen_utc < ?", (cut,))
     con.commit()
-    print(f"headlines: {n} gold headlines in the last three days")
+    print(f"headlines: {g} from GDELT, {f} from publishers' feeds")
 
 
 def comex(con) -> None:

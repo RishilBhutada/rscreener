@@ -186,7 +186,7 @@ export default function GoldPage() {
                 <div className="flex items-center gap-2">
                   <Chips value={minNews} options={[["3", "Three stars and up"], ["2", "All"]] as ["3" | "2", string][]} onChange={setMinNews} />
                   <InfoTip title="News">
-                    <p>Gold headlines from the last week, from the GDELT news index, refreshed each night. Each is rated by the first rule its headline matches - central-bank buying, India&apos;s import duty and Fed decisions highest; local price notices and single mining shares are left out.</p>
+                    <p>Gold headlines from the last week, from the GDELT news index and the commodity feeds of Economic Times, Business Standard, BusinessLine and FXStreet, refreshed each night. Each is rated by the first rule its headline matches - central-bank buying, India&apos;s import duty and Fed decisions highest; city price lists, miners&apos; press releases and single mining shares are left out.</p>
                     <p>The rating reads the headline only, not the article. Tap one for the rule it matched.</p>
                   </InfoTip>
                 </div>

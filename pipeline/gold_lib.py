@@ -112,9 +112,13 @@ NEWS_RULES: list[tuple[int, str, list[str]]] = [
     (5, "A Fed decision resets the cost of holding gold",
      [r"\bFed\b|Federal Reserve|FOMC|Powell", r"rate (cut|hike|decision)|cuts rates|raises rates|holds rates"]),
     (4, "Geopolitical shocks send buyers to gold as a safe haven",
-     [r"\bwars?\b|attack|missile|invasion|sanction|ceasefire|conflict", r"gold|safe.haven|bullion"]),
+     [r"\bwars?\b|attack|missile|invasion|sanction|ceasefire|conflict|geopolitic|tension|West Asia|Middle East|\bIran|Israel|Ukraine|Russia|Gaza|Taiwan",
+      r"gold|safe.haven|bullion"]),
     (4, "Fed policy signals move real yields and the dollar",
      [r"\bFed\b|Federal Reserve|FOMC|Powell", r"gold|yield|dollar"]),
+    (4, "Rate expectations set the cost of holding a metal that pays nothing",
+     [r"rate.?(hike|cut|hold)s?\b.*\b(bets?|expectations?|hopes?|odds|fears?)\b|(bets?|expectations?|hopes?|odds) of (a )?rate",
+      r"gold|bullion"]),
     (4, "US inflation data drives rate expectations",
      [r"inflation|CPI|PCE", r"gold|bullion"]),
     (4, "US jobs data move rate expectations",
@@ -125,8 +129,11 @@ NEWS_RULES: list[tuple[int, str, list[str]]] = [
      [r"ETF|SPDR|GLD", r"gold", r"inflow|outflow|holdings|redemption"]),
     (4, "Gold is priced in dollars; a big dollar move moves it",
      [r"dollar|DXY|greenback", r"gold|bullion"]),
+    (3, "Oil feeds inflation expectations, and through them rate bets",
+     [r"crude|\boil\b", r"gold|bullion"]),
     (3, "A record or a sharp move changes the market's footing",
-     [r"gold|bullion", r"record|all.time high|lifetime high|plunge|slump|surge|soar|tumble|crash|biggest"]),
+     [r"gold|bullion", r"record|all.time high|lifetime high|plunge|slump|surge|soar|tumble|crash|biggest"
+                       r"|jumps?|rall(y|ies)|spikes?|drops? more than|\b[2-9](\.\d+)?%"]),
     (3, "Physical demand in the two largest markets",
      [r"gold", r"China|India|jewel|wedding|Dhanteras|Akshaya|festive|demand"]),
     (2, "Commentary or a forecast", [r"\bgold\b|bullion", r"price|market|rate|ounce|demand|invest|forecast|outlook|central|ETF"]),
@@ -135,9 +142,12 @@ NEWS_RULES: list[tuple[int, str, list[str]]] = [
 
 # Local retail price notices ("gold rate today in Pakistan", "city-wise
 # rates") are most of what the news feed returns, and none of them is news.
-RETAIL = (r"in Pakistan|per tola|city.?wise|rates? today|prices? today|today'?s (gold )?rate|check (the )?latest|check rates"
+RETAIL = (r"in Pakistan|per tola|city.?wise|rates? today|prices? today|today['’]?s (gold )?rate|check (the )?latest|check rates"
           # single mining shares and fund tickers: company news, not gold news
-          r"|stock price|NYSEARCA|NASDAQ|NYSE:|TSX|ASX:|Should You Buy|price target|Miners ETF|Junior|Mining (Corp|Inc|Ltd)|Advances")
+          r"|stock price|NYSEARCA|NASDAQ|NYSE:|TSX|ASX:|Should You Buy|price target|Miners ETF|Junior|Mining (Corp|Inc|Ltd)|Advances"
+          # explorers' press releases ("X Gold Corp: X Announces Drilling...") and karat price lists
+          r"|\b(Corp|Inc|Ltd|Limited|plc)\b[.:]|Announces|Drilling|Exploration|Property|Financing|Launches|Initiative"
+          r"|gold loan|\b(24|22|18)K\b|rates in .* today|Current price of gold|Gold IRA|Price Prediction|\bmine\b")
 
 
 def clean_title(t: str) -> str:
@@ -146,6 +156,8 @@ def clean_title(t: str) -> str:
     t = re.sub(r"\s+([,.:;!?%')])", r"\1", t)
     t = re.sub(r"(\d)[,.] (\d)", lambda m: m.group(0).replace(" ", ""), t)
     t = re.sub(r"\b([A-Z])\. ([A-Z])\.", r"\1.\2.", t)
+    # "rate - hike", "20 - year"; a dash before a capital is a separator ("bets - Kitco")
+    t = re.sub(r"(\w) - ([a-z])", r"\1-\2", t)
     t = re.sub(r"\( ", "(", t)
     return re.sub(r"\s+", " ", t).strip(" -|")
 
