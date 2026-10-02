@@ -32,6 +32,9 @@ export const DESTINATIONS: { key: string; label: string; href: string; icon: str
   // MCX futures: every expiry side by side, and each against the world price.
   { key: "commodities", label: "Commodities", href: "/commodities",
     icon: "M3.5 19h8l-1.2-5h-5.6zM12.5 19h8l-1.2-5h-5.6zM8 12h8l-1.2-5H9.2z" },
+  // Gold: its price here and abroad, and the events that move it, rated.
+  { key: "gold", label: "Gold", href: "/gold",
+    icon: "M4 18h7l-1.2-5H5.2zM13 18h7l-1.2-5h-4.6zM8.5 11h7l-1.2-5H9.7z" },
   // Every NSE index and the Sensex: level, returns, valuation, members.
   { key: "indices", label: "Indices", href: "/indices",
     icon: "M4 19h16M5.5 15l4-4.5 3.5 3 5.5-7" },

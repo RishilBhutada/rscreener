@@ -258,6 +258,12 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "15"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_indices.py
+      - name: Refresh gold's calendar, Fed dates, headlines and COMEX closes
+        # Forex Factory's public week calendar, federalreserve.gov's meeting
+        # list, GDELT headlines and Yahoo's GC=F - one request each, every run.
+        env:
+          RSCREENER_STEP_MINUTES: "3"
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_gold.py
       - name: Refresh the mandi (spot) price beside each NCDEX contract
         # Agmarknet, the Government of India's mandi-price service: about a
         # dozen open requests, every run. Its CAPTCHA-guarded reports are not
@@ -427,6 +433,8 @@ jobs:
         # web/public/commodities.json and web/public/commodity/<ROOT>.json -
         # every expiry, the premium between them, and MCX against the world.
         run: python pipeline/export_commodities_json.py
+      - name: Write the gold page (events rated, headlines, prices)
+        run: python pipeline/export_gold_json.py
       - name: Write the indices page and one file per index
         # web/public/indices.json, idx/<SYM>.json, their valuation and chart
         # files, and a row each in the search index.

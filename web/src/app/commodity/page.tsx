@@ -207,6 +207,9 @@ function CommodityView() {
           <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink3)]">{doc.exchange} · {doc.code ?? doc.s}</span>
         </div>
         <p className="text-sm text-[var(--ink2)]">{doc.quoted}{doc.mult ? ` · one contract is ${lotText(doc.mult, doc.quoted)}` : ""}</p>
+        {doc.family === "GOLD" && (
+          <Link href="/gold" className="mt-1 inline-block text-[13px] font-semibold text-[var(--accent-ink)]">Gold events and news, rated</Link>
+        )}
       </header>
 
       <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] px-3 py-3">

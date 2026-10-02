@@ -435,7 +435,7 @@ function BackButton() {
   );
 }
 
-export default function TopNav({ active }: { active?: "home" | "screens" | "sectors" | "calendar" | "portfolio" | "watchlists" | "others" | "etfs" | "commodities" | "indices" | "status" | "settings" }) {
+export default function TopNav({ active }: { active?: "home" | "screens" | "sectors" | "calendar" | "portfolio" | "watchlists" | "others" | "etfs" | "commodities" | "indices" | "gold" | "status" | "settings" }) {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<Lite[]>([]);
