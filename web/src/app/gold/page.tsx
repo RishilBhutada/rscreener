@@ -34,6 +34,12 @@ function basis(f: GoldFamily, min: number): string {
   return `Rule-based: ${f.n} of these have gold prices around them so far; the stars switch to measured at ${min}.`;
 }
 
+/** The kind of event under its title - or, where the title already says
+ *  it ("ECB rate decision"), where the date comes from. */
+function subtitle(e: GoldEvent, label?: string): string {
+  return label && !e.title.toLowerCase().startsWith(label.toLowerCase()) ? label : e.src;
+}
+
 function Card({ title, tip, children }: { title: string; tip?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
@@ -160,7 +166,7 @@ export default function GoldPage() {
                       {list.map((e) => (
                         <li key={`${e.t}${e.title}`}>
                           <button type="button" onClick={() => setEv(e)} className="w-full flex items-start gap-3 px-3 py-2.5 text-left active:bg-[var(--card2)]">
-                            <span className="w-11 shrink-0 text-[12px] tabular-nums text-[var(--ink3)] pt-0.5">{istTime(e.t)}</span>
+                            <span className="w-11 shrink-0 text-[12px] tabular-nums text-[var(--ink3)] pt-0.5">{e.src.includes("approximate") ? "~" : ""}{istTime(e.t)}</span>
                             <span className="flex-1 min-w-0">
                               <span className="flex items-center gap-1.5">
                                 <span className="text-[10px] font-semibold rounded px-1 py-0.5 bg-[var(--card2)] text-[var(--ink3)]">{COUNTRY[e.c] ?? e.c}</span>
@@ -168,7 +174,7 @@ export default function GoldPage() {
                               </span>
                               <span className="block text-[11px] text-[var(--ink3)] tabular-nums truncate">
                                 {[e.actual && `Actual ${e.actual}`, e.forecast && `Forecast ${e.forecast}`, e.previous && `Previous ${e.previous}`].filter(Boolean).join(" · ")
-                                  || doc.families[e.fam]?.label}
+                                  || subtitle(e, doc.families[e.fam]?.label)}
                               </span>
                               {(e.comex || e.mcx) && (
                                 <span className="block text-[11px] tabular-nums">
