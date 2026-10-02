@@ -25,9 +25,11 @@ function Stars({ n, size = 13 }: { n: number; size?: number }) {
 }
 
 function basis(f: GoldFamily, min: number): string {
+  if (f.fixed) return "Set by rule: an exchange date, not news, so gold's moves around it are not measured.";
   if (f.ratio !== undefined && f.median_move !== undefined && f.normal_move !== undefined) {
     const since = f.since ? new Date(`${f.since}T00:00:00Z`).toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" }) : "";
-    return `Measured: on ${f.n} of these since ${since}, gold moved a median ${f.median_move}% the next session, against ${f.normal_move}% on an ordinary day - ${f.ratio.toFixed(1)}x.`;
+    const rule = f.stars !== f.rule ? ` The rule alone gave ${f.rule}.` : "";
+    return `Measured: on ${f.n} of these since ${since}, gold moved a median ${f.median_move}% the next session, against ${f.normal_move}% on an ordinary day - ${f.ratio.toFixed(1)}x.${rule}`;
   }
   return `Rule-based: ${f.n} of these have gold prices around them so far; the stars switch to measured at ${min}.`;
 }
@@ -47,7 +49,7 @@ export default function GoldPage() {
   const [tab, setTab] = useState<Tab>("calendar");
   const [when, setWhen] = useState<"next" | "past">("next");
   const [minNews, setMinNews] = useState<"3" | "2">("3");
-  const [minEv, setMinEv] = useState<"3" | "2">("3");
+  const [minEv, setMinEv] = useState<"3" | "1">("3");
   const [ev, setEv] = useState<GoldEvent | null>(null);
   const [item, setItem] = useState<GoldNews | null>(null);
   const [now, setNow] = useState(0);
@@ -107,8 +109,10 @@ export default function GoldPage() {
                   {s.comex && <p className={`text-[13px] font-semibold tabular-nums ${tone(s.comex.chg)}`}>{signed(s.comex.chg)}% <span className="font-normal text-[var(--ink3)]">· {istDay(`${s.comex.date}T12:00:00Z`)}</span></p>}
                 </div>
               </div>
-              <div className="mt-3 pt-3 border-t border-[var(--line)] grid grid-cols-4 gap-2">
+              <div className="mt-3 pt-3 border-t border-[var(--line)] grid grid-cols-3 gap-x-2 gap-y-3">
                 <Stat label="World in ₹" value={s.parity ? `₹${s.parity.toLocaleString("en-IN")}` : "—"} />
+                <Stat label={s.duty !== undefined ? `+ ${s.duty}% duty` : "With duty"} value={s.landed ? `₹${s.landed.toLocaleString("en-IN")}` : "—"} />
+                <Stat label="MCX vs that" value={s.mcx_vs_landed !== undefined ? `${signed(s.mcx_vs_landed, 1)}%` : "—"} />
                 <Stat label="MCX over world" value={s.mcx_prem !== undefined ? `${signed(s.mcx_prem, 1)}%` : "—"} />
                 <Stat label="USD/INR" value={s.usdinr ? s.usdinr.close.toFixed(2) : "—"} />
                 <Stat label="Gold/silver" value={s.gold_silver ? `${s.gold_silver}` : "—"} />
@@ -119,7 +123,8 @@ export default function GoldPage() {
                   onClick={() => { try { sessionStorage.setItem("rs_chart_from", "/gold"); } catch { /* private mode */ } }}
                   className="rs-press min-h-[34px] px-3 rounded-lg inline-flex items-center text-[12px] font-semibold text-[var(--accent-ink)] bg-[var(--accent-soft)]">Chart</Link>
                 <InfoTip title="Prices">
-                  <p>MCX: the nearest gold contract not in its last five days, closing price. COMEX: the front-month settlement, via Yahoo. World in ₹ is COMEX × USD/INR for 10 grams; MCX sits above it by India&apos;s import duty and taxes, plus the local premium.</p>
+                  <p>MCX: the nearest gold contract not in its last five days, closing price. COMEX: the front-month settlement, via Yahoo. World in ₹ is COMEX × USD/INR for 10 grams, on the same day as the MCX close.</p>
+                  {s.duty !== undefined && <p>India charges {s.duty}% import duty on gold{s.duty_since ? ` since ${istDay(`${s.duty_since}T12:00:00Z`)} ${s.duty_since.slice(0, 4)}` : ""}{s.duty_why ? ` - ${s.duty_why.charAt(0).toLowerCase()}${s.duty_why.slice(1)}` : ""}. MCX prices carry it and COMEX does not, so it is most of the gap. What is left - MCX vs the world price with duty - is the local premium or discount plus a month or two of carry. GST is not in either price.</p>}
                   <p>Gold/silver: grams of silver one gram of gold buys at MCX prices. Prices are as published, not checked further.</p>
                 </InfoTip>
               </div>
@@ -138,13 +143,16 @@ export default function GoldPage() {
               <>
                 <div className="flex items-center gap-2">
                   <Chips value={when} options={[["next", "Coming up"], ["past", "Past 45 days"]] as ["next" | "past", string][]} onChange={setWhen} />
-                  <Chips value={minEv} options={[["3", "3+"], ["2", "All"]] as ["3" | "2", string][]} onChange={setMinEv} />
+                  <Chips value={minEv} options={[["3", "3+"], ["1", "All"]] as ["3" | "1", string][]} onChange={setMinEv} />
                   <InfoTip title="Calendar">
-                    <p>Scheduled releases from Forex Factory&apos;s public calendar, which covers the current week; history builds from each night&apos;s copy. Fed decisions from federalreserve.gov, every scheduled meeting to 2027.</p>
-                    <p>Times are IST. Events rated one star are left out. Tap one for why it matters and, once it has happened, how gold moved.</p>
+                    <p>This week&apos;s releases, with forecasts, from Forex Factory&apos;s public calendar. Further ahead, from the publishers&apos; own schedules: Fed decisions (federalreserve.gov), GDP and PCE (BEA), retail sales (Census Bureau), ECB and Bank of Japan meetings, and MCX gold expiries. When the week&apos;s calendar lists a release, its copy is the one shown.</p>
+                    {doc.events.some((e) => e.src.startsWith("FRED"))
+                      ? <p>CPI, the jobs report, PPI, JOLTS and jobless claims: dates from FRED (St. Louis Fed), and each actual figure as first published.</p>
+                      : <p>CPI, the jobs report and PPI appear in the week they come out: their publisher, BLS, refuses programs.</p>}
+                    <p>Times are IST. Minor data rated one star is left out. Tap an event for why it matters and, once it has happened, how gold moved.</p>
                   </InfoTip>
                 </div>
-                {days.length === 0 && <p className="py-10 text-center text-[13px] text-[var(--ink3)]">Nothing rated {minEv === "3" ? "three" : "two"} stars or more {when === "next" ? "ahead" : "in the past 45 days"}</p>}
+                {days.length === 0 && <p className="py-10 text-center text-[13px] text-[var(--ink3)]">{minEv === "3" ? "Nothing rated three stars or more" : "Nothing"} {when === "next" ? "ahead" : "in the past 45 days"}</p>}
                 {days.map(([d, list]) => (
                   <section key={d} className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
                     <h3 className="px-3 py-2 text-[13px] font-semibold border-b border-[var(--line)]">{istDay(list[0].t)}</h3>

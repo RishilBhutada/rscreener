@@ -13,6 +13,8 @@ export type GoldEvent = {
 export type GoldFamily = {
   label: string; why: string; rule: number; stars: number; n: number;
   median_move?: number; normal_move?: number; ratio?: number; since?: string;
+  /** a date, not news: never measured */
+  fixed?: boolean;
 };
 
 export type GoldNews = { t: string; title: string; url: string; src: string; stars: number; why: string };
@@ -21,7 +23,9 @@ export type GoldDoc = {
   generated_at: string;
   snapshot: {
     mcx?: GoldQuote; comex?: GoldQuote; usdinr?: GoldQuote; silver?: GoldQuote;
-    parity?: number; mcx_prem?: number; gold_silver?: number;
+    parity?: number; parity_date?: string; mcx_prem?: number; gold_silver?: number;
+    /** India's import duty in force (%), since when and why; the world price with it; MCX against that */
+    duty?: number; duty_since?: string; duty_why?: string; landed?: number; mcx_vs_landed?: number;
   };
   events: GoldEvent[];
   families: Record<string, GoldFamily>;

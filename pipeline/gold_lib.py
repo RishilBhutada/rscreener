@@ -62,9 +62,32 @@ FAMILIES: dict[str, tuple[int, str, str]] = {
               "China is the world's largest buyer of physical gold. Weaker growth can cut jewellery demand; "
               "stimulus and a weaker yuan can push savers towards gold."),
     "boj": (2, "Bank of Japan decision", "Moves the yen, a fellow safe haven, and global bond yields."),
+    "mcx_expiry": (2, "MCX gold contract expiry",
+                   "The month's MCX gold contract stops trading; positions roll to the next month or settle. "
+                   "It matters to anyone holding MCX futures, not to the world price."),
     "other_high": (1, "Major data elsewhere", "A high-impact release in a smaller economy; it reaches gold, if at all, through the dollar."),
     "other": (1, "Other data", "Little direct link to gold."),
 }
+
+# Mechanical dates, not news: measuring the world price around them means nothing.
+NOT_MEASURED = {"mcx_expiry"}
+
+# India's import duty on gold - basic customs duty plus the agriculture cess -
+# from the day each rate took effect. MCX prices carry it; COMEX does not, so
+# it is most of the gap between the two.
+DUTY: list[tuple[str, float, str]] = [
+    ("2024-07-24", 6.0, "Union Budget, July 2024: cut from 15% to 6%"),
+    ("2026-05-13", 15.0, "Raised to 15% (10% basic customs duty + 5% agriculture cess) to support the rupee"),
+]
+
+
+def duty_on(day: str) -> tuple[float, str, str] | None:
+    """The duty in force on a day: (percent, since, why)."""
+    found = None
+    for since, pct, why in DUTY:
+        if since <= day:
+            found = (pct, since, why)
+    return found
 
 # (family, country or None for any, pattern) - first match wins.
 RULES: list[tuple[str, str | None, str]] = [

@@ -6,6 +6,14 @@
   - Every FOMC decision date, past and scheduled: federalreserve.gov's
     meeting calendar (2021 onwards) - enough to measure gold's reaction to
     the Fed from the first run.
+  - The official release schedules, past and coming, so the calendar looks
+    months ahead and more kinds of event can be measured: BEA (GDP, PCE),
+    the Census Bureau (retail sales), the ECB's meeting calendar and the
+    Bank of Japan's meeting list (each site's robots.txt allows it).
+  - With a FRED_API_KEY secret (free, from the St. Louis Fed): the dates of
+    CPI, the jobs report, PPI, JOLTS and jobless claims since 2021 and
+    ahead, and the actual figure of each release the night it comes out.
+    BLS, which publishes them, refuses programs; FRED republishes them.
   - Gold headlines: the GDELT news API, built for programs, and the RSS
     feeds publishers put out for readers' apps (each feed's robots.txt
     allows it). GDELT often refuses GitHub's shared runners; the feeds
@@ -20,6 +28,7 @@ Usage:  python fetch_gold.py
 """
 import html
 import json
+import os
 import re
 import sqlite3
 import time
@@ -48,6 +57,30 @@ FEEDS = [
     "https://www.fxstreet.com/rss/news",
 ]
 YAHOO = "https://query2.finance.yahoo.com/v8/finance/chart/GC%3DF?period1={p1}&period2={p2}&interval=1d"
+BEA = ["https://www.bea.gov/news/schedule/full-2025", "https://www.bea.gov/news/schedule/full"]
+CENSUS = ["https://www.census.gov/economic-indicators/calendar-listview-2025.html",
+          "https://www.census.gov/economic-indicators/calendar-listview.html"]
+ECB = "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html"
+BOJ = ["https://www.boj.or.jp/en/mopo/mpmsche_minu/past.htm", "https://www.boj.or.jp/en/mopo/mpmsche_minu/index.htm"]
+FRED = "https://api.stlouisfed.org/fred"
+# FRED release id: (family, title, New York time, a word the release's name must contain)
+FRED_RELEASES = {
+    10: ("us_cpi", "US CPI inflation", (8, 30), "Consumer Price"),
+    50: ("us_jobs", "US jobs report", (8, 30), "Employment Situation"),
+    46: ("us_ppi", "US producer prices (PPI)", (8, 30), "Producer Price"),
+    192: ("us_labour_minor", "US job openings (JOLTS)", (10, 0), "Job Openings"),
+    180: ("us_claims", "US jobless claims", (8, 30), "Claims"),
+}
+# Forex Factory title: (FRED series, how the calendar writes the figure)
+ACTUALS = {
+    "CPI m/m": ("CPIAUCSL", "mm"), "Core CPI m/m": ("CPILFESL", "mm"), "CPI y/y": ("CPIAUCNS", "yy"),
+    "Non-Farm Employment Change": ("PAYEMS", "change_k"), "Unemployment Rate": ("UNRATE", "level_pct"),
+    "Average Hourly Earnings m/m": ("CES0500000003", "mm"), "Core PCE Price Index m/m": ("PCEPILFE", "mm"),
+    "PPI m/m": ("PPIFIS", "mm"), "Retail Sales m/m": ("RSAFS", "mm"),
+    "JOLTS Job Openings": ("JTSJOL", "level_m"), "Unemployment Claims": ("ICSA", "level_k"),
+    "Advance GDP q/q": ("A191RL1Q225SBEA", "level_pct"), "Prelim GDP q/q": ("A191RL1Q225SBEA", "level_pct"),
+    "Final GDP q/q": ("A191RL1Q225SBEA", "level_pct"),
+}
 NY = ZoneInfo("America/New_York")
 MONTHS = {m: i + 1 for i, m in enumerate(["january", "february", "march", "april", "may", "june", "july",
                                          "august", "september", "october", "november", "december"])}
@@ -68,16 +101,40 @@ def connect() -> sqlite3.Connection:
     return con
 
 
-def upsert_event(con, key, when_utc, country, title, impact, forecast, previous, actual, source, today):
+def upsert_event(con, key, when_utc, country, title, impact, forecast, previous, actual, source, today,
+                 family: str | None = None):
     con.execute("""
         INSERT INTO gold_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(key) DO UPDATE SET when_utc=excluded.when_utc, impact=excluded.impact,
+            title=excluded.title, source=excluded.source,
             forecast=COALESCE(NULLIF(excluded.forecast,''), gold_events.forecast),
             previous=COALESCE(NULLIF(excluded.previous,''), gold_events.previous),
             actual=COALESCE(NULLIF(excluded.actual,''), gold_events.actual),
             family=excluded.family, last_seen=excluded.last_seen""",
         (key, when_utc, country, title, impact, forecast, previous, actual,
-         family_of(title, country, impact), source, today, today))
+         family or family_of(title, country, impact), source, today, today))
+
+
+def get(url: str) -> str:
+    r = requests.get(url, headers={"User-Agent": UA}, timeout=60)
+    r.raise_for_status()
+    return r.content.decode("utf-8", "replace")
+
+
+def plain(s: str) -> str:
+    s = re.sub(r"<script.*?</script>|<style.*?</style>", " ", s, flags=re.S)
+    return html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", s))).strip()
+
+
+def stamp(when: datetime) -> str:
+    return when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def ny_time(day: date, hm: str | tuple[int, int]) -> datetime:
+    if isinstance(hm, str):  # "8:30 AM"
+        t = datetime.strptime(hm.strip().upper(), "%I:%M %p")
+        hm = (t.hour, t.minute)
+    return datetime(day.year, day.month, day.day, hm[0], hm[1], tzinfo=NY)
 
 
 def week_calendar(con, today: str) -> None:
@@ -130,12 +187,218 @@ def fomc_dates(con, today: str) -> None:
                 continue
             title = "FOMC rate decision" + (" and projections" if m.group(3) else "")
             upsert_event(con, f"fed|FOMC|{when.date().isoformat()}", when.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                         "USD", title, "High", "", "", "", "federalreserve.gov", today)
-            # family_of reads the title; an FOMC decision is its own family.
-            con.execute("UPDATE gold_events SET family='fomc' WHERE key=?", (f"fed|FOMC|{when.date().isoformat()}",))
+                         "USD", title, "High", "", "", "", "federalreserve.gov", today, family="fomc")
             n += 1
     con.commit()
     print(f"FOMC: {n} decision dates from {FED}")
+
+
+def bea(con, today: str) -> None:
+    """GDP and PCE inflation (BEA's Personal Income and Outlays), last year's
+    schedule and this year's, past dates and coming ones."""
+    n = 0
+    for url in BEA:
+        page = get(url)
+        y = re.search(r"Year\s*(\d{4})", plain(page[page.find("<table"):][:3000])) or re.search(r"full-(\d{4})", url)
+        if not y:
+            print(f"BEA: no year on {url}")
+            continue
+        year = int(y.group(1))
+        for row in re.findall(r'<tr class="scheduled-releases-type-press">(.*?)</tr>', page, flags=re.S):
+            d = re.search(r'release-date">([^<]+)<', row)
+            t = re.search(r"<small[^>]*>([^<]+)<", row)
+            name = re.search(r"release-title[^>]*>(.*?)</td>", row, flags=re.S)
+            if not (d and t and name):
+                continue
+            name = plain(name.group(1))
+            gdp = re.match(r"GDP \(([^)]+)\).*?(\d)(?:st|nd|rd|th) Quarter (\d{4})", name)
+            if gdp:
+                fam, title = "us_growth", f"US GDP, Q{gdp.group(2)} {gdp.group(3)} ({gdp.group(1).lower()})"
+            elif name.startswith("Personal Income and Outlays,"):
+                fam, title = "us_pce", f"US PCE inflation, {name.split(',', 1)[1].strip()}"
+            else:
+                continue
+            try:
+                day = datetime.strptime(f"{d.group(1).strip()} {year}", "%B %d %Y").date()
+                when = ny_time(day, t.group(1))
+            except ValueError:
+                continue
+            upsert_event(con, f"bea|{fam}|{day}", stamp(when), "USD", title, "High", "", "", "", "BEA release schedule",
+                         today, family=fam)
+            n += 1
+        time.sleep(1)
+    con.commit()
+    print(f"BEA: {n} GDP and PCE release dates")
+
+
+def census(con, today: str) -> None:
+    """Retail sales (the Census Bureau's advance monthly report)."""
+    n = 0
+    for url in CENSUS:
+        for d, t, period in re.findall(
+                r"Advance Monthly Sales for Retail and Food Services\s+([A-Z][a-z]+ \d{1,2}, \d{4})\s+"
+                r"(\d{1,2}:\d{2} [AP]M)\s+([A-Z][a-z]+ \d{4})", plain(get(url))):
+            try:
+                day = datetime.strptime(d, "%B %d, %Y").date()
+                when = ny_time(day, t)
+            except ValueError:
+                continue
+            upsert_event(con, f"census|retail|{day}", stamp(when), "USD", f"US retail sales, {period}", "High",
+                         "", "", "", "Census Bureau schedule", today, family="us_growth")
+            n += 1
+        time.sleep(1)
+    con.commit()
+    print(f"Census: {n} retail-sales release dates")
+
+
+def ecb(con, today: str) -> None:
+    """Coming ECB decisions: the meeting day followed by a press conference,
+    decided at 14:15 Frankfurt time. The page lists only meetings ahead, so
+    the ECB's history builds from the week's calendar."""
+    n = 0
+    for d, m, y in re.findall(r"(\d{2})/(\d{2})/(\d{4}) Governing Council of the ECB: monetary policy meeting"
+                              r"[^/]*?followed by press conference", plain(get(ECB))):
+        when = datetime(int(y), int(m), int(d), 14, 15, tzinfo=ZoneInfo("Europe/Berlin"))
+        upsert_event(con, f"ecb|{when.date()}", stamp(when), "EUR", "ECB rate decision", "High", "", "", "",
+                     "ECB meeting calendar", today, family="ecb")
+        n += 1
+    con.commit()
+    print(f"ECB: {n} coming decisions")
+
+
+def boj(con, today: str) -> None:
+    """Bank of Japan decisions since 2021 and the ones scheduled: the last
+    day of each meeting. The Bank announces when the meeting ends, usually
+    around noon in Tokyo; 12:00 JST (03:00 UTC) stands in for the hour."""
+    n = 0
+    for url in BOJ:
+        page = get(url)
+        for cap, body in re.findall(r"<caption[^>]*>(.*?)</caption>(.*?)</table>", page, flags=re.S):
+            y = re.search(r"(20\d\d)", plain(cap))
+            if not y or int(y.group(1)) < 2021:
+                continue
+            for row in re.findall(r"<tr.*?</tr>", body, flags=re.S):
+                cells = re.findall(r"<t[hd][^>]*>(.*?)</t[hd]>", row, flags=re.S)
+                if not cells:
+                    continue
+                first = re.sub(r"\(.*?\)|\[.*?\]", " ", plain(cells[0]))
+                mon, last = None, None
+                for name, day in re.findall(r"(?:([A-Z][a-z]{2,4})\.?\s+)?(\d{1,2})\b", first):
+                    if name:
+                        mon = MON3.get(name.lower()[:3])
+                    if mon:
+                        last = (mon, int(day))
+                if not last:
+                    continue
+                try:
+                    when = datetime(int(y.group(1)), last[0], last[1], 3, 0, tzinfo=timezone.utc)
+                except ValueError:
+                    continue
+                upsert_event(con, f"boj|{when.date()}", stamp(when), "JPY", "Bank of Japan rate decision", "High",
+                             "", "", "", "Bank of Japan (hour approximate)", today, family="boj")
+                n += 1
+        time.sleep(1)
+    con.commit()
+    print(f"Bank of Japan: {n} decision dates")
+
+
+def fred(path: str, **params) -> dict:
+    """One FRED call. The key travels only inside the request: a failure
+    names the path and the status, never the URL that carries the key."""
+    try:
+        r = requests.get(f"{FRED}/{path}", headers={"User-Agent": UA}, timeout=40,
+                         params={**params, "api_key": os.environ["FRED_API_KEY"].strip(), "file_type": "json"})
+    except requests.RequestException as e:
+        raise RuntimeError(f"FRED {path}: {type(e).__name__}") from None
+    time.sleep(0.6)  # FRED allows 120 calls a minute
+    if r.status_code != 200:
+        raise RuntimeError(f"FRED {path}: HTTP {r.status_code}")
+    return r.json()
+
+
+def fred_dates(con, today: str) -> None:
+    for rid, (fam, title, hm, word) in FRED_RELEASES.items():
+        try:
+            name = ((fred("release", release_id=rid).get("releases") or [{}])[0]).get("name", "")
+            if word.lower() not in name.lower():
+                print(f"FRED: release {rid} is {name!r}, not {word} - skipped")
+                continue
+            got = fred("release/dates", release_id=rid, realtime_start="2021-01-01", realtime_end="9999-12-31",
+                       include_release_dates_with_no_data="true", sort_order="asc", limit=10000)
+        except RuntimeError as e:
+            print(e)
+            continue
+        n = 0
+        for x in got.get("release_dates") or []:
+            try:
+                day = date.fromisoformat(x["date"])
+            except (KeyError, ValueError):
+                continue
+            upsert_event(con, f"fred|{fam}|{day}", stamp(ny_time(day, hm)), "USD", title, "High", "", "", "",
+                         "FRED (St. Louis Fed)", today, family=fam)
+            n += 1
+        con.commit()
+        print(f"FRED: {name} - {n} release dates")
+
+
+def figure(new: list[tuple[str, float]], how: str) -> str | None:
+    """A FRED series, newest first, written the way the calendar writes it."""
+    v = new[0][1]
+    if how == "mm" and len(new) > 1:
+        x = (v / new[1][1] - 1) * 100
+    elif how == "yy":
+        year_ago = f"{int(new[0][0][:4]) - 1}{new[0][0][4:]}"
+        base = next((b for d, b in new if d == year_ago), None)
+        if base is None:
+            return None
+        x = (v / base - 1) * 100
+    elif how == "change_k" and len(new) > 1:
+        return f"{round(v - new[1][1])}K"
+    elif how == "level_pct":
+        x = v
+    elif how == "level_m":
+        return f"{v / 1000:.2f}M"
+    elif how == "level_k":
+        return f"{round(v / 1000)}K"
+    else:
+        return None
+    return f"{0.0 if abs(x) < 0.05 else x:.1f}%"
+
+
+def fred_actuals(con) -> None:
+    """The actual figure of each US release in the last 60 days, from the
+    FRED vintage of its release day - the number as first published, before
+    later revisions. A release counts only if that day's vintage has a newer
+    reading than the day before's."""
+    now = datetime.now(timezone.utc)
+    rows = con.execute("SELECT key, when_utc, title FROM gold_events WHERE source='forexfactory' AND country='USD' "
+                       "AND COALESCE(actual,'')='' AND when_utc BETWEEN ? AND ?",
+                       (stamp(now - timedelta(days=60)), stamp(now - timedelta(hours=2)))).fetchall()
+    n = 0
+    for key, when, title in rows:
+        if title not in ACTUALS:
+            continue
+        sid, how = ACTUALS[title]
+        day = datetime.fromisoformat(when.replace("Z", "+00:00")).astimezone(NY).date()
+        try:
+            obs = fred("series/observations", series_id=sid, realtime_start=str(day), realtime_end=str(day),
+                       sort_order="desc", limit=14).get("observations") or []
+            before = fred("series/observations", series_id=sid, realtime_start=str(day - timedelta(days=1)),
+                          realtime_end=str(day - timedelta(days=1)), sort_order="desc", limit=1).get("observations") or []
+        except RuntimeError as e:
+            print(e)
+            continue
+        new = [(o["date"], float(o["value"])) for o in obs if re.fullmatch(r"-?[\d.]+", o.get("value") or "")]
+        old = [(o["date"], float(o["value"])) for o in before if re.fullmatch(r"-?[\d.]+", o.get("value") or "")]
+        # Nothing new that day: the release slipped, or FRED had not caught up.
+        if not new or (old and old[0][0] == new[0][0] and abs(old[0][1] - new[0][1]) < 1e-9):
+            continue
+        fig = figure(new, how)
+        if fig:
+            con.execute("UPDATE gold_events SET actual=? WHERE key=?", (fig, key))
+            n += 1
+    con.commit()
+    print(f"FRED: {n} actual figures filled in")
 
 
 def save_headline(con, url: str, seen: datetime, title: str, domain: str) -> bool:
@@ -244,8 +507,14 @@ def comex(con) -> None:
 def main() -> None:
     con = connect()
     today = date.today().isoformat()
-    for step in (lambda: week_calendar(con, today), lambda: fomc_dates(con, today), lambda: headlines(con),
-                 lambda: comex(con)):
+    steps = [lambda: week_calendar(con, today), lambda: fomc_dates(con, today), lambda: bea(con, today),
+             lambda: census(con, today), lambda: ecb(con, today), lambda: boj(con, today)]
+    if os.environ.get("FRED_API_KEY", "").strip():
+        steps += [lambda: fred_dates(con, today), lambda: fred_actuals(con)]
+    else:
+        print("FRED: no FRED_API_KEY secret - CPI, jobs, PPI, JOLTS and claims dates come from the week's calendar "
+              "only, and actual figures are not filled in")
+    for step in steps + [lambda: headlines(con), lambda: comex(con)]:
         try:
             step()
         except Exception as e:  # noqa: BLE001 - each source fails on its own

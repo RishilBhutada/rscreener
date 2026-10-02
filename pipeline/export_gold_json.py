@@ -25,7 +25,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from gold_lib import FAMILIES, MIN_MEASURED, clean_title, rate_headline, stars_from_ratio
+from gold_lib import FAMILIES, MIN_MEASURED, NOT_MEASURED, clean_title, duty_on, rate_headline, stars_from_ratio
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
@@ -55,6 +55,10 @@ class Closes:
 
     def last_two(self):
         return (self.d[-1], self.c[-1], self.c[-2]) if len(self.c) > 1 else None
+
+    def on_or_before(self, day: str) -> float | None:
+        i = bisect.bisect_right(self.d, day)
+        return self.c[i - 1] if i else None
 
     def abs_moves(self, start: str, end: str) -> list[float]:
         i, j = bisect.bisect_left(self.d, start), bisect.bisect_right(self.d, end)
@@ -100,6 +104,14 @@ def main() -> None:
     mcx, silver = front_series(con, "GOLD"), front_series(con, "SILVER")
     events = con.execute("SELECT key, when_utc, country, title, impact, forecast, previous, actual, family, source "
                          "FROM gold_events ORDER BY when_utc").fetchall()
+    # MCX gold's expiries: trading ends at 23:30 IST on the day.
+    for (exp,) in con.execute("SELECT DISTINCT expiry FROM commodity_contracts WHERE root='GOLD' AND exchange='MCX'"):
+        d = date.fromisoformat(exp)
+        when = datetime(d.year, d.month, d.day, 23, 30, tzinfo=IST).astimezone(timezone.utc)
+        events.append((f"mcx|{exp}", when.strftime("%Y-%m-%dT%H:%M:%SZ"), "INR",
+                       f"MCX gold {d.strftime('%b %Y')} contract expires", "", "", "", "", "mcx_expiry",
+                       "MCX contract list"))
+    events.sort(key=lambda e: e[1])
     news = con.execute("SELECT url, seen_utc, title, domain FROM gold_news ORDER BY seen_utc DESC").fetchall()
     con.close()
 
@@ -114,7 +126,9 @@ def main() -> None:
     for fam, (stars, label, why) in FAMILIES.items():
         moves = [m[1] for d in sorted(fam_days.get(fam, ())) if (m := comex.move_from(d))]
         info = {"label": label, "why": why, "rule": stars, "stars": stars, "n": len(moves)}
-        if len(moves) >= MIN_MEASURED:
+        if fam in NOT_MEASURED:
+            info.update({"n": 0, "fixed": True})
+        elif len(moves) >= MIN_MEASURED:
             days = sorted(fam_days[fam])
             base = statistics.median(comex.abs_moves(days[0], days[-1]))
             med = statistics.median(abs(m) for m in moves)
@@ -122,21 +136,28 @@ def main() -> None:
                          "stars": stars_from_ratio(med / base), "since": days[0]})
         families[fam] = info
 
+    # A release the week's calendar already lists (with its forecast) is not
+    # shown a second time from a schedule.
+    on_calendar = {(e[8], e[1][:10]) for e in events if e[9] == "forexfactory"}
     out_events = []
     lo, hi = (now - timedelta(days=45)), (now + timedelta(days=120))
     for key, when, country, title, impact, forecast, previous, actual, family, source in events:
         w = datetime.fromisoformat(when.replace("Z", "+00:00"))
         if not lo <= w <= hi:
             continue
+        if source != "forexfactory" and (family, when[:10]) in on_calendar:
+            continue
         fam = families.get(family) or families["other"]
-        if fam["stars"] < 2:
+        # One star is shown for a named kind of event - measured that low, it
+        # is still worth knowing - but not for the long tail of minor data.
+        if fam["stars"] < 2 and family in ("other", "other_high"):
             continue
         e = {"t": w.strftime("%Y-%m-%dT%H:%M:%SZ"), "c": country, "title": title, "fam": family,
              "stars": fam["stars"], "src": source}
         for k, v in (("forecast", forecast), ("previous", previous), ("actual", actual)):
             if v:
                 e[k] = v
-        if w < now:
+        if w < now and family not in NOT_MEASURED:
             cday, mday = reaction_days(w)
             cm, mm = comex.move_from(cday), mcx.move_from(mday)
             if cm:
@@ -168,10 +189,21 @@ def main() -> None:
         if t:
             snap[name] = {"date": t[0], "close": r2(t[1]), "chg": r2((t[1] / t[2] - 1) * 100)}
     if "comex" in snap and "usdinr" in snap:
-        parity = snap["comex"]["close"] * snap["usdinr"]["close"] * 10 / TROY_OZ_G
+        # The world price on MCX's own last day, so the two compare like with like.
+        day = snap["mcx"]["date"] if "mcx" in snap else snap["comex"]["date"]
+        cx, rate = comex.on_or_before(day), fx.on_or_before(day)
+        parity = (cx or snap["comex"]["close"]) * (rate or snap["usdinr"]["close"]) * 10 / TROY_OZ_G
         snap["parity"] = r2(parity, 0)
+        snap["parity_date"] = day
         if "mcx" in snap:
             snap["mcx_prem"] = r2((snap["mcx"]["close"] / parity - 1) * 100)
+            # What is left once India's import duty is added to the world price:
+            # the local premium or discount, plus a month or two of carry.
+            duty = duty_on(snap["mcx"]["date"])
+            if duty:
+                landed = parity * (1 + duty[0] / 100)
+                snap.update({"duty": duty[0], "duty_since": duty[1], "duty_why": duty[2], "landed": r2(landed, 0),
+                             "mcx_vs_landed": r2((snap["mcx"]["close"] / landed - 1) * 100)})
     if "mcx" in snap and "silver" in snap:
         snap["gold_silver"] = r2((snap["mcx"]["close"] / 10) / (snap["silver"]["close"] / 1000), 1)
 
