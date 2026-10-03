@@ -41,7 +41,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 import price_periods
-from gold_lib import family_of
+from gold_lib import ANNOUNCE, INDIA_EVENTS, clean_title, family_of, rate_headline
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
@@ -57,9 +57,15 @@ FEEDS = [
     "https://www.fxstreet.com/rss/news",
 ]
 YAHOO = "https://query2.finance.yahoo.com/v8/finance/chart/GC%3DF?period1={p1}&period2={p2}&interval=1d"
-BEA = ["https://www.bea.gov/news/schedule/full-2025", "https://www.bea.gov/news/schedule/full"]
-CENSUS = ["https://www.census.gov/economic-indicators/calendar-listview-2025.html",
-          "https://www.census.gov/economic-indicators/calendar-listview.html"]
+# Last year's schedule, this year's, and next year's once it is published
+# (until then its page is empty, or missing).
+BEA = ["https://www.bea.gov/news/schedule/full-{prev}", "https://www.bea.gov/news/schedule/full",
+       "https://www.bea.gov/news/schedule/full-{next}"]
+CENSUS = ["https://www.census.gov/economic-indicators/calendar-listview-{prev}.html",
+          "https://www.census.gov/economic-indicators/calendar-listview.html",
+          "https://www.census.gov/economic-indicators/calendar-listview-{next}.html"]
+FED_CALENDAR = "https://www.federalreserve.gov/json/calendar.json"
+WAYBACK = "https://archive.org/wayback/available"
 ECB = "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html"
 BOJ = ["https://www.boj.or.jp/en/mopo/mpmsche_minu/past.htm", "https://www.boj.or.jp/en/mopo/mpmsche_minu/index.htm"]
 FRED = "https://api.stlouisfed.org/fred"
@@ -80,6 +86,12 @@ ACTUALS = {
     "JOLTS Job Openings": ("JTSJOL", "level_m"), "Unemployment Claims": ("ICSA", "level_k"),
     "Advance GDP q/q": ("A191RL1Q225SBEA", "level_pct"), "Prelim GDP q/q": ("A191RL1Q225SBEA", "level_pct"),
     "Final GDP q/q": ("A191RL1Q225SBEA", "level_pct"),
+}
+# FRED's own release dates: the headline figure of each, and what it is.
+FRED_HEADLINE = {
+    "us_cpi": ("CPIAUCSL", "mm", " m/m"), "us_jobs": ("PAYEMS", "change_k", " payrolls"),
+    "us_ppi": ("PPIFIS", "mm", " m/m"), "us_labour_minor": ("JTSJOL", "level_m", " openings"),
+    "us_claims": ("ICSA", "level_k", " claims"),
 }
 NY = ZoneInfo("America/New_York")
 MONTHS = {m: i + 1 for i, m in enumerate(["january", "february", "march", "april", "may", "june", "july",
@@ -197,8 +209,14 @@ def bea(con, today: str) -> None:
     """GDP and PCE inflation (BEA's Personal Income and Outlays), last year's
     schedule and this year's, past dates and coming ones."""
     n = 0
+    year = int(today[:4])
     for url in BEA:
-        page = get(url)
+        url = url.format(prev=year - 1, next=year + 1)
+        try:
+            page = get(url)
+        except requests.RequestException as e:
+            print(f"BEA: {url} {type(e).__name__}")
+            continue
         y = re.search(r"Year\s*(\d{4})", plain(page[page.find("<table"):][:3000])) or re.search(r"full-(\d{4})", url)
         if not y:
             print(f"BEA: no year on {url}")
@@ -234,10 +252,17 @@ def bea(con, today: str) -> None:
 def census(con, today: str) -> None:
     """Retail sales (the Census Bureau's advance monthly report)."""
     n = 0
+    year = int(today[:4])
     for url in CENSUS:
+        url = url.format(prev=year - 1, next=year + 1)
+        try:
+            page = plain(get(url))
+        except requests.RequestException as e:
+            print(f"Census: {url} {type(e).__name__}")
+            continue
         for d, t, period in re.findall(
                 r"Advance Monthly Sales for Retail and Food Services\s+([A-Z][a-z]+ \d{1,2}, \d{4})\s+"
-                r"(\d{1,2}:\d{2} [AP]M)\s+([A-Z][a-z]+ \d{4})", plain(get(url))):
+                r"(\d{1,2}:\d{2} [AP]M)\s+([A-Z][a-z]+ \d{4})", page):
             try:
                 day = datetime.strptime(d, "%B %d, %Y").date()
                 when = ny_time(day, t)
@@ -251,19 +276,153 @@ def census(con, today: str) -> None:
     print(f"Census: {n} retail-sales release dates")
 
 
-def ecb(con, today: str) -> None:
-    """Coming ECB decisions: the meeting day followed by a press conference,
-    decided at 14:15 Frankfurt time. The page lists only meetings ahead, so
-    the ECB's history builds from the week's calendar."""
+def ecb_dates(con, page: str, source: str, today: str, past_only: bool = False) -> int:
     n = 0
     for d, m, y in re.findall(r"(\d{2})/(\d{2})/(\d{4}) Governing Council of the ECB: monetary policy meeting"
-                              r"[^/]*?followed by press conference", plain(get(ECB))):
+                              r"[^/]*?followed by press conference", plain(page)):
         when = datetime(int(y), int(m), int(d), 14, 15, tzinfo=ZoneInfo("Europe/Berlin"))
+        if past_only and when.date().isoformat() >= today:
+            continue  # what is still ahead comes from the live page
         upsert_event(con, f"ecb|{when.date()}", stamp(when), "EUR", "ECB rate decision", "High", "", "", "",
-                     "ECB meeting calendar", today, family="ecb")
+                     source, today, family="ecb")
         n += 1
     con.commit()
-    print(f"ECB: {n} coming decisions")
+    return n
+
+
+def ecb(con, today: str) -> None:
+    """ECB decisions: the meeting day followed by a press conference, decided
+    at 14:15 Frankfurt time. The ECB's page lists only meetings ahead and its
+    list of past decisions is drawn by script, so past meetings come from the
+    Internet Archive's copies of the same page: three copies (January and
+    October of last year, January of this one) cover every meeting since the
+    start of last year. Asked only while those are missing, slowly, and never
+    again in a run once the Archive answers 429 - it treats more as abuse."""
+    print(f"ECB: {ecb_dates(con, get(ECB), 'ECB meeting calendar', today)} coming decisions")
+    year = int(today[:4])
+    have = con.execute("SELECT COUNT(*) FROM gold_events WHERE family='ecb' AND when_utc BETWEEN ? AND ?",
+                       (f"{year - 1}-01-01", today)).fetchone()[0]
+    if have >= 10:  # eight meetings a year: last year's are in
+        return
+    n = 0
+    for ts in (f"{year - 1}0115", f"{year - 1}1015", f"{year}0115"):
+        try:
+            snap = (requests.get(WAYBACK, params={"url": ECB.split("//")[1], "timestamp": ts},
+                                 headers={"User-Agent": UA}, timeout=40).json()
+                    .get("archived_snapshots", {}).get("closest") or {})
+            if snap.get("url"):
+                # The Archive's raw copy ("id_"), over https.
+                raw = re.sub(r"/web/(\d+)/", r"/web/\1id_/", snap["url"]).replace("http://", "https://", 1)
+                time.sleep(6)
+                n += ecb_dates(con, get(raw), "ECB meeting calendar (Internet Archive copy)", today, past_only=True)
+        except requests.HTTPError as e:
+            print(f"ECB history {ts}: HTTP {e.response.status_code if e.response is not None else '?'}")
+            if e.response is not None and e.response.status_code == 429:
+                break
+        except (requests.RequestException, ValueError) as e:
+            print(f"ECB history {ts}: {type(e).__name__}")
+        time.sleep(6)
+    print(f"ECB: {n} past decisions read from archived copies")
+
+
+def fed_calendar(con, today: str) -> None:
+    """The Fed Board's own calendar: the Chair's and governors' speeches and
+    testimony, FOMC minutes and the Beige Book, from 2021 and as far ahead as
+    the Board has announced. New speeches appear here as they are scheduled."""
+    r = requests.get(FED_CALENDAR, headers={"User-Agent": UA}, timeout=60)
+    r.raise_for_status()
+    rows = json.loads(r.content.decode("utf-8-sig")).get("events") or []
+    n = 0
+    for x in rows:
+        kind, title, month = x.get("type"), plain(x.get("title") or ""), x.get("month") or ""
+        if not re.fullmatch(r"20\d\d-\d\d", month) or month < "2021-01":
+            continue
+        desc = plain(html.unescape(x.get("description") or ""))
+        chair = False
+        if kind in ("Speeches", "Testimony"):
+            who = re.split(r"\s+-+\s+", title, maxsplit=1)[-1].strip()
+            # "Chair Jerome H. Powell", "Chairman Kevin Warsh" - not a Vice Chair
+            chair = bool(re.match(r"Chair(man|woman)?\b", who))
+            fam = "fed_chair" if chair else "fed_member"
+            verb = "testifies" if kind == "Testimony" else "speaks"
+            label = f"Fed {who} {verb}" + (f": {desc}" if desc and len(desc) < 90 else "")
+        elif kind == "FOMC" and "Minutes" in title:
+            fam, who, label = "fomc_minutes", "minutes", f"FOMC minutes{(' (' + desc + ')') if desc else ''}"
+        elif kind == "Beige":
+            fam, who, label = "beige_book", "beige", "Fed Beige Book"
+        else:
+            continue
+        day = re.match(r"\s*(\d{1,2})", x.get("days") or "")
+        tm = re.match(r"\s*(\d{1,2}):(\d{2})\s*([ap])", x.get("time") or "", flags=re.I)
+        if not day:
+            continue
+        try:
+            d = date(int(month[:4]), int(month[5:7]), int(day.group(1)))
+        except ValueError:
+            continue
+        hh = (int(tm.group(1)) % 12 + (12 if tm.group(3).lower() == "p" else 0)) if tm else 12
+        when = ny_time(d, (hh, int(tm.group(2)) if tm else 0))
+        upsert_event(con, f"fedcal|{kind}|{d}|{who}", stamp(when), "USD", label, "High" if chair else "Medium",
+                     "", "", "", "federalreserve.gov calendar" + ("" if tm else " (hour not given)"), today,
+                     family=fam)
+        n += 1
+    con.commit()
+    print(f"Fed calendar: {n} speeches, testimonies, minutes and Beige Books since 2021")
+
+
+def us_holidays(year: int) -> set[date]:
+    """US federal holidays as observed (a Saturday holiday on the Friday, a
+    Sunday one on the Monday)."""
+    def nth(month: int, weekday: int, n: int) -> date:
+        d = date(year, month, 1)
+        d += timedelta(days=(weekday - d.weekday()) % 7)
+        return d + timedelta(weeks=n - 1)
+
+    def last(month: int, weekday: int) -> date:
+        d = date(year, month + 1, 1) - timedelta(days=1)
+        return d - timedelta(days=(d.weekday() - weekday) % 7)
+
+    fixed = [date(year, 1, 1), date(year, 6, 19), date(year, 7, 4), date(year, 11, 11), date(year, 12, 25)]
+    observed = {d - timedelta(days=1) if d.weekday() == 5 else d + timedelta(days=1) if d.weekday() == 6 else d
+                for d in fixed}
+    return observed | {nth(1, 0, 3), nth(2, 0, 3), last(5, 0), nth(9, 0, 1), nth(10, 0, 2), nth(11, 3, 4)}
+
+
+def ism(con, today: str) -> None:
+    """ISM's two PMIs, from ISM's published rule - manufacturing on the first
+    business day of the month, services on the third, both at 10:00 New York
+    time. ISM's own calendar is drawn by script; these dates are worked out,
+    and the week's calendar replaces them when it lists the release."""
+    t = date.fromisoformat(today)
+    n = 0
+    for k in range(-14, 15):
+        y, m = divmod(t.month - 1 + k, 12)
+        first = date(t.year + y, m + 1, 1)
+        hol = us_holidays(first.year)
+        days, d = [], first
+        while len(days) < 3:
+            if d.weekday() < 5 and d not in hol:
+                days.append(d)
+            d += timedelta(days=1)
+        covers = (first - timedelta(days=1)).strftime("%B %Y")
+        for name, d in (("manufacturing", days[0]), ("services", days[2])):
+            upsert_event(con, f"ism|{name}|{d}", stamp(ny_time(d, (10, 0))), "USD",
+                         f"US ISM {name} PMI, {covers}", "High", "", "", "", "ISM rule (date worked out)", today,
+                         family="us_growth")
+            n += 1
+    con.commit()
+    print(f"ISM: {n} PMI dates worked out")
+
+
+def india(con, today: str) -> None:
+    """India's scheduled events from the hand-kept list in gold_lib."""
+    for d, hm, fam, title, src in INDIA_EVENTS:
+        day = date.fromisoformat(d)
+        when = datetime(day.year, day.month, day.day, int(hm[:2]), int(hm[3:]),
+                        tzinfo=timezone(timedelta(hours=5, minutes=30)))
+        upsert_event(con, f"india|{fam}|{d}", stamp(when), "INR", title, "High", "", "", "", src, today, family=fam)
+    con.commit()
+    print(f"India: {len(INDIA_EVENTS)} scheduled events from the hand-kept list")
 
 
 def boj(con, today: str) -> None:
@@ -366,19 +525,24 @@ def figure(new: list[tuple[str, float]], how: str) -> str | None:
 
 
 def fred_actuals(con) -> None:
-    """The actual figure of each US release in the last 60 days, from the
-    FRED vintage of its release day - the number as first published, before
-    later revisions. A release counts only if that day's vintage has a newer
-    reading than the day before's."""
+    """The actual figure of each US release, from the FRED vintage of its
+    release day - the number as first published, before later revisions. A
+    release counts only if that day's vintage has a newer reading than the
+    day before's. The week's calendar rows from the last 60 days, and FRED's
+    own release dates from the last year (the headline figure of each)."""
     now = datetime.now(timezone.utc)
-    rows = con.execute("SELECT key, when_utc, title FROM gold_events WHERE source='forexfactory' AND country='USD' "
-                       "AND COALESCE(actual,'')='' AND when_utc BETWEEN ? AND ?",
-                       (stamp(now - timedelta(days=60)), stamp(now - timedelta(hours=2)))).fetchall()
+    rows = con.execute("SELECT key, when_utc, title, family, source FROM gold_events WHERE COALESCE(actual,'')='' "
+                       "AND ((source='forexfactory' AND country='USD' AND when_utc >= ?) "
+                       "  OR (source LIKE 'FRED%' AND when_utc >= ?)) AND when_utc <= ? ORDER BY when_utc DESC",
+                       (stamp(now - timedelta(days=60)), stamp(now - timedelta(days=380)),
+                        stamp(now - timedelta(hours=2)))).fetchall()
     n = 0
-    for key, when, title in rows:
-        if title not in ACTUALS:
+    for key, when, title, family, source in rows[:120]:  # two calls each; FRED allows 120 a minute
+        spec = ACTUALS.get(title) if source == "forexfactory" else FRED_HEADLINE.get(family)
+        if not spec:
             continue
-        sid, how = ACTUALS[title]
+        sid, how = spec[:2]
+        suffix = spec[2] if len(spec) > 2 else ""
         day = datetime.fromisoformat(when.replace("Z", "+00:00")).astimezone(NY).date()
         try:
             obs = fred("series/observations", series_id=sid, realtime_start=str(day), realtime_end=str(day),
@@ -395,7 +559,7 @@ def fred_actuals(con) -> None:
             continue
         fig = figure(new, how)
         if fig:
-            con.execute("UPDATE gold_events SET actual=? WHERE key=?", (fig, key))
+            con.execute("UPDATE gold_events SET actual=? WHERE key=?", (fig + suffix, key))
             n += 1
     con.commit()
     print(f"FRED: {n} actual figures filled in")
@@ -475,9 +639,15 @@ def rss(con) -> int:
 
 def headlines(con) -> None:
     g, f = gdelt(con), rss(con)
-    # A week is all the page shows; older headlines go.
-    cut = (datetime.now(timezone.utc) - timedelta(days=21)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    con.execute("DELETE FROM gold_news WHERE seen_utc < ?", (cut,))
+    # The news tab shows a week. Announcements (a central bank buying, a duty
+    # change) stay on the calendar for a year; everything else goes.
+    now = datetime.now(timezone.utc)
+    cut, year = stamp(now - timedelta(days=21)), stamp(now - timedelta(days=400))
+    old = con.execute("SELECT url, seen_utc, title FROM gold_news WHERE seen_utc < ?", (cut,)).fetchall()
+    for url, seen, title in old:
+        rated = rate_headline(clean_title(title))
+        if seen < year or not rated or rated[1] not in ANNOUNCE:
+            con.execute("DELETE FROM gold_news WHERE url=?", (url,))
     con.commit()
     print(f"headlines: {g} from GDELT, {f} from publishers' feeds")
 
@@ -507,8 +677,9 @@ def comex(con) -> None:
 def main() -> None:
     con = connect()
     today = date.today().isoformat()
-    steps = [lambda: week_calendar(con, today), lambda: fomc_dates(con, today), lambda: bea(con, today),
-             lambda: census(con, today), lambda: ecb(con, today), lambda: boj(con, today)]
+    steps = [lambda: week_calendar(con, today), lambda: fomc_dates(con, today), lambda: fed_calendar(con, today),
+             lambda: bea(con, today), lambda: census(con, today), lambda: ecb(con, today), lambda: boj(con, today),
+             lambda: ism(con, today), lambda: india(con, today)]
     if os.environ.get("FRED_API_KEY", "").strip():
         steps += [lambda: fred_dates(con, today), lambda: fred_actuals(con)]
     else:

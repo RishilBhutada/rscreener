@@ -62,6 +62,25 @@ FAMILIES: dict[str, tuple[int, str, str]] = {
               "China is the world's largest buyer of physical gold. Weaker growth can cut jewellery demand; "
               "stimulus and a weaker yuan can push savers towards gold."),
     "boj": (2, "Bank of Japan decision", "Moves the yen, a fellow safe haven, and global bond yields."),
+    "beige_book": (2, "Fed Beige Book",
+                   "The Fed's survey of business in its twelve districts, out two weeks before each meeting. It "
+                   "colours expectations for the decision; it rarely moves gold on the day."),
+    "rbi": (3, "RBI policy decision",
+            "Sets India's repo rate and moves the rupee. MCX gold is priced in rupees, so a weaker rupee lifts "
+            "the MCX price even when the world price is flat."),
+    "india_budget": (4, "India's Union Budget",
+                     "The budget is where India usually changes the import duty on gold - most of the gap between "
+                     "MCX and the world price. The July 2024 budget cut it from 15% to 6% and MCX gold fell "
+                     "sharply that day."),
+    "india_duty": (5, "India changes the gold import duty",
+                   "The duty is most of the gap between MCX and the world price; a change moves MCX by about "
+                   "the size of the change, whatever the world price does."),
+    "festival": (2, "Festival buying (India)",
+                 "Dhanteras is India's biggest gold-buying day. It shows in jewellers' sales and the local "
+                 "premium, rarely in the world price."),
+    "announced": (5, "Announced (from the news)",
+                  "An unscheduled announcement found in the headlines: a central bank buying gold, or a change "
+                  "to India's import duty. Each is rated by the rule its headline matched."),
     "mcx_expiry": (2, "MCX gold contract expiry",
                    "The month's MCX gold contract stops trading; positions roll to the next month or settle. "
                    "It matters to anyone holding MCX futures, not to the world price."),
@@ -69,8 +88,39 @@ FAMILIES: dict[str, tuple[int, str, str]] = {
     "other": (1, "Other data", "Little direct link to gold."),
 }
 
-# Mechanical dates, not news: measuring the world price around them means nothing.
-NOT_MEASURED = {"mcx_expiry"}
+# Mechanical dates, not news: measuring the world price around them means
+# nothing. A headline's time is when it was seen, not when the news broke.
+NOT_MEASURED = {"mcx_expiry", "announced"}
+
+# India's own events reach gold through the rupee and the duty: they are
+# measured on MCX, not COMEX.
+MEASURE_ON_MCX = {"rbi", "india_budget", "india_duty", "festival"}
+
+# India's scheduled events, kept by hand because their publishers cannot be
+# read by a program (rbi.org.in answers robots.txt with HTTP 418). Each line:
+# (date, IST time, family, title, where the date comes from). Add the next
+# financial year's RBI meetings when RBI announces them, usually in March.
+INDIA_EVENTS: list[tuple[str, str, str, str, str]] = [
+    ("2025-04-09", "10:00", "rbi", "RBI policy decision", "RBI MPC schedule 2025-26 (26 Mar 2025)"),
+    ("2025-06-06", "10:00", "rbi", "RBI policy decision", "RBI MPC schedule 2025-26"),
+    ("2025-08-06", "10:00", "rbi", "RBI policy decision", "RBI MPC schedule 2025-26, moved a day on 6 Jun 2025"),
+    ("2025-10-01", "10:00", "rbi", "RBI policy decision", "RBI MPC schedule 2025-26"),
+    ("2025-12-05", "10:00", "rbi", "RBI policy decision", "RBI MPC schedule 2025-26"),
+    ("2026-02-06", "10:00", "rbi", "RBI policy decision", "RBI MPC schedule 2025-26"),
+    ("2026-04-08", "10:00", "rbi", "RBI policy decision", "RBI press release, 23 Mar 2026"),
+    ("2026-06-05", "10:00", "rbi", "RBI policy decision", "RBI press release, 23 Mar 2026"),
+    ("2026-08-05", "10:00", "rbi", "RBI policy decision", "RBI press release, 23 Mar 2026"),
+    ("2026-10-07", "10:00", "rbi", "RBI policy decision", "RBI press release, 23 Mar 2026"),
+    ("2026-12-04", "10:00", "rbi", "RBI policy decision", "RBI press release, 23 Mar 2026"),
+    ("2027-02-05", "10:00", "rbi", "RBI policy decision", "RBI press release, 23 Mar 2026"),
+    ("2026-02-01", "11:00", "india_budget", "Union Budget 2026-27", "Presented 1 Feb 2026"),
+    ("2027-02-01", "11:00", "india_budget", "Union Budget 2027-28 (expected)",
+     "1 February by convention since 2017; not yet notified"),
+    ("2026-05-13", "10:00", "india_duty", "India raises gold import duty to 15% from 6%",
+     "Government order effective 13 May 2026 (CNBC, 13 May 2026)"),
+    ("2025-10-18", "12:00", "festival", "Dhanteras", "All India Radio (newsonair.gov.in), 18 Oct 2025"),
+    ("2026-11-06", "12:00", "festival", "Dhanteras", "Hindu calendar sites"),
+]
 
 # India's import duty on gold - basic customs duty plus the agriculture cess -
 # from the day each rate took effect. MCX prices carry it; COMEX does not, so
@@ -183,6 +233,11 @@ def clean_title(t: str) -> str:
     t = re.sub(r"(\w) - ([a-z])", r"\1-\2", t)
     t = re.sub(r"\( ", "(", t)
     return re.sub(r"\s+", " ", t).strip(" -|")
+
+
+# Five-star rules whose headlines are announcements in their own right, shown
+# on the calendar as well as in the news. (A Fed decision is already there.)
+ANNOUNCE = {NEWS_RULES[0][1], NEWS_RULES[1][1]}
 
 
 def rate_headline(title: str) -> tuple[int, str] | None:

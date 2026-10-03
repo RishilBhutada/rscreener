@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
@@ -29,9 +29,10 @@ function basis(f: GoldFamily, min: number): string {
   if (f.ratio !== undefined && f.median_move !== undefined && f.normal_move !== undefined) {
     const since = f.since ? new Date(`${f.since}T00:00:00Z`).toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" }) : "";
     const rule = f.stars !== f.rule ? ` The rule alone gave ${f.rule}.` : "";
-    return `Measured: on ${f.n} of these since ${since}, gold moved a median ${f.median_move}% the next session, against ${f.normal_move}% on an ordinary day - ${f.ratio.toFixed(1)}x.${rule}`;
+    const where = f.market === "MCX" ? "MCX gold" : "gold";
+    return `Measured: on ${f.n} of these since ${since}, ${where} moved a median ${f.median_move}% the next session, against ${f.normal_move}% on an ordinary day - ${f.ratio.toFixed(1)}x.${rule}`;
   }
-  return `Rule-based: ${f.n} of these have gold prices around them so far; the stars switch to measured at ${min}.`;
+  return `Rule-based: ${f.n} of these have ${f.market === "MCX" ? "MCX" : "gold"} prices around them so far; the stars switch to measured at ${min}.`;
 }
 
 /** The kind of event under its title - or, where the title already says
@@ -148,19 +149,26 @@ export default function GoldPage() {
             {tab === "calendar" && (
               <>
                 <div className="flex items-center gap-2">
-                  <Chips value={when} options={[["next", "Coming up"], ["past", "Past 45 days"]] as ["next" | "past", string][]} onChange={setWhen} />
+                  <Chips value={when} options={[["next", "Year ahead"], ["past", "Past year"]] as ["next" | "past", string][]} onChange={setWhen} />
                   <Chips value={minEv} options={[["3", "3+"], ["1", "All"]] as ["3" | "1", string][]} onChange={setMinEv} />
                   <InfoTip title="Calendar">
-                    <p>This week&apos;s releases, with forecasts, from Forex Factory&apos;s public calendar. Further ahead, from the publishers&apos; own schedules: Fed decisions (federalreserve.gov), GDP and PCE (BEA), retail sales (Census Bureau), ECB and Bank of Japan meetings, and MCX gold expiries. When the week&apos;s calendar lists a release, its copy is the one shown.</p>
+                    <p>A year back and a year ahead, refreshed every night: new dates appear as soon as their publisher announces them.</p>
+                    <p>This week&apos;s releases, with forecasts, from Forex Factory&apos;s public calendar. Beyond the week, from the publishers&apos; own schedules: the Fed&apos;s meetings and its calendar of speeches, testimony, minutes and Beige Books (federalreserve.gov); GDP and PCE (BEA); retail sales (Census Bureau); ECB and Bank of Japan meetings; MCX gold expiries. ISM&apos;s survey dates are worked out from ISM&apos;s published rule. India&apos;s RBI meetings, Budget, duty changes and Dhanteras are kept by hand from RBI&apos;s and the government&apos;s announcements. A central bank buying gold or a duty change found in the news appears as an announcement.</p>
                     {doc.events.some((e) => e.src.startsWith("FRED"))
                       ? <p>CPI, the jobs report, PPI, JOLTS and jobless claims: dates from FRED (St. Louis Fed), and each actual figure as first published.</p>
-                      : <p>CPI, the jobs report and PPI appear in the week they come out: their publisher, BLS, refuses programs.</p>}
-                    <p>Times are IST. Minor data rated one star is left out. Tap an event for why it matters and, once it has happened, how gold moved.</p>
+                      : <p>CPI, the jobs report and PPI appear only in the week they come out: their publisher, BLS, refuses programs, and FRED, which republishes them, needs a key not yet set.</p>}
+                    <p>Times are IST; ~ marks an hour that is approximate. Minor data rated one star is left out. Tap an event for why it matters and, once it has happened, how gold moved.</p>
                   </InfoTip>
                 </div>
-                {days.length === 0 && <p className="py-10 text-center text-[13px] text-[var(--ink3)]">{minEv === "3" ? "Nothing rated three stars or more" : "Nothing"} {when === "next" ? "ahead" : "in the past 45 days"}</p>}
-                {days.map(([d, list]) => (
-                  <section key={d} className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
+                {days.length === 0 && <p className="py-10 text-center text-[13px] text-[var(--ink3)]">{minEv === "3" ? "Nothing rated three stars or more" : "Nothing"} {when === "next" ? "in the year ahead" : "in the past year"}</p>}
+                {days.map(([d, list], i) => (
+                  <Fragment key={d}>
+                  {(i === 0 || days[i - 1][0].slice(0, 7) !== d.slice(0, 7)) && (
+                    <h3 className="pt-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
+                      {new Date(`${d}T12:00:00Z`).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" })}
+                    </h3>
+                  )}
+                  <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
                     <h3 className="px-3 py-2 text-[13px] font-semibold border-b border-[var(--line)]">{istDay(list[0].t)}</h3>
                     <ul className="divide-y divide-[var(--line)]">
                       {list.map((e) => (
@@ -191,6 +199,7 @@ export default function GoldPage() {
                       ))}
                     </ul>
                   </section>
+                  </Fragment>
                 ))}
               </>
             )}
@@ -267,9 +276,15 @@ export default function GoldPage() {
               {ev.mcx && <Stat label={`MCX, ${istDay(`${ev.mcx[0]}T12:00:00Z`)}`} value={`${signed(ev.mcx[1])}%`} className={tone(ev.mcx[1])} />}
             </div>
           )}
-          <p><b>Why it matters for gold.</b> {evFam.why}</p>
+          <p><b>Why it matters for gold.</b> {ev.why ? `${ev.why}.` : evFam.why}</p>
           <p className="text-[12px]">{basis(evFam, doc.min_measured)}</p>
           <p className="text-[11px] text-[var(--ink3)]">Source: {ev.src}. A day&apos;s move has many causes; this event is one of them.</p>
+          {ev.url && (
+            <a href={ev.url} target="_blank" rel="noopener noreferrer"
+              className="rs-press inline-flex items-center justify-center gap-2 w-full min-h-[44px] rounded-xl bg-[var(--accent-fill)] text-[var(--accent-fill-ink)] text-[14px] font-semibold">
+              Read at {ev.src} <ExternalGlyph size={13} />
+            </a>
+          )}
         </InfoDialog>
       )}
 

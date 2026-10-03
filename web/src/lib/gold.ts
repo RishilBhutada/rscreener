@@ -8,6 +8,8 @@ export type GoldEvent = {
   forecast?: string; previous?: string; actual?: string;
   /** [session date, % move] - the first close after the event */
   comex?: [string, number]; mcx?: [string, number];
+  /** an announcement found in the news: the article, and the rule it matched */
+  url?: string; why?: string;
 };
 
 export type GoldFamily = {
@@ -15,6 +17,8 @@ export type GoldFamily = {
   median_move?: number; normal_move?: number; ratio?: number; since?: string;
   /** a date, not news: never measured */
   fixed?: boolean;
+  /** where the moves are measured: COMEX, or MCX for India's own events */
+  market?: "COMEX" | "MCX";
 };
 
 export type GoldNews = { t: string; title: string; url: string; src: string; stars: number; why: string };

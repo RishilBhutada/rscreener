@@ -2,9 +2,10 @@
 
   snapshot   MCX gold, COMEX gold in dollars and in rupees, MCX over the
              world price, USD/INR, the gold-silver ratio
-  events     scheduled releases from this week's calendar and every FOMC
-             decision, each with its stars, the reason, and - once it has
-             happened - how gold moved that day on COMEX and MCX
+  events     a year back and a year ahead: this week's calendar, the
+             publishers' schedules, India's hand-kept dates, MCX expiries and
+             five-star announcements from the news - each with its stars, the
+             reason, and once it has happened how gold moved on COMEX and MCX
   families   per kind of event: the rule stars, and the measured stars where
              enough past events have prices around them
   news       the week's gold headlines, each rated by the rule it matched
@@ -25,7 +26,8 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from gold_lib import FAMILIES, MIN_MEASURED, NOT_MEASURED, clean_title, duty_on, rate_headline, stars_from_ratio
+from gold_lib import (ANNOUNCE, FAMILIES, MEASURE_ON_MCX, MIN_MEASURED, NOT_MEASURED, clean_title, duty_on,
+                      rate_headline, stars_from_ratio)
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
@@ -117,30 +119,33 @@ def main() -> None:
 
     now = datetime.now(timezone.utc)
     # ── how each family has moved gold ──
+    # India's own events reach gold through the rupee and the duty, so they
+    # are measured on MCX; everything else on COMEX.
     fam_days: dict[str, set[str]] = defaultdict(set)
     for key, when, country, title, impact, *_rest, family, _src in events:
         w = datetime.fromisoformat(when.replace("Z", "+00:00"))
         if w < now:
-            fam_days[family].add(reaction_days(w)[0])
+            cday, mday = reaction_days(w)
+            fam_days[family].add(mday if family in MEASURE_ON_MCX else cday)
     families = {}
     for fam, (stars, label, why) in FAMILIES.items():
-        moves = [m[1] for d in sorted(fam_days.get(fam, ())) if (m := comex.move_from(d))]
-        info = {"label": label, "why": why, "rule": stars, "stars": stars, "n": len(moves)}
+        series, market = (mcx, "MCX") if fam in MEASURE_ON_MCX else (comex, "COMEX")
+        priced = [(d, m[1]) for d in sorted(fam_days.get(fam, ())) if (m := series.move_from(d))]
+        info = {"label": label, "why": why, "rule": stars, "stars": stars, "n": len(priced), "market": market}
         if fam in NOT_MEASURED:
             info.update({"n": 0, "fixed": True})
-        elif len(moves) >= MIN_MEASURED:
-            days = sorted(fam_days[fam])
-            base = statistics.median(comex.abs_moves(days[0], days[-1]))
-            med = statistics.median(abs(m) for m in moves)
+        elif len(priced) >= MIN_MEASURED:
+            base = statistics.median(series.abs_moves(priced[0][0], priced[-1][0]))
+            med = statistics.median(abs(m) for _, m in priced)
             info.update({"median_move": r2(med), "normal_move": r2(base), "ratio": r2(med / base),
-                         "stars": stars_from_ratio(med / base), "since": days[0]})
+                         "stars": stars_from_ratio(med / base), "since": priced[0][0]})
         families[fam] = info
 
     # A release the week's calendar already lists (with its forecast) is not
     # shown a second time from a schedule.
     on_calendar = {(e[8], e[1][:10]) for e in events if e[9] == "forexfactory"}
     out_events = []
-    lo, hi = (now - timedelta(days=45)), (now + timedelta(days=120))
+    lo, hi = (now - timedelta(days=366)), (now + timedelta(days=366))
     for key, when, country, title, impact, forecast, previous, actual, family, source in events:
         w = datetime.fromisoformat(when.replace("Z", "+00:00"))
         if not lo <= w <= hi:
@@ -165,6 +170,17 @@ def main() -> None:
             if mm:
                 e["mcx"] = [mm[0], r2(mm[1])]
         out_events.append(e)
+
+    # ── announcements: five-star headlines that are events in themselves ──
+    # One per kind a day - the first outlet to carry it.
+    announced: dict[tuple[str, str], dict] = {}
+    for url, when, title, domain in news:  # newest first, so the earliest of a day wins
+        title = clean_title(title)
+        rated = rate_headline(title)
+        if rated and rated[1] in ANNOUNCE and lo.strftime("%Y-%m-%dT%H:%M:%SZ") <= when:
+            announced[(rated[1], when[:10])] = {"t": when, "c": "", "title": title, "fam": "announced",
+                                                "stars": rated[0], "src": domain, "url": url, "why": rated[1]}
+    out_events = sorted(out_events + list(announced.values()), key=lambda e: e["t"])
 
     # ── headlines ──
     out_news, seen = [], set()
