@@ -202,6 +202,10 @@ export default function GoldPage() {
                   </section>
                   </Fragment>
                 ))}
+                {/* FRED's API terms require this notice, shown prominently. */}
+                {doc.events.some((e) => e.src.startsWith("FRED")) && (
+                  <p className="pt-4 text-[11px] text-[var(--ink3)]">This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis.</p>
+                )}
               </>
             )}
 
