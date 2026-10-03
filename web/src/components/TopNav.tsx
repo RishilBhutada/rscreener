@@ -293,7 +293,7 @@ function RefreshButton() {
       {ready && !dismissed && (
         <div role="status"
           className="rs-sheet fixed inset-x-0 mx-auto w-fit max-w-[calc(100vw-2rem)] z-50
-                     bottom-[calc(76px+env(safe-area-inset-bottom))] sm:bottom-6
+                     bottom-6 touch:bottom-[calc(76px+env(safe-area-inset-bottom))]
                      flex items-center gap-3 rounded-full border border-[var(--line2)] bg-[var(--card)]
                      shadow-[0_10px_30px_rgba(0,0,0,0.35)] pl-4 pr-1.5 py-1.5">
           <span className="text-[13px] font-medium text-[var(--ink)] whitespace-nowrap">New version ready</span>
@@ -496,19 +496,10 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
   const ordered = applyOrder(DESTINATIONS, (d) => d.key, navOrder);
   const PRIMARY = ordered.slice(0, BAR_SLOTS);
   const SECONDARY = ordered.slice(BAR_SLOTS);
-
-  const links: [string, string, string][] = [
-    ["home", "Home", "/"],
-    ["watchlists", "Watchlists", "/watchlists"],
-    ["sectors", "Sectors", "/sectors"],
-    ["etfs", "ETFs", "/etfs"],
-    ["commodities", "Commodities", "/commodities"],
-    ["others", "Others", "/others"],
-    ["calendar", "Calendar", "/calendar"],
-    ["portfolio", "Portfolio", "/portfolio"],
-    ["screens", "Screener", "/screens"],
-    ["status", "Data", "/status"],
-  ];
+  // The desktop row is the same list as the phone bar: the first four, the page
+  // you are on if it is further down, and More for the rest. It used to be a
+  // hand-kept list of its own, which never learnt about Gold or Indices.
+  const deskLinks = [...PRIMARY, ...SECONDARY.filter((d) => d.key === active)];
 
   return (
     <header className="bg-[var(--card)] border-b border-[var(--line)] sm:sticky sm:top-0 z-30">
@@ -589,8 +580,8 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
           )}
         </div>
 
-        <nav className="hidden sm:flex items-center gap-1 text-sm font-medium">
-          {links.map(([key, label, href]) => (
+        <nav className="hidden sm:flex touch:hidden! items-center gap-1 text-sm font-medium">
+          {deskLinks.map(({ key, label, href }) => (
             <Link
               key={key}
               href={href}
@@ -599,6 +590,8 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
               {label}
             </Link>
           ))}
+          <button onClick={() => setMoreOpen(true)}
+            className="px-3 py-1.5 rounded-lg text-[var(--ink2)] hover:bg-[var(--card2)]">More</button>
         </nav>
 
         {/* Top right. Theme, accent and reload used to sit out here as three
@@ -637,7 +630,11 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
           miss. The three that did not make the cut - Calendar, IPO and Data -
           are reachable from the More sheet, and none of them is somewhere you
           go mid-task. */}
-      <nav className="sm:hidden fixed bottom-0 inset-x-0 z-40 grid grid-cols-5 border-t border-[var(--line)] bg-[var(--card)] pb-[env(safe-area-inset-bottom)]">
+      {/* Full width with a solid colour: iPadOS 26 Safari leaves an edge clear
+          of its glass blur only where a fixed, opaque, near-full-width bar
+          sits on it. The five cells keep a phone's spacing on an iPad. */}
+      <nav className="hidden touch:block fixed bottom-0 inset-x-0 z-40 border-t border-[var(--line)] bg-[var(--card)] pb-[env(safe-area-inset-bottom)]">
+        <div className="grid grid-cols-5 max-w-xl mx-auto">
         {PRIMARY.map(({ key, label, href, icon }) => (
           <Link
             key={key}
@@ -662,13 +659,17 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
           <span className="flex items-center justify-center w-14 h-7 rounded-full"><MoreIcon /></span>
           More
         </button>
+        </div>
       </nav>
 
       {moreOpen && (
-        <div className="sm:hidden fixed inset-0 z-50" onClick={() => setMoreOpen(false)}>
+        <div className="fixed inset-0 z-50" onClick={() => setMoreOpen(false)}>
           <div className="rs-fade absolute inset-0 bg-black/40" />
+          {/* A bottom sheet on a phone; on a wider screen the same list as a
+              card, not a strip stretched across the whole width. */}
           <div
-            className="rs-sheet absolute bottom-0 inset-x-0 bg-[var(--card)] rounded-t-2xl border-t border-[var(--line)] p-2 pb-[calc(env(safe-area-inset-bottom)+8px)]"
+            className="rs-sheet absolute bottom-0 inset-x-0 bg-[var(--card)] rounded-t-2xl border-t border-[var(--line)] p-2 pb-[calc(env(safe-area-inset-bottom)+8px)]
+                       sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 sm:bottom-6 sm:w-80 sm:rounded-2xl sm:border"
             onClick={(e) => e.stopPropagation()}
           >
             {SECONDARY.map(({ key, label, href, icon }) => (
