@@ -50,7 +50,9 @@ FAMILIES: dict[str, tuple[int, str, str]] = {
     "us_expect": (3, "US inflation expectations",
                   "What households expect inflation to be; the Fed watches it for signs inflation is settling in."),
     "us_yields": (2, "US Treasury auction",
-                  "Weak demand at a long bond auction pushes yields up - the opportunity cost of holding gold."),
+                  "Weak demand at a long bond auction pushes yields up - the opportunity cost of holding gold. "
+                  "The result is the yield the bonds sold at, and cover: the bids as a multiple of the amount "
+                  "offered. A low cover means weak demand."),
     "us_claims": (2, "US jobless claims",
                   "A weekly read on layoffs; matters most when the labour market is turning."),
     "fed_member": (2, "Fed official speaks",

@@ -153,10 +153,11 @@ export default function GoldPage() {
                   <Chips value={minEv} options={[["3", "3+"], ["1", "All"]] as ["3" | "1", string][]} onChange={setMinEv} />
                   <InfoTip title="Calendar">
                     <p>A year back and a year ahead, refreshed every night: new dates appear as soon as their publisher announces them.</p>
-                    <p>This week&apos;s releases, with forecasts, from Forex Factory&apos;s public calendar. Beyond the week, from the publishers&apos; own schedules: the Fed&apos;s meetings and its calendar of speeches, testimony, minutes and Beige Books (federalreserve.gov); GDP and PCE (BEA); retail sales (Census Bureau); ECB and Bank of Japan meetings; MCX gold expiries. ISM&apos;s survey dates are worked out from ISM&apos;s published rule. India&apos;s RBI meetings, Budget, duty changes and Dhanteras are kept by hand from RBI&apos;s and the government&apos;s announcements. A central bank buying gold or a duty change found in the news appears as an announcement.</p>
+                    <p>From each publisher&apos;s own schedule: the Fed&apos;s meetings and its calendar of speeches, testimony, minutes and Beige Books (federalreserve.gov); GDP and PCE (BEA); retail sales (Census Bureau); 10- and 30-year Treasury auctions with their results (US Treasury, about a week ahead); ECB and Bank of Japan meetings; MCX gold expiries. ISM&apos;s survey dates are worked out from ISM&apos;s published rule. India&apos;s RBI meetings, Budget, duty changes and Dhanteras are kept by hand from RBI&apos;s and the government&apos;s announcements. A central bank buying gold or a duty change found in the news appears as an announcement.</p>
                     {doc.events.some((e) => e.src.startsWith("FRED"))
-                      ? <p>CPI, the jobs report, PPI, JOLTS and jobless claims: dates from FRED (St. Louis Fed), and each actual figure as first published.</p>
-                      : <p>CPI, the jobs report and PPI appear only in the week they come out: their publisher, BLS, refuses programs, and FRED, which republishes them, needs a key not yet set.</p>}
+                      ? <p>CPI, the jobs report, PPI, JOLTS and jobless claims: dates from FRED (St. Louis Fed). Actual and previous figures of US releases as first published, from FRED.</p>
+                      : <p>CPI, the jobs report, PPI, JOLTS and jobless claims are not shown yet: their publisher, BLS, refuses programs, and FRED, which republishes them, needs a key not yet set.</p>}
+                    <p>Not from Forex Factory, whose terms forbid republishing its calendar. No forecasts: the sites that collect them forbid republishing them too.</p>
                     <p>Times are IST; ~ marks an hour that is approximate. Minor data rated one star is left out. Tap an event for why it matters and, once it has happened, how gold moved.</p>
                   </InfoTip>
                 </div>
@@ -181,7 +182,7 @@ export default function GoldPage() {
                                 <span className="text-[14px] font-medium truncate">{e.title}</span>
                               </span>
                               <span className="block text-[11px] text-[var(--ink3)] tabular-nums truncate">
-                                {[e.actual && `Actual ${e.actual}`, e.forecast && `Forecast ${e.forecast}`, e.previous && `Previous ${e.previous}`].filter(Boolean).join(" · ")
+                                {[e.actual && `Actual ${e.actual}`, e.previous && `Previous ${e.previous}`].filter(Boolean).join(" · ")
                                   || subtitle(e, doc.families[e.fam]?.label)}
                               </span>
                               {(e.comex || e.mcx) && (
@@ -263,10 +264,9 @@ export default function GoldPage() {
             <span className="text-[12px] text-[var(--ink3)]">{evFam.label} · {COUNTRY[ev.c] ?? ev.c}</span>
           </div>
           <p className="text-[12px] text-[var(--ink3)]">{istDay(ev.t)}, {istTime(ev.t)} IST</p>
-          {(ev.actual || ev.forecast || ev.previous) && (
-            <div className="grid grid-cols-3 gap-3 py-1">
+          {(ev.actual || ev.previous) && (
+            <div className="flex flex-wrap gap-x-6 gap-y-2 py-1">
               {ev.actual && <Stat label="Actual" value={ev.actual} />}
-              {ev.forecast && <Stat label="Forecast" value={ev.forecast} />}
               {ev.previous && <Stat label="Previous" value={ev.previous} />}
             </div>
           )}

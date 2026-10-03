@@ -259,13 +259,14 @@ jobs:
           RSCREENER_STEP_MINUTES: "15"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_indices.py
       - name: Refresh gold's calendar, Fed dates, headlines and COMEX closes
-        # Forex Factory's public week calendar; the release schedules of the
-        # Fed (meetings and its speech/testimony calendar), BEA, the Census
-        # Bureau, the ECB and the Bank of Japan; GDELT and five publishers'
-        # RSS feeds for headlines; Yahoo's GC=F. About twenty-five requests,
-        # every run. With the owner's FRED_API_KEY secret
-        # (free; he sets it himself) also the CPI/jobs/PPI/JOLTS/claims dates
-        # and each release's actual figure; without it those steps skip.
+        # The release schedules of the Fed (meetings and its speech/testimony
+        # calendar), BEA, the Census Bureau, the ECB and the Bank of Japan;
+        # Treasury auctions (Fiscal Data API); GDELT and five publishers' RSS
+        # feeds for headlines; Yahoo's GC=F. About twenty-five requests, every
+        # run. Not Forex Factory: its terms forbid republishing its calendar.
+        # With the owner's FRED_API_KEY secret (free; he sets it himself)
+        # also the CPI/jobs/PPI/JOLTS/claims dates and the actual and previous
+        # figures of US releases; without it those steps skip.
         env:
           RSCREENER_STEP_MINUTES: "5"
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}

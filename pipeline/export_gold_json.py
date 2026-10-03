@@ -141,18 +141,13 @@ def main() -> None:
                          "stars": stars_from_ratio(med / base), "since": priced[0][0]})
         families[fam] = info
 
-    # A release the week's calendar already lists (with its forecast) is not
-    # shown a second time from a schedule.
-    on_calendar = {(e[8], e[1][:10]) for e in events if e[9] == "forexfactory"}
     out_events = []
     lo, hi = (now - timedelta(days=366)), (now + timedelta(days=366))
     for key, when, country, title, impact, forecast, previous, actual, family, source in events:
         w = datetime.fromisoformat(when.replace("Z", "+00:00"))
-        if not lo <= w <= hi:
+        if not lo <= w <= hi or source == "forexfactory":
             continue
-        if source != "forexfactory" and (family, when[:10]) in on_calendar:
-            continue
-        fam = families.get(family) or families["other"]
+        fam =families.get(family) or families["other"]
         # One star is shown for a named kind of event - measured that low, it
         # is still worth knowing - but not for the long tail of minor data.
         if fam["stars"] < 2 and family in ("other", "other_high"):
