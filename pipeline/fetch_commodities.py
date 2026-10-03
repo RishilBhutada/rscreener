@@ -91,13 +91,12 @@ def load_contracts(session: requests.Session, con: sqlite3.Connection, today: st
 
 
 def load_bars(session: requests.Session, con: sqlite3.Connection, live: list[str], today: str, sleep: float) -> None:
-    """Daily bars per contract: its whole life the first time, the last ten
-    days after that. Contracts that expired in the past fortnight get one
-    more read, for their final days."""
-    recent = (datetime.fromisoformat(today) - timedelta(days=14)).date().isoformat()
-    have = set(live)
-    keys = live + [k for (k,) in con.execute(
-        "SELECT key FROM commodity_contracts WHERE exchange='MCX' AND expiry < ? AND expiry >= ?", (today, recent)) if k not in have]
+    """Daily bars per live contract: its whole life the first time, the last
+    ten days after that. An expired contract is not asked for: Upstox's
+    public candle API answers HTTP 400 for every expired key (all 16 of the
+    late-September expiries, every run from 30-Sep-2026), so a contract's
+    last bar is the day before its expiry day."""
+    keys = live
     last = dict(con.execute("SELECT key, MAX(date) FROM commodity_bars GROUP BY key"))
     ok = empty = bad = 0
     for i, key in enumerate(keys):
