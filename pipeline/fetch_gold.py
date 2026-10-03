@@ -41,7 +41,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 import price_periods
-from gold_lib import ANNOUNCE, INDIA_EVENTS, clean_title, family_of, rate_headline
+from gold_lib import ANNOUNCE, ECB_PAST, INDIA_EVENTS, clean_title, family_of, rate_headline
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
@@ -65,7 +65,6 @@ CENSUS = ["https://www.census.gov/economic-indicators/calendar-listview-{prev}.h
           "https://www.census.gov/economic-indicators/calendar-listview.html",
           "https://www.census.gov/economic-indicators/calendar-listview-{next}.html"]
 FED_CALENDAR = "https://www.federalreserve.gov/json/calendar.json"
-WAYBACK = "https://archive.org/wayback/available"
 ECB = "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html"
 BOJ = ["https://www.boj.or.jp/en/mopo/mpmsche_minu/past.htm", "https://www.boj.or.jp/en/mopo/mpmsche_minu/index.htm"]
 FRED = "https://api.stlouisfed.org/fred"
@@ -276,53 +275,24 @@ def census(con, today: str) -> None:
     print(f"Census: {n} retail-sales release dates")
 
 
-def ecb_dates(con, page: str, source: str, today: str, past_only: bool = False) -> int:
-    n = 0
-    for d, m, y in re.findall(r"(\d{2})/(\d{2})/(\d{4}) Governing Council of the ECB: monetary policy meeting"
-                              r"[^/]*?followed by press conference", plain(page)):
-        when = datetime(int(y), int(m), int(d), 14, 15, tzinfo=ZoneInfo("Europe/Berlin"))
-        if past_only and when.date().isoformat() >= today:
-            continue  # what is still ahead comes from the live page
-        upsert_event(con, f"ecb|{when.date()}", stamp(when), "EUR", "ECB rate decision", "High", "", "", "",
-                     source, today, family="ecb")
-        n += 1
-    con.commit()
-    return n
-
-
 def ecb(con, today: str) -> None:
     """ECB decisions: the meeting day followed by a press conference, decided
-    at 14:15 Frankfurt time. The ECB's page lists only meetings ahead and its
-    list of past decisions is drawn by script, so past meetings come from the
-    Internet Archive's copies of the same page: three copies (January and
-    October of last year, January of this one) cover every meeting since the
-    start of last year. Asked only while those are missing, slowly, and never
-    again in a run once the Archive answers 429 - it treats more as abuse."""
-    print(f"ECB: {ecb_dates(con, get(ECB), 'ECB meeting calendar', today)} coming decisions")
-    year = int(today[:4])
-    have = con.execute("SELECT COUNT(*) FROM gold_events WHERE family='ecb' AND when_utc BETWEEN ? AND ?",
-                       (f"{year - 1}-01-01", today)).fetchone()[0]
-    if have >= 10:  # eight meetings a year: last year's are in
-        return
+    at 14:15 Frankfurt time. The ECB's page lists only meetings ahead - kept
+    here as they pass - and past ones come from gold_lib.ECB_PAST."""
     n = 0
-    for ts in (f"{year - 1}0115", f"{year - 1}1015", f"{year}0115"):
-        try:
-            snap = (requests.get(WAYBACK, params={"url": ECB.split("//")[1], "timestamp": ts},
-                                 headers={"User-Agent": UA}, timeout=40).json()
-                    .get("archived_snapshots", {}).get("closest") or {})
-            if snap.get("url"):
-                # The Archive's raw copy ("id_"), over https.
-                raw = re.sub(r"/web/(\d+)/", r"/web/\1id_/", snap["url"]).replace("http://", "https://", 1)
-                time.sleep(6)
-                n += ecb_dates(con, get(raw), "ECB meeting calendar (Internet Archive copy)", today, past_only=True)
-        except requests.HTTPError as e:
-            print(f"ECB history {ts}: HTTP {e.response.status_code if e.response is not None else '?'}")
-            if e.response is not None and e.response.status_code == 429:
-                break
-        except (requests.RequestException, ValueError) as e:
-            print(f"ECB history {ts}: {type(e).__name__}")
-        time.sleep(6)
-    print(f"ECB: {n} past decisions read from archived copies")
+    for d, m, y in re.findall(r"(\d{2})/(\d{2})/(\d{4}) Governing Council of the ECB: monetary policy meeting"
+                              r"[^/]*?followed by press conference", plain(get(ECB))):
+        when = datetime(int(y), int(m), int(d), 14, 15, tzinfo=ZoneInfo("Europe/Berlin"))
+        upsert_event(con, f"ecb|{when.date()}", stamp(when), "EUR", "ECB rate decision", "High", "", "", "",
+                     "ECB meeting calendar", today, family="ecb")
+        n += 1
+    for d in ECB_PAST:
+        day = date.fromisoformat(d)
+        when = datetime(day.year, day.month, day.day, 14, 15, tzinfo=ZoneInfo("Europe/Berlin"))
+        upsert_event(con, f"ecb|{d}", stamp(when), "EUR", "ECB rate decision", "High", "", "", "",
+                     "ECB meeting calendar (archived copies, 2025)", today, family="ecb")
+    con.commit()
+    print(f"ECB: {n} coming decisions, {len(ECB_PAST)} past ones from the kept list")
 
 
 def fed_calendar(con, today: str) -> None:

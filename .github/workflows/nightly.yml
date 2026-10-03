@@ -263,8 +263,7 @@ jobs:
         # Fed (meetings and its speech/testimony calendar), BEA, the Census
         # Bureau, the ECB and the Bank of Japan; GDELT and five publishers'
         # RSS feeds for headlines; Yahoo's GC=F. About twenty-five requests,
-        # every run (ECB history from the Internet Archive only until it is
-        # in, and never past a 429). With the owner's FRED_API_KEY secret
+        # every run. With the owner's FRED_API_KEY secret
         # (free; he sets it himself) also the CPI/jobs/PPI/JOLTS/claims dates
         # and each release's actual figure; without it those steps skip.
         env:

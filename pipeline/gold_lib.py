@@ -235,6 +235,13 @@ def clean_title(t: str) -> str:
     return re.sub(r"\s+", " ", t).strip(" -|")
 
 
+# Past ECB decisions. The ECB's meeting page lists only meetings ahead (the
+# nightly run keeps those as they pass) and its list of past decisions is
+# drawn by script, so these were read once, on 3 Oct 2026, from the Internet
+# Archive's copies of the ECB's own meeting page (13 Jan and 10 Oct 2025).
+ECB_PAST = ["2025-01-30", "2025-03-06", "2025-04-17", "2025-06-05", "2025-07-24", "2025-09-11", "2025-10-30",
+            "2025-12-18", "2026-02-05", "2026-03-19", "2026-04-30", "2026-06-11", "2026-07-23", "2026-09-10"]
+
 # Five-star rules whose headlines are announcements in their own right, shown
 # on the calendar as well as in the news. (A Fed decision is already there.)
 ANNOUNCE = {NEWS_RULES[0][1], NEWS_RULES[1][1]}
