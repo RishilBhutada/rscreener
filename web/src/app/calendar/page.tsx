@@ -40,7 +40,7 @@ function line(e: CalEvent): string {
   const p = e.past, n = e.next;
   if (p?.k === "results") {
     return [p.q, p.rvy !== undefined && `Sales ${pctText(p.rvy)}`, p.pty !== undefined && `Profit ${pctText(p.pty)}`,
-      p.pty === undefined && p.pt !== undefined && `Profit ${crore(p.pt)}`].filter(Boolean).join(" · ");
+      p.pty === undefined && p.pt !== undefined && (p.pt < 0 ? `Loss ${crore(-p.pt)}` : `Profit ${crore(p.pt)}`)].filter(Boolean).join(" · ");
   }
   if (p?.k === "dividend") return [p.amt && `${rs(p.amt)} a share`, p.yld !== undefined && `${p.yld}% of the price`, !p.amt && p.x].filter(Boolean).join(" · ");
   if (p?.k === "ipo") return [p.seg, p.ip && `issue ${rs(p.ip)}`, p.lc && `first close ${rs(p.lc)}`].filter(Boolean).join(" · ");

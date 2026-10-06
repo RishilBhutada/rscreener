@@ -86,5 +86,6 @@ export function dayLabel(iso: string, withYear = false): string {
 }
 
 export function crore(v: number): string {
-  return `₹${v.toLocaleString("en-IN", { maximumFractionDigits: Math.abs(v) >= 1000 ? 0 : 1 })} Cr`;
+  const s = Math.abs(v).toLocaleString("en-IN", { maximumFractionDigits: Math.abs(v) >= 1000 ? 0 : 1 });
+  return `${v < 0 ? "−" : ""}₹${s} Cr`;
 }
