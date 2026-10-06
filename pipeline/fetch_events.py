@@ -9,10 +9,12 @@ while the nightly run fetched fresh ones each night. export_calendar_json.py
 now writes the page's file from this table on every run.
 
 Each kind is replaced only when its call succeeds; a night NSE refuses keeps
-the last good list rather than emptying it.
+the last good list rather than emptying it. Board meetings that have passed
+are kept for a year, so the calendar's past year builds up; ex-dates are not,
+because the corporate-actions table already holds their history.
 """
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -38,8 +40,17 @@ def iso(raw: str | None) -> str | None:
         return None
 
 
-def replace(con: sqlite3.Connection, kind: str, rows: list[tuple]) -> None:
-    con.execute("DELETE FROM calendar_events WHERE kind=?", (kind,))
+def replace(con: sqlite3.Connection, kind: str, rows: list[tuple], keep_before: str | None = None) -> None:
+    """The new list replaces the old. With keep_before, rows dated before it
+    stay - unless the new list carries the same company and day again."""
+    if keep_before is None:
+        con.execute("DELETE FROM calendar_events WHERE kind=?", (kind,))
+    else:
+        con.execute("DELETE FROM calendar_events WHERE kind=? AND date >= ?", (kind, keep_before))
+        con.executemany("DELETE FROM calendar_events WHERE kind=? AND symbol=? AND date=?",
+                        [(kind, r[1], r[4]) for r in rows])
+        year_ago = (date.fromisoformat(keep_before) - timedelta(days=400)).isoformat()
+        con.execute("DELETE FROM calendar_events WHERE kind=? AND date < ?", (kind, year_ago))
     con.executemany("INSERT INTO calendar_events VALUES (?,?,?,?,?,?,?)", rows)
     con.commit()
 
@@ -61,9 +72,9 @@ def main() -> None:
     meetings = [("meeting", e.get("symbol"), e.get("company"), e.get("purpose"), d,
                  (e.get("bm_desc") or "")[:200], stamp)
                 for e in r.json() if (d := iso(e.get("date")))]
-    replace(con, "meeting", meetings)
-
     today = datetime.now(IST).date()
+    replace(con, "meeting", meetings, keep_before=today.isoformat())
+
     r = s.get(EXDATES.format(a=today, b=today + timedelta(days=45)), timeout=30)
     r.raise_for_status()
     body = r.json()

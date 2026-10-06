@@ -5,7 +5,7 @@ import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { StarGlyph, ExternalGlyph } from "@/components/Glyphs";
-import { Chips, Stat, signed, tone } from "@/components/QuoteUI";
+import { Chips, Icon, Stat, signed, tone } from "@/components/QuoteUI";
 import { COUNTRY, GoldDoc, GoldEvent, GoldFamily, GoldNews, ago, istDate, istDay, istTime } from "@/lib/gold";
 
 /** Gold: what it costs now, and what moves it - the scheduled releases and
@@ -57,6 +57,7 @@ export default function GoldPage() {
   const [when, setWhen] = useState<"next" | "past">("next");
   const [minNews, setMinNews] = useState<"3" | "2">("3");
   const [minEv, setMinEv] = useState<"3" | "1">("3");
+  const [find, setFind] = useState("");
   const [ev, setEv] = useState<GoldEvent | null>(null);
   const [item, setItem] = useState<GoldNews | null>(null);
   const [now, setNow] = useState(0);
@@ -68,15 +69,23 @@ export default function GoldPage() {
       .catch((e) => setError(String(e.message ?? e)));
   }, []);
 
+  // Searching looks both ways at once: what is coming, then the past year.
+  const words = find.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const ahead = (e: GoldEvent) => new Date(e.t).getTime() >= now - 3600000;
   const days = useMemo(() => {
     if (!doc || !now) return [];
-    const list = doc.events.filter((e) => e.stars >= Number(minEv)
-      && (when === "next" ? new Date(e.t).getTime() >= now - 3600000 : new Date(e.t).getTime() < now));
-    if (when === "past") list.reverse();
+    const hit = (e: GoldEvent) => words.every((w) =>
+      `${e.title} ${doc.families[e.fam]?.label ?? ""} ${COUNTRY[e.c] ?? e.c}`.toLowerCase().includes(w));
+    const pick = (fwd: boolean) => {
+      const l = doc.events.filter((e) => e.stars >= Number(minEv) && ahead(e) === fwd && hit(e));
+      return fwd ? l : l.reverse();
+    };
+    const list = words.length ? [...pick(true), ...pick(false)] : pick(when === "next");
     const by = new Map<string, GoldEvent[]>();
     for (const e of list) by.set(istDate(e.t), [...(by.get(istDate(e.t)) ?? []), e]);
     return Array.from(by.entries());
-  }, [doc, when, now, minEv]);
+  }, [doc, when, now, minEv, find]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pastAt = words.length ? days.findIndex(([, l]) => !ahead(l[0])) : -1;
 
   const news = useMemo(() => (doc?.news ?? []).filter((n) => n.stars >= Number(minNews)), [doc, minNews]);
   const fams = useMemo(() => Object.entries(doc?.families ?? {}).filter(([k]) => k !== "other")
@@ -148,8 +157,21 @@ export default function GoldPage() {
 
             {tab === "calendar" && (
               <>
+                <div className="relative">
+                  <Icon name="search" size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--ink3)] pointer-events-none" />
+                  <input value={find} onChange={(e) => setFind(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") setFind(""); }}
+                    placeholder="Search events: CPI, Fed, RBI, auction…" aria-label="Search events" autoComplete="off" enterKeyHint="search"
+                    className="w-full rounded-xl border border-[var(--line2)] bg-[var(--card)] pl-9 pr-10 py-2.5 text-base text-[var(--ink)]
+                               placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent-soft)]" />
+                  {find && (
+                    <button type="button" onClick={() => setFind("")} aria-label="Clear search"
+                      className="absolute right-1 top-1/2 -translate-y-1/2 w-9 h-9 inline-flex items-center justify-center rounded-full text-[var(--ink3)] active:bg-[var(--card2)]">
+                      <Icon name="close" size={15} />
+                    </button>
+                  )}
+                </div>
                 <div className="flex items-center gap-2">
-                  <Chips value={when} options={[["next", "Year ahead"], ["past", "Past year"]] as ["next" | "past", string][]} onChange={setWhen} />
+                  {!words.length && <Chips value={when} options={[["next", "Year ahead"], ["past", "Past year"]] as ["next" | "past", string][]} onChange={setWhen} />}
                   <Chips value={minEv} options={[["3", "3+"], ["1", "All"]] as ["3" | "1", string][]} onChange={setMinEv} />
                   <InfoTip title="Calendar">
                     <p>A year back and a year ahead, refreshed every night: new dates appear as soon as their publisher announces them.</p>
@@ -161,9 +183,11 @@ export default function GoldPage() {
                     <p>Times are IST; ~ marks an hour that is approximate. Minor data rated one star is left out. Tap an event for why it matters and, once it has happened, how gold moved.</p>
                   </InfoTip>
                 </div>
-                {days.length === 0 && <p className="py-10 text-center text-[13px] text-[var(--ink3)]">{minEv === "3" ? "Nothing rated three stars or more" : "Nothing"} {when === "next" ? "in the year ahead" : "in the past year"}</p>}
+                {days.length === 0 && <p className="py-10 text-center text-[13px] text-[var(--ink3)]">{minEv === "3" ? "Nothing rated three stars or more" : "Nothing"} {words.length ? `matching “${find.trim()}” in the two years` : when === "next" ? "in the year ahead" : "in the past year"}</p>}
                 {days.map(([d, list], i) => (
                   <Fragment key={d}>
+                  {words.length > 0 && i === 0 && pastAt !== 0 && <h2 className="pt-1 text-[13px] font-bold">Year ahead</h2>}
+                  {i === pastAt && <h2 className="pt-3 text-[13px] font-bold">Past year</h2>}
                   {(i === 0 || days[i - 1][0].slice(0, 7) !== d.slice(0, 7)) && (
                     <h3 className="pt-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
                       {new Date(`${d}T12:00:00Z`).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" })}

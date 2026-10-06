@@ -1,110 +1,397 @@
 "use client";
 
-import { StarGlyph } from "@/components/Glyphs";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
+import InfoTip, { InfoDialog } from "@/components/InfoTip";
+import { StarGlyph, ExternalGlyph } from "@/components/Glyphs";
+import { Chips, Icon, Stat, signed, tone } from "@/components/QuoteUI";
 import { allWatched } from "@/lib/watchlists";
+import { loadPortfolio } from "@/lib/portfolio";
 import { shortName } from "@/lib/names";
+import {
+  CalEvent, CalKind, GROUPS, KIND_LABEL, PastDoc, UpcomingDoc, crore, dayLabel, docUrl, fromPast, fromUpcoming, matches,
+} from "@/lib/calendar";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+/** Rows drawn at a time: the past year holds about 11,000 events. */
+const PAGE = 250;
 
-type Ev = { symbol: string; company: string; purpose: string; date: string; desc: string };
-type Calendar = { generated_at: string; events: Ev[] };
+const COLOR: Record<CalKind, string> = {
+  results: "var(--accent)", dividend: "var(--ca-div)", bonus: "var(--ca-bon)", split: "var(--ca-spl)",
+  rights: "var(--ca-rgt)", buyback: "var(--ca-buy)", other: "var(--ca-oth)", ipo: "var(--warn)", meeting: "var(--ink3)",
+};
 
-function dateLabel(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+function Badge({ kind }: { kind: CalKind }) {
+  return (
+    <span className="shrink-0 text-[10px] font-semibold rounded px-1.5 py-0.5"
+      style={{ color: COLOR[kind], background: `color-mix(in srgb, ${COLOR[kind]} 14%, transparent)` }}>
+      {KIND_LABEL[kind]}
+    </span>
+  );
+}
+
+const pctText = (v: number | undefined, dec = 1) => (v === undefined ? "" : `${signed(v, dec)}%`);
+/** ₹5.5 reads as ₹5.50. */
+const rs = (v: number) => `₹${Number.isInteger(v) ? v : v.toFixed(2)}`;
+
+/** The one line under a company's name. */
+function line(e: CalEvent): string {
+  const p = e.past, n = e.next;
+  if (p?.k === "results") {
+    return [p.q, p.rvy !== undefined && `Sales ${pctText(p.rvy)}`, p.pty !== undefined && `Profit ${pctText(p.pty)}`,
+      p.pty === undefined && p.pt !== undefined && `Profit ${crore(p.pt)}`].filter(Boolean).join(" · ");
+  }
+  if (p?.k === "dividend") return [p.amt && `${rs(p.amt)} a share`, p.yld !== undefined && `${p.yld}% of the price`, !p.amt && p.x].filter(Boolean).join(" · ");
+  if (p?.k === "ipo") return [p.seg, p.ip && `issue ${rs(p.ip)}`, p.lc && `first close ${rs(p.lc)}`].filter(Boolean).join(" · ");
+  if (p?.k === "meeting") return p.x ?? "";
+  if (p) return p.x ?? "";
+  if (n?.type === "results") {
+    const l = n.last;
+    const bits = [l?.q && `Last: ${l.q}`, l?.pty !== undefined && `profit ${pctText(l.pty)}`,
+      n.typ !== undefined && `usually moves ±${n.typ}%`];
+    return bits.filter(Boolean).join(" · ") || n.desc;
+  }
+  if (n?.type === "dividend" && n.amt) return [`${rs(n.amt)} a share`, n.yld !== undefined && `${n.yld}% of the price`].filter(Boolean).join(" · ");
+  return n?.desc ?? "";
+}
+
+/** The row's second line; a coming result or IPO also says what it is. */
+function sub(e: CalEvent): string {
+  const l = line(e);
+  if (e.upcoming && (e.kind === "results" || e.kind === "ipo")) return [e.what, l].filter(Boolean).join(" · ");
+  return l || e.what;
+}
+
+/** The figure on the right: how the stock moved. */
+function figure(e: CalEvent): { v: number; label: string } | null {
+  const p = e.past;
+  if (p?.k === "results" && p.mv !== undefined) return { v: p.mv, label: "stock" };
+  if (p?.k === "ipo" && p.lg !== undefined) return { v: p.lg, label: "day one" };
+  return null;
 }
 
 export default function CalendarPage() {
-  const [cal, setCal] = useState<Calendar | null>(null);
+  const [next, setNext] = useState<UpcomingDoc | null>(null);
+  const [past, setPast] = useState<PastDoc | null>(null);
   const [error, setError] = useState("");
-  const [resultsOnly, setResultsOnly] = useState(true);
-  const [watchOnly, setWatchOnly] = useState(false);
-  const [watch, setWatch] = useState<string[]>([]);
+  const [pastError, setPastError] = useState("");
+  const [when, setWhen] = useState<"next" | "past">("next");
+  const [group, setGroup] = useState("all");
+  const [mineOnly, setMineOnly] = useState(false);
+  const [mine, setMine] = useState<Set<string>>(new Set());
+  const [q, setQ] = useState("");
+  const [shown, setShown] = useState(PAGE);
+  const [open, setOpen] = useState<CalEvent | null>(null);
+  const [today, setToday] = useState("");
 
   useEffect(() => {
     fetch(`${BASE}/calendar.json`)
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then(setCal)
+      .then(setNext)
       .catch((e) => setError(String(e.message ?? e)));
-    setWatch(allWatched());
+    // The past year is the larger file (about 400 KB on the wire); it loads
+    // behind the upcoming list rather than in front of it.
+    fetch(`${BASE}/calendar-past.json`)
+      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(setPast)
+      .catch((e) => setPastError(String(e.message ?? e)));
+    setMine(new Set([...allWatched(), ...loadPortfolio().map((h) => h.symbol)]));
+    const d = new Date();
+    setToday(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+    // A link can open the page on a company: /calendar?q=TCS
+    const fromUrl = new URLSearchParams(window.location.search).get("q");
+    if (fromUrl) setQ(fromUrl);
   }, []);
 
-  const grouped = useMemo(() => {
-    if (!cal) return [];
-    const today = new Date().toISOString().slice(0, 10);
-    let evs = cal.events.filter((e) => e.date >= today);
-    if (resultsOnly) evs = evs.filter((e) => (e.purpose || "").toLowerCase().includes("result"));
-    if (watchOnly) evs = evs.filter((e) => watch.includes(e.symbol));
-    const by: Record<string, Ev[]> = {};
-    for (const e of evs) (by[e.date] ??= []).push(e);
-    return Object.entries(by).sort(([a], [b]) => a.localeCompare(b));
-  }, [cal, resultsOnly, watchOnly, watch]);
+  const upcoming = useMemo(() => (next?.events ?? []).filter((e) => !today || e.date >= today)
+    .map((e, i) => fromUpcoming(e, i, shortName)), [next, today]);
+  const history = useMemo(() => (past ? past.events.map((e, i) => fromPast(e, i, past.names, shortName)) : []), [past]);
+
+  const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const searching = words.length > 0;
+  const kinds = GROUPS.find(([k]) => k === group)?.[2] ?? [];
+  const keep = (e: CalEvent) => (!kinds.length || kinds.includes(e.kind)) && (!mineOnly || mine.has(e.symbol))
+    && (!searching || matches(e, words));
+
+  // Searching looks both ways at once: what is coming, then the past year.
+  const nextList = useMemo(() => upcoming.filter(keep), [upcoming, group, mineOnly, mine, q]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pastList = useMemo(() => history.filter(keep), [history, group, mineOnly, mine, q]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => setShown(PAGE), [when, group, mineOnly, q]);
+
+  const sections: [string, CalEvent[], number][] = searching
+    ? [["Coming up", nextList, nextList.length], ["Past year", pastList, pastList.length]]
+    : [["", when === "next" ? nextList : pastList, (when === "next" ? nextList : pastList).length]];
+
+  let budget = shown;
+  const drawn = sections.map(([title, list, total]) => {
+    const slice = list.slice(0, Math.max(0, budget));
+    budget -= slice.length;
+    const days: [string, CalEvent[]][] = [];
+    for (const e of slice) {
+      if (days.length && days[days.length - 1][0] === e.date) days[days.length - 1][1].push(e);
+      else days.push([e.date, [e]]);
+    }
+    return { title, days, total, hidden: total - slice.length };
+  });
+  const hidden = drawn.reduce((a, s) => a + s.hidden, 0);
+
+  const loadingPast = (when === "past" || searching) && !past && !pastError;
+  const stale = next?.generated_at
+    ? Math.floor((Date.now() - Date.parse(next.generated_at.replace(" UTC", "Z").replace(" ", "T"))) / 86400000) : 0;
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
       <TopNav active="calendar" />
-      <main className="max-w-6xl mx-auto px-4 py-6 space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <h1 className="text-lg font-bold text-[var(--ink)]">Upcoming board meetings</h1>
-          <div className="flex gap-2 text-xs">
-            <button onClick={() => setResultsOnly(!resultsOnly)}
-              className={`rounded-full px-3.5 py-2 sm:py-1 border ${resultsOnly ? "bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
-              Results only
+      <main className="rs-page-in max-w-3xl mx-auto px-4 py-5 space-y-3">
+        <h1 className="text-xl font-bold flex items-center gap-1.5">
+          Calendar
+          <InfoTip title="Calendar">
+            <p>Coming up: board meetings (results, dividends, fund raising), ex-dates for dividends, bonuses, splits and rights, and IPOs, from NSE&apos;s event calendar and each company&apos;s corporate actions.</p>
+            <p>Past year: every results announcement with the quarter&apos;s sales and net profit against the same quarter a year before, and how the stock moved; dividends with what they were worth against the price; splits, bonuses, rights, buybacks and demergers; IPO listings with the first day&apos;s close against the issue price.</p>
+            <p>&quot;Stock&quot; on a result is the move from the last close before the day NSE published it to the close of the next session after it - results often come out after the market shuts, so the window spans two sessions. A split or bonus inside the window leaves it blank. Nifty 50 over the same window is in the detail.</p>
+            <p>Search covers both the coming weeks and the past year. A record of what happened, not a forecast and not advice to buy or sell.</p>
+          </InfoTip>
+        </h1>
+
+        <div className="relative">
+          <Icon name="search" size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--ink3)] pointer-events-none" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") setQ(""); }}
+            placeholder="Search a company or ticker" aria-label="Search a company or ticker" autoComplete="off" enterKeyHint="search"
+            className="w-full rounded-xl border border-[var(--line2)] bg-[var(--card)] pl-10 pr-10 py-3 text-base text-[var(--ink)]
+                       placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent-soft)]" />
+          {q && (
+            <button type="button" onClick={() => setQ("")} aria-label="Clear search"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 w-9 h-9 inline-flex items-center justify-center rounded-full text-[var(--ink3)] active:bg-[var(--card2)]">
+              <Icon name="close" size={16} />
             </button>
-            <button onClick={() => setWatchOnly(!watchOnly)}
-              className={`rounded-full px-3.5 py-2 sm:py-1 border ${watchOnly ? "bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-semibold" : "bg-[var(--card)] border-[var(--line)] text-[var(--ink3)]"}`}>
-              <StarGlyph filled={watchOnly} size={13} className="mr-1" />My watchlist
-            </button>
-          </div>
+          )}
         </div>
-        {error && <p className="text-[var(--neg)] text-sm">{error} — run the pipeline&apos;s fetch_events step first.</p>}
-        {!cal && !error && (
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {!searching && (
+            <Chips value={when} options={[["next", "Coming up"], ["past", "Past year"]] as ["next" | "past", string][]} onChange={setWhen} />
+          )}
+          <button type="button" onClick={() => setMineOnly(!mineOnly)} aria-pressed={mineOnly}
+            className={`rs-press inline-flex items-center gap-1 min-h-[34px] px-3 rounded-full text-[13px] border ${mineOnly
+              ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)] font-semibold" : "text-[var(--ink2)] border-[var(--line)]"}`}>
+            <StarGlyph filled={mineOnly} size={13} />My stocks
+          </button>
+        </div>
+        <div className="-mx-4 px-4 flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {GROUPS.map(([k, label]) => (
+            <button key={k} type="button" onClick={() => setGroup(k)} aria-pressed={group === k}
+              className={`rs-press shrink-0 min-h-[34px] px-3 rounded-full text-[13px] border ${group === k
+                ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)] font-semibold" : "text-[var(--ink2)] border-[var(--line)]"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {error && <p className="text-[var(--neg)] text-sm">The calendar did not load ({error}).</p>}
+        {stale > 3 && !searching && when === "next" && (
+          <div className="text-sm rounded-xl border border-[var(--neg-line)] bg-[var(--neg-soft)] text-[var(--neg)] p-3">
+            <span className="font-semibold">NSE&apos;s calendar was last read {stale} days ago</span> ({next?.generated_at}).
+            Meetings announced since then are missing.
+          </div>
+        )}
+        {(!next && !error) || loadingPast ? (
           <div className="space-y-3" aria-busy="true" aria-label="Loading">
             <div className="rs-skel h-28" /><div className="rs-skel h-28" /><div className="rs-skel h-28" />
           </div>
-        )}
-        {/* "Nothing upcoming" and "this file is seven weeks old" look identical on
-            screen, and for seven weeks it was the second one: every event in it
-            had already happened, so the page said there was nothing coming. Age
-            is checked before emptiness is reported. */}
-        {cal && grouped.length === 0 && (() => {
-          const days = Math.floor((Date.now() - Date.parse(cal.generated_at.replace(" UTC", "Z").replace(" ", "T"))) / 86400000);
-          return days > 3 ? (
-            <div className="text-sm rounded-xl border border-[var(--neg-line)] bg-[var(--neg-soft)] text-[var(--neg)] p-3">
-              <span className="font-semibold">This calendar is {days} days old.</span> It is empty because
-              every meeting in it has already happened, not because none are scheduled. The nightly
-              refresh has not published since {cal.generated_at}.
-            </div>
-          ) : (
-            <p className="text-[var(--ink3)] text-sm">Nothing upcoming under the current filters.</p>
-          );
-        })()}
-        {grouped.map(([date, evs]) => (
-          <section key={date} className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
-            <h2 className="px-4 py-2.5 text-sm font-bold text-[var(--ink)] border-b border-[var(--line)]">{dateLabel(date)}</h2>
-            <ul>
-              {evs.map((e, i) => (
-                <li key={`${e.symbol}-${i}`} className="px-4 py-3 sm:py-2.5 border-t border-[var(--line)] flex flex-col gap-1 sm:flex-row sm:gap-3 sm:items-baseline sm:flex-wrap">
-                  {/* The company name was already in this data and went unused,
-                      so a page listing who reports this week read as a column of
-                      tickers - ANANTRAJ, ARE&M, BOSCHLTD - that you have to know
-                      by heart. The name leads; the ticker stays beside it for
-                      anyone who thinks in tickers. */}
-                  <Link href={`/company?s=${encodeURIComponent(e.symbol)}`} className="font-semibold text-[var(--accent-ink)] hover:underline shrink-0">
-                    {shortName(e.company ?? "", e.symbol)}
-                    <span className="ml-1.5 text-xs font-normal text-[var(--ink3)]">{e.symbol}</span>
-                  </Link>
-                  <span className="text-xs font-semibold text-[var(--ink3)] shrink-0">{e.purpose}</span>
-                  <span className="text-xs text-[var(--ink3)] truncate max-w-full">{e.desc}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
+        ) : null}
+        {pastError && (when === "past" || searching) && <p className="text-[var(--neg)] text-sm">The past year did not load ({pastError}).</p>}
+
+        {!loadingPast && (next || past) && drawn.map((s) => (
+          <Fragment key={s.title || "list"}>
+            {s.title && (
+              <h2 className="pt-2 text-[13px] font-bold">{s.title} <span className="font-normal text-[var(--ink3)]">· {s.total.toLocaleString("en-IN")}</span></h2>
+            )}
+            {s.total === 0 && (
+              <p className="py-6 text-center text-[13px] text-[var(--ink3)]">
+                Nothing{searching ? ` for “${q.trim()}”` : ""}{mineOnly ? " in your stocks" : ""}{group !== "all" ? " of this type" : ""}{(searching ? s.title === "Coming up" : when === "next") ? " coming up" : " in the past year"}
+              </p>
+            )}
+            {s.days.map(([d, list], i) => (
+              <Fragment key={`${s.title}${d}`}>
+                {(i === 0 || s.days[i - 1][0].slice(0, 7) !== d.slice(0, 7)) && (
+                  <h3 className="pt-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
+                    {new Date(`${d}T12:00:00Z`).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" })}
+                  </h3>
+                )}
+                <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
+                  <h3 className="px-3 py-2 text-[13px] font-semibold border-b border-[var(--line)] flex justify-between">
+                    <span>{d === today ? "Today" : dayLabel(d)}</span>
+                    <span className="font-normal text-[var(--ink3)]">{list.length}</span>
+                  </h3>
+                  <ul className="divide-y divide-[var(--line)]">
+                    {list.map((e) => {
+                      const f = figure(e);
+                      return (
+                        <li key={e.id}>
+                          <button type="button" onClick={() => setOpen(e)} className="w-full flex items-start gap-3 px-3 py-2.5 text-left active:bg-[var(--card2)]">
+                            <span className="flex-1 min-w-0">
+                              <span className="flex items-center gap-1.5 min-w-0">
+                                <Badge kind={e.kind} />
+                                <span className="text-[14px] font-medium truncate">{e.name}</span>
+                                <span className="shrink-0 text-[11px] text-[var(--ink3)]">{e.symbol}</span>
+                              </span>
+                              <span className="block text-[12px] text-[var(--ink3)] tabular-nums truncate">
+                                {sub(e)}
+                              </span>
+                            </span>
+                            {f && (
+                              <span className="shrink-0 text-right">
+                                <span className={`block text-[13px] font-semibold tabular-nums ${tone(f.v)}`}>{signed(f.v, 1)}%</span>
+                                <span className="block text-[10px] text-[var(--ink3)]">{f.label}</span>
+                              </span>
+                            )}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
+              </Fragment>
+            ))}
+          </Fragment>
         ))}
-        {cal && <p className="text-[11px] text-[var(--ink3)]">NSE event calendar · {cal.generated_at}</p>}
+
+        {hidden > 0 && !loadingPast && (
+          <button type="button" onClick={() => setShown(shown + PAGE)}
+            className="rs-press w-full min-h-[44px] rounded-xl border border-[var(--line)] bg-[var(--card)] text-[14px] font-medium text-[var(--accent-ink)]">
+            Show {Math.min(PAGE, hidden).toLocaleString("en-IN")} more <span className="text-[var(--ink3)] font-normal">of {hidden.toLocaleString("en-IN")}</span>
+          </button>
+        )}
+        {next && (
+          <p className="text-[11px] text-[var(--ink3)]">
+            NSE event calendar read {next.generated_at ?? "—"}{past ? ` · past year ${dayLabel(past.from, true)} to ${dayLabel(past.to, true)}, prices to ${past.prices_to ? dayLabel(past.prices_to, true) : "—"}` : ""}
+          </p>
+        )}
       </main>
+
+      {open && <Detail e={open} onClose={() => setOpen(null)}
+        earlier={history.filter((h) => h.symbol === open.symbol && h.kind === "results" && h.date < open.date).slice(0, 4)} />}
     </div>
+  );
+}
+
+/** The company's results before this one, newest first. */
+function Earlier({ list }: { list: CalEvent[] }) {
+  if (!list.length) return null;
+  const cell = (v: number | undefined, dec = 1) => <span className={`tabular-nums text-right ${tone(v)}`}>{v === undefined ? "—" : pctText(v, dec)}</span>;
+  return (
+    <div>
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)] pb-1">Its last {list.length === 1 ? "result" : `${list.length} results`}</p>
+      <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 gap-y-1 text-[12px]">
+        <span className="text-[var(--ink3)]">Quarter</span><span className="text-[var(--ink3)] text-right">Sales</span>
+        <span className="text-[var(--ink3)] text-right">Profit</span><span className="text-[var(--ink3)] text-right">Stock</span>
+        {list.map((r) => (
+          <Fragment key={r.id}>
+            <span>{r.past?.q} <span className="text-[var(--ink3)]">· {dayLabel(r.date).replace(/^\w+, /, "")}</span></span>
+            {cell(r.past?.rvy)}{cell(r.past?.pty)}{cell(r.past?.mv)}
+          </Fragment>
+        ))}
+      </div>
+      <p className="text-[11px] text-[var(--ink3)] pt-1">Sales and profit against the same quarter a year before.</p>
+    </div>
+  );
+}
+
+function Detail({ e, onClose, earlier }: { e: CalEvent; onClose: () => void; earlier: CalEvent[] }) {
+  const p = e.past, n = e.next;
+  const rel = p?.mv !== undefined && p?.nf !== undefined ? p.mv - p.nf : undefined;
+  return (
+    <InfoDialog title={e.name} onClose={onClose}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <Badge kind={e.kind} />
+        <span className="text-[12px] text-[var(--ink3)]">{e.symbol} · {dayLabel(e.date, true)}</span>
+      </div>
+      <p className="text-[14px] text-[var(--ink)] font-medium leading-snug">{e.what}</p>
+
+      {p?.k === "results" && (
+        <>
+          <div className="grid grid-cols-2 gap-3 py-1">
+            {p.rv !== undefined && <Stat label={`Sales${p.rvy !== undefined ? ", vs a year before" : ""}`}
+              value={<>{crore(p.rv)} {p.rvy !== undefined && <span className={tone(p.rvy)}>{pctText(p.rvy)}</span>}</>} />}
+            {p.pt !== undefined && <Stat label={`Net profit${p.pty !== undefined ? ", vs a year before" : ""}`}
+              value={<>{crore(p.pt)} {p.pty !== undefined && <span className={tone(p.pty)}>{pctText(p.pty)}</span>}</>} />}
+            {p.eps !== undefined && <Stat label="EPS" value={`₹${p.eps}`} />}
+            {p.mv !== undefined && <Stat label="Stock, over the results" value={pctText(p.mv, 2)} className={tone(p.mv)} />}
+            {p.nf !== undefined && <Stat label="Nifty 50, same days" value={pctText(p.nf, 2)} className={tone(p.nf)} />}
+            {rel !== undefined && <Stat label="Stock against Nifty" value={`${signed(rel, 2)} pts`} className={tone(rel)} />}
+          </div>
+          {p.rv === undefined && p.pt === undefined && <p className="text-[12px]">The quarter&apos;s figures are not in the database yet.</p>}
+          {(p.rv !== undefined || p.pt !== undefined) && (
+            <p className="text-[11px] text-[var(--ink3)]">{p.sa ? "Standalone" : "Consolidated"} figures from the company&apos;s filing with NSE.{p.mv !== undefined ? " Stock: last close before the day of the results to the close of the next session after it." : ""}</p>
+          )}
+          <Earlier list={earlier} />
+          {p.cc && (
+            <div className="grid grid-cols-2 gap-2">
+              {p.cc.t && <DocLink href={docUrl(p.cc.t)}>Call transcript</DocLink>}
+              {p.cc.r && <DocLink href={docUrl(p.cc.r)}>Call recording</DocLink>}
+            </div>
+          )}
+        </>
+      )}
+
+      {p?.k === "dividend" && (
+        <div className="grid grid-cols-2 gap-3 py-1">
+          {p.amt !== undefined && <Stat label="Per share" value={`${rs(p.amt)}`} />}
+          {p.yld !== undefined && <Stat label="Of the price the day before" value={`${p.yld}%`} />}
+        </div>
+      )}
+      {p?.k === "ipo" && (
+        <div className="grid grid-cols-2 gap-3 py-1">
+          {p.seg && <Stat label="Segment" value={p.seg} />}
+          {p.ip !== undefined && <Stat label="Issue price" value={`${rs(p.ip)}`} />}
+          {p.lc !== undefined && <Stat label="First close" value={`${rs(p.lc)}`} />}
+          {p.lg !== undefined && <Stat label="First close vs issue" value={pctText(p.lg)} className={tone(p.lg)} />}
+        </div>
+      )}
+      {p && ["bonus", "split", "rights", "buyback", "other"].includes(p.k) && (
+        <p className="text-[12px]">{p.k === "bonus" || p.k === "split"
+          ? "The share count changed on this date; prices before it are not comparable without adjusting for it."
+          : p.k === "rights" ? "Shareholders on the record date could buy new shares at the stated price."
+          : p.k === "buyback" ? "The company bought back its own shares." : "A change to the company's shares or securities."}</p>
+      )}
+      {p?.k === "meeting" && p.x && <p className="text-[13px]">{p.x}</p>}
+
+      {n && (
+        <>
+          {n.desc && <p className="text-[13px]">{n.desc}</p>}
+          {n.type === "results" && n.typ !== undefined && (
+            <Stat label={`Typical move on its last ${n.n} results`} value={`±${n.typ}%`} />
+          )}
+          {n.type === "results" && n.typ !== undefined && (
+            <p className="text-[11px] text-[var(--ink3)]">Typical move: the middle of the stock&apos;s moves on its last {n.n} results, up or down. What happened before, not a forecast.</p>
+          )}
+          {n.type === "results" && <Earlier list={earlier} />}
+          {n.type === "dividend" && n.amt !== undefined && (
+            <div className="grid grid-cols-2 gap-3 py-1">
+              <Stat label="Per share" value={`${rs(n.amt)}`} />
+              {n.yld !== undefined && <Stat label="Of the latest price" value={`${n.yld}%`} />}
+            </div>
+          )}
+          {n.kind === "exdate" && <p className="text-[11px] text-[var(--ink3)]">Shares bought on or after the ex-date do not carry this entitlement.</p>}
+        </>
+      )}
+
+      <Link href={`/company?s=${encodeURIComponent(e.symbol)}`}
+        className="rs-press inline-flex items-center justify-center w-full min-h-[44px] rounded-xl bg-[var(--accent-fill)] text-[var(--accent-fill-ink)] text-[14px] font-semibold">
+        Open {e.name}
+      </Link>
+      <p className="text-[11px] text-[var(--ink3)]">Source: NSE - {e.upcoming ? "event calendar and corporate actions" : p?.k === "results" ? "results filings and daily prices" : p?.k === "ipo" ? "IPO list and daily prices" : "corporate actions"}.</p>
+    </InfoDialog>
+  );
+}
+
+function DocLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer"
+      className="rs-press inline-flex items-center justify-center gap-1.5 min-h-[40px] rounded-xl border border-[var(--line)] text-[13px] font-medium text-[var(--accent-ink)]">
+      {children} <ExternalGlyph size={12} />
+    </a>
   );
 }
