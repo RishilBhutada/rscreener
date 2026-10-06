@@ -56,6 +56,12 @@ def year_before(iso_day: str) -> str:
     return f"{int(iso_day[:4]) - 1}{iso_day[4:]}"
 
 
+def quarter_before(period_end: str) -> str:
+    """2026-06-30 -> 2026-03-31; a date that is not a quarter's end -> ""."""
+    y, m = int(period_end[:4]), int(period_end[5:7])
+    return {3: f"{y - 1}-12-31", 6: f"{y}-03-31", 9: f"{y}-06-30", 12: f"{y}-09-30"}.get(m, "")
+
+
 def pct(new: float | None, old: float | None, places: int = 1) -> float | None:
     if new is None or old is None or old <= 0:
         return None
@@ -177,12 +183,16 @@ def main() -> None:
     for sym, pe, ann in filings:
         e = {"d": ann, "k": "results", "s": sym, "q": quarter(pe)}
         basis = "consolidated" if figures.get((sym, "consolidated", pe), {}).get("pat") is not None else "standalone"
-        cur, ago = figures.get((sym, basis, pe), {}), figures.get((sym, basis, year_before(pe)), {})
+        cur = figures.get((sym, basis, pe), {})
+        ago, before = figures.get((sym, basis, year_before(pe)), {}), figures.get((sym, basis, quarter_before(pe)), {})
+        # Growth against the same quarter a year before (y) and against the
+        # quarter just before (q). None when the base was a loss or missing.
         for key, item in (("rv", "revenue"), ("pt", "pat")):
             if cur.get(item) is not None:
                 e[key] = crore(cur[item])
-                if (g := pct(cur[item], ago.get(item))) is not None:
-                    e[key + "y"] = g
+                for tag, base in (("y", ago), ("q", before)):
+                    if (g := pct(cur[item], base.get(item))) is not None:
+                        e[key + tag] = g
         if cur.get("eps") is not None:
             e["eps"] = round(cur["eps"], 2)
         if cur and basis == "standalone":
@@ -262,7 +272,7 @@ def main() -> None:
             mine = [r for r in results_by.get(sym, []) if r["d"] < d]
             if mine:
                 last = mine[-1]
-                e["last"] = {k: last[k] for k in ("q", "rvy", "pty", "mv") if k in last}
+                e["last"] = {k: last[k] for k in ("q", "rvy", "pty", "rvq", "ptq", "pt", "mv") if k in last}
             moves = [abs(r["mv"]) for r in mine[-4:] if "mv" in r]
             if len(moves) >= 2:
                 e["typ"], e["n"] = round(statistics.median(moves), 1), len(moves)

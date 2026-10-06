@@ -10,14 +10,17 @@ export type UpcomingEvent = {
   type?: CalKind; amt?: number; yld?: number; seg?: string; end?: string;
   /** For a results meeting: the company's last results, and how far the stock
    *  typically moved on its last n results (median, either way). */
-  last?: { q?: string; rvy?: number; pty?: number; mv?: number }; typ?: number; n?: number;
+  last?: { q?: string; rvy?: number; pty?: number; rvq?: number; ptq?: number; pt?: number; mv?: number };
+  typ?: number; n?: number;
 };
 export type UpcomingDoc = { generated_at: string | null; events: UpcomingEvent[] };
 
 /** calendar-past.json - the past year, in short keys (about 11,000 events). */
 export type PastEvent = {
   d: string; k: CalKind; s: string;
-  q?: string; rv?: number; rvy?: number; pt?: number; pty?: number; eps?: number; sa?: 1;
+  /** Sales (rv) and net profit (pt) in ₹ crore; growth against a year before
+   *  (y) and against the quarter before (q), in %. */
+  q?: string; rv?: number; rvy?: number; rvq?: number; pt?: number; pty?: number; ptq?: number; eps?: number; sa?: 1;
   mv?: number; nf?: number; cc?: { t?: string; r?: string };
   x?: string; amt?: number; yld?: number; r?: string;
   seg?: string; ip?: number; lc?: number; lg?: number; p?: string;

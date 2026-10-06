@@ -35,23 +35,34 @@ const pctText = (v: number | undefined, dec = 1) => (v === undefined ? "" : `${s
 /** ₹5.5 reads as ₹5.50. */
 const rs = (v: number) => `₹${Number.isInteger(v) ? v : v.toFixed(2)}`;
 
+/** Growth against a year before (y) or against the quarter before (q). */
+type Basis = "y" | "q";
+const BASIS_KEY = "rs.calendar.growth";
+const COL = "w-[50px] shrink-0 text-right";
+
+/** Sales and profit growth on the chosen basis - for a coming result, its
+ *  last one's. Null for anything that is not a result. */
+function growth(e: CalEvent, b: Basis): { rv?: number; pt?: number; loss: boolean } | null {
+  const r = e.past?.k === "results" ? e.past : e.next?.type === "results" ? e.next.last : undefined;
+  if (!r) return null;
+  return { rv: b === "y" ? r.rvy : r.rvq, pt: b === "y" ? r.pty : r.ptq, loss: (r.pt ?? 0) < 0 };
+}
+
+/** One figure in a column. A loss says so; a jump of 1,000% or more reads "24×". */
+function Cell({ v, loss = false, cls = COL }: { v?: number; loss?: boolean; cls?: string }) {
+  const text = loss ? "Loss" : v === undefined ? "—" : v >= 1000 ? `${Math.round(1 + v / 100)}×` : `${signed(v, 1)}%`;
+  return <span className={`${cls} text-[12px] font-semibold tabular-nums ${loss ? "text-[var(--neg)]" : tone(v)}`}>{text}</span>;
+}
+
 /** The one line under a company's name. */
 function line(e: CalEvent): string {
   const p = e.past, n = e.next;
-  if (p?.k === "results") {
-    return [p.q, p.rvy !== undefined && `Sales ${pctText(p.rvy)}`, p.pty !== undefined && `Profit ${pctText(p.pty)}`,
-      p.pty === undefined && p.pt !== undefined && (p.pt < 0 ? `Loss ${crore(-p.pt)}` : `Profit ${crore(p.pt)}`)].filter(Boolean).join(" · ");
-  }
+  if (p?.k === "results") return `${p.q ?? ""} results${p.rv === undefined && p.pt === undefined ? " · figures not in yet" : ""}`;
   if (p?.k === "dividend") return [p.amt && `${rs(p.amt)} a share`, p.yld !== undefined && `${p.yld}% of the price`, !p.amt && p.x].filter(Boolean).join(" · ");
   if (p?.k === "ipo") return [p.seg, p.ip && `issue ${rs(p.ip)}`, p.lc && `first close ${rs(p.lc)}`].filter(Boolean).join(" · ");
   if (p?.k === "meeting") return p.x ?? "";
   if (p) return p.x ?? "";
-  if (n?.type === "results") {
-    const l = n.last;
-    const bits = [l?.q && `Last: ${l.q}`, l?.pty !== undefined && `profit ${pctText(l.pty)}`,
-      n.typ !== undefined && `usually moves ±${n.typ}%`];
-    return bits.filter(Boolean).join(" · ") || n.desc;
-  }
+  if (n?.type === "results") return n.last?.q ? `Last: ${n.last.q}` : n.desc;
   if (n?.type === "dividend" && n.amt) return [`${rs(n.amt)} a share`, n.yld !== undefined && `${n.yld}% of the price`].filter(Boolean).join(" · ");
   return n?.desc ?? "";
 }
@@ -84,6 +95,11 @@ export default function CalendarPage() {
   const [shown, setShown] = useState(PAGE);
   const [open, setOpen] = useState<CalEvent | null>(null);
   const [today, setToday] = useState("");
+  const [basis, setBasis] = useState<Basis>("y");
+  const pickBasis = (b: Basis) => {
+    setBasis(b);
+    try { localStorage.setItem(BASIS_KEY, b); } catch { /* the choice just is not remembered */ }
+  };
 
   useEffect(() => {
     fetch(`${BASE}/calendar.json`)
@@ -100,6 +116,7 @@ export default function CalendarPage() {
     const d = new Date();
     setToday(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
     // A link can open the page on a company: /calendar?q=TCS
+    try { if (localStorage.getItem(BASIS_KEY) === "q") setBasis("q"); } catch { /* default: yearly */ }
     const fromUrl = new URLSearchParams(window.location.search).get("q");
     if (fromUrl) setQ(fromUrl);
   }, []);
@@ -189,6 +206,18 @@ export default function CalendarPage() {
           ))}
         </div>
 
+        {(group === "all" || group === "results") && (
+          <div className="flex items-center gap-2">
+            <span className="text-[12px] text-[var(--ink3)]">Growth</span>
+            <Chips value={basis} options={[["y", "Yearly"], ["q", "Quarterly"]] as [Basis, string][]} onChange={pickBasis} />
+            <InfoTip title="Growth">
+              <p>Yearly: the quarter&apos;s sales and net profit against the same quarter a year before (YoY). Quarterly: against the quarter just before it (QoQ).</p>
+              <p>Many businesses are seasonal - festive quarters, monsoon quarters - so quarter-on-quarter swings can be large without meaning much; yearly is the steadier read.</p>
+              <p>&quot;Loss&quot; means the quarter itself was a loss; a dash, that the earlier quarter was a loss or is not in the database. For a coming result the columns show its last results, and &quot;Usual&quot; is the middle of the stock&apos;s moves on its last four.</p>
+            </InfoTip>
+          </div>
+        )}
+
         {error && <p className="text-[var(--neg)] text-sm">The calendar did not load ({error}).</p>}
         {stale > 3 && !searching && when === "next" && (
           <div className="text-sm rounded-xl border border-[var(--neg-line)] bg-[var(--neg-soft)] text-[var(--neg)] p-3">
@@ -221,27 +250,39 @@ export default function CalendarPage() {
                   </h3>
                 )}
                 <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
-                  <h3 className="px-3 py-2 text-[13px] font-semibold border-b border-[var(--line)] flex justify-between">
-                    <span>{d === today ? "Today" : dayLabel(d)}</span>
-                    <span className="font-normal text-[var(--ink3)]">{list.length}</span>
+                  <h3 className="px-3 py-2 text-[13px] font-semibold border-b border-[var(--line)] flex items-center gap-3">
+                    <span className="flex-1">{d === today ? "Today" : dayLabel(d)} <span className="font-normal text-[var(--ink3)]">· {list.length}</span></span>
+                    {list.some((e) => growth(e, basis)) && (
+                      <span className="flex text-[10px] font-medium uppercase tracking-wide text-[var(--ink3)]">
+                        <span className={COL}>Sales</span><span className={COL}>Profit</span>
+                        <span className={COL}>{list[0].upcoming ? "Usual" : "Stock"}</span>
+                      </span>
+                    )}
                   </h3>
                   <ul className="divide-y divide-[var(--line)]">
                     {list.map((e) => {
-                      const f = figure(e);
+                      const f = figure(e), g = growth(e, basis);
                       return (
                         <li key={e.id}>
                           <button type="button" onClick={() => setOpen(e)} className="w-full flex items-start gap-3 px-3 py-2.5 text-left active:bg-[var(--card2)]">
                             <span className="flex-1 min-w-0">
-                              <span className="flex items-center gap-1.5 min-w-0">
+                              {/* The name gets the whole first line: beside three
+                                  columns of figures it had room for five letters. */}
+                              <span className="block text-[14px] font-medium truncate">{e.name}</span>
+                              <span className="flex items-center gap-1.5 min-w-0 text-[12px] text-[var(--ink3)] tabular-nums">
                                 <Badge kind={e.kind} />
-                                <span className="text-[14px] font-medium truncate">{e.name}</span>
-                                <span className="shrink-0 text-[11px] text-[var(--ink3)]">{e.symbol}</span>
-                              </span>
-                              <span className="block text-[12px] text-[var(--ink3)] tabular-nums truncate">
-                                {sub(e)}
+                                <span className="shrink-0">{e.symbol}</span>
+                                <span className="truncate">· {sub(e)}</span>
                               </span>
                             </span>
-                            {f && (
+                            {g ? (
+                              <span className="flex pt-0.5">
+                                <Cell v={g.rv} /><Cell v={g.pt} loss={g.loss} />
+                                {e.upcoming
+                                  ? <span className={`${COL} text-[12px] tabular-nums text-[var(--ink2)]`}>{e.next?.typ !== undefined ? `±${e.next.typ}%` : "—"}</span>
+                                  : <Cell v={e.past?.mv} />}
+                              </span>
+                            ) : f && (
                               <span className="shrink-0 text-right">
                                 <span className={`block text-[13px] font-semibold tabular-nums ${tone(f.v)}`}>{signed(f.v, 1)}%</span>
                                 <span className="block text-[10px] text-[var(--ink3)]">{f.label}</span>
@@ -271,35 +312,40 @@ export default function CalendarPage() {
         )}
       </main>
 
-      {open && <Detail e={open} onClose={() => setOpen(null)}
+      {open && <Detail e={open} onClose={() => setOpen(null)} basis={basis} pickBasis={pickBasis}
         earlier={history.filter((h) => h.symbol === open.symbol && h.kind === "results" && h.date < open.date).slice(0, 4)} />}
     </div>
   );
 }
 
 /** The company's results before this one, newest first. */
-function Earlier({ list }: { list: CalEvent[] }) {
+function Earlier({ list, basis, pickBasis }: { list: CalEvent[]; basis: Basis; pickBasis: (b: Basis) => void }) {
   if (!list.length) return null;
   const cell = (v: number | undefined, dec = 1) => <span className={`tabular-nums text-right ${tone(v)}`}>{v === undefined ? "—" : pctText(v, dec)}</span>;
   return (
     <div>
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)] pb-1">Its last {list.length === 1 ? "result" : `${list.length} results`}</p>
+      <div className="flex items-center justify-between gap-2 pb-1.5">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">Its last {list.length === 1 ? "result" : `${list.length} results`}</p>
+        <Chips value={basis} options={[["y", "Yearly"], ["q", "Quarterly"]] as [Basis, string][]} onChange={pickBasis} />
+      </div>
       <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 gap-y-1 text-[12px]">
         <span className="text-[var(--ink3)]">Quarter</span><span className="text-[var(--ink3)] text-right">Sales</span>
         <span className="text-[var(--ink3)] text-right">Profit</span><span className="text-[var(--ink3)] text-right">Stock</span>
         {list.map((r) => (
           <Fragment key={r.id}>
             <span>{r.past?.q} <span className="text-[var(--ink3)]">· {dayLabel(r.date).replace(/^\w+, /, "")}</span></span>
-            {cell(r.past?.rvy)}{cell(r.past?.pty)}{cell(r.past?.mv)}
+            {cell(basis === "y" ? r.past?.rvy : r.past?.rvq)}{cell(basis === "y" ? r.past?.pty : r.past?.ptq)}{cell(r.past?.mv)}
           </Fragment>
         ))}
       </div>
-      <p className="text-[11px] text-[var(--ink3)] pt-1">Sales and profit against the same quarter a year before.</p>
+      <p className="text-[11px] text-[var(--ink3)] pt-1">Sales and profit against {basis === "y" ? "the same quarter a year before" : "the quarter before"}.</p>
     </div>
   );
 }
 
-function Detail({ e, onClose, earlier }: { e: CalEvent; onClose: () => void; earlier: CalEvent[] }) {
+function Detail({ e, onClose, earlier, basis, pickBasis }: {
+  e: CalEvent; onClose: () => void; earlier: CalEvent[]; basis: Basis; pickBasis: (b: Basis) => void;
+}) {
   const p = e.past, n = e.next;
   const rel = p?.mv !== undefined && p?.nf !== undefined ? p.mv - p.nf : undefined;
   return (
@@ -312,11 +358,28 @@ function Detail({ e, onClose, earlier }: { e: CalEvent; onClose: () => void; ear
 
       {p?.k === "results" && (
         <>
+          {(p.rv !== undefined || p.pt !== undefined) && (
+            <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 gap-y-1.5 items-baseline py-1">
+              <span /><span className="text-[11px] text-[var(--ink3)] text-right">{p.q}</span>
+              <span className="text-[11px] text-[var(--ink3)] text-right">Quarterly</span>
+              <span className="text-[11px] text-[var(--ink3)] text-right">Yearly</span>
+              {p.rv !== undefined && (
+                <>
+                  <span className="text-[13px] text-[var(--ink2)]">Sales</span>
+                  <span className="text-[14px] font-medium tabular-nums text-right">{crore(p.rv)}</span>
+                  <Cell v={p.rvq} cls="text-right" /><Cell v={p.rvy} cls="text-right" />
+                </>
+              )}
+              {p.pt !== undefined && (
+                <>
+                  <span className="text-[13px] text-[var(--ink2)]">Net profit</span>
+                  <span className="text-[14px] font-medium tabular-nums text-right">{crore(p.pt)}</span>
+                  <Cell v={p.ptq} cls="text-right" /><Cell v={p.pty} cls="text-right" />
+                </>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3 py-1">
-            {p.rv !== undefined && <Stat label={`Sales${p.rvy !== undefined ? ", vs a year before" : ""}`}
-              value={<>{crore(p.rv)} {p.rvy !== undefined && <span className={tone(p.rvy)}>{pctText(p.rvy)}</span>}</>} />}
-            {p.pt !== undefined && <Stat label={`Net profit${p.pty !== undefined ? ", vs a year before" : ""}`}
-              value={<>{crore(p.pt)} {p.pty !== undefined && <span className={tone(p.pty)}>{pctText(p.pty)}</span>}</>} />}
             {p.eps !== undefined && <Stat label="EPS" value={`₹${p.eps}`} />}
             {p.mv !== undefined && <Stat label="Stock, over the results" value={pctText(p.mv, 2)} className={tone(p.mv)} />}
             {p.nf !== undefined && <Stat label="Nifty 50, same days" value={pctText(p.nf, 2)} className={tone(p.nf)} />}
@@ -324,9 +387,9 @@ function Detail({ e, onClose, earlier }: { e: CalEvent; onClose: () => void; ear
           </div>
           {p.rv === undefined && p.pt === undefined && <p className="text-[12px]">The quarter&apos;s figures are not in the database yet.</p>}
           {(p.rv !== undefined || p.pt !== undefined) && (
-            <p className="text-[11px] text-[var(--ink3)]">{p.sa ? "Standalone" : "Consolidated"} figures from the company&apos;s filing with NSE.{p.mv !== undefined ? " Stock: last close before the day of the results to the close of the next session after it." : ""}</p>
+            <p className="text-[11px] text-[var(--ink3)]">{p.sa ? "Standalone" : "Consolidated"} figures from the company&apos;s filing with NSE. Quarterly: against the quarter before; yearly: against the same quarter a year before.{p.mv !== undefined ? " Stock: last close before the day of the results to the close of the next session after it." : ""}</p>
           )}
-          <Earlier list={earlier} />
+          <Earlier list={earlier} basis={basis} pickBasis={pickBasis} />
           {p.cc && (
             <div className="grid grid-cols-2 gap-2">
               {p.cc.t && <DocLink href={docUrl(p.cc.t)}>Call transcript</DocLink>}
@@ -367,7 +430,7 @@ function Detail({ e, onClose, earlier }: { e: CalEvent; onClose: () => void; ear
           {n.type === "results" && n.typ !== undefined && (
             <p className="text-[11px] text-[var(--ink3)]">Typical move: the middle of the stock&apos;s moves on its last {n.n} results, up or down. What happened before, not a forecast.</p>
           )}
-          {n.type === "results" && <Earlier list={earlier} />}
+          {n.type === "results" && <Earlier list={earlier} basis={basis} pickBasis={pickBasis} />}
           {n.type === "dividend" && n.amt !== undefined && (
             <div className="grid grid-cols-2 gap-3 py-1">
               <Stat label="Per share" value={`${rs(n.amt)}`} />
