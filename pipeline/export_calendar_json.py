@@ -56,6 +56,12 @@ def year_before(iso_day: str) -> str:
     return f"{int(iso_day[:4]) - 1}{iso_day[4:]}"
 
 
+def quarter_reported(day: str) -> str:
+    """The quarter a results meeting on `day` reports: the last to end before it."""
+    y, m = int(day[:4]), int(day[5:7])
+    return [f"{y - 1}-12-31", f"{y}-03-31", f"{y}-06-30", f"{y}-09-30"][(m - 1) // 3]
+
+
 def quarter_before(period_end: str) -> str:
     """2026-06-30 -> 2026-03-31; a date that is not a quarter's end -> ""."""
     y, m = int(period_end[:4]), int(period_end[5:7])
@@ -180,7 +186,7 @@ def main() -> None:
     filings = con.execute("SELECT symbol, period_end, announced_on FROM filing_dates WHERE announced_on >= ?"
                           " AND announced_on < ? ORDER BY announced_on", (lo, today)).fetchall() if has("filing_dates") else []
     results_by = defaultdict(list)  # symbol -> its results, oldest first
-    for sym, pe, ann in filings:
+    def result_event(sym: str, pe: str, ann: str) -> dict:
         e = {"d": ann, "k": "results", "s": sym, "q": quarter(pe)}
         basis = "consolidated" if figures.get((sym, "consolidated", pe), {}).get("pat") is not None else "standalone"
         cur = figures.get((sym, basis, pe), {})
@@ -212,6 +218,10 @@ def main() -> None:
                     cc[k] = url[len(NSE_DOCS):] if url.startswith(NSE_DOCS) else url
         if cc:
             e["cc"] = cc
+        return e
+
+    for sym, pe, ann in filings:
+        e = result_event(sym, pe, ann)
         past.append(e)
         results_by[sym].append(e)
 
@@ -253,11 +263,25 @@ def main() -> None:
     # ── other board meetings (results meetings are covered above) ──
     meetings = con.execute("SELECT symbol, company, purpose, date, detail FROM calendar_events WHERE kind='meeting'"
                            " AND date >= ? AND date < ?", (lo, today)).fetchall() if has("calendar_events") else []
+    via_meeting = 0
     for sym, company, purpose, d, detail in meetings:
-        if "result" in (purpose or "").lower() and any(abs(gap(r["d"], d)) <= 5 for r in results_by.get(sym, [])):
-            continue
         names.setdefault(sym, company)
+        if "result" in (purpose or "").lower():
+            if any(abs(gap(r["d"], d)) <= 5 for r in results_by.get(sym, [])):
+                continue
+            # Results dates are on record for about half the companies; board
+            # meetings for nearly all. With no date on record, the day of the
+            # results meeting stands in for it - results are approved and
+            # published at that meeting.
+            e = result_event(sym, quarter_reported(d), d)
+            e["bm"] = 1
+            past.append(e)
+            results_by[sym].append(e)
+            via_meeting += 1
+            continue
         past.append({"d": d, "k": "meeting", "s": sym, "p": purpose or "", "x": detail or ""})
+    for lst in results_by.values():
+        lst.sort(key=lambda r: r["d"])
 
     # ── what is coming ──
     upcoming = []
@@ -336,7 +360,8 @@ def main() -> None:
     for e in past:
         kinds[e["k"]] += 1
     print(f"calendar: {len(upcoming)} events from {today} on (fetched {fetched}); past year: {len(past)} events "
-          f"({', '.join(f'{k} {n}' for k, n in sorted(kinds.items()))}), {PAST.stat().st_size // 1024} KB")
+          f"({', '.join(f'{k} {n}' for k, n in sorted(kinds.items()))}; {via_meeting} results dated by their board "
+          f"meeting), {PAST.stat().st_size // 1024} KB")
 
 
 if __name__ == "__main__":
