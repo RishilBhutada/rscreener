@@ -184,6 +184,24 @@ jobs:
         # no retry, no guard, so one dropped NSE response took the results
         # calendar out for a night with the run still reported as a success.
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_events.py
+      - name: Fetch first the companies whose results just came out
+        if: steps.plan.outputs.earnings == '1' && steps.plan.outputs.targeted == '0'
+        # The two steps further down reach each company once a week, so a
+        # company that reported yesterday could keep its old quarter for up to
+        # seven days - the calendar and the company page both showed it. This
+        # takes the companies whose results meeting was in the last five days
+        # and whose new quarter is not stored yet (pipeline/just_reported.py),
+        # and fetches only those, before anything else can use up the time.
+        env:
+          RSCREENER_STEP_MINUTES: "15"
+        run: |
+          python pipeline/just_reported.py
+          if [ -s data/just_reported_dates.txt ]; then
+            bash pipeline/guarded_fetch.sh python pipeline/fetch_filing_dates.py --symbols @data/just_reported_dates.txt --max-age-hours 1 --sleep 0.2
+          fi
+          if [ -s data/just_reported_results.txt ]; then
+            bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols @data/just_reported_results.txt --refresh --limit 300 --quarters-back 8 --sleep 0.25
+          fi
       - name: Refresh shareholding patterns (whole universe, rotating)
         if: steps.plan.outputs.earnings == '1'
         # Was @data/top500.txt, so the other 1,857 companies were unreachable: 432

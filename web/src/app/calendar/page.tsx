@@ -10,7 +10,7 @@ import { allWatched } from "@/lib/watchlists";
 import { loadPortfolio } from "@/lib/portfolio";
 import { shortName } from "@/lib/names";
 import {
-  CalEvent, CalKind, GROUPS, KIND_LABEL, PastDoc, UpcomingDoc, crore, dayLabel, docUrl, fromPast, fromUpcoming, matches,
+  CalEvent, CalKind, GROUPS, KIND_LABEL, PastDoc, UpcomingDoc, crore, dayLabel, docUrl, fromPast, fromUpcoming, matches, quarterDue,
 } from "@/lib/calendar";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -43,7 +43,11 @@ const COL = "w-[50px] shrink-0 text-right";
 /** Sales and profit growth on the chosen basis - for a coming result, its
  *  last one's. Null for anything that is not a result. */
 function growth(e: CalEvent, b: Basis): { rv?: number; pt?: number; loss: boolean } | null {
-  const r = e.past?.k === "results" ? e.past : e.next?.type === "results" ? e.next.last : undefined;
+  // A result still to come shows nothing until it is out. Its LAST quarter's
+  // growth used to sit in these columns, and on Anand Rathi Wealth's row the
+  // day before its Q2 results that read as if Q2 were already known.
+  if (e.next?.type === "results") return { loss: false };
+  const r = e.past?.k === "results" ? e.past : undefined;
   if (!r) return null;
   return { rv: b === "y" ? r.rvy : r.rvq, pt: b === "y" ? r.pty : r.ptq, loss: (r.pt ?? 0) < 0 };
 }
@@ -62,7 +66,7 @@ function line(e: CalEvent): string {
   if (p?.k === "ipo") return [p.seg, p.ip && `issue ${rs(p.ip)}`, p.lc && `first close ${rs(p.lc)}`].filter(Boolean).join(" · ");
   if (p?.k === "meeting") return p.x ?? "";
   if (p) return p.x ?? "";
-  if (n?.type === "results") return n.last?.q ? `Last: ${n.last.q}` : n.desc;
+  if (n?.type === "results") return `${quarterDue(n.date)} results due`;
   if (n?.type === "dividend" && n.amt) return [`${rs(n.amt)} a share`, n.yld !== undefined && `${n.yld}% of the price`].filter(Boolean).join(" · ");
   return n?.desc ?? "";
 }
@@ -213,7 +217,7 @@ export default function CalendarPage() {
             <InfoTip title="Growth">
               <p>Yearly: the quarter&apos;s sales and net profit against the same quarter a year before (YoY). Quarterly: against the quarter just before it (QoQ).</p>
               <p>Many businesses are seasonal - festive quarters, monsoon quarters - so quarter-on-quarter swings can be large without meaning much; yearly is the steadier read.</p>
-              <p>&quot;Loss&quot; means the quarter itself was a loss; a dash, that the earlier quarter was a loss or is not in the database. For a coming result the columns show its last results, and &quot;Usual&quot; is the middle of the stock&apos;s moves on its last four.</p>
+              <p>&quot;Loss&quot; means the quarter itself was a loss; a dash, that the earlier quarter was a loss or is not in the database. A coming result stays blank until it is released; the night after, it moves to the past year with the figures it released. &quot;Usual&quot; is the middle of the stock&apos;s moves on its last four results.</p>
             </InfoTip>
           </div>
         )}

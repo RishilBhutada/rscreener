@@ -13,7 +13,8 @@ import WatchStar from "@/components/WatchStar";
 import { loadSectionMode, SectionMode } from "@/components/Settings";
 import { isRefreshLoad } from "@/components/TopNav";
 import { applyOrder, loadOrder } from "@/lib/order";
-import InfoTip, { InfoPart } from "@/components/InfoTip";
+import InfoTip, { InfoDialog, InfoPart } from "@/components/InfoTip";
+import { change, changeText, savePctChange, usePctChange } from "@/lib/pctchange";
 import { IconButton, dayMove, signed as signedNum, tone } from "@/components/QuoteUI";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -246,18 +247,49 @@ function declaredLabel(d: string | null | undefined): string | null {
  *  2005, a thousand cells most visits never look at. */
 const RECENT_PERIODS = 12;
 
-function StatementTable({ title, stmt, subtitle, boldRows }: { title: string; stmt: Stmt; subtitle?: string; boldRows?: string[] }) {
+/** The quarter after `p`: "2026-06-30" -> "2026-09-30". */
+function quarterAfter(p: string): string {
+  const m = Number(p.slice(5, 7)) + 3, y = Number(p.slice(0, 4)) + (m > 12 ? 1 : 0), mm = m > 12 ? m - 12 : m;
+  return `${y}-${String(mm).padStart(2, "0")}-${String(new Date(Date.UTC(y, mm, 0)).getUTCDate()).padStart(2, "0")}`;
+}
+
+/** The quarter a results meeting on `day` reports: the last one to end before it. */
+function quarterBefore(day: string): string {
+  const y = Number(day.slice(0, 4)), m = Number(day.slice(5, 7));
+  const qm = [12, 3, 6, 9][Math.floor((m - 1) / 3)], qy = m <= 3 ? y - 1 : y;
+  return `${qy}-${String(qm).padStart(2, "0")}-${String(new Date(Date.UTC(qy, qm, 0)).getUTCDate()).padStart(2, "0")}`;
+}
+
+/** The next results meeting on NSE's calendar: undefined while loading, null if none. */
+type NextResults = { date: string; purpose: string } | null | undefined;
+
+function StatementTable({ title, stmt, subtitle, boldRows, next }: {
+  title: string; stmt: Stmt; subtitle?: string; boldRows?: string[];
+  /** Adds the coming quarter as a blank last column - the quarterly table only. */
+  next?: NextResults;
+}) {
   const [all, setAll] = useState(false);
+  const showPct = usePctChange();
+  const [asking, setAsking] = useState(false);
   const total = stmt.periods.length;
   const from = all ? 0 : Math.max(0, total - RECENT_PERIODS);
   const periods = stmt.periods.slice(from);
+  const coming = next !== undefined && total ? quarterAfter(stmt.periods[total - 1]) : null;
+  // The meeting's date belongs on that column only if it is that quarter's.
+  const due = coming && next && quarterBefore(next.date) === coming ? next.date : null;
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
       <div className="px-4 pt-3.5 pb-2 flex items-start gap-2">
         <div className="flex-1 min-w-0">
           <h2 className="text-base font-semibold text-[var(--ink)]">{title}</h2>
-          <p className="text-xs text-[var(--ink3)] mt-0.5">{subtitle ?? "Figures in ₹ Crores"}</p>
+          <p className="text-xs text-[var(--ink3)] mt-0.5">
+            {subtitle ?? "Figures in ₹ Crores"}{showPct ? " · in brackets, change from the period before" : ""}
+          </p>
         </div>
+        <button type="button" onClick={() => setAsking(true)} aria-pressed={showPct}
+          className="shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold text-[var(--ink2)] border border-[var(--line)]">
+          {showPct ? "Hide %" : "Show %"}
+        </button>
         {total > RECENT_PERIODS && (
           <button type="button" onClick={() => setAll(!all)}
             className="shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold text-[var(--accent-ink)] bg-[var(--accent-soft)]">
@@ -283,6 +315,12 @@ function StatementTable({ title, stmt, subtitle, boldRows }: { title: string; st
                   </th>
                 );
               })}
+              {coming && (
+                <th className="px-3 py-2 text-right font-medium whitespace-nowrap text-[var(--accent-ink)]">
+                  {periodLabel(coming)}
+                  <span className="block font-normal text-[11px]">({due ? `due ${declaredLabel(due)}` : "date not out"})</span>
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -291,17 +329,49 @@ function StatementTable({ title, stmt, subtitle, boldRows }: { title: string; st
               return (
                 <tr key={it.label} className="border-b border-[var(--line)] hover:bg-[var(--card2)]">
                   <td className={`px-3 py-2 sm:py-1.5 truncate max-w-[42vw] sm:max-w-none sm:whitespace-nowrap sticky left-0 bg-[var(--card)] ${bold ? "font-semibold text-[var(--ink)]" : "text-[var(--ink2)]"}`}>{it.label}</td>
-                  {it.values.slice(from).map((v, i) => (
-                    <td key={i} className={`px-3 py-2 sm:py-1.5 text-right whitespace-nowrap tabular-nums ${bold ? "font-semibold" : ""} ${typeof v === "number" && v < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
-                      {fmtNum(v, it.label.includes("EPS") || it.label.includes("%") ? 2 : 0)}
-                    </td>
-                  ))}
+                  {it.values.slice(from).map((v, i) => {
+                    // Against the period before - the one off-screen to the
+                    // left too, so the first visible column still has one.
+                    const at = from + i, points = it.label.includes("%");
+                    const prev = at > 0 ? it.values[at - 1] : null;
+                    const ch = showPct ? change(v, prev, points) : null;
+                    return (
+                      <td key={i} className={`px-3 py-2 sm:py-1.5 text-right whitespace-nowrap tabular-nums ${bold ? "font-semibold" : ""} ${typeof v === "number" && v < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
+                        {fmtNum(v, it.label.includes("EPS") || it.label.includes("%") ? 2 : 0)}
+                        {ch !== null && (
+                          <span className={`ml-1 text-[11px] font-normal ${ch > 0 ? "text-[var(--pos)]" : ch < 0 ? "text-[var(--neg)]" : "text-[var(--ink3)]"}`}>
+                            ({changeText(ch, points, v, prev)})
+                          </span>
+                        )}
+                      </td>
+                    );
+                  })}
+                  {coming && <td className="px-3 py-2 sm:py-1.5 bg-[color-mix(in_srgb,var(--accent)_6%,transparent)]" />}
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
+      {asking && (
+        <InfoDialog title={showPct ? "Hide % change?" : "Show % change?"} onClose={() => setAsking(false)}>
+          <p>
+            {showPct
+              ? "The change from the period before, in brackets beside each figure, will be hidden"
+              : "Each figure will show its change from the period before in brackets - green for a rise, red for a fall -"}
+            {" "}on every table, for every company.
+          </p>
+          <p className="text-[12px] text-[var(--ink3)]">You can change it back from any table, or in Settings.</p>
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <button type="button" onClick={() => setAsking(false)}
+              className="rs-press min-h-[44px] rounded-xl border border-[var(--line)] text-[14px] font-medium text-[var(--ink2)]">Cancel</button>
+            <button type="button" onClick={() => { savePctChange(!showPct); setAsking(false); }}
+              className="rs-press min-h-[44px] rounded-xl bg-[var(--accent-fill)] text-[var(--accent-fill-ink)] text-[14px] font-semibold">
+              {showPct ? "Hide for all" : "Show for all"}
+            </button>
+          </div>
+        </InfoDialog>
+      )}
     </section>
   );
 }
@@ -1129,7 +1199,7 @@ function industryMedian(cohort: Cohort, field: string): { value: number; n: numb
   return { value: m, n: vs.length };
 }
 
-function RatioGrid({ snapshot, row, cohort }: { snapshot: Row; row: Row | null; cohort: Cohort | null }) {
+function RatioGrid({ snapshot, row, cohort, next }: { snapshot: Row; row: Row | null; cohort: Cohort | null; next?: NextResults }) {
   const g = (k: string) => num(row, k) ?? num(snapshot, k);
   const method = String((row?.["vol_method"] ?? snapshot["vol_method"]) ?? "");
   const vol = (k: string) => {
@@ -1168,6 +1238,8 @@ function RatioGrid({ snapshot, row, cohort }: { snapshot: Row; row: Row | null; 
       ["Dividend Yield", pct(g("div_yield")), "div_yield"],
     ]],
     ["What it earns", [
+      ["Next results", next === undefined ? "—" : next === null ? "Not announced"
+        : new Date(`${next.date}T00:00:00`).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" }), ""],
       ["ROCE", pct(g("roce")), "roce"],
       ["ROE", pct(g("roe")), "roe"],
       ["Sales growth 5Y", pct(g("sales_cagr_5y")), "sales_cagr_5y"],
@@ -1221,7 +1293,9 @@ function RatioGrid({ snapshot, row, cohort }: { snapshot: Row; row: Row | null; 
               {heading}
             </h3>
             {cells.map(([label, value, field]) => {
-              const ctx = context(field);
+              const ctx = label === "Next results"
+                ? (next ? `${periodLabel(quarterBefore(next.date))} quarter · board meeting` : next === null ? "No date on NSE's calendar yet" : null)
+                : context(field);
               return (
                 <div key={label} className="border-b border-[var(--line)] py-1.5">
                   <div className="flex items-baseline justify-between">
@@ -1565,6 +1639,26 @@ function CompanyView() {
     setNote(loadNote(symbol));
   }, [symbol]);
 
+  // The next results meeting, from the calendar the Calendar page reads
+  // (8 KB on the wire). Undefined while loading, null if NSE lists none.
+  const [nextResults, setNextResults] = useState<NextResults>(undefined);
+  useEffect(() => {
+    if (!symbol) return;
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    fetch(`${BASE}/calendar.json`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((cal: { events?: { symbol: string; date: string; purpose: string; kind: string; type?: string }[] } | null) => {
+        if (!cal?.events) return setNextResults(undefined);
+        const hit = cal.events
+          .filter((e) => e.symbol === symbol && e.kind === "meeting" && e.date >= today
+            && (e.type === "results" || /result/i.test(e.purpose)))
+          .sort((a, b) => a.date.localeCompare(b.date))[0];
+        setNextResults(hit ? { date: hit.date, purpose: hit.purpose } : null);
+      })
+      .catch(() => setNextResults(undefined));
+  }, [symbol]);
+
   useEffect(() => {
     if (!symbol) return;
     // Past the HTTP cache on the load a refresh produced - a fresh shell around
@@ -1810,7 +1904,7 @@ function CompanyView() {
       <div ref={pager} className={mode === "swipe" ? "rs-pager" : "rs-stack"}>
 
       <div id="summary" className="scroll-mt-32">
-        <RatioGrid snapshot={s} row={fullRow} cohort={cohort} />
+        <RatioGrid snapshot={s} row={fullRow} cohort={cohort} next={nextResults} />
       </div>
 
       <div id="chart" className="scroll-mt-32 space-y-4">
@@ -1913,7 +2007,7 @@ function CompanyView() {
           on every company, hardcoded, and 1,347 of the 3,198 with filed results
           file standalone - which excludes subsidiaries, so for a holding company
           the label named a different business from the one in the table. */}
-      {quarterly && <div id="quarters" className="scroll-mt-32"><StatementTable title="Quarterly results" stmt={quarterly} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} /></div>}
+      {quarterly && <div id="quarters" className="scroll-mt-32"><StatementTable title="Quarterly results" stmt={quarterly} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} next={nextResults} /></div>}
 
       {pnl && (
         <div id="profit-loss" className="scroll-mt-32 space-y-6">

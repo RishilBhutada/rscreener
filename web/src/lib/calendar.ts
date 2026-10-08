@@ -82,6 +82,13 @@ export function matches(e: CalEvent, words: string[]): boolean {
   return words.every((w) => e.hay.includes(w));
 }
 
+/** The quarter a results meeting on `day` reports - the last to end before
+ *  it - as India writes it: 9 Oct 2026 -> "Q2 FY27". */
+export function quarterDue(day: string): string {
+  const y = Number(day.slice(0, 4)), i = Math.floor((Number(day.slice(5, 7)) - 1) / 3);
+  return `Q${[3, 4, 1, 2][i]} FY${String((i <= 1 ? y : y + 1) % 100).padStart(2, "0")}`;
+}
+
 export function dayLabel(iso: string, withYear = false): string {
   return new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-IN", {
     weekday: "short", day: "numeric", month: "short", ...(withYear ? { year: "numeric" } : {}), timeZone: "UTC",
