@@ -7,7 +7,7 @@ import { BUILD_TIME, BUILD_COMMIT, BUILD_SUBJECT } from "@/lib/buildinfo";
 import { DESTINATIONS, BAR_SLOTS } from "@/lib/destinations";
 import { applyOrder, clearOrder, loadOrder, move, saveOrder, OrderKind } from "@/lib/order";
 import { reloadBypassingCache } from "@/lib/reload";
-import { loadPctChange, savePctChange } from "@/lib/pctchange";
+import { clearOrders, customOrders } from "@/lib/tableprefs";
 import { Glyph, Group, PageTitle, Row, Segmented } from "@/components/ListUI";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -46,7 +46,6 @@ const SECTIONS: { id: string; label: string }[] = [
 
 const THEMES = [["light", "Light"], ["dark", "Dark"], ["black", "Black"], ["system", "Auto"]] as const;
 const LAYOUTS = [["scroll", "Scroll"], ["swipe", "Swipe"]] as const;
-const PCT_CHOICES = [["on", "Show"], ["off", "Hide"]] as const;
 
 const ACCENTS = ["mono", "indigo", "emerald", "rose", "amber"] as const;
 
@@ -217,7 +216,7 @@ function MainScreen() {
   const [theme, setTheme] = useState("system");
   const [accent, setAccent] = useState("indigo");
   const [sections, setSections] = useState<SectionMode>("scroll");
-  const [pct, setPct] = useState<"on" | "off">("on");
+  const [rowOrders, setRowOrders] = useState<string[]>([]);
   const [isDark, setIsDark] = useState(false);
   const [navOrder, setNavOrder] = useState<string[]>([]);
   const [secOrder, setSecOrder] = useState<string[]>([]);
@@ -227,7 +226,7 @@ function MainScreen() {
     setTheme(localStorage.getItem("rs_theme") || "system");
     setAccent(localStorage.getItem("rs_accent") || "indigo");
     setSections(loadSectionMode());
-    setPct(loadPctChange() ? "on" : "off");
+    setRowOrders(customOrders());
     setNavOrder(loadOrder("nav"));
     setSecOrder(loadOrder("sections"));
     const resolve = () => setIsDark(document.documentElement.dataset.theme === "dark");
@@ -244,7 +243,6 @@ function MainScreen() {
   const pickAccent = (a: string) => {
     setAccent(a); localStorage.setItem("rs_accent", a); apply(theme, a);
   };
-  const pickPct = (v: "on" | "off") => { setPct(v); savePctChange(v === "on"); };
   const pickSections = (m: SectionMode) => {
     setSections(m); localStorage.setItem("rs_sections", m);
     // The company page reads this on mount; tell any open one immediately.
@@ -320,12 +318,21 @@ function MainScreen() {
           right={<Segmented label="Company page layout" value={sections} options={LAYOUTS} onChange={pickSections} />}
         />
         <Row icon={<Glyph d={ICON.order} />} title="Section order" sub={`${secs}…`} href="/settings?p=sections" chevron />
-        <Row
-          icon={<Glyph d={ICON.change} />}
-          title="% change in tables"
-          sub="In brackets beside each figure, against the period before"
-          right={<Segmented label="% change in tables" value={pct} options={PCT_CHOICES} onChange={pickPct} />}
-        />
+        {/* Shown only once an order has been saved: a reset with nothing to
+            reset is a dead control. */}
+        {rowOrders.length > 0 && (
+          <Row
+            icon={<Glyph d={ICON.order} />}
+            title="Table row order"
+            sub={`Your own order on ${rowOrders.length} table${rowOrders.length === 1 ? "" : "s"}`}
+            right={
+              <button type="button" onClick={() => { clearOrders(); setRowOrders([]); }}
+                className="rs-press shrink-0 min-h-[34px] px-3 rounded-full text-[13px] border border-[var(--line)] text-[var(--ink2)]">
+                Reset
+              </button>
+            }
+          />
+        )}
       </Group>
 
       <Group title="Navigation">

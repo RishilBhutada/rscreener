@@ -23,7 +23,8 @@ export const SYNCED_KEYS = [
   "rscreener_ratios",
   "rs_theme",
   "rs_accent",
-  "rs_pct_change",
+  "rs_pct_tables",
+  "rs_row_order",
 ] as const;
 
 type Profile = Record<string, unknown>;

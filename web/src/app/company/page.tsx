@@ -14,7 +14,8 @@ import { loadSectionMode, SectionMode } from "@/components/Settings";
 import { isRefreshLoad } from "@/components/TopNav";
 import { applyOrder, loadOrder } from "@/lib/order";
 import InfoTip, { InfoDialog, InfoPart } from "@/components/InfoTip";
-import { change, changeText, savePctChange, usePctChange } from "@/lib/pctchange";
+import { TableKind, arrange, change, changeText, usePct, useRowOrder } from "@/lib/tableprefs";
+import { move } from "@/lib/order";
 import { IconButton, dayMove, signed as signedNum, tone } from "@/components/QuoteUI";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -263,13 +264,18 @@ function quarterBefore(day: string): string {
 /** The next results meeting on NSE's calendar: undefined while loading, null if none. */
 type NextResults = { date: string; purpose: string } | null | undefined;
 
-function StatementTable({ title, stmt, subtitle, boldRows, next }: {
+function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol }: {
   title: string; stmt: Stmt; subtitle?: string; boldRows?: string[];
   /** Adds the coming quarter as a blank last column - the quarterly table only. */
   next?: NextResults;
+  /** Which table this is, for its "%" switch and row order; and whose page. */
+  kind: TableKind; symbol: string;
 }) {
   const [all, setAll] = useState(false);
-  const showPct = usePctChange();
+  const [showPct, setShowPct] = usePct(kind);
+  const saved = useRowOrder(kind, symbol);
+  // Reordering: the order being edited, and whether to ask where it applies.
+  const [draft, setDraft] = useState<string[] | null>(null);
   const [asking, setAsking] = useState(false);
   const total = stmt.periods.length;
   const from = all ? 0 : Math.max(0, total - RECENT_PERIODS);
@@ -277,24 +283,60 @@ function StatementTable({ title, stmt, subtitle, boldRows, next }: {
   const coming = next !== undefined && total ? quarterAfter(stmt.periods[total - 1]) : null;
   // The meeting's date belongs on that column only if it is that quarter's.
   const due = coming && next && quarterBefore(next.date) === coming ? next.date : null;
+  const labels = stmt.items.map((it) => it.label);
+  const arranged = arrange(labels, saved.order);
+  const order = draft ?? arranged;
+  const byLabel = new Map(stmt.items.map((it) => [it.label, it]));
+  const rows = order.map((l) => byLabel.get(l)).filter((it): it is Stmt["items"][number] => Boolean(it));
+  const finish = () => {
+    if (!draft || draft.join("|") === arranged.join("|")) { setDraft(null); return; }
+    setAsking(true);
+  };
+  const keep = (scope: "company" | "all") => { if (draft) saved.save(draft, scope); setDraft(null); setAsking(false); };
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
-      <div className="px-4 pt-3.5 pb-2 flex items-start gap-2">
+      <div className="px-4 pt-3.5 pb-2 flex items-start gap-1.5">
         <div className="flex-1 min-w-0">
           <h2 className="text-base font-semibold text-[var(--ink)]">{title}</h2>
           <p className="text-xs text-[var(--ink3)] mt-0.5">
-            {subtitle ?? "Figures in ₹ Crores"}{showPct ? " · in brackets, change from the period before" : ""}
+            {draft ? "Move rows with the arrows, then Done"
+              : `${subtitle ?? "Figures in ₹ Crores"}${showPct ? " · in brackets, change from the period before" : ""}`}
           </p>
         </div>
-        <button type="button" onClick={() => setAsking(true)} aria-pressed={showPct}
-          className="shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold text-[var(--ink2)] border border-[var(--line)]">
-          {showPct ? "Hide %" : "Show %"}
-        </button>
-        {total > RECENT_PERIODS && (
-          <button type="button" onClick={() => setAll(!all)}
-            className="shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold text-[var(--accent-ink)] bg-[var(--accent-soft)]">
-            {all ? `Last ${RECENT_PERIODS}` : `All ${total}`}
-          </button>
+        {draft ? (
+          <>
+            <button type="button" onClick={() => setDraft(labels)}
+              className="shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold text-[var(--ink2)] border border-[var(--line)]">
+              Reset
+            </button>
+            <button type="button" onClick={finish}
+              className="shrink-0 min-h-[32px] px-3 rounded-lg text-[12px] font-semibold bg-[var(--accent-fill)] text-[var(--accent-fill-ink)]">
+              Done
+            </button>
+          </>
+        ) : (
+          <>
+            {/* On by default; one tap turns this table's figures' change on or off. */}
+            <button type="button" onClick={() => setShowPct(!showPct)} aria-pressed={showPct}
+              aria-label={showPct ? "Hide the % change" : "Show the % change"} title="% change from the period before"
+              className={`shrink-0 min-h-[32px] min-w-[32px] px-2 rounded-lg text-[13px] font-bold border ${showPct
+                ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
+                : "text-[var(--ink3)] border-[var(--line)]"}`}>
+              %
+            </button>
+            <button type="button" onClick={() => setDraft(arranged)} aria-label="Change the order of the rows" title="Row order"
+              className="shrink-0 min-h-[32px] min-w-[32px] px-2 rounded-lg text-[var(--ink2)] border border-[var(--line)] inline-flex items-center justify-center">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M7 4v16M3.5 7.5 7 4l3.5 3.5M17 20V4M13.5 16.5 17 20l3.5-3.5" />
+              </svg>
+            </button>
+            {total > RECENT_PERIODS && (
+              <button type="button" onClick={() => setAll(!all)}
+                className="shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold text-[var(--accent-ink)] bg-[var(--accent-soft)]">
+                {all ? `Last ${RECENT_PERIODS}` : `All ${total}`}
+              </button>
+            )}
+          </>
         )}
       </div>
       {/* Opens on the NEWEST period. These tables carry up to twenty years of
@@ -324,11 +366,23 @@ function StatementTable({ title, stmt, subtitle, boldRows, next }: {
             </tr>
           </thead>
           <tbody>
-            {stmt.items.map((it) => {
+            {rows.map((it, r) => {
               const bold = boldRows?.includes(it.label);
               return (
                 <tr key={it.label} className="border-b border-[var(--line)] hover:bg-[var(--card2)]">
-                  <td className={`px-3 py-2 sm:py-1.5 truncate max-w-[42vw] sm:max-w-none sm:whitespace-nowrap sticky left-0 bg-[var(--card)] ${bold ? "font-semibold text-[var(--ink)]" : "text-[var(--ink2)]"}`}>{it.label}</td>
+                  <td className={`px-3 py-2 sm:py-1.5 truncate max-w-[42vw] sm:max-w-none sm:whitespace-nowrap sticky left-0 bg-[var(--card)] ${bold ? "font-semibold text-[var(--ink)]" : "text-[var(--ink2)]"}`}>
+                    {draft && (
+                      <span className="inline-flex align-middle mr-1.5">
+                        <button type="button" disabled={r === 0} onClick={() => setDraft(move(order, it.label, -1))}
+                          aria-label={`Move ${it.label} up`}
+                          className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[var(--line)] text-[var(--ink2)] disabled:opacity-30">▲</button>
+                        <button type="button" disabled={r === rows.length - 1} onClick={() => setDraft(move(order, it.label, 1))}
+                          aria-label={`Move ${it.label} down`}
+                          className="w-7 h-7 ml-1 inline-flex items-center justify-center rounded-md border border-[var(--line)] text-[var(--ink2)] disabled:opacity-30">▼</button>
+                      </span>
+                    )}
+                    {it.label}
+                  </td>
                   {it.values.slice(from).map((v, i) => {
                     // Against the period before - the one off-screen to the
                     // left too, so the first visible column still has one.
@@ -353,21 +407,23 @@ function StatementTable({ title, stmt, subtitle, boldRows, next }: {
           </tbody>
         </table>
       </div>
-      {asking && (
-        <InfoDialog title={showPct ? "Hide % change?" : "Show % change?"} onClose={() => setAsking(false)}>
-          <p>
-            {showPct
-              ? "The change from the period before, in brackets beside each figure, will be hidden"
-              : "Each figure will show its change from the period before in brackets - green for a rise, red for a fall -"}
-            {" "}on every table, for every company.
+      {!draft && saved.scope === "company" && (
+        <p className="px-4 py-2 text-[11px] text-[var(--ink3)]">Rows in this company&apos;s own order.</p>
+      )}
+      {asking && draft && (
+        <InfoDialog title="Use this order for every company?" onClose={() => setAsking(false)}>
+          <p>{title} rows in this order on every company&apos;s page.</p>
+          <p className="text-[12px] text-[var(--ink3)]">
+            A company with a row this one does not have keeps that row in its usual place. You can change the order again from any company.
           </p>
-          <p className="text-[12px] text-[var(--ink3)]">You can change it back from any table, or in Settings.</p>
           <div className="grid grid-cols-2 gap-2 pt-1">
-            <button type="button" onClick={() => setAsking(false)}
-              className="rs-press min-h-[44px] rounded-xl border border-[var(--line)] text-[14px] font-medium text-[var(--ink2)]">Cancel</button>
-            <button type="button" onClick={() => { savePctChange(!showPct); setAsking(false); }}
+            <button type="button" onClick={() => keep("company")}
+              className="rs-press min-h-[44px] rounded-xl border border-[var(--line)] text-[14px] font-medium text-[var(--ink2)]">
+              No, only {symbol}
+            </button>
+            <button type="button" onClick={() => keep("all")}
               className="rs-press min-h-[44px] rounded-xl bg-[var(--accent-fill)] text-[var(--accent-fill-ink)] text-[14px] font-semibold">
-              {showPct ? "Hide for all" : "Show for all"}
+              Yes, all companies
             </button>
           </div>
         </InfoDialog>
@@ -2007,17 +2063,17 @@ function CompanyView() {
           on every company, hardcoded, and 1,347 of the 3,198 with filed results
           file standalone - which excludes subsidiaries, so for a holding company
           the label named a different business from the one in the table. */}
-      {quarterly && <div id="quarters" className="scroll-mt-32"><StatementTable title="Quarterly results" stmt={quarterly} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} next={nextResults} /></div>}
+      {quarterly && <div id="quarters" className="scroll-mt-32"><StatementTable title="Quarterly results" stmt={quarterly} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} next={nextResults} kind="quarterly" symbol={symbol} /></div>}
 
       {pnl && (
         <div id="profit-loss" className="scroll-mt-32 space-y-6">
-          <StatementTable title="Profit & loss" stmt={pnl} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} />
+          <StatementTable title="Profit & loss" stmt={pnl} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} kind="pnl" symbol={symbol} />
           <CompoundedGrowth trend={company.trend} prices={company.prices} />
         </div>
       )}
 
-      {balance && <div id="balance-sheet" className="scroll-mt-32"><StatementTable title="Balance sheet" stmt={balance} subtitle={figuresCaption} boldRows={["Total Assets", "Total Liabilities"]} /></div>}
-      {cashflow && <div id="cash-flows" className="scroll-mt-32"><StatementTable title="Cash flows" stmt={cashflow} subtitle={figuresCaption} boldRows={["Free Cash Flow"]} /></div>}
+      {balance && <div id="balance-sheet" className="scroll-mt-32"><StatementTable title="Balance sheet" stmt={balance} subtitle={figuresCaption} boldRows={["Total Assets", "Total Liabilities"]} kind="balance" symbol={symbol} /></div>}
+      {cashflow && <div id="cash-flows" className="scroll-mt-32"><StatementTable title="Cash flows" stmt={cashflow} subtitle={figuresCaption} boldRows={["Free Cash Flow"]} kind="cash" symbol={symbol} /></div>}
 
       {Object.keys(company.statements).length === 0 && !company.trend?.annual && (
         <div className="bg-[var(--warn-soft)] border border-[var(--warn-line)] text-[var(--warn-ink)] rounded-xl p-4 text-sm">
@@ -2049,6 +2105,8 @@ function CompanyView() {
         <div id="shareholding" className="scroll-mt-32"><StatementTable
           title="Shareholding pattern"
           subtitle="Figures in %"
+          kind="shareholding"
+          symbol={symbol}
           stmt={{
             periods: company.shareholding.dates,
             items: [
