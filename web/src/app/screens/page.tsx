@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { saveFile } from "@/lib/download";
 import TopNav from "@/components/TopNav";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { Row, canonicalField, compile, isValidRatioName } from "@/lib/query";
@@ -328,12 +329,7 @@ function ScreensInner() {
     };
     const lines = [cols.map((c) => (c === "symbol" ? "Symbol" : c === "name" ? "Name" : c === "sector" ? "Sector" : by.get(c)?.label ?? c)).join(",")];
     for (const r of sorted) lines.push(cols.map((c) => esc(r[c])).join(","));
-    const blob = new Blob([String.fromCharCode(0xfeff) + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "rscreener_screen.csv";
-    a.click();
-    URL.revokeObjectURL(a.href);
+    void saveFile("rscreener_screen.csv", String.fromCharCode(0xfeff) + lines.join("\r\n"));
   };
 
   const openCond = (index: number | null, field: string) => {

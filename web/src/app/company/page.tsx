@@ -4,6 +4,7 @@ import { ChevronGlyph, ExternalGlyph } from "@/components/Glyphs";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { saveFile } from "@/lib/download";
 import TopNav from "@/components/TopNav";
 import { shortName, titleCase } from "@/lib/names";
 import StockChart, { CorpAction, Quarter } from "@/components/StockChart";
@@ -1823,12 +1824,7 @@ function CompanyView() {
       });
     }
     const bom = String.fromCharCode(0xfeff);
-    const blob = new Blob([bom + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${symbol}_rscreener.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    void saveFile(`${symbol}_rscreener.csv`, bom + lines.join("\r\n"));
   };
 
   if (!symbol) return <p className="text-[var(--ink3)] p-6">No company selected. <Link className="text-[var(--accent-ink)] underline" href="/">Back to screener</Link></p>;
