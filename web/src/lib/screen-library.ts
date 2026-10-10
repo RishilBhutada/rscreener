@@ -40,6 +40,14 @@ export const LIBRARY: LibraryScreen[] = [
     sort: ["f_score", -1],
   },
   {
+    id: "seasonal",
+    name: "Seasonal businesses",
+    blurb: "Sales that peak in the same quarter year after year",
+    about: "Companies whose sales in their best quarter of the financial year usually run 40% or more above their weakest, where the pattern beats luck (it passes a shuffle test and repeats in the later years). Add season_peak = 4 for Jan–Mar sellers, 1 for Apr–Jun, and so on. A quarter-on-quarter fall in a weak season is the season, not necessarily news. What happened, not a forecast.",
+    query: "season_swing >= 40 and mcap > 500",
+    sort: ["season_swing", -1],
+  },
+  {
     id: "coffee",
     name: "Coffee-can style",
     blurb: "A decade of sales growth with a high return on capital",

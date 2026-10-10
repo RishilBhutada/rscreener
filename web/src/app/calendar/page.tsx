@@ -7,6 +7,7 @@ import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { StarGlyph, ExternalGlyph } from "@/components/Glyphs";
 import { Chips, Icon, Stat, signed, tone } from "@/components/QuoteUI";
 import { allWatched } from "@/lib/watchlists";
+import { SEASON_QUARTERS } from "@/components/Seasons";
 import { loadPortfolio } from "@/lib/portfolio";
 import { shortName } from "@/lib/names";
 import {
@@ -488,6 +489,12 @@ function Detail({ e, onClose, earlier, basis, pickBasis }: {
               <Stat label="Usually out" value={`~${clock(n.usual)} IST`} />
               <p className="text-[11px] text-[var(--ink3)]">The middle of the times NSE published its last {n.un} results. When it was, not when it will be.</p>
             </>
+          )}
+          {n.type === "results" && n.ssn && (
+            <p className="text-[13px]">
+              {SEASON_QUARTERS[n.ssn.q]} is usually {n.ssn.pk ? "its strongest quarter" : n.ssn.lo ? "its weakest quarter" : "an ordinary quarter"} for sales:{" "}
+              <span className="font-semibold tabular-nums">{n.ssn.i.toFixed(2)}×</span> an average one, so a change from the quarter before can be the season rather than news.
+            </p>
           )}
           {n.type === "results" && n.typ !== undefined && (
             <Stat label={`Typical move on its last ${n.n} results`} value={`±${n.typ}%`} />

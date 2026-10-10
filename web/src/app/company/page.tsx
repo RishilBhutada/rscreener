@@ -11,6 +11,7 @@ import StockChart, { CorpAction, Quarter } from "@/components/StockChart";
 import { Row } from "@/lib/query";
 import { loadNote, pushRecent, saveNote } from "@/lib/store";
 import WatchStar from "@/components/WatchStar";
+import SeasonsCard, { Seasons } from "@/components/Seasons";
 import { loadSectionMode, SectionMode } from "@/components/Settings";
 import { isRefreshLoad } from "@/components/TopNav";
 import { applyOrder, loadOrder } from "@/lib/order";
@@ -70,6 +71,7 @@ type Company = {
    *  as the other says the numbers cover a different business than they do. */
   basis?: string | null;
   fscore?: FScoreData | null;
+  seasons?: Seasons | null;
   exchange?: string | null;
   bse_code?: number | string | null;
   /** Written by pipeline/export_company_json.py so this page need not download
@@ -2059,7 +2061,12 @@ function CompanyView() {
           on every company, hardcoded, and 1,347 of the 3,198 with filed results
           file standalone - which excludes subsidiaries, so for a holding company
           the label named a different business from the one in the table. */}
-      {quarterly && <div id="quarters" className="scroll-mt-32"><StatementTable title="Quarterly results" stmt={quarterly} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} next={nextResults} kind="quarterly" symbol={symbol} /></div>}
+      {quarterly && (
+        <div id="quarters" className="scroll-mt-32 space-y-6">
+          <StatementTable title="Quarterly results" stmt={quarterly} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} next={nextResults} kind="quarterly" symbol={symbol} />
+          <SeasonsCard seasons={company.seasons} />
+        </div>
+      )}
 
       {pnl && (
         <div id="profit-loss" className="scroll-mt-32 space-y-6">

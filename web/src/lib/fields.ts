@@ -71,6 +71,10 @@ export const FIELD_CATALOG: FieldDef[] = [
   { key: "rsi14", label: "RSI (14)", group: "Technicals", unit: "", desc: "Relative strength index over 14 sessions, 0–100. Under 30 is usually called oversold, over 70 overbought", short: "RSI" },
   { key: "vol_surge", label: "Volume vs 20-day average", group: "Technicals", unit: "×", desc: "The last session's traded volume as a multiple of the average of the 20 before it", short: "Volume" },
 
+  { key: "season_peak", label: "Sales peak quarter", group: "Seasons", unit: "", desc: "The quarter of the financial year that usually brings the most sales: 1 = Apr–Jun, 2 = Jul–Sep, 3 = Oct–Dec, 4 = Jan–Mar. Only for companies whose pattern beats luck (shuffle test, and it repeats in later years); blank otherwise", short: "Peak qtr" },
+  { key: "season_low", label: "Sales weakest quarter", group: "Seasons", unit: "", desc: "The quarter that usually brings the least sales, numbered the same way. Blank unless the pattern beats luck", short: "Weak qtr" },
+  { key: "season_swing", label: "Seasonal swing", group: "Seasons", unit: "%", desc: "How much bigger sales usually are in the peak quarter than in the weakest, each against an average quarter of the same year. Blank unless the pattern beats luck", short: "Swing" },
+
   { key: "f_score", label: "Piotroski F-score", group: "Scores", unit: "/9", desc: "Nine pass/fail tests on the two latest annual reports: profit, cash flow, rising return on assets, cash above profit, no rise in debt, better current ratio, no new shares, rising gross margin, rising asset turnover. 8–9 is strong, 0–2 weak. Banks have no score", short: "F-score" },
 
   { key: "volatility_1y", label: "Volatility (1y)", group: "Risk", unit: "%", desc: "How wildly the price swings — annualised realised volatility from a year of daily bars (Yang-Zhang OHLC estimator); under ~25% is calm, over ~50% is stormy", short: "Vol 1y" },

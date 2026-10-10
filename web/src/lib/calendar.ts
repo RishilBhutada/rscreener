@@ -15,6 +15,10 @@ export type UpcomingEvent = {
   /** When its results usually come out ("15:45", IST): the middle of its last
    *  `un` announcement times. */
   usual?: string; un?: number;
+  /** The reported quarter's usual sales against an average quarter, for a
+   *  company with a reliable season (pipeline/seasons_lib.py); pk/lo when it
+   *  is the year's peak or weakest. */
+  ssn?: { i: number; q: number; pk?: 1; lo?: 1 };
 };
 /** `recent` is the last three days of the past year (from `recent_from`), in
  *  calendar-past.json's shape: the page re-reads this small file every few

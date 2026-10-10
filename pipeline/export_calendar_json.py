@@ -47,6 +47,8 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+import seasons_lib
+
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
 OUT = ROOT / "web" / "public" / "calendar.json"
@@ -350,6 +352,10 @@ def main() -> None:
     rows = con.execute("SELECT kind, symbol, company, purpose, date, detail FROM calendar_events WHERE date >= ?"
                        " ORDER BY date, symbol", (today,)).fetchall() if has("calendar_events") else []
     seen_ex = set()
+    # The quarter being reported, against the company's usual year: "Jul-Sep is
+    # usually its weakest quarter" reads a fall from the quarter before for
+    # what it is. Reliable sales seasons only (seasons_lib.py).
+    season = seasons_lib.business(con, "revenue", {s for k, s, _, p, _, _ in rows if k == "meeting" and "result" in (p or "").lower()})
     for kind, sym, company, purpose, d, detail in rows:
         e = {"kind": kind, "symbol": sym, "company": company, "purpose": purpose if kind == "meeting" else f"Ex-date: {purpose}",
              "date": d, "desc": detail or ""}
@@ -363,6 +369,10 @@ def main() -> None:
             if len(ts) >= 2:
                 m = round(statistics.median(int(x[:2]) * 60 + int(x[3:5]) for x in ts) / 5) * 5
                 e["usual"], e["un"] = f"{m // 60:02d}:{m % 60:02d}", len(ts)
+            ss = season.get(sym)
+            if ss and ss["ok"]:
+                q = seasons_lib._fq(int(quarter_reported(d)[5:7]))
+                e["ssn"] = {"i": ss["idx"][q], "q": q, **({"pk": 1} if q == ss["peak"] else {}), **({"lo": 1} if q == ss["low"] else {})}
             mine = [r for r in results_by.get(sym, []) if r["d"] < d]
             if mine:
                 last = mine[-1]

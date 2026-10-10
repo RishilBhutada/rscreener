@@ -20,6 +20,7 @@ from export_json import freshen_prices
 from fetch_corporate_actions import dividend_detail
 from trend_lib import build_trends, net_debt_series, ratio_bands
 import fund_units
+import seasons_lib
 
 
 def clean_nan(o):
@@ -744,6 +745,9 @@ def main() -> None:
     wc_ratios = working_capital_ratios(con)
     basis_by_symbol = reporting_basis(con)
     fscores = piotroski(con)
+    # Whether sales, profit and the share price follow the quarter of the
+    # year, and whether that beats luck (seasons_lib.py).
+    seasons_by_symbol = seasons_lib.seasons(con, only)
     coverage_by_symbol = coverage_notes(con)
     # symbol -> (exchange, bse code). Older databases have no EXCHANGE column,
     # in which case every company is what it always was: NSE.
@@ -848,6 +852,7 @@ def main() -> None:
             "ratios": wc_ratios.get(sym),
             "basis": basis_by_symbol.get(sym),
             "fscore": fscores.get(sym),
+            "seasons": seasons_by_symbol.get(sym),
             "no_pe_reason": None if (bands.get(sym, {}) or {}).get("pe") else no_pe.get(sym),
             # Which exchange this company is listed on, because it decides what
             # can exist on the page. The as-filed quarterly table, the P/E band
