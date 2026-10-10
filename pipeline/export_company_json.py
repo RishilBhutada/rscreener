@@ -665,6 +665,26 @@ def main() -> None:
     # the database is saved to the release BEFORE this runs; it costs ~2 s.
     con.execute("CREATE INDEX IF NOT EXISTS idx_statements_symbol ON statements(symbol)")
     con.commit()
+    if only:
+        # A few companies - the results watcher's run (results.yml). trend_lib's
+        # history, bands and cross-source checks read EVERY company's filings
+        # whatever is asked for: three minutes for one page. Temp tables of the
+        # same names, holding just these companies, shadow those tables for
+        # this connection only (as price_adjust shadows prices). Each of those
+        # computations is per company, so the pages come out identical -
+        # checked on TCS, HDFC Bank, M&M, Anand Rathi and Cordelia on
+        # 10-Oct-2026 - in seconds.
+        #
+        # Tables, filled in the table's own order, not views: where two rows
+        # tie - a consolidated and a standalone net worth for one year - the
+        # loaders keep the one read last. A view was read through the symbol
+        # index, in another order, and gave TCS a different price-to-book
+        # history. Literal values: SQLite binds no parameters in DDL.
+        listed = ",".join("'" + s.replace("'", "''") + "'" for s in sorted(only))
+        for table in ("results_history", "statements", "filing_dates"):
+            if _table_exists(con, table):
+                con.execute(f"CREATE TEMP TABLE {table} AS SELECT * FROM main.{table}"
+                            f" WHERE symbol IN ({listed}) ORDER BY rowid")
     snaps = pd.read_sql("SELECT * FROM fundamentals", con)
     # Fund units are not companies (fund_units.py). Their old pages are removed
     # too - the published site is built from this folder, and a file left in it

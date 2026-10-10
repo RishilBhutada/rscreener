@@ -12,8 +12,17 @@ export type UpcomingEvent = {
    *  typically moved on its last n results (median, either way). */
   last?: { q?: string; rvy?: number; pty?: number; rvq?: number; ptq?: number; pt?: number; mv?: number };
   typ?: number; n?: number;
+  /** When its results usually come out ("15:45", IST): the middle of its last
+   *  `un` announcement times. */
+  usual?: string; un?: number;
 };
-export type UpcomingDoc = { generated_at: string | null; events: UpcomingEvent[] };
+/** `recent` is the last three days of the past year (from `recent_from`), in
+ *  calendar-past.json's shape: the page re-reads this small file every few
+ *  minutes and the year's file hourly. */
+export type UpcomingDoc = {
+  generated_at: string | null; updated?: string; events: UpcomingEvent[];
+  recent_from?: string; recent?: PastEvent[]; recent_names?: Record<string, string>;
+};
 
 /** calendar-past.json - the past year, in short keys (about 11,000 events). */
 export type PastEvent = {
@@ -22,6 +31,8 @@ export type PastEvent = {
    *  (y) and against the quarter before (q), in %. */
   q?: string; rv?: number; rvy?: number; rvq?: number; pt?: number; pty?: number; ptq?: number; eps?: number; sa?: 1;
   mv?: number; nf?: number; cc?: { t?: string; r?: string };
+  /** When NSE stamped the results announcement ("15:40", IST), and its PDF. */
+  at?: string; doc?: string; bm?: 1;
   x?: string; amt?: number; yld?: number; r?: string;
   seg?: string; ip?: number; lc?: number; lg?: number; p?: string;
 };
@@ -93,6 +104,12 @@ export function dayLabel(iso: string, withYear = false): string {
   return new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-IN", {
     weekday: "short", day: "numeric", month: "short", ...(withYear ? { year: "numeric" } : {}), timeZone: "UTC",
   });
+}
+
+/** "15:40" -> "3:40 pm". */
+export function clock(hhmm: string): string {
+  const h = Number(hhmm.slice(0, 2)), m = hhmm.slice(3, 5);
+  return `${h % 12 || 12}:${m} ${h < 12 ? "am" : "pm"}`;
 }
 
 export function crore(v: number): string {

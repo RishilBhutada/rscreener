@@ -231,6 +231,14 @@ def iso(d: str) -> str:
     return datetime.strptime(d, "%d-%b-%Y").strftime("%Y-%m-%d")
 
 
+def _day(d: str | None) -> str | None:
+    """iso() for a date that may be missing or oddly written: None, not an error."""
+    try:
+        return iso(str(d).strip().title()) if d else None
+    except ValueError:
+        return None
+
+
 def parse_xbrl(xml_bytes: bytes, period_type: str) -> dict[str, float]:
     """NSE results XBRL uses FIXED context ids (Reg-33 column layout), not
     period dates: OneD = the reported quarter, FourD = cumulative year-to-date,
@@ -337,6 +345,8 @@ def integrated_filings(session, sym: str) -> list[dict]:
             "consolidated": "Consolidated" if cons else "Standalone",
             "_ptype": "quarterly",
             "_cons": cons,
+            # the day NSE broadcast it, for filing_dates (--only-missing)
+            "_ann": str(r.get("revised_Date") or r.get("broadcast_Date") or "").split(" ")[0],
         }
     return sorted(best.values(), key=lambda r: r["toDate"], reverse=True)
 
@@ -405,6 +415,14 @@ def main() -> None:
     ap.add_argument("--max-minutes", type=float, default=0,
                     help="stop starting new symbols after this long (0 = no budget)")
     ap.add_argument("--refresh", action="store_true", help="re-fetch every listed symbol regardless of age")
+    # The results watcher's mode. A company that reported an hour ago needs ONE
+    # quarter, and the full pass re-reads both index lists and every recent
+    # XBRL for it - fifteen-odd requests where two will do. This reads only the
+    # Integrated Filing list (the legacy one stopped in 2024), fetches only the
+    # quarters not stored yet, records their results date, and leaves the
+    # fetch logs alone so the weekly full pass still comes round as usual.
+    ap.add_argument("--only-missing", action="store_true",
+                    help="fetch only quarters not stored yet, from the Integrated Filing list")
     args = ap.parse_args()
 
     raw = (ROOT / args.symbols[1:]).read_text(encoding="utf-8") if args.symbols.startswith("@") else args.symbols
@@ -441,7 +459,7 @@ def main() -> None:
     )
     # decide which symbols are due, oldest-first (a never-fetched symbol counts as oldest)
     log = {r[0]: r[1] for r in con.execute(f"SELECT symbol, fetched_at FROM {log_table} WHERE error IS NULL").fetchall()}
-    if args.refresh:
+    if args.refresh or args.only_missing:
         due = list(symbols)
     elif args.max_age_hours > 0:
         cutoff = (datetime.utcnow() - timedelta(hours=args.max_age_hours)).strftime("%Y-%m-%d %H:%M:%S")
@@ -473,7 +491,19 @@ def main() -> None:
         err = None
         try:
             filings = []
-            for period in ("Annual", "Quarterly"):
+            if args.only_missing:
+                stored = {r[0] for r in con.execute(
+                    "SELECT DISTINCT period_end FROM results_history WHERE symbol=? AND period_type='quarterly'", (sym,))}
+                filings = [f for f in integrated_filings(s, sym) if iso(f["toDate"]) not in stored]
+                dated = [(sym, iso(f["toDate"]), d) for f in filings if (d := _day(f.get("_ann")))]
+                if dated:
+                    db_retry(lambda: con.execute(
+                        "CREATE TABLE IF NOT EXISTS filing_dates "
+                        "(symbol TEXT, period_end TEXT, announced_on TEXT, PRIMARY KEY (symbol, period_end))"))
+                    # OR IGNORE: fetch_filing_dates.py keeps the EARLIEST date
+                    # across both lists, and that is not ours to overwrite.
+                    db_retry(lambda: con.executemany("INSERT OR IGNORE INTO filing_dates VALUES (?,?,?)", dated))
+            for period in (() if args.only_missing else ("Annual", "Quarterly")):
                 r = get_retry(s, INDEX_API.format(sym=nse_session.q(sym), period=period))
                 body = r.json()
                 rows = body if isinstance(body, list) else body.get("data", [])
@@ -482,10 +512,11 @@ def main() -> None:
                     filings.append(f)
                 time.sleep(args.sleep)
             # the legacy index stops in 2024; the newest quarters live here
-            have = {(f["fromDate"], f["toDate"]) for f in filings}
-            for f in integrated_filings(s, sym):
-                if (f["fromDate"], f["toDate"]) not in have:
-                    filings.append(f)
+            if not args.only_missing:
+                have = {(f["fromDate"], f["toDate"]) for f in filings}
+                for f in integrated_filings(s, sym):
+                    if (f["fromDate"], f["toDate"]) not in have:
+                        filings.append(f)
             time.sleep(args.sleep)
             for f in filings:
                 try:
@@ -509,10 +540,11 @@ def main() -> None:
                 db_retry(lambda: con.executemany("INSERT INTO results_history VALUES (?,?,?,?,?,?,?)", rows_in))
                 n_periods += 1
                 time.sleep(0.15)
-            db_retry(lambda: con.execute(
-                f"INSERT OR REPLACE INTO {log_table} VALUES (?,?,?,?)",
-                (sym, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), None, n_periods),
-            ))
+            if not args.only_missing:
+                db_retry(lambda: con.execute(
+                    f"INSERT OR REPLACE INTO {log_table} VALUES (?,?,?,?)",
+                    (sym, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), None, n_periods),
+                ))
             db_retry(con.commit)
             print(f"[{i}/{len(symbols)}] {sym}: {n_periods} periods parsed, {skipped} skipped")
         except Exception as e:  # noqa: BLE001

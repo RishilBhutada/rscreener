@@ -47,13 +47,20 @@ concurrency:
   # code from ten commits earlier while every workflow reported success.
   #
   # Publishing is idempotent and the newest code should always win, so
-  # publish-only runs get their own group where the newest cancels the rest.
-  # The two can overlap safely: they hold separate runner filesystems, and Pages
-  # serialises deployments through the github-pages environment.
+  # publish-only runs get their own group. The two can overlap safely: they
+  # hold separate runner filesystems, and Pages serialises deployments through
+  # the github-pages environment.
+  #
+  # "Publish new results" (results.yml) shares the publish group, and nothing
+  # in it is cancelled any more - a newer run waits for the running one. That
+  # run republishes the LIVE site, so overlapping a publish would put the older
+  # site back; and cancelled during its database save, `gh release upload
+  # --clobber` has already deleted the stored copy and not yet replaced it.
+  # GitHub still keeps only the newest waiting run, so the newest code wins.
   group: >-
     nightly-${{ inputs.scope == 'rebuild and publish only (no fetching)'
       && 'publish' || 'refresh' }}
-  cancel-in-progress: ${{ inputs.scope == 'rebuild and publish only (no fetching)' }}
+  cancel-in-progress: false
 
 jobs:
   refresh:
@@ -184,23 +191,35 @@ jobs:
         # no retry, no guard, so one dropped NSE response took the results
         # calendar out for a night with the run still reported as a success.
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_events.py
+      - name: Record when each company's results came out
+        # NSE's announcements list, one call a day: the time each results
+        # announcement was published, which the calendar shows and dates
+        # results by (pipeline/fetch_result_times.py). The last three days on
+        # every run, and any day of the past year not held yet - the whole
+        # year the first time, about six minutes, then nothing.
+        env:
+          RSCREENER_STEP_MINUTES: "12"
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_result_times.py --days 3 --backfill
       - name: Fetch first the companies whose results just came out
-        if: steps.plan.outputs.earnings == '1' && steps.plan.outputs.targeted == '0'
+        if: (steps.plan.outputs.earnings == '1' || steps.plan.outputs.scope == 'rebuild and publish only (no fetching)') && steps.plan.outputs.targeted == '0'
         # The two steps further down reach each company once a week, so a
         # company that reported yesterday could keep its old quarter for up to
         # seven days - the calendar and the company page both showed it. This
-        # takes the companies whose results meeting was in the last five days
-        # and whose new quarter is not stored yet (pipeline/just_reported.py),
-        # and fetches only those, before anything else can use up the time.
+        # takes the companies whose results meeting or announcement was in the
+        # last five days and whose new quarter is not stored yet
+        # (pipeline/just_reported.py), and fetches only that quarter, before
+        # anything else can use up the time. Publish-only runs too: about two
+        # seconds a company, and a code publish then carries the day's results.
+        # During the day the results watcher does the same within minutes.
         env:
           RSCREENER_STEP_MINUTES: "15"
         run: |
           python pipeline/just_reported.py
-          if [ -s data/just_reported_dates.txt ]; then
+          if [ "${{ steps.plan.outputs.earnings }}" = "1" ] && [ -s data/just_reported_dates.txt ]; then
             bash pipeline/guarded_fetch.sh python pipeline/fetch_filing_dates.py --symbols @data/just_reported_dates.txt --max-age-hours 1 --sleep 0.2
           fi
           if [ -s data/just_reported_results.txt ]; then
-            bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols @data/just_reported_results.txt --refresh --limit 300 --quarters-back 8 --sleep 0.25
+            bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols @data/just_reported_results.txt --only-missing --limit 400 --sleep 0.2
           fi
       - name: Refresh shareholding patterns (whole universe, rotating)
         if: steps.plan.outputs.earnings == '1'
@@ -615,6 +634,9 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web/out
+          # "Publish new results" republishes from these files: kept three days
+          # (the default is one) so a failed night does not strand it.
+          retention-days: 3
 
   deploy:
     needs: refresh
@@ -642,6 +664,23 @@ jobs:
       - id: retry
         if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v4
+
+  # The day's results watcher (results-watch.yml), started as the nightly run
+  # ends - the one start GitHub does not drop. Whatever the night's outcome:
+  # watching NSE does not depend on tonight's publish having worked.
+  start-watch:
+    needs: [refresh, deploy]
+    if: always() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Start today's results watch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run results-watch.yml -R "${{ github.repository }}" \
+            || echo "could not start the watcher - its timed starts will"
 
   # A failed refresh is SILENT otherwise: the site keeps serving yesterday's data
   # and looks completely normal. That is what happened on 1-Aug-2026 - the depth

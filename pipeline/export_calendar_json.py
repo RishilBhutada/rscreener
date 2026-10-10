@@ -16,6 +16,20 @@ put an old calendar back on the site (see fetch_events.py). If NSE refuses for
 a week, the upcoming list thins out as dates pass rather than showing last
 week's meetings as "upcoming".
 
+TODAY counts as past the moment a company's results are out. This used to list
+only days before today, so results that landed at 3:40 pm stayed "coming up"
+until the next night's run - whatever time they were fetched. The results
+watcher (results-watch.yml) publishes within minutes now, and the page has to
+show what it publishes. A results meeting today with nothing out yet stays in
+the upcoming list, with the time the company's results usually come out.
+
+Times come from fetch_result_times.py: when NSE stamped the results
+announcement, which is often hours before the XBRL the figures are read from
+(TCS, 8-Oct-2026: 15:40 and 22:07). A result is dated by its announcement, so a
+filing broadcast after midnight no longer moves it to the next day. calendar.json
+also carries the last three days' past events ("recent"): the page re-reads that
+small file every few minutes while open, not the year's.
+
 How a stock "moved on results": from the last close before the day NSE
 broadcast the results to the close of the next session after it. Results
 often come out after the market shuts (MTAR's June-2026 quarter: 18:39), so a
@@ -170,6 +184,33 @@ def main() -> None:
 
     past: list[dict] = []
 
+    # When each company's results came out (fetch_result_times.py).
+    times: dict[str, list[tuple]] = defaultdict(list)  # symbol -> [(day, "HH:MM:SS", doc)], oldest first
+    if has("result_times"):
+        for sym, d, at, doc in con.execute("SELECT symbol, day, at, doc FROM result_times WHERE day >= ? AND day <= ?"
+                                           " ORDER BY day", (early, today)):
+            times[sym].append((d, at, doc))
+    claimed: set[tuple] = set()
+
+    def stamp(sym: str, a: str, b: str):
+        """The company's results announcement from day a to day b, the latest
+        not already given to another result."""
+        for d, at, doc in reversed(times.get(sym, [])):
+            if a <= d <= b and (sym, d) not in claimed:
+                claimed.add((sym, d))
+                return d, at, doc
+        return None
+
+    def timed(e: dict, t) -> dict:
+        if t:
+            e["at"] = t[1][:5]
+            if t[2]:
+                e["doc"] = t[2]
+        return e
+
+    def shift(day: str, n: int) -> str:
+        return (date.fromisoformat(day) + timedelta(days=n)).isoformat()
+
     # ── results ──
     figures: dict[tuple, dict] = defaultdict(dict)
     if has("results_history"):
@@ -184,7 +225,7 @@ def main() -> None:
                 " ORDER BY date", ((now.date() - timedelta(days=380)).isoformat(),)):
             calls[sym].append((d, title or "", url or ""))
     filings = con.execute("SELECT symbol, period_end, announced_on FROM filing_dates WHERE announced_on >= ?"
-                          " AND announced_on < ? ORDER BY announced_on", (lo, today)).fetchall() if has("filing_dates") else []
+                          " AND announced_on <= ? ORDER BY announced_on", (lo, today)).fetchall() if has("filing_dates") else []
     results_by = defaultdict(list)  # symbol -> its results, oldest first
     def result_event(sym: str, pe: str, ann: str) -> dict:
         e = {"d": ann, "k": "results", "s": sym, "q": quarter(pe)}
@@ -221,7 +262,10 @@ def main() -> None:
         return e
 
     for sym, pe, ann in filings:
-        e = result_event(sym, pe, ann)
+        # The announcement: after the quarter ended, up to four days before
+        # the XBRL that dates the filing.
+        t = stamp(sym, max(shift(pe, 1), shift(ann, -4)), ann)
+        e = timed(result_event(sym, pe, t[0] if t else ann), t)
         past.append(e)
         results_by[sym].append(e)
 
@@ -262,24 +306,42 @@ def main() -> None:
 
     # ── other board meetings (results meetings are covered above) ──
     meetings = con.execute("SELECT symbol, company, purpose, date, detail FROM calendar_events WHERE kind='meeting'"
-                           " AND date >= ? AND date < ?", (lo, today)).fetchall() if has("calendar_events") else []
+                           " AND date >= ? AND date <= ?", (lo, today)).fetchall() if has("calendar_events") else []
     via_meeting = 0
     for sym, company, purpose, d, detail in meetings:
         names.setdefault(sym, company)
         if "result" in (purpose or "").lower():
             if any(abs(gap(r["d"], d)) <= 5 for r in results_by.get(sym, [])):
                 continue
+            # Out, but its XBRL not filed yet: dated and timed by the
+            # announcement, figures to follow.
+            t = stamp(sym, shift(d, -1), shift(d, 3))
+            if d == today and not t:
+                continue  # still to come today: it is in the upcoming list
             # Results dates are on record for about half the companies; board
             # meetings for nearly all. With no date on record, the day of the
             # results meeting stands in for it - results are approved and
             # published at that meeting.
-            e = result_event(sym, quarter_reported(d), d)
-            e["bm"] = 1
+            e = timed(result_event(sym, quarter_reported(t[0] if t else d), t[0] if t else d), t)
+            if not t:
+                e["bm"] = 1
             past.append(e)
             results_by[sym].append(e)
             via_meeting += 1
             continue
-        past.append({"d": d, "k": "meeting", "s": sym, "p": purpose or "", "x": detail or ""})
+        if d < today:
+            past.append({"d": d, "k": "meeting", "s": sym, "p": purpose or "", "x": detail or ""})
+    # Results announced with no meeting on NSE's calendar and no XBRL yet.
+    unlisted = 0
+    for sym, lst in times.items():
+        for d, at, doc in lst:
+            if d < lo or (sym, d) in claimed or any(abs(gap(r["d"], d)) <= 10 for r in results_by.get(sym, [])):
+                continue
+            claimed.add((sym, d))
+            e = timed(result_event(sym, quarter_reported(d), d), (d, at, doc))
+            past.append(e)
+            results_by[sym].append(e)
+            unlisted += 1
     for lst in results_by.values():
         lst.sort(key=lambda r: r["d"])
 
@@ -292,7 +354,15 @@ def main() -> None:
         e = {"kind": kind, "symbol": sym, "company": company, "purpose": purpose if kind == "meeting" else f"Ex-date: {purpose}",
              "date": d, "desc": detail or ""}
         if kind == "meeting" and "result" in (purpose or "").lower():
+            if d == today and any(r["d"] >= today for r in results_by.get(sym, [])):
+                continue  # out already: listed with the past, under today
             e["type"] = "results"
+            # When its results usually come out: the middle of its last four
+            # announcement times, to five minutes.
+            ts = [at for day, at, _ in times.get(sym, []) if day < d and at][-4:]
+            if len(ts) >= 2:
+                m = round(statistics.median(int(x[:2]) * 60 + int(x[3:5]) for x in ts) / 5) * 5
+                e["usual"], e["un"] = f"{m // 60:02d}:{m % 60:02d}", len(ts)
             mine = [r for r in results_by.get(sym, []) if r["d"] < d]
             if mine:
                 last = mine[-1]
@@ -341,15 +411,30 @@ def main() -> None:
     fetched = con.execute("SELECT MAX(fetched_at) FROM calendar_events").fetchone()[0] if has("calendar_events") else None
     con.close()
 
+    # Newest first; today's results by the time they came out, latest on top.
+    past.sort(key=lambda e: (e["d"], e.get("at", ""), e["s"]), reverse=True)
+    recent_from = (now.date() - timedelta(days=2)).isoformat()
+    recent = [e for e in past if e["d"] >= recent_from]
     OUT.write_text(json.dumps({
         # When NSE was last read, not when this file was written - the honest
         # age of what the page shows.
         "generated_at": fetched,
+        "updated": now.isoformat(timespec="seconds"),
         "events": upcoming,
-    }, ensure_ascii=False, allow_nan=False), encoding="utf-8")
+        # The last three days of the past year, so the page can stay current by
+        # re-reading this file alone (see the docstring).
+        "recent_from": recent_from,
+        "recent": recent,
+        "recent_names": {s: names[s] for s in sorted({e["s"] for e in recent}) if s in names},
+    }, ensure_ascii=False, allow_nan=False, separators=(",", ":")), encoding="utf-8")
 
-    past.sort(key=lambda e: (e["d"], e["s"]), reverse=True)
     used = {e["s"] for e in past}
+    # The announcement's PDF for the last 90 days only - the latest results
+    # season. On every row of the year it was a quarter of the file's size.
+    doc_from = (now.date() - timedelta(days=90)).isoformat()
+    for e in past:
+        if "doc" in e and e["d"] < doc_from:
+            del e["doc"]
     PAST.write_text(json.dumps({
         "from": lo, "to": today,
         "prices_to": max((d[-1] for d in closes.days.values() if d), default=None),
@@ -361,7 +446,7 @@ def main() -> None:
         kinds[e["k"]] += 1
     print(f"calendar: {len(upcoming)} events from {today} on (fetched {fetched}); past year: {len(past)} events "
           f"({', '.join(f'{k} {n}' for k, n in sorted(kinds.items()))}; {via_meeting} results dated by their board "
-          f"meeting), {PAST.stat().st_size // 1024} KB")
+          f"meeting, {unlisted} by their announcement alone; {sum(1 for e in past if "at" in e)} timed), {PAST.stat().st_size // 1024} KB")
 
 
 if __name__ == "__main__":

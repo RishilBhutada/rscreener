@@ -1,0 +1,137 @@
+name: Publish new results
+run-name: Publish new results
+
+# Started by the results watcher (results-watch.yml) when NSE lists results
+# newer than the last publish; by hand from the Actions tab too.
+#
+# NOT a rebuild. The nightly's publish exports all ~4,700 companies and builds
+# the app: twenty minutes. This takes the site that is LIVE - the artifact
+# behind the latest Pages deployment - fetches only the companies whose results
+# just came out, swaps in the calendar and those companies' pages, and deploys
+# that: about four minutes from start to live.
+#
+# Everything else stays exactly as the last full publish left it, these
+# companies' screener rows included, until the nightly run.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write    # the database release
+  pages: write
+  id-token: write
+  actions: read      # the live site's files, from the run that deployed them
+
+concurrency:
+  # The nightly's publish-only group. This republishes the live site, so it
+  # must never overlap another publish: started from the site before that one,
+  # it would put the old site back over the new. GitHub keeps one waiting run
+  # per group - the newest - so a burst of results is one run, not ten.
+  group: nightly-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url || steps.retry.outputs.page_url }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: pipeline
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pandas requests
+      - name: Download the database and the live site
+        id: base
+        run: |
+          mkdir -p data site web/public/companies
+          gh release download data-db --pattern rscreener.db.gz --dir data
+          gunzip -f data/rscreener.db.gz
+          RUN=$(python pipeline/live_site.py)
+          echo "run=$RUN" >> "$GITHUB_OUTPUT"
+          if ! gh run download "$RUN" -n github-pages -D base; then
+            # Artifacts are kept three days. Older than that there is nothing
+            # to patch: a full publish fetches these results too.
+            echo "::warning::the live site's files (run $RUN) are gone - asking for a full publish instead"
+            gh workflow run nightly.yml -f scope="rebuild and publish only (no fetching)"
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          tar -xf base/artifact.tar -C site
+          rm -rf base
+          echo "live site: run $RUN, $(find site -type f | wc -l) files"
+      - name: Fetch the results that just came out
+        if: steps.base.outputs.skip != '1'
+        run: |
+          bash pipeline/guarded_fetch.sh python pipeline/fetch_events.py
+          bash pipeline/guarded_fetch.sh python pipeline/fetch_result_times.py --days 3
+          python pipeline/just_reported.py
+          if [ -s data/just_reported_results.txt ]; then
+            bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols @data/just_reported_results.txt --only-missing --sleep 0.2
+          fi
+      - name: Write the calendar and the reporting companies' pages
+        if: steps.base.outputs.skip != '1'
+        run: |
+          # The company export reads the screener's rows from data.json: the
+          # live one, so these pages agree with the screener beside them.
+          cp site/data.json web/public/data.json
+          python pipeline/export_calendar_json.py
+          if [ -s data/just_reported_results.txt ]; then
+            python pipeline/export_company_json.py --symbols @data/just_reported_results.txt
+          fi
+      - name: Swap them into the live site (re-based if another publish landed meanwhile)
+        if: steps.base.outputs.skip != '1'
+        run: |
+          NOW=$(python pipeline/live_site.py)
+          if [ "$NOW" != "${{ steps.base.outputs.run }}" ]; then
+            echo "run $NOW deployed while this one worked - starting from its site instead"
+            rm -rf site && mkdir site
+            gh run download "$NOW" -n github-pages -D base
+            tar -xf base/artifact.tar -C site
+            rm -rf base
+          fi
+          cp web/public/calendar.json web/public/calendar-past.json site/
+          n=$(find web/public/companies -maxdepth 1 -name '*.json' | tee /dev/stderr | wc -l)
+          find web/public/companies -maxdepth 1 -name '*.json' -exec cp {} site/companies/ \;
+          echo "swapped in the calendar and $n company pages"
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.base.outputs.skip != '1'
+        with:
+          path: site
+          retention-days: 3
+      # Two attempts, as in the nightly: the first can fail on GitHub's own
+      # token service ("Failed to get ID Token: Request timeout").
+      - id: deployment
+        if: steps.base.outputs.skip != '1'
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+      - name: Wait, then try the deployment once more
+        if: steps.base.outputs.skip != '1' && steps.deployment.outcome == 'failure'
+        run: sleep 45
+      - id: retry
+        if: steps.base.outputs.skip != '1' && steps.deployment.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+      - name: Save the fetched results to the data-db release
+        # After the deploy, so it does not hold the site back. Without it the
+        # next run would fetch the same companies again.
+        if: steps.base.outputs.skip != '1'
+        run: |
+          SIZE=$(stat -c%s data/rscreener.db 2>/dev/null || echo 0)
+          if [ "$SIZE" -lt 100000000 ]; then
+            echo "database is only $SIZE bytes - refusing to overwrite the stored copy"; exit 0
+          fi
+          gzip -c data/rscreener.db > rscreener.db.gz
+          ok=0
+          for attempt in 1 2 3; do
+            if gh release upload data-db rscreener.db.gz --clobber; then ok=1; break; fi
+            echo "upload attempt $attempt failed; retrying in 30s"
+            sleep 30
+          done
+          [ "$ok" = 1 ] || { echo "could not store the database after three attempts"; exit 1; }
+          echo "stored $(du -h rscreener.db.gz | cut -f1)"

@@ -1,0 +1,40 @@
+name: Watch for results
+run-name: Watch for results
+
+# One job that watches NSE while results are due and starts "Publish new
+# results" (results.yml) when they land - see pipeline/results_watch.py for
+# when it watches and why it is not simply a timed workflow.
+#
+# Started each morning by the nightly run. The timed starts below are backups
+# only: GitHub drops most timed runs on this repository. One watcher at a time;
+# a second one waits, and finding the day done or over, stops at once.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 4,7,10,13 * * *"   # 10:11, 13:11, 16:11 and 19:11 IST
+
+permissions:
+  actions: write     # starting "Publish new results", and the next watcher
+  contents: read
+
+concurrency:
+  group: results-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    # Above the watcher's own hand-over at 5h40m, below GitHub's 6h.
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: pipeline
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - run: python pipeline/results_watch.py
+        env:
+          GH_TOKEN: ${{ github.token }}

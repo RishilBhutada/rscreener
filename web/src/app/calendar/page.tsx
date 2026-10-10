@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
@@ -10,12 +10,15 @@ import { allWatched } from "@/lib/watchlists";
 import { loadPortfolio } from "@/lib/portfolio";
 import { shortName } from "@/lib/names";
 import {
-  CalEvent, CalKind, GROUPS, KIND_LABEL, PastDoc, UpcomingDoc, crore, dayLabel, docUrl, fromPast, fromUpcoming, matches, quarterDue,
+  CalEvent, CalKind, GROUPS, KIND_LABEL, PastDoc, UpcomingDoc, clock, crore, dayLabel, docUrl, fromPast, fromUpcoming, matches, quarterDue,
 } from "@/lib/calendar";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 /** Rows drawn at a time: the past year holds about 11,000 events. */
 const PAGE = 250;
+/** How often an open page looks for newly published results. The results
+ *  watcher publishes within minutes of NSE listing them (results-watch.yml). */
+const RECHECK_MS = 3 * 60_000;
 
 const COLOR: Record<CalKind, string> = {
   results: "var(--accent)", dividend: "var(--ca-div)", bonus: "var(--ca-bon)", split: "var(--ca-spl)",
@@ -61,12 +64,21 @@ function Cell({ v, loss = false, cls = COL }: { v?: number; loss?: boolean; cls?
 /** The one line under a company's name. */
 function line(e: CalEvent): string {
   const p = e.past, n = e.next;
-  if (p?.k === "results") return `${p.q ?? ""} results${p.rv === undefined && p.pt === undefined ? " · figures not in yet" : ""}`;
+  // The time first: on a phone the line is cut off after thirty-odd letters.
+  if (p?.k === "results") {
+    return [p.at && clock(p.at), p.q, !p.at && p.rv === undefined && p.pt === undefined && "figures not in yet"]
+      .filter(Boolean).join(" · ");
+  }
   if (p?.k === "dividend") return [p.amt && `${rs(p.amt)} a share`, p.yld !== undefined && `${p.yld}% of the price`, !p.amt && p.x].filter(Boolean).join(" · ");
   if (p?.k === "ipo") return [p.seg, p.ip && `issue ${rs(p.ip)}`, p.lc && `first close ${rs(p.lc)}`].filter(Boolean).join(" · ");
   if (p?.k === "meeting") return p.x ?? "";
   if (p) return p.x ?? "";
-  if (n?.type === "results") return `${quarterDue(n.date)} results due`;
+  if (n?.type === "results") {
+    // "Financial Results/Dividend": what else the meeting takes up.
+    const also = n.purpose.split("/").map((x) => x.trim()).filter((x) => x && !/^financial results?$/i.test(x));
+    return [n.usual && `~${clock(n.usual)}`, `${quarterDue(n.date)} due`, also.length && `also ${also.join(", ").toLowerCase()}`]
+      .filter(Boolean).join(" · ");
+  }
   if (n?.type === "dividend" && n.amt) return [`${rs(n.amt)} a share`, n.yld !== undefined && `${n.yld}% of the price`].filter(Boolean).join(" · ");
   return n?.desc ?? "";
 }
@@ -74,7 +86,7 @@ function line(e: CalEvent): string {
 /** The row's second line; a coming result or IPO also says what it is. */
 function sub(e: CalEvent): string {
   const l = line(e);
-  if (e.upcoming && (e.kind === "results" || e.kind === "ipo")) return [e.what, l].filter(Boolean).join(" · ");
+  if (e.upcoming && e.kind === "ipo") return [e.what, l].filter(Boolean).join(" · ");
   return l || e.what;
 }
 
@@ -105,14 +117,28 @@ export default function CalendarPage() {
     try { localStorage.setItem(BASIS_KEY, b); } catch { /* the choice just is not remembered */ }
   };
 
-  useEffect(() => {
-    fetch(`${BASE}/calendar.json`)
+  // A new URL each minute: GitHub Pages' CDN keeps a file for ten minutes, so
+  // the plain one could show results published nine minutes ago as not out.
+  const loadNext = useCallback((first: boolean) => {
+    fetch(`${BASE}/calendar.json?t=${Math.floor(Date.now() / 60_000)}`, { cache: "no-store" })
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then(setNext)
-      .catch((e) => setError(String(e.message ?? e)));
-    // The past year is the larger file (about 400 KB on the wire); it loads
-    // behind the upcoming list rather than in front of it.
-    fetch(`${BASE}/calendar-past.json`)
+      .then((d: UpcomingDoc) => setNext((cur) => (cur && cur.updated && cur.updated === d.updated ? cur : d)))
+      .catch((e) => { if (first) setError(String(e.message ?? e)); });
+  }, []);
+
+  useEffect(() => {
+    const look = () => { if (document.visibilityState === "visible") loadNext(false); };
+    const timer = setInterval(look, RECHECK_MS);
+    document.addEventListener("visibilitychange", look);
+    return () => { clearInterval(timer); document.removeEventListener("visibilitychange", look); };
+  }, [loadNext]);
+
+  useEffect(() => {
+    loadNext(true);
+    // The past year is the larger file (about 500 KB on the wire); it loads
+    // behind the upcoming list rather than in front of it. Hourly is fresh
+    // enough: its last three days come from calendar.json.
+    fetch(`${BASE}/calendar-past.json?h=${Math.floor(Date.now() / 3_600_000)}`)
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then(setPast)
       .catch((e) => setPastError(String(e.message ?? e)));
@@ -125,9 +151,19 @@ export default function CalendarPage() {
     if (fromUrl) setQ(fromUrl);
   }, []);
 
-  const upcoming = useMemo(() => (next?.events ?? []).filter((e) => !today || e.date >= today)
+  const coming = useMemo(() => (next?.events ?? []).filter((e) => !today || e.date >= today)
     .map((e, i) => fromUpcoming(e, i, shortName)), [next, today]);
-  const history = useMemo(() => (past ? past.events.map((e, i) => fromPast(e, i, past.names, shortName)) : []), [past]);
+  // The past year, its last three days from the fresher calendar.json.
+  const history = useMemo(() => {
+    const from = next?.recent ? next.recent_from ?? "" : "";
+    const names = { ...(past?.names ?? {}), ...(next?.recent_names ?? {}) };
+    const events = [...(next?.recent ?? []), ...(past?.events ?? []).filter((e) => !from || e.d < from)];
+    return past || next?.recent ? events.map((e, i) => fromPast(e, i, names, shortName)) : [];
+  }, [past, next]);
+  // Coming up opens on today: the results already out, latest first, above
+  // the ones still to come.
+  const outToday = useMemo(() => history.filter((e) => e.date === today), [history, today]);
+  const upcoming = useMemo(() => [...outToday, ...coming], [outToday, coming]);
 
   const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const searching = words.length > 0;
@@ -136,7 +172,8 @@ export default function CalendarPage() {
     && (!searching || matches(e, words));
 
   // Searching looks both ways at once: what is coming, then the past year.
-  const nextList = useMemo(() => upcoming.filter(keep), [upcoming, group, mineOnly, mine, q]); // eslint-disable-line react-hooks/exhaustive-deps
+  // While searching, today's results show once - under the past year.
+  const nextList = useMemo(() => (searching ? coming : upcoming).filter(keep), [upcoming, coming, searching, group, mineOnly, mine, q]); // eslint-disable-line react-hooks/exhaustive-deps
   const pastList = useMemo(() => history.filter(keep), [history, group, mineOnly, mine, q]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => setShown(PAGE), [when, group, mineOnly, q]);
@@ -149,9 +186,11 @@ export default function CalendarPage() {
   const drawn = sections.map(([title, list, total]) => {
     const slice = list.slice(0, Math.max(0, budget));
     budget -= slice.length;
+    // One card per day - two for today on Coming up: out, and still to come.
     const days: [string, CalEvent[]][] = [];
     for (const e of slice) {
-      if (days.length && days[days.length - 1][0] === e.date) days[days.length - 1][1].push(e);
+      const last = days[days.length - 1];
+      if (last && last[0] === e.date && last[1][0].upcoming === e.upcoming) last[1].push(e);
       else days.push([e.date, [e]]);
     }
     return { title, days, total, hidden: total - slice.length };
@@ -217,7 +256,8 @@ export default function CalendarPage() {
             <InfoTip title="Growth">
               <p>Yearly: the quarter&apos;s sales and net profit against the same quarter a year before (YoY). Quarterly: against the quarter just before it (QoQ).</p>
               <p>Many businesses are seasonal - festive quarters, monsoon quarters - so quarter-on-quarter swings can be large without meaning much; yearly is the steadier read.</p>
-              <p>&quot;Loss&quot; means the quarter itself was a loss; a dash, that the earlier quarter was a loss or is not in the database. A coming result stays blank until it is released; the night after, it moves to the past year with the figures it released. &quot;Usual&quot; is the middle of the stock&apos;s moves on its last four results.</p>
+              <p>&quot;Loss&quot; means the quarter itself was a loss; a dash, that the earlier quarter was a loss or is not in the database. A coming result stays blank until it is released. &quot;Usual&quot; is the middle of the stock&apos;s moves on its last four results.</p>
+              <p>Results are published here within minutes of NSE listing them. The time on a result is when NSE published the company&apos;s announcement; the figures come from the company&apos;s data filing (XBRL), which can follow hours later - until then the row says &quot;figures awaited&quot;. &quot;Usually ~3:45 pm&quot; is the middle of the times of its last four results.</p>
             </InfoTip>
           </div>
         )}
@@ -248,14 +288,20 @@ export default function CalendarPage() {
             )}
             {s.days.map(([d, list], i) => (
               <Fragment key={`${s.title}${d}`}>
-                {(i === 0 || s.days[i - 1][0].slice(0, 7) !== d.slice(0, 7)) && (
+                {(i === 0 || s.days[i - 1][0].slice(0, 7) !== d.slice(0, 7)) && s.days[i - 1]?.[0] !== d && (
                   <h3 className="pt-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
                     {new Date(`${d}T12:00:00Z`).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" })}
                   </h3>
                 )}
                 <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
                   <h3 className="px-3 py-2 text-[13px] font-semibold border-b border-[var(--line)] flex items-center gap-3">
-                    <span className="flex-1">{d === today ? "Today" : dayLabel(d)} <span className="font-normal text-[var(--ink3)]">· {list.length}</span></span>
+                    <span className="flex-1">
+                      {d === today ? "Today" : dayLabel(d)}
+                      {d === today && (when === "next" || searching) && s.title !== "Past year" && list.some((e) => e.kind === "results") && (
+                        <span className="font-normal text-[var(--ink2)]">{list[0].upcoming ? " · still to come" : " · out"}</span>
+                      )}
+                      <span className="font-normal text-[var(--ink3)]"> · {list.length}</span>
+                    </span>
                     {list.some((e) => growth(e, basis)) && (
                       <span className="flex text-[10px] font-medium uppercase tracking-wide text-[var(--ink3)]">
                         <span className={COL}>Sales</span><span className={COL}>Profit</span>
@@ -279,7 +325,9 @@ export default function CalendarPage() {
                                 <span className="truncate">· {sub(e)}</span>
                               </span>
                             </span>
-                            {g ? (
+                            {g && e.past?.at && e.past.rv === undefined && e.past.pt === undefined ? (
+                              <span className="w-[150px] shrink-0 pt-0.5 text-right text-[12px] text-[var(--ink3)]">Figures awaited</span>
+                            ) : g ? (
                               <span className="flex pt-0.5">
                                 <Cell v={g.rv} /><Cell v={g.pt} loss={g.loss} />
                                 {e.upcoming
@@ -311,6 +359,7 @@ export default function CalendarPage() {
         )}
         {next && (
           <p className="text-[11px] text-[var(--ink3)]">
+            {next.updated ? `Updated ${new Date(next.updated).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" })} IST, re-checked every 3 minutes while open · ` : ""}
             NSE event calendar read {next.generated_at ?? "—"}{past ? ` · past year ${dayLabel(past.from, true)} to ${dayLabel(past.to, true)}, prices to ${past.prices_to ? dayLabel(past.prices_to, true) : "—"}` : ""}
           </p>
         )}
@@ -384,20 +433,26 @@ function Detail({ e, onClose, earlier, basis, pickBasis }: {
             </div>
           )}
           <div className="grid grid-cols-2 gap-3 py-1">
+            {p.at && <Stat label="Out at" value={`${clock(p.at)} IST`} />}
             {p.eps !== undefined && <Stat label="EPS" value={`₹${p.eps}`} />}
             {p.mv !== undefined && <Stat label="Stock, over the results" value={pctText(p.mv, 2)} className={tone(p.mv)} />}
             {p.nf !== undefined && <Stat label="Nifty 50, same days" value={pctText(p.nf, 2)} className={tone(p.nf)} />}
             {rel !== undefined && <Stat label="Stock against Nifty" value={`${signed(rel, 2)} pts`} className={tone(rel)} />}
           </div>
-          {p.rv === undefined && p.pt === undefined && <p className="text-[12px]">The quarter&apos;s figures are not in the database yet.</p>}
+          {p.rv === undefined && p.pt === undefined && (
+            <p className="text-[12px]">{p.at
+              ? "The results are out; their figures come from the company's data filing (XBRL), which often follows hours later, and appear here once it is filed. Until then the announcement itself has them."
+              : "The quarter's figures are not in the database yet."}</p>
+          )}
           {(p.rv !== undefined || p.pt !== undefined) && (
             <p className="text-[11px] text-[var(--ink3)]">{p.sa ? "Standalone" : "Consolidated"} figures from the company&apos;s filing with NSE. Quarterly: against the quarter before; yearly: against the same quarter a year before.{p.mv !== undefined ? " Stock: last close before the day of the results to the close of the next session after it." : ""}</p>
           )}
           <Earlier list={earlier} basis={basis} pickBasis={pickBasis} />
-          {p.cc && (
+          {(p.cc || p.doc) && (
             <div className="grid grid-cols-2 gap-2">
-              {p.cc.t && <DocLink href={docUrl(p.cc.t)}>Call transcript</DocLink>}
-              {p.cc.r && <DocLink href={docUrl(p.cc.r)}>Call recording</DocLink>}
+              {p.doc && <DocLink href={docUrl(p.doc)}>Results announcement</DocLink>}
+              {p.cc?.t && <DocLink href={docUrl(p.cc.t)}>Call transcript</DocLink>}
+              {p.cc?.r && <DocLink href={docUrl(p.cc.r)}>Call recording</DocLink>}
             </div>
           )}
         </>
@@ -428,6 +483,12 @@ function Detail({ e, onClose, earlier, basis, pickBasis }: {
       {n && (
         <>
           {n.desc && <p className="text-[13px]">{n.desc}</p>}
+          {n.type === "results" && n.usual && (
+            <>
+              <Stat label="Usually out" value={`~${clock(n.usual)} IST`} />
+              <p className="text-[11px] text-[var(--ink3)]">The middle of the times NSE published its last {n.un} results. When it was, not when it will be.</p>
+            </>
+          )}
           {n.type === "results" && n.typ !== undefined && (
             <Stat label={`Typical move on its last ${n.n} results`} value={`±${n.typ}%`} />
           )}

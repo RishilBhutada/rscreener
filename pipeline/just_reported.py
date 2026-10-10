@@ -6,7 +6,8 @@ The results and results-date fetches each come round to a company once a week
 its old quarter for up to seven days: the calendar showed Anand Rathi Wealth's
 Q1 growth on the row for its Q2 results. This lists every company whose results
 board meeting fell in the last five days (fetch_events.py keeps meetings once
-they pass) and whose new quarter is not in the database yet. The run fetches
+they pass), or whose results announcement NSE stamped in that time
+(fetch_result_times.py), and whose new quarter is not in the database yet. The run fetches
 those before the weekly rotation. A company drops off the list the night its
 quarter arrives, so it is fetched once, not five nights running.
 
@@ -41,13 +42,22 @@ def main() -> None:
     nse_file = ROOT / "data" / "nse_symbols.txt"
     nse = {s for s in nse_file.read_text(encoding="utf-8").split(",") if s} if nse_file.exists() else set()
     need_results, need_dates = [], []
+    # Today's meetings too: a run that starts before midnight IST finds that
+    # evening's results already out. And every company whose results
+    # announcement NSE has stamped (fetch_result_times.py), meeting listed or
+    # not - that is the list the results watcher publishes from.
+    latest: dict[str, str] = {}
     if "calendar_events" in tables:
-        # Today's meetings too: a run that starts before midnight IST finds
-        # that evening's results already out.
-        meetings = con.execute(
-            "SELECT symbol, MAX(date) FROM calendar_events WHERE kind='meeting' AND lower(purpose) LIKE '%result%'"
-            " AND date >= ? AND date <= ? GROUP BY symbol ORDER BY MAX(date) DESC",
-            (lo, today.isoformat())).fetchall()
+        for sym, day in con.execute(
+                "SELECT symbol, MAX(date) FROM calendar_events WHERE kind='meeting' AND lower(purpose) LIKE '%result%'"
+                " AND date >= ? AND date <= ? GROUP BY symbol", (lo, today.isoformat())):
+            latest[sym] = day
+    if "result_times" in tables:
+        for sym, day in con.execute("SELECT symbol, MAX(day) FROM result_times WHERE day >= ? AND day <= ?"
+                                    " GROUP BY symbol", (lo, today.isoformat())):
+            latest[sym] = max(day, latest.get(sym, ""))
+    if latest:
+        meetings = sorted(latest.items(), key=lambda kv: kv[1], reverse=True)
         for sym, day in meetings:
             if not sym or (nse and sym not in nse):
                 continue
@@ -62,7 +72,7 @@ def main() -> None:
     con.close()
     OUT_RESULTS.write_text(",".join(need_results), encoding="utf-8")
     OUT_DATES.write_text(",".join(need_dates), encoding="utf-8")
-    print(f"just reported (results meeting {lo} to {today}): {len(need_results)} need their new quarter's "
+    print(f"just reported (results meeting or announcement {lo} to {today}): {len(need_results)} need their new quarter's "
           f"figures, {len(need_dates)} its results date")
 
 
