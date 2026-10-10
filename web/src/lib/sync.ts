@@ -51,6 +51,23 @@ function writeLocal(p: Profile) {
   }
 }
 
+/** This device's data as text, for moving it without signing in: copied here,
+ *  pasted on the new phone - or into a reinstalled app, whose storage the
+ *  uninstall wiped (Settings > Move my data). */
+export function backupText(): string {
+  return JSON.stringify({ rscreener_backup: 1, at: new Date().toISOString(), data: readLocal() });
+}
+
+/** Merges a backup into this device the way signing in merges a profile:
+ *  lists are joined, nothing already here is deleted. Returns how many kinds
+ *  of data it carried; throws on text that is not a backup. */
+export function restoreText(text: string): number {
+  const doc = JSON.parse(text.trim());
+  if (!doc || doc.rscreener_backup !== 1 || !doc.data || typeof doc.data !== "object") throw new Error("not a backup");
+  writeLocal(merge(readLocal(), doc.data as Profile));
+  return Object.keys(doc.data).filter((k) => (SYNCED_KEYS as readonly string[]).includes(k)).length;
+}
+
 /** Union for lists, key-by-key for objects, remote for plain values. */
 function merge(local: Profile, remote: Profile): Profile {
   const out: Profile = { ...local };

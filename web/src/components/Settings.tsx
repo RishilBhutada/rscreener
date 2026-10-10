@@ -8,6 +8,7 @@ import { DESTINATIONS, BAR_SLOTS } from "@/lib/destinations";
 import { applyOrder, clearOrder, loadOrder, move, saveOrder, OrderKind } from "@/lib/order";
 import { reloadBypassingCache } from "@/lib/reload";
 import { clearOrders, customOrders } from "@/lib/tableprefs";
+import { backupText, restoreText } from "@/lib/sync";
 import { Glyph, Group, PageTitle, Row, Segmented } from "@/components/ListUI";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -66,6 +67,7 @@ const ICON = {
   order: "M9 6.5h11M9 12h11M9 17.5h11M4 6.5h1.5M4 12h1.5M4 17.5h1.5",
   bar: "M7.5 3h9A1.5 1.5 0 0 1 18 4.5v15a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19.5v-15A1.5 1.5 0 0 1 7.5 3zM6 16.5h12",
   status: "M3 12.5h4l2.5-6 5 11 2.5-5H21",
+  copy: "M9 9h11v11H9zM5 15V4h11",
   update: "M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5V9H15",
   version: "M12 3.5a8.5 8.5 0 1 0 0 17a8.5 8.5 0 0 0 0-17zM12 11v5.5M12 7.8v.01",
   change: "M3.5 12h5M15.5 12h5M12 8.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 0 0 0-7z",
@@ -199,6 +201,7 @@ export function SettingsScreen() {
       />
     );
   }
+  if (p === "data") return <DataScreen />;
   if (p === "sections") {
     return (
       <ReorderScreen
@@ -341,6 +344,7 @@ function MainScreen() {
 
       <Group title="Data">
         <Row icon={<Glyph d={ICON.status} />} title="Data status" sub="How fresh each source is" href="/status" chevron />
+        <Row icon={<Glyph d={ICON.copy} />} title="Move my data" sub="Lists, portfolio and notes to another phone or a reinstalled app" href="/settings?p=data" chevron />
         <Row
           icon={<Glyph d={ICON.update} />}
           title="Check for updates"
@@ -385,6 +389,53 @@ function MainScreen() {
  *  and considerably worse when it does not: on a touch screen it fights the
  *  scroll of the page it sits in, and it is unreachable by keyboard. The row
  *  that just moved flashes once, so the eye can follow it. */
+/** Moving this device's data without an account: a backup as text, copied to
+ *  the clipboard, pasted on the other side. Text rather than a file, because
+ *  the old Android app could not save files at all - this has to work there. */
+function DataScreen() {
+  const [text, setText] = useState("");
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const copy = async () => {
+    const backup = backupText();
+    try {
+      await navigator.clipboard.writeText(backup);
+      setMsg({ ok: true, text: "Copied. On the other phone, or in the new app, open this screen, paste it below and tap Restore." });
+    } catch {
+      setText(backup);
+      setMsg({ ok: false, text: "Copying was blocked here. The backup is in the box below: select all of it and copy it." });
+    }
+  };
+  const restore = () => {
+    try {
+      const n = restoreText(text);
+      setMsg({ ok: true, text: `Restored ${n} kind${n === 1 ? "" : "s"} of data, added to what was here. Reloading…` });
+      setTimeout(() => window.location.reload(), 900);
+    } catch {
+      setMsg({ ok: false, text: "That is not an Rscreener backup. Copy it again on the other device." });
+    }
+  };
+  const button = "w-full min-h-[50px] rounded-2xl text-[15px] font-semibold";
+  return (
+    <div>
+      <PageTitle>Move my data</PageTitle>
+      <p className="-mt-4 mb-5 px-1 text-sm text-[var(--ink3)]">
+        Your watchlists, portfolio, notes, saved screens, own ratios and look are kept on this device only.
+        Reinstalling the app or changing phones starts empty - copy a backup first, then paste it on the other side.
+        Restoring adds to what is there; it deletes nothing.
+      </p>
+      <button type="button" onClick={copy} className={`${button} bg-[var(--accent-fill)] text-[var(--accent-fill-ink)]`}>Copy my data</button>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} spellCheck={false}
+        placeholder="Paste a backup here to restore it"
+        aria-label="Backup text"
+        className="mt-5 w-full rounded-2xl border border-[var(--line2)] bg-[var(--card)] p-3 text-[13px] font-mono text-[var(--ink)]
+                   placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)]" />
+      <button type="button" onClick={restore} disabled={!text.trim()}
+        className={`${button} mt-3 border border-[var(--line)] bg-[var(--card)] text-[var(--accent-ink)] disabled:opacity-40`}>Restore</button>
+      {msg && <p role="status" className={`mt-4 px-1 text-sm ${msg.ok ? "text-[var(--pos)]" : "text-[var(--neg)]"}`}>{msg.text}</p>}
+    </div>
+  );
+}
+
 function ReorderScreen({ kind, title, caption, items, split }: {
   kind: OrderKind;
   title: string;
