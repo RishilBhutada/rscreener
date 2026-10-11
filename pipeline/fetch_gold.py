@@ -171,7 +171,7 @@ def treasury(con, today: str) -> None:
             continue
         yld, cover = x.get("high_yield") or "", x.get("bid_to_cover_ratio") or ""
         actual = ""
-        if re.fullmatch(r"[\d.]+", yld) and re.fullmatch(r"[\d.]+", cover):
+        if re.fullmatch(r"\d+(?:\.\d+)?", yld) and re.fullmatch(r"\d+(?:\.\d+)?", cover):
             actual = f"{float(yld):.3f}% yield, {float(cover):.2f}× cover"
         upsert_event(con, f"ust|{term}|{day}", stamp(when), "USD", f"US {term}-year {kind} auction", "Medium",
                      "", "", actual, "US Treasury (Fiscal Data)", today, family="us_yields")
@@ -480,6 +480,15 @@ def fred_dates(con, today: str) -> None:
         print(f"FRED: {name} - {n} release dates")
 
 
+def readings(observations: list[dict]) -> list[tuple[str, float]]:
+    """(date, value) for the observations that have a number. FRED writes a
+    missing value as a lone "." - which the old check, -?[\\d.]+, took for a
+    number: float(".") then stopped the whole actual-figures step on the
+    first night the key existed (11-Oct-2026), dates in, no figures."""
+    return [(o["date"], float(o["value"])) for o in observations
+            if re.fullmatch(r"-?\d+(?:\.\d+)?", (o.get("value") or "").strip())]
+
+
 def figure(new: list[tuple[str, float]], how: str) -> str | None:
     """A FRED series, newest first, written the way the calendar writes it."""
     v = new[0][1]
@@ -531,8 +540,8 @@ def fred_actuals(con) -> None:
         except RuntimeError as e:
             print(e)
             continue
-        new = [(o["date"], float(o["value"])) for o in obs if re.fullmatch(r"-?[\d.]+", o.get("value") or "")]
-        old = [(o["date"], float(o["value"])) for o in before if re.fullmatch(r"-?[\d.]+", o.get("value") or "")]
+        new = readings(obs)
+        old = readings(before)
         # Nothing new that day: the release slipped, or FRED had not caught up.
         if not new or (old and old[0][0] == new[0][0] and abs(old[0][1] - new[0][1]) < 1e-9):
             continue
@@ -553,7 +562,7 @@ def fred_actuals(con) -> None:
         except RuntimeError as e:
             print(e)
             continue
-        latest = [(o["date"], float(o["value"])) for o in obs if re.fullmatch(r"-?[\d.]+", o.get("value") or "")]
+        latest = readings(obs)
         prev = figure(latest, how) if latest else None
         if prev:
             con.execute("UPDATE gold_events SET previous=? WHERE key=?", (prev + suffix, key))
