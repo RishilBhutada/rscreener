@@ -27,6 +27,8 @@ export type IndexDoc = {
   factsheet: string | null;
   etfs: string[];
   val_file?: string;
+  /** The first day with a P/E, P/B or yield - the index's launch. */
+  val_since?: string | null;
 };
 
 export const RETURN_ORDER = ["1W", "1M", "3M", "6M", "1Y", "3Y", "5Y", "10Y", "20Y"];

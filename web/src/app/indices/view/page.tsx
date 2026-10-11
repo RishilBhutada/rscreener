@@ -57,10 +57,12 @@ function ValTile({ label, v, unit = "", lowIsCheap = true }: { label: string; v?
     <div className="min-w-0">
       <p className="text-xs text-[var(--ink3)]">{label}</p>
       <p className="font-semibold tabular-nums">{f(v.now)}</p>
-      <p className="text-[11px] text-[var(--ink3)] truncate">5y median {f(v.med5)}</p>
+      {/* Medians over the years that exist: an index launched two years ago
+          has no five-year median, and "of 10y" would claim a decade. */}
+      {v.med5 !== null && <p className="text-[11px] text-[var(--ink3)] truncate">{v.years < 5 ? `${v.years}y` : "5y"} median {f(v.med5)}</p>}
       {cheapness !== null && (
         <p className={`text-[11px] truncate ${dear ? "text-[var(--neg)]" : cheap ? "text-[var(--pos)]" : "text-[var(--ink3)]"}`}>
-          {cheapness >= 50 ? `Cheaper than ${cheapness}%` : `Dearer than ${100 - cheapness}%`} of 10y
+          {cheapness >= 50 ? `Cheaper than ${cheapness}%` : `Dearer than ${100 - cheapness}%`} of {v.years < 10 ? `its ${v.years}y` : "10y"}
         </p>
       )}
     </div>
@@ -208,6 +210,13 @@ function IndexView() {
             <ValTile label="Div yield" v={doc.val.dy} unit="%" lowIsCheap={false} />
           </div>
           {doc.val_file && <EtfValChart file={doc.val_file} />}
+          {doc.val_since && Date.parse(doc.val_since) - Date.parse(doc.since) > 365 * 86400000 && (
+            <p className="px-3 pb-3 text-[11px] text-[var(--ink3)]">
+              P/E, P/B and yield from {dayLabel(doc.val_since, true)}{doc.val_since <= "1999-01-31"
+                ? ", where NSE's published series begins"
+                : ", when NSE launched the index"}. The price reaches back to {dayLabel(doc.since, true)}; NSE published no valuation for the years before.
+            </p>
+          )}
         </Card>
       )}
 
