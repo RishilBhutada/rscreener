@@ -86,6 +86,24 @@ export async function signInWithEmail(email: string, password: string, create = 
   return res.user;
 }
 
+/** A password on the signed-in Google account, so the Android app - where
+ *  Google's sign-in page is refused - reaches the SAME account with the Gmail
+ *  address and this password (owner, 12-Oct-2026). Firebase keeps one account
+ *  per email; this links the second way in rather than making a second one. */
+export async function addPassword(password: string): Promise<void> {
+  const fb = await getFirebase();
+  const user = fb?.auth.currentUser;
+  if (!fb || !user?.email) throw Object.assign(new Error("not signed in"), { code: "auth/no-current-user" });
+  const { EmailAuthProvider, linkWithCredential } = await import("firebase/auth");
+  await linkWithCredential(user, EmailAuthProvider.credential(user.email, password));
+  await user.reload();
+}
+
+/** Whether the signed-in account can also be entered with a password. */
+export function hasPassword(user: User | null): boolean {
+  return Boolean(user?.providerData.some((p) => p.providerId === "password"));
+}
+
 export async function sendPasswordReset(email: string): Promise<void> {
   const fb = await getFirebase();
   if (!fb) return;
@@ -99,8 +117,12 @@ export function authMessage(e: unknown): string {
   const known: Record<string, string> = {
     "auth/invalid-credential": "That email and password do not match an account.",
     "auth/wrong-password": "That email and password do not match an account.",
-    "auth/user-not-found": "No account with that email yet - use Create account.",
-    "auth/email-already-in-use": "There is already an account with that email - sign in instead.",
+    "auth/user-not-found": "No account with that email yet - use Create account, or if it is your Google email, set a password on the website first.",
+    "auth/email-already-in-use": "This email already has an account - often the Google one. Sign in instead; or, to use it in the app, sign in with Google on the website and choose Set a password for the app.",
+    "auth/account-exists-with-different-credential": "This email already has an account - sign in with Google on the website, then choose Set a password for the app.",
+    "auth/requires-recent-login": "For safety, sign out and sign in with Google again, then set the password straight away.",
+    "auth/provider-already-linked": "This account already has a password.",
+    "auth/credential-already-in-use": "Another account already uses this email with a password.",
     "auth/weak-password": "Use a password of at least 6 characters.",
     "auth/invalid-email": "That is not a valid email address.",
     "auth/missing-password": "Enter a password.",

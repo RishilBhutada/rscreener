@@ -12,7 +12,7 @@ import { backupText, restoreText } from "@/lib/sync";
 import { allWatched } from "@/lib/watchlists";
 import type { User } from "firebase/auth";
 import {
-  authMessage, firebaseConfigured, inApp, sendPasswordReset, signInWithEmail, signInWithGoogle, signOutOfGoogle, watchUser,
+  addPassword, authMessage, firebaseConfigured, hasPassword, inApp, sendPasswordReset, signInWithEmail, signInWithGoogle, signOutOfGoogle, watchUser,
 } from "@/lib/firebase";
 import { Glyph, Group, PageTitle, Row, Segmented } from "@/components/ListUI";
 
@@ -459,6 +459,7 @@ function AccountScreen() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [linked, setLinked] = useState(false);
   const app = typeof window !== "undefined" && inApp();
   useEffect(() => {
     let off: (() => void) | undefined;
@@ -493,6 +494,27 @@ function AccountScreen() {
         <p className="-mt-4 mb-5 px-1 text-sm text-[var(--ink3)]">
           Signed in as <span className="text-[var(--ink)] font-medium">{user.email ?? user.displayName}</span>. Your watchlists, portfolio, notes, saved screens, own ratios and look are kept in your account and follow you to every device you sign in on.
         </p>
+        {/* The Android app cannot show Google's sign-in, so a Google account
+            gets a password as its second way in - the same account, not a
+            second one. */}
+        {hasPassword(user) || linked ? (
+          <p className="mb-5 px-1 text-sm text-[var(--ink2)]">
+            In the app, sign in with <span className="font-medium">{user.email}</span> and your password - it opens this same account.
+          </p>
+        ) : (
+          <div className="mb-5 space-y-3">
+            <p className="px-1 text-sm text-[var(--ink2)]">
+              <span className="font-semibold">Set a password for the app.</span> Google sign-in does not work inside the Android app, so give this account a password: then, in the app, sign in with {user.email} and it opens this same account.
+            </p>
+            <input type="password" autoComplete="new-password" placeholder="New password (6 or more characters)" value={password}
+              onChange={(e) => setPassword(e.target.value)} className={field} />
+            <button type="button" disabled={busy}
+              onClick={() => (password.length < 6
+                ? setMsg({ ok: false, text: "Use a password of at least 6 characters." })
+                : run(async () => { await addPassword(password); setPassword(""); setLinked(true); }, `Password set. In the app, sign in with ${user.email} and this password.`))}
+              className={`${button} bg-[var(--accent-fill)] text-[var(--accent-fill-ink)]`}>Set a password for the app</button>
+          </div>
+        )}
         <button type="button" onClick={() => run(signOutOfGoogle, "Signed out. Everything on this device stays as it is.")} disabled={busy}
           className={`${button} border border-[var(--line)] bg-[var(--card)] text-[var(--neg)]`}>Sign out</button>
         {msg && <p role="status" className={`mt-4 px-1 text-sm ${msg.ok ? "text-[var(--pos)]" : "text-[var(--neg)]"}`}>{msg.text}</p>}
