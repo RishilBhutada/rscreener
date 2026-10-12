@@ -52,6 +52,9 @@ const ALIASES: Record<string, string> = {
   fscore: "f_score",
   piotroski: "f_score",
   promoter_change: "promoter_chg_qtr",
+  fii: "fii_holding",
+  dii: "dii_holding",
+  mf: "mf_holding",
   peak_quarter: "season_peak",
   weak_quarter: "season_low",
   seasonality: "season_swing",
@@ -72,6 +75,7 @@ export const NUMERIC_FIELDS = [
   "qtr_sales_yoy", "qtr_profit_yoy", "qtr_sales_qoq", "qtr_profit_qoq",
   "promoter_chg_qtr", "promoter_chg_1y", "f_score",
   "season_peak", "season_low", "season_swing",
+  "fii_holding", "dii_holding", "mf_holding", "fii_chg_qtr", "dii_chg_qtr",
 ];
 
 /** The catalogue name a typed field resolves to ("dy" -> "div_yield"). */

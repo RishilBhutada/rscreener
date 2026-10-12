@@ -9,6 +9,7 @@ Unit conventions in the exported file (what the query language sees):
 Missing values are exported as null - the app must treat null as
 "excluded from this screen", never as zero.
 """
+import argparse
 import bisect
 import json
 import math
@@ -56,7 +57,8 @@ RENAME = {
 SCREEN_FIELDS = ["vs_dma50", "vs_dma200", "dma50_200", "rsi14", "vol_surge",
                  "qtr_sales_yoy", "qtr_profit_yoy", "qtr_sales_qoq", "qtr_profit_qoq",
                  "promoter_chg_qtr", "promoter_chg_1y", "f_score",
-                 "season_peak", "season_low", "season_swing"]
+                 "season_peak", "season_low", "season_swing",
+                 "fii_holding", "dii_holding", "mf_holding", "fii_chg_qtr", "dii_chg_qtr"]
 RETURN_ANCHORS = {"ret_1m": 1, "ret_3m": 3, "ret_6m": 6, "ret_1y": 12, "ret_3y": 36, "ret_5y": 60}
 
 
@@ -470,10 +472,33 @@ def week52_range(con) -> dict[str, tuple[float, float]]:
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser()
+    # The results watcher's mode (results.yml): a company reported an hour ago,
+    # its new quarter is fetched, and its screener row - quarterly growth, P/E,
+    # the seasons - should say so now rather than after the nightly run. Only
+    # these rows are recomputed and patched into the existing data.json; every
+    # other row, and index.json, are left exactly as they are.
+    ap.add_argument("--symbols", help="comma list or @path: recompute only these rows, patched into data.json")
+    args = ap.parse_args()
+    only = None
+    if args.symbols:
+        raw = (ROOT / args.symbols[1:]).read_text(encoding="utf-8") if args.symbols.startswith("@") else args.symbols
+        only = {s.strip().upper() for s in raw.split(",") if s.strip()}
     con = sqlite3.connect(DB, timeout=180)
     # Prices before a demerger on the continuing company's base (price_adjust.py).
     price_adjust.install(con)
+    if only:
+        # As in export_company_json: the filings tables shadowed by temp tables
+        # holding just these companies, in the table's own row order, so every
+        # per-company computation gives the full run's answer in seconds.
+        listed = ",".join("'" + s.replace("'", "''") + "'" for s in sorted(only))
+        for table in ("results_history", "statements", "filing_dates"):
+            if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                con.execute(f"CREATE TEMP TABLE {table} AS SELECT * FROM main.{table}"
+                            f" WHERE symbol IN ({listed}) ORDER BY rowid")
     df = pd.read_sql("SELECT * FROM fundamentals", con)
+    if only:
+        df = df[df["symbol"].isin(only)].reset_index(drop=True)
     # Fund units stay out of the company table - see fund_units.py. Snapshots
     # fetched while they were in the universe are still stored.
     funds = fund_units.symbols(con)
@@ -508,6 +533,7 @@ def main() -> None:
     extra_fields: dict[str, dict] = {}
     for part in (screen_fields.technicals(con), screen_fields.quarter_growth(trends),
                  screen_fields.promoter_changes(con), screen_fields.piotroski(con),
+                 screen_fields.institutions(con),
                  seasons_lib.screen_fields(seasons_lib.seasons(con))):
         for sym, vals in part.items():
             extra_fields.setdefault(sym, {}).update(vals)
@@ -760,6 +786,16 @@ def main() -> None:
     date_counts = Counter(r.get("price_date") for r in df.to_dict(orient="records")
                           if r.get("price_date"))
     modal_date, modal_n = (date_counts.most_common(1)[0] if date_counts else (None, 0))
+
+    if only:
+        live = json.loads(OUT.read_text(encoding="utf-8"))
+        fresh_rows = {r["symbol"]: r for r in clean_nan(df.to_dict(orient="records"))}
+        replaced = len(fresh_rows.keys() & {r["symbol"] for r in live["rows"]})
+        live["rows"] = [fresh_rows.pop(r["symbol"], r) for r in live["rows"]] + list(fresh_rows.values())
+        OUT.write_text(json.dumps(clean_nan(live), ensure_ascii=False, allow_nan=False,
+                                  separators=(",", ":")), encoding="utf-8")
+        print(f"patched {replaced} rows, added {len(fresh_rows)}, of {len(live['rows'])} in {OUT}")
+        return
 
     payload = {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),

@@ -57,6 +57,11 @@ export const FIELD_CATALOG: FieldDef[] = [
   { key: "inventory_days", label: "Inventory days", group: "Balance sheet", unit: "days", desc: "How long stock sits before selling" },
 
   { key: "promoter_holding", label: "Promoter holding", group: "Ownership", unit: "%", desc: "Founders'/promoters' stake — skin in the game", short: "Promoter" },
+  { key: "fii_holding", label: "FII holding", group: "Ownership", unit: "%", desc: "Foreign institutions' share of the company (foreign portfolio investors and the like), from the latest shareholding pattern. Blank for quarters filed on SEBI's older format, which has no FII/DII split", short: "FII" },
+  { key: "dii_holding", label: "DII holding", group: "Ownership", unit: "%", desc: "Domestic institutions' share - mutual funds, insurers, banks, pension funds - from the latest shareholding pattern", short: "DII" },
+  { key: "mf_holding", label: "Mutual fund holding", group: "Ownership", unit: "%", desc: "Mutual funds' share of the company, part of the DII figure", short: "MF" },
+  { key: "fii_chg_qtr", label: "FII change (quarter)", group: "Ownership", unit: "pts", desc: "Change in FIIs' share since the previous shareholding filing, in percentage points", short: "FII Δq" },
+  { key: "dii_chg_qtr", label: "DII change (quarter)", group: "Ownership", unit: "pts", desc: "Change in DIIs' share since the previous shareholding filing, in percentage points", short: "DII Δq" },
   { key: "promoter_chg_qtr", label: "Promoter change (quarter)", group: "Ownership", unit: "pts", desc: "Change in the promoters' stake since the previous shareholding filing, in percentage points", short: "Promoter Δq" },
   { key: "promoter_chg_1y", label: "Promoter change (1 year)", group: "Ownership", unit: "pts", desc: "Change in the promoters' stake against the filing a year earlier, in percentage points", short: "Promoter Δ1y" },
 

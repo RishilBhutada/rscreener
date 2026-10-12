@@ -221,6 +221,15 @@ jobs:
           if [ -s data/just_reported_results.txt ]; then
             bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols @data/just_reported_results.txt --only-missing --limit 400 --sleep 0.2
           fi
+      - name: Tell the owner's phone about his watchlist's results (late ones)
+        # The results watcher stops at midnight; filings that land after it
+        # are fetched just above. Before the database save, so what is sent
+        # is remembered (alert_log) and the day's watcher does not repeat it.
+        if: github.event_name == 'schedule'
+        continue-on-error: true
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python alerts/results_alerts.py
       - name: Refresh shareholding patterns (whole universe, rotating)
         if: steps.plan.outputs.earnings == '1'
         # Was @data/top500.txt, so the other 1,857 companies were unreachable: 432
@@ -229,6 +238,16 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "18"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_shareholding.py --symbols @data/nse_symbols.txt --max-age-hours 336 --limit 700 --sleep 0.3
+      - name: Who holds the public part - FIIs, DIIs, mutual funds (rotating)
+        if: steps.plan.outputs.earnings == '1'
+        # Each quarter's shareholding XBRL (pipeline/fetch_shp_detail.py): the
+        # newest five quarters a company, two files a company a night, newest
+        # missing first - files run to 1.25 MB for a large company, so the
+        # history fills in over a few weeks rather than in one night's
+        # downloads. Weekly per company after that, for the new quarter.
+        env:
+          RSCREENER_STEP_MINUTES: "15"
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_shp_detail.py --symbols @data/nse_symbols.txt --limit 350 --quarters 5 --per-company 2 --max-age-hours 168 --sleep 0.4
       - name: Refresh price-chart history (whole universe, rotating)
         if: steps.plan.outputs.prices == '1'
         # The WHOLE universe, every night - deliberately not a rotation.

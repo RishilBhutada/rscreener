@@ -42,7 +42,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: pipeline
+          sparse-checkout: |
+            pipeline
+            alerts
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -83,6 +85,9 @@ jobs:
           cp site/data.json web/public/data.json
           python pipeline/export_calendar_json.py
           if [ -s data/just_reported_results.txt ]; then
+            # Their screener rows first - quarterly growth, P/E, seasons - patched
+            # into the live data.json; then their pages, which read those rows.
+            python pipeline/export_json.py --symbols @data/just_reported_results.txt
             python pipeline/export_company_json.py --symbols @data/just_reported_results.txt
           fi
       - name: Swap them into the live site (re-based if another publish landed meanwhile)
@@ -96,7 +101,7 @@ jobs:
             tar -xf base/artifact.tar -C site
             rm -rf base
           fi
-          cp web/public/calendar.json web/public/calendar-past.json site/
+          cp web/public/calendar.json web/public/calendar-past.json web/public/data.json site/
           n=$(find web/public/companies -maxdepth 1 -name '*.json' | tee /dev/stderr | wc -l)
           find web/public/companies -maxdepth 1 -name '*.json' -exec cp {} site/companies/ \;
           echo "swapped in the calendar and $n company pages"
@@ -117,6 +122,16 @@ jobs:
       - id: retry
         if: steps.base.outputs.skip != '1' && steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v4
+      - name: Tell the owner's phone about his watchlist's results
+        # After the deploy, so the link in the push opens the new figures.
+        # alerts/results_alerts.py: once when the results are out, once when
+        # their figures are filed; alert_log (saved with the database below)
+        # stops the next run sending them again.
+        if: steps.base.outputs.skip != '1'
+        continue-on-error: true
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python alerts/results_alerts.py
       - name: Save the fetched results to the data-db release
         # After the deploy, so it does not hold the site back. Without it the
         # next run would fetch the same companies again.

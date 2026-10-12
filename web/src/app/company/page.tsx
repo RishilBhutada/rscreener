@@ -43,6 +43,11 @@ type Shareholding = {
   promoter: (number | null)[];
   public: (number | null)[];
   employee: (number | null)[];
+  /** Foreign and domestic institutions and mutual funds, from each quarter's
+   *  XBRL - empty for quarters on SEBI's older format. */
+  fii?: (number | null)[];
+  dii?: (number | null)[];
+  mf?: (number | null)[];
 };
 type Pt = [string, number] | [string, number, number | null];
 type Prices = { monthly?: Pt[]; weekly?: Pt[]; daily?: Pt[] };
@@ -72,6 +77,8 @@ type Company = {
   basis?: string | null;
   fscore?: FScoreData | null;
   seasons?: Seasons | null;
+  /** [index symbol, name, group] - the indices it is a member of, broad market first. */
+  indices?: [string, string, string][] | null;
   exchange?: string | null;
   bse_code?: number | string | null;
   /** Written by pipeline/export_company_json.py so this page need not download
@@ -541,6 +548,29 @@ function CompoundedGrowth({ trend, prices }: { trend?: { annual?: Trend }; price
         <GrowthCard key={title} title={title} rows={rows} />
       ))}
     </section>
+  );
+}
+
+/** The indices the company is in: the first few, the rest one tap away. */
+function IndexChips({ list }: { list?: [string, string, string][] | null }) {
+  const [all, setAll] = useState(false);
+  if (!list?.length) return null;
+  const shown = all ? list : list.slice(0, 4);
+  return (
+    <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12px]">
+      <span className="text-[var(--ink3)]">In {list.length} {list.length === 1 ? "index" : "indices"}:</span>
+      {shown.map(([sym, name]) => (
+        <Link key={sym} href={`/indices/view?s=${encodeURIComponent(sym)}`}
+          className="rounded-full border border-[var(--line)] px-2 py-0.5 text-[var(--ink2)] hover:bg-[var(--card2)]">
+          {name.replace(/^NIFTY\b/, "Nifty")}
+        </Link>
+      ))}
+      {list.length > 4 && (
+        <button type="button" onClick={() => setAll(!all)} className="text-[var(--accent-ink)] font-medium px-1">
+          {all ? "Fewer" : `+${list.length - 4} more`}
+        </button>
+      )}
+    </p>
   );
 }
 
@@ -1820,6 +1850,9 @@ function CompanyView() {
         periods: company.shareholding.dates,
         items: [
           { label: "Promoters %", values: company.shareholding.promoter },
+          ...(company.shareholding.fii ? [{ label: "FIIs %", values: company.shareholding.fii }] : []),
+          ...(company.shareholding.dii ? [{ label: "DIIs %", values: company.shareholding.dii }] : []),
+          ...(company.shareholding.mf ? [{ label: "Mutual funds %", values: company.shareholding.mf }] : []),
           { label: "Public %", values: company.shareholding.public },
           { label: "Employee trusts %", values: company.shareholding.employee },
         ],
@@ -1857,6 +1890,7 @@ function CompanyView() {
             ) : "—"}
             {s.industry ? ` · ${String(s.industry)}` : ""}
           </p>
+          <IndexChips list={company.indices} />
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <IconButton name="download" label="Export to Excel (CSV)" onClick={exportCompanyCsv} />
@@ -2114,6 +2148,9 @@ function CompanyView() {
             periods: company.shareholding.dates,
             items: [
               { label: "Promoters %", values: company.shareholding.promoter },
+              ...(company.shareholding.fii ? [{ label: "FIIs %", values: company.shareholding.fii }] : []),
+              ...(company.shareholding.dii ? [{ label: "DIIs %", values: company.shareholding.dii }] : []),
+              ...(company.shareholding.mf ? [{ label: "Mutual funds %", values: company.shareholding.mf }] : []),
               { label: "Public %", values: company.shareholding.public },
               { label: "Employee trusts %", values: company.shareholding.employee },
             ],
