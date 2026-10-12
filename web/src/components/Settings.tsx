@@ -469,6 +469,13 @@ function AccountScreen() {
     setBusy(true); setMsg(null);
     try { await f(); setMsg({ ok: true, text: ok }); } catch (e) { setMsg({ ok: false, text: authMessage(e) }); } finally { setBusy(false); }
   };
+  // The buttons are never greyed out - a dead-looking button reads as broken
+  // (owner, 12-Oct-2026). A missing field is said instead.
+  const missing = () => {
+    if (email.trim() && password) return false;
+    setMsg({ ok: false, text: !email.trim() ? "Enter your email first." : "Enter a password (6 or more characters)." });
+    return true;
+  };
   const field = "w-full rounded-2xl border border-[var(--line2)] bg-[var(--card)] px-4 py-3 text-base text-[var(--ink)] placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)]";
   const button = "w-full min-h-[50px] rounded-2xl text-[15px] font-semibold disabled:opacity-40";
   if (!firebaseConfigured) {
@@ -509,11 +516,11 @@ function AccountScreen() {
       <div className="space-y-3">
         <input type="email" autoComplete="email" inputMode="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} className={field} />
         <input type="password" autoComplete="current-password" placeholder="Password (6 or more characters)" value={password} onChange={(e) => setPassword(e.target.value)} className={field} />
-        <button type="button" disabled={busy || !email || !password} onClick={() => run(() => signInWithEmail(email, password), "Signed in - syncing your lists.")}
+        <button type="button" disabled={busy} onClick={() => (missing() || run(() => signInWithEmail(email, password), "Signed in - syncing your lists."))}
           className={`${button} ${app ? "bg-[var(--accent-fill)] text-[var(--accent-fill-ink)]" : "border border-[var(--line)] bg-[var(--card)] text-[var(--accent-ink)]"}`}>Sign in</button>
-        <button type="button" disabled={busy || !email || !password} onClick={() => run(() => signInWithEmail(email, password, true), "Account created and signed in - syncing your lists.")}
+        <button type="button" disabled={busy} onClick={() => (missing() || run(() => signInWithEmail(email, password, true), "Account created and signed in - syncing your lists."))}
           className={`${button} border border-[var(--line)] bg-[var(--card)] text-[var(--ink2)]`}>Create account</button>
-        <button type="button" disabled={busy || !email} onClick={() => run(() => sendPasswordReset(email), "If that email has an account, a reset link is on its way.")}
+        <button type="button" disabled={busy} onClick={() => (email.trim() ? run(() => sendPasswordReset(email), "If that email has an account, a reset link is on its way.") : setMsg({ ok: false, text: "Enter your email first." }))}
           className="w-full text-[13px] text-[var(--accent-ink)] disabled:opacity-40 py-2">Forgot password</button>
       </div>
       {msg && <p role="status" className={`mt-4 px-1 text-sm ${msg.ok ? "text-[var(--pos)]" : "text-[var(--neg)]"}`}>{msg.text}</p>}
