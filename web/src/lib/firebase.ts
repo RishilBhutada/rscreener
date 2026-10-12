@@ -15,11 +15,15 @@ import type { FirebaseApp } from "firebase/app";
 import type { Auth, User } from "firebase/auth";
 import type { Firestore } from "firebase/firestore";
 
+// The owner's project (rscreener-9ae56, created 12-Oct-2026). Written here,
+// not kept as GitHub secrets, because it is public by design - every visitor's
+// browser receives it - and the Firestore rules (each user their own
+// /profiles/{uid}) are what protect the data. Secrets, if set, still win.
 const CONFIG = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyDTMccThIjUK-QkuNRz_EPywbx3yiBiaVU",
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "rscreener-9ae56.firebaseapp.com",
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "rscreener-9ae56",
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "1:842782223773:web:dc118caae4885af2299374",
 };
 
 export const firebaseConfigured = Boolean(CONFIG.apiKey && CONFIG.projectId && CONFIG.appId);
