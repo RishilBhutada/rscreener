@@ -40,7 +40,20 @@ export async function getFirebase() {
     import("firebase/firestore"),
   ]);
   const app = getApps()[0] ?? initializeApp(CONFIG as Record<string, string>);
-  cached = { app, auth: authMod.getAuth(app), db: dbMod.getFirestore(app) };
+  // Who is signed in is kept in localStorage, not IndexedDB (getAuth's
+  // default). Opening Google's pop-up sends this tab to the background, a
+  // phone browser closed the IndexedDB connection, and the sign-in died with
+  // "Database is closing" (owner, 12-Oct-2026).
+  let auth: Auth;
+  try {
+    auth = authMod.initializeAuth(app, {
+      persistence: [authMod.browserLocalPersistence, authMod.browserSessionPersistence],
+      popupRedirectResolver: authMod.browserPopupRedirectResolver,
+    });
+  } catch {
+    auth = authMod.getAuth(app);  // already set up on this page
+  }
+  cached = { app, auth, db: dbMod.getFirestore(app) };
   return cached;
 }
 
@@ -97,6 +110,9 @@ export function authMessage(e: unknown): string {
     "auth/popup-closed-by-user": "The sign-in window was closed.",
     "auth/unauthorized-domain": "This site is not on the Firebase project's list of allowed domains yet.",
   };
+  if (/database.*clos|closing/i.test(String((e as Error)?.message ?? ""))) {
+    return "The browser closed its storage while Google's window was open. Try once more; if it repeats, sign in with email.";
+  }
   if (code.startsWith("auth/api-key-not-valid")) return "The site's Firebase settings are wrong - check the four FIREBASE_ secrets on GitHub.";
   return known[code] ?? String((e as Error)?.message ?? e);
 }
