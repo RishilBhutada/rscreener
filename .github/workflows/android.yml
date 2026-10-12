@@ -24,6 +24,25 @@ jobs:
         working-directory: web
       - run: npx cap sync android
         working-directory: web
+      - name: The owner's signing key, when it has been added
+        # Two secrets the owner adds himself (steps in the folder Claude made
+        # for him): the key, base64, and its password. Without them the build
+        # is signed by the runner's throwaway key, as before.
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/rscreener.p12"
+            echo "RS_KEYSTORE=$RUNNER_TEMP/rscreener.p12" >> "$GITHUB_ENV"
+            echo "RS_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            # The certificate's fingerprint is public - printed so a build can
+            # be matched to the key without anyone seeing the key.
+            keytool -list -v -storetype pkcs12 -keystore "$RUNNER_TEMP/rscreener.p12" -storepass "$KEYSTORE_PASSWORD" \
+              | grep -m1 "SHA256:" || { echo "::error::the signing key or its password is wrong"; exit 1; }
+          else
+            echo "::warning::no ANDROID_KEYSTORE secret - signed with a throwaway key; this app will not install over the last one"
+          fi
       - run: chmod +x gradlew && ./gradlew assembleDebug
         working-directory: web/android
       - run: mv web/android/app/build/outputs/apk/debug/app-debug.apk rscreener.apk

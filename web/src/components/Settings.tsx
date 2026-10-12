@@ -9,6 +9,11 @@ import { applyOrder, clearOrder, loadOrder, move, saveOrder, OrderKind } from "@
 import { reloadBypassingCache } from "@/lib/reload";
 import { clearOrders, customOrders } from "@/lib/tableprefs";
 import { backupText, restoreText } from "@/lib/sync";
+import { allWatched } from "@/lib/watchlists";
+import type { User } from "firebase/auth";
+import {
+  authMessage, firebaseConfigured, inApp, sendPasswordReset, signInWithEmail, signInWithGoogle, signOutOfGoogle, watchUser,
+} from "@/lib/firebase";
 import { Glyph, Group, PageTitle, Row, Segmented } from "@/components/ListUI";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -68,6 +73,8 @@ const ICON = {
   bar: "M7.5 3h9A1.5 1.5 0 0 1 18 4.5v15a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19.5v-15A1.5 1.5 0 0 1 7.5 3zM6 16.5h12",
   status: "M3 12.5h4l2.5-6 5 11 2.5-5H21",
   copy: "M9 9h11v11H9zM5 15V4h11",
+  user: "M12 12a4 4 0 1 0 0-8a4 4 0 0 0 0 8zM4 20a8 8 0 0 1 16 0",
+  bell: "M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0",
   update: "M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5V9H15",
   version: "M12 3.5a8.5 8.5 0 1 0 0 17a8.5 8.5 0 0 0 0-17zM12 11v5.5M12 7.8v.01",
   change: "M3.5 12h5M15.5 12h5M12 8.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 0 0 0-7z",
@@ -202,6 +209,8 @@ export function SettingsScreen() {
     );
   }
   if (p === "data") return <DataScreen />;
+  if (p === "alerts") return <AlertsScreen />;
+  if (p === "account") return <AccountScreen />;
   if (p === "sections") {
     return (
       <ReorderScreen
@@ -344,7 +353,11 @@ function MainScreen() {
 
       <Group title="Data">
         <Row icon={<Glyph d={ICON.status} />} title="Data status" sub="How fresh each source is" href="/status" chevron />
+        {firebaseConfigured && (
+          <Row icon={<Glyph d={ICON.user} />} title="Account" sub="Your lists, portfolio and notes on every device" href="/settings?p=account" chevron />
+        )}
         <Row icon={<Glyph d={ICON.copy} />} title="Move my data" sub="Lists, portfolio and notes to another phone or a reinstalled app" href="/settings?p=data" chevron />
+        <Row icon={<Glyph d={ICON.bell} />} title="Phone alerts" sub="Results and announcements of the stocks you choose" href="/settings?p=alerts" chevron />
         <Row
           icon={<Glyph d={ICON.update} />}
           title="Check for updates"
@@ -432,6 +445,124 @@ function DataScreen() {
       <button type="button" onClick={restore} disabled={!text.trim()}
         className={`${button} mt-3 border border-[var(--line)] bg-[var(--card)] text-[var(--accent-ink)] disabled:opacity-40`}>Restore</button>
       {msg && <p role="status" className={`mt-4 px-1 text-sm ${msg.ok ? "text-[var(--pos)]" : "text-[var(--neg)]"}`}>{msg.text}</p>}
+    </div>
+  );
+}
+
+/** Signing in, so the lists follow you. Email and password everywhere;
+ *  Google in browsers only (the Android app's built-in browser is refused by
+ *  Google's sign-in page). Syncing itself is AccountButton's, in the top bar,
+ *  which notices the sign-in on every page. */
+function AccountScreen() {
+  const [user, setUser] = useState<User | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const app = typeof window !== "undefined" && inApp();
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    watchUser(setUser).then((f) => { off = f; });
+    return () => off?.();
+  }, []);
+  const run = async (f: () => Promise<unknown>, ok: string) => {
+    setBusy(true); setMsg(null);
+    try { await f(); setMsg({ ok: true, text: ok }); } catch (e) { setMsg({ ok: false, text: authMessage(e) }); } finally { setBusy(false); }
+  };
+  const field = "w-full rounded-2xl border border-[var(--line2)] bg-[var(--card)] px-4 py-3 text-base text-[var(--ink)] placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)]";
+  const button = "w-full min-h-[50px] rounded-2xl text-[15px] font-semibold disabled:opacity-40";
+  if (!firebaseConfigured) {
+    return (
+      <div>
+        <PageTitle>Account</PageTitle>
+        <p className="-mt-4 px-1 text-sm text-[var(--ink3)]">Sign-in is not set up for this site yet. Until it is, use Move my data to carry your lists between devices.</p>
+      </div>
+    );
+  }
+  if (user) {
+    return (
+      <div>
+        <PageTitle>Account</PageTitle>
+        <p className="-mt-4 mb-5 px-1 text-sm text-[var(--ink3)]">
+          Signed in as <span className="text-[var(--ink)] font-medium">{user.email ?? user.displayName}</span>. Your watchlists, portfolio, notes, saved screens, own ratios and look are kept in your account and follow you to every device you sign in on.
+        </p>
+        <button type="button" onClick={() => run(signOutOfGoogle, "Signed out. Everything on this device stays as it is.")} disabled={busy}
+          className={`${button} border border-[var(--line)] bg-[var(--card)] text-[var(--neg)]`}>Sign out</button>
+        {msg && <p role="status" className={`mt-4 px-1 text-sm ${msg.ok ? "text-[var(--pos)]" : "text-[var(--neg)]"}`}>{msg.text}</p>}
+      </div>
+    );
+  }
+  return (
+    <div>
+      <PageTitle>Sign in</PageTitle>
+      <p className="-mt-4 mb-5 px-1 text-sm text-[var(--ink3)]">
+        Keeps your watchlists, portfolio, notes, saved screens, own ratios and look in your account, so they follow you between your phone, the app and a computer. What is on this device now is kept and joined with the account&apos;s.
+      </p>
+      {!app && (
+        <>
+          <button type="button" disabled={busy} onClick={() => run(signInWithGoogle, "Signed in - syncing your lists.")}
+            className={`${button} bg-[var(--accent-fill)] text-[var(--accent-fill-ink)]`}>Continue with Google</button>
+          <p className="my-4 text-center text-[12px] text-[var(--ink3)]">or with email</p>
+        </>
+      )}
+      {app && <p className="mb-3 px-1 text-[12px] text-[var(--ink3)]">Google sign-in does not work inside the app - Google blocks it in apps&apos; built-in browsers. Use email here; in a browser you can use either.</p>}
+      <div className="space-y-3">
+        <input type="email" autoComplete="email" inputMode="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} className={field} />
+        <input type="password" autoComplete="current-password" placeholder="Password (6 or more characters)" value={password} onChange={(e) => setPassword(e.target.value)} className={field} />
+        <button type="button" disabled={busy || !email || !password} onClick={() => run(() => signInWithEmail(email, password), "Signed in - syncing your lists.")}
+          className={`${button} ${app ? "bg-[var(--accent-fill)] text-[var(--accent-fill-ink)]" : "border border-[var(--line)] bg-[var(--card)] text-[var(--accent-ink)]"}`}>Sign in</button>
+        <button type="button" disabled={busy || !email || !password} onClick={() => run(() => signInWithEmail(email, password, true), "Account created and signed in - syncing your lists.")}
+          className={`${button} border border-[var(--line)] bg-[var(--card)] text-[var(--ink2)]`}>Create account</button>
+        <button type="button" disabled={busy || !email} onClick={() => run(() => sendPasswordReset(email), "If that email has an account, a reset link is on its way.")}
+          className="w-full text-[13px] text-[var(--accent-ink)] disabled:opacity-40 py-2">Forgot password</button>
+      </div>
+      {msg && <p role="status" className={`mt-4 px-1 text-sm ${msg.ok ? "text-[var(--pos)]" : "text-[var(--neg)]"}`}>{msg.text}</p>}
+    </div>
+  );
+}
+
+const ALERT_LIST = "https://github.com/RishilBhutada/rscreener/edit/main/alerts/watchlist.txt";
+
+/** Which stocks reach the phone. The list lives in the repository
+ *  (alerts/watchlist.txt), where the GitHub runs that send the pushes can read
+ *  it; the stars in the app live on this device and cannot reach them. This
+ *  turns the stars into the list's format and opens the file to paste into. */
+function AlertsScreen() {
+  const [text, setText] = useState("");
+  const [msg, setMsg] = useState("");
+  const copy = async () => {
+    const syms = allWatched();
+    if (!syms.length) { setMsg("No starred stocks on this device yet."); return; }
+    const list = syms.join("\n");
+    try {
+      await navigator.clipboard.writeText(list);
+      setMsg(`Copied ${syms.length} symbols. Open the list below, replace its symbols with them, and tap Commit changes.`);
+    } catch {
+      setText(list);
+      setMsg("Copying was blocked here - select the symbols below and copy them.");
+    }
+  };
+  const button = "w-full min-h-[50px] rounded-2xl text-[15px] font-semibold flex items-center justify-center";
+  return (
+    <div>
+      <PageTitle>Phone alerts</PageTitle>
+      <div className="-mt-4 mb-5 px-1 text-sm text-[var(--ink3)] space-y-2">
+        <p>Pushed through the ntfy app, for the stocks on your alert list:</p>
+        <ul className="list-disc pl-5 space-y-1">
+          <li><span className="text-[var(--ink2)]">Results out</span> - within minutes of NSE publishing them, with the time and the filing.</li>
+          <li><span className="text-[var(--ink2)]">Results figures</span> - sales and profit against a year before, once the company files them.</li>
+          <li><span className="text-[var(--ink2)]">Other announcements</span> - checked through the day.</li>
+        </ul>
+        <p>The list is a file in the app&apos;s GitHub repository, because that is where the alerts are sent from. Stars in the app stay on this device, so copy them across when your list changes.</p>
+      </div>
+      <button type="button" onClick={copy} className={`${button} bg-[var(--accent-fill)] text-[var(--accent-fill-ink)]`}>Copy my starred stocks</button>
+      {text && (
+        <textarea readOnly value={text} rows={6} aria-label="Starred symbols"
+          className="mt-3 w-full rounded-2xl border border-[var(--line2)] bg-[var(--card)] p-3 text-[13px] font-mono text-[var(--ink)]" />
+      )}
+      <a href={ALERT_LIST} target="_blank" rel="noopener noreferrer"
+        className={`${button} mt-3 border border-[var(--line)] bg-[var(--card)] text-[var(--accent-ink)]`}>Open the alert list on GitHub</a>
+      {msg && <p role="status" className="mt-4 px-1 text-sm text-[var(--ink2)]">{msg}</p>}
     </div>
   );
 }

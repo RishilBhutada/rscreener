@@ -7,7 +7,8 @@ android {
         applicationId "com.rishil.rscreener"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
+        // Each cloud build a higher number, so Android installs it as an update.
+        versionCode((System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger())
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
@@ -16,7 +17,29 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // The owner's own key (GitHub secrets ANDROID_KEYSTORE and
+    // ANDROID_KEYSTORE_PASSWORD, decoded by android.yml), so every build
+    // carries the same signature and installs over the last one. Without it
+    // each cloud build was signed by a throwaway key, and Android refused the
+    // new app until the old one - and its stored lists - was uninstalled.
+    signingConfigs {
+        rscreener {
+            def ks = System.getenv("RS_KEYSTORE")
+            if (ks) {
+                storeFile file(ks)
+                storeType "pkcs12"
+                storePassword System.getenv("RS_KEYSTORE_PASSWORD")
+                keyAlias "rscreener"
+                keyPassword System.getenv("RS_KEYSTORE_PASSWORD")
+            }
+        }
+    }
     buildTypes {
+        debug {
+            if (System.getenv("RS_KEYSTORE")) {
+                signingConfig signingConfigs.rscreener
+            }
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'

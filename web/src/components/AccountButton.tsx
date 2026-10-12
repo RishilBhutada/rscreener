@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { User } from "firebase/auth";
-import { firebaseConfigured, signInWithGoogle, signOutOfGoogle, watchUser } from "@/lib/firebase";
+import Link from "next/link";
+import { firebaseConfigured, signOutOfGoogle, watchUser } from "@/lib/firebase";
 import { syncNow, watchLocalChanges } from "@/lib/sync";
 
 /** Sign in with Google so the watchlist, notes, portfolio and saved screens follow
@@ -10,7 +11,6 @@ import { syncNow, watchLocalChanges } from "@/lib/sync";
  *  un-set-up build is exactly the app it was before. */
 export default function AccountButton() {
   const [user, setUser] = useState<User | null>(null);
-  const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const stop = useRef<(() => void) | null>(null);
@@ -33,29 +33,18 @@ export default function AccountButton() {
 
   if (!firebaseConfigured) return null;
 
-  const go = async () => {
-    setBusy(true); setMsg(null);
-    try {
-      await signInWithGoogle();
-    } catch (e) {
-      const m = String((e as Error).message ?? e);
-      setMsg(m.includes("popup") ? "Sign-in window was closed." : m);
-    } finally {
-      setBusy(false);
-    }
-  };
-
+  // Signed out: the account screen, which offers email and password (works
+  // in the Android app) as well as Google (browsers only).
   if (!user) {
     return (
-      <button
-        onClick={go}
-        disabled={busy}
+      <Link
+        href="/settings?p=account"
         title="Keep your watchlist, notes and portfolio on every device"
         className="text-xs font-medium rounded-lg border border-[var(--line)] px-2.5 py-1.5
-                   text-[var(--ink2)] hover:bg-[var(--card2)] disabled:opacity-50 whitespace-nowrap"
+                   text-[var(--ink2)] hover:bg-[var(--card2)] whitespace-nowrap"
       >
-        {busy ? "…" : "Sign in"}
-      </button>
+        Sign in
+      </Link>
     );
   }
 
