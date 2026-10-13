@@ -16,6 +16,8 @@ import { COUNTRY, GoldDoc, GoldEvent, GoldFamily, GoldNews, ago, istDate, istDay
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 type Tab = "calendar" | "news" | "ratings";
+type StarMin = "1" | "2" | "3" | "4" | "5";
+const STAR_MINS: [StarMin, string][] = [["1", "1+"], ["2", "2+"], ["3", "3+"], ["4", "4+"], ["5", "5"]];
 
 function Stars({ n, size = 13 }: { n: number; size?: number }) {
   return (
@@ -57,7 +59,7 @@ export default function GoldPage() {
   const [tab, setTab] = useState<Tab>("calendar");
   const [when, setWhen] = useState<"next" | "past">("next");
   const [minNews, setMinNews] = useState<"3" | "2">("3");
-  const [minEv, setMinEv] = useState<"3" | "1">("3");
+  const [minEv, setMinEv] = useState<StarMin>("3");
   const [find, setFind] = useState("");
   const [ev, setEv] = useState<GoldEvent | null>(null);
   const [item, setItem] = useState<GoldNews | null>(null);
@@ -188,7 +190,6 @@ export default function GoldPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   {!words.length && <Chips value={when} options={[["next", "Year ahead"], ["past", "Past year"]] as ["next" | "past", string][]} onChange={setWhen} />}
-                  <Chips value={minEv} options={[["3", "3+"], ["1", "All"]] as ["3" | "1", string][]} onChange={setMinEv} />
                   <InfoTip title="Calendar">
                     <p>A year back and a year ahead, refreshed every night: new dates appear as soon as their publisher announces them.</p>
                     <p>From each publisher&apos;s own schedule: the Fed&apos;s meetings and its calendar of speeches, testimony, minutes and Beige Books (federalreserve.gov); GDP and PCE (BEA); retail sales (Census Bureau); 10- and 30-year Treasury auctions with their results (US Treasury, about a week ahead); ECB and Bank of Japan meetings; MCX gold expiries. ISM&apos;s survey dates are worked out from ISM&apos;s published rule. India&apos;s RBI meetings, Budget, duty changes and Dhanteras are kept by hand from RBI&apos;s and the government&apos;s announcements. A central bank buying gold or a duty change found in the news appears as an announcement.</p>
@@ -199,7 +200,12 @@ export default function GoldPage() {
                     <p>Times are IST; ~ marks an hour that is approximate. Minor data rated one star is left out. Tap an event for why it matters and, once it has happened, how gold moved.</p>
                   </InfoTip>
                 </div>
-                {days.length === 0 && <p className="py-10 text-center text-[13px] text-[var(--ink3)]">{minEv === "3" ? "Nothing rated three stars or more" : "Nothing"} {words.length ? `matching “${find.trim()}” in the two years` : when === "next" ? "in the year ahead" : "in the past year"}</p>}
+                {/* Owner, 13-Oct-2026: a full 1-5 range, not just 3+ / All. */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[12px] font-semibold uppercase tracking-wider text-[var(--ink3)]">Stars</span>
+                  <Chips value={minEv} options={STAR_MINS} onChange={setMinEv} />
+                </div>
+                {days.length === 0 && <p className="py-10 text-center text-[13px] text-[var(--ink3)]">{minEv === "1" ? "Nothing" : minEv === "5" ? "Nothing rated five stars" : `Nothing rated ${minEv} stars or more`} {words.length ? `matching “${find.trim()}” in the two years` : when === "next" ? "in the year ahead" : "in the past year"}</p>}
                 {days.map(([d, list], i) => (
                   <Fragment key={d}>
                   {words.length > 0 && i === 0 && pastAt !== 0 && <h2 className="pt-1 text-[13px] font-bold">Year ahead</h2>}
