@@ -11,6 +11,7 @@
  *  matters because the project has to be created by the owner under his own Google
  *  account, and the app must not be broken in the meantime.
  */
+import { useSyncExternalStore } from "react";
 import type { FirebaseApp } from "firebase/app";
 import type { Auth, User } from "firebase/auth";
 import type { Firestore } from "firebase/firestore";
@@ -28,12 +29,22 @@ const CONFIG = {
 
 export const firebaseConfigured = Boolean(CONFIG.apiKey && CONFIG.projectId && CONFIG.appId);
 
-let cached: { app: FirebaseApp; auth: Auth; db: Firestore } | null = null;
+type FB = { app: FirebaseApp; auth: Auth; db: Firestore };
+let loading: Promise<FB> | null = null;
 
-/** Loads the SDK on first use only, so an unconfigured build ships none of it. */
-export async function getFirebase() {
-  if (!firebaseConfigured) return null;
-  if (cached) return cached;
+/** Loads the SDK on first use only, so an unconfigured build ships none of it.
+ *  One shared promise, so the top bar, the account screen and sync never set
+ *  up Auth twice. */
+export function getFirebase(): Promise<FB | null> {
+  if (!firebaseConfigured) return Promise.resolve(null);
+  if (!loading) {
+    loading = loadFirebase();
+    loading.catch(() => { loading = null; });   // offline: try again later
+  }
+  return loading;
+}
+
+async function loadFirebase(): Promise<FB> {
   const [{ initializeApp, getApps }, authMod, dbMod] = await Promise.all([
     import("firebase/app"),
     import("firebase/auth"),
@@ -41,27 +52,33 @@ export async function getFirebase() {
   ]);
   const app = getApps()[0] ?? initializeApp(CONFIG as Record<string, string>);
   // Who is signed in is kept in localStorage, not IndexedDB (getAuth's
-  // default). Opening Google's pop-up sends this tab to the background, a
-  // phone browser closed the IndexedDB connection, and the sign-in died with
-  // "Database is closing" (owner, 12-Oct-2026).
+  // default). Firebase's IndexedDB store closes itself whenever the page is
+  // hidden, and Google's pop-up hides it: the sign-in died with "Database is
+  // closing" (owner, 12-Oct-2026). The Android WebView writes localStorage
+  // to disk within about a second.
+  const persistence = [authMod.browserLocalPersistence, authMod.browserSessionPersistence];
   let auth: Auth;
   try {
-    auth = authMod.initializeAuth(app, {
-      persistence: [authMod.browserLocalPersistence, authMod.browserSessionPersistence],
-      popupRedirectResolver: authMod.browserPopupRedirectResolver,
-    });
+    auth = authMod.initializeAuth(app, inApp()
+      // No pop-up helper in the app: Google sign-in is not offered there, and
+      // on a phone the helper loads Google's script and a hidden page BEFORE
+      // the saved account is restored - seconds of looking signed out on
+      // every start (owner, 13-Oct-2026: "should stay signed in").
+      ? { persistence }
+      : { persistence, popupRedirectResolver: authMod.browserPopupRedirectResolver });
   } catch {
     auth = authMod.getAuth(app);  // already set up on this page
   }
-  cached = { app, auth, db: dbMod.getFirestore(app) };
-  return cached;
+  return { app, auth, db: dbMod.getFirestore(app) };
 }
 
 export async function signInWithGoogle(): Promise<User | null> {
   const fb = await getFirebase();
   if (!fb) return null;
-  const { GoogleAuthProvider, signInWithPopup } = await import("firebase/auth");
-  const res = await signInWithPopup(fb.auth, new GoogleAuthProvider());
+  const { GoogleAuthProvider, signInWithPopup, browserPopupRedirectResolver } = await import("firebase/auth");
+  // The helper is passed here, not set on Auth, so the app (which has no
+  // Google button) never loads it.
+  const res = await signInWithPopup(fb.auth, new GoogleAuthProvider(), browserPopupRedirectResolver);
   return res.user;
 }
 
@@ -151,4 +168,77 @@ export async function watchUser(cb: (u: User | null) => void): Promise<() => voi
   if (!fb) { cb(null); return () => {}; }
   const { onAuthStateChanged } = await import("firebase/auth");
   return onAuthStateChanged(fb.auth, cb);
+}
+
+// ---------------------------------------------------------------- who is signed in
+/** The account last signed in on this device. Shown while Firebase is still
+ *  loading, so the top bar and the account screen never show "signed out" to
+ *  someone who is signed in - which is what a cold start of the app looked
+ *  like. Cleared as soon as Firebase reports no user. Not synced. */
+export type AccountHint = { uid: string; email: string | null; name: string | null; photo: string | null };
+/** ready=false: Firebase has not answered yet; `hint` is the last account seen here. */
+export type AuthView = { ready: boolean; user: User | null; hint: AccountHint | null };
+
+const HINT_KEY = "rs_account_hint";
+const SERVER_VIEW: AuthView = { ready: false, user: null, hint: null };
+let view: AuthView | null = null;
+const listeners = new Set<() => void>();
+let started = false;
+
+function readHint(): AccountHint | null {
+  try {
+    const raw = localStorage.getItem(HINT_KEY);
+    return raw ? (JSON.parse(raw) as AccountHint) : null;
+  } catch { return null; }
+}
+
+function saveHint(h: AccountHint | null) {
+  try {
+    if (h) localStorage.setItem(HINT_KEY, JSON.stringify(h));
+    else localStorage.removeItem(HINT_KEY);
+  } catch { /* storage off: the hint is only cosmetic */ }
+}
+
+function currentView(): AuthView {
+  if (!view) view = { ready: false, user: null, hint: readHint() };
+  return view;
+}
+
+function publish(next: AuthView) {
+  view = next;
+  listeners.forEach((f) => f());
+}
+
+/** Starts Firebase once per page load, as early as possible. */
+export function startAuth(): void {
+  if (started || typeof window === "undefined" || !firebaseConfigured) return;
+  started = true;
+  getFirebase()
+    .then(async (fb) => {
+      if (!fb) return;
+      const { onAuthStateChanged } = await import("firebase/auth");
+      onAuthStateChanged(fb.auth, (u) => {
+        const hint = u ? { uid: u.uid, email: u.email, name: u.displayName, photo: u.photoURL } : null;
+        saveHint(hint);
+        publish({ ready: true, user: u, hint });
+      });
+    })
+    .catch(() => {
+      // The SDK could not be downloaded (offline). Keep showing the hint and
+      // try again when the connection returns.
+      started = false;
+      window.addEventListener("online", startAuth, { once: true });
+    });
+}
+
+function subscribeAuth(cb: () => void) {
+  startAuth();
+  listeners.add(cb);
+  return () => { listeners.delete(cb); };
+}
+
+/** The signed-in user, shared by every screen, with the last-known account
+ *  while Firebase loads. */
+export function useAuth(): AuthView {
+  return useSyncExternalStore(subscribeAuth, currentView, () => SERVER_VIEW);
 }

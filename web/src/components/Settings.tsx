@@ -10,9 +10,8 @@ import { reloadBypassingCache } from "@/lib/reload";
 import { clearOrders, customOrders } from "@/lib/tableprefs";
 import { backupText, restoreText } from "@/lib/sync";
 import { allWatched } from "@/lib/watchlists";
-import type { User } from "firebase/auth";
 import {
-  addPassword, authMessage, firebaseConfigured, hasPassword, inApp, sendPasswordReset, signInWithEmail, signInWithGoogle, signOutOfGoogle, watchUser,
+  addPassword, authMessage, firebaseConfigured, hasPassword, inApp, sendPasswordReset, signInWithEmail, signInWithGoogle, signOutOfGoogle, useAuth,
 } from "@/lib/firebase";
 import { Glyph, Group, PageTitle, Row, Segmented } from "@/components/ListUI";
 
@@ -454,18 +453,20 @@ function DataScreen() {
  *  Google's sign-in page). Syncing itself is AccountButton's, in the top bar,
  *  which notices the sign-in on every page. */
 function AccountScreen() {
-  const [user, setUser] = useState<User | null>(null);
+  const { ready, user, hint } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [linked, setLinked] = useState(false);
   const app = typeof window !== "undefined" && inApp();
+  // Still checking after 8 s: almost always no connection - say so.
+  const [slow, setSlow] = useState(false);
   useEffect(() => {
-    let off: (() => void) | undefined;
-    watchUser(setUser).then((f) => { off = f; });
-    return () => off?.();
-  }, []);
+    if (ready) return;
+    const t = setTimeout(() => setSlow(true), 8000);
+    return () => clearTimeout(t);
+  }, [ready]);
   const run = async (f: () => Promise<unknown>, ok: string) => {
     setBusy(true); setMsg(null);
     try { await f(); setMsg({ ok: true, text: ok }); } catch (e) { setMsg({ ok: false, text: authMessage(e) }); } finally { setBusy(false); }
@@ -484,6 +485,20 @@ function AccountScreen() {
       <div>
         <PageTitle>Account</PageTitle>
         <p className="-mt-4 px-1 text-sm text-[var(--ink3)]">Sign-in is not set up for this site yet. Until it is, use Move my data to carry your lists between devices.</p>
+      </div>
+    );
+  }
+  // Firebase has not answered yet: show the account this device was signed
+  // in with, not the sign-in form - the form is what made the app look signed
+  // out on every start (owner, 13-Oct-2026).
+  if (!user && !ready && hint) {
+    return (
+      <div>
+        <PageTitle>Account</PageTitle>
+        <p className="-mt-4 mb-5 px-1 text-sm text-[var(--ink3)]">
+          Signed in as <span className="text-[var(--ink)] font-medium">{hint.email ?? hint.name}</span>.{" "}
+          {slow ? "Still checking your account - this needs a connection, and finishes when you are back online." : "Checking your account..."}
+        </p>
       </div>
     );
   }
