@@ -16,7 +16,37 @@ import { Group, PageTitle, Row } from "@/components/ListUI";
 
 type Site = { name: string; mark: string; url: string; what: string };
 
-const GROUPS: { id: string; title: string; tip?: ReactNode; sites: Site[] }[] = [
+const GROUPS: { id: string; title: string; tip?: ReactNode; tipTitle?: string; sites: Site[] }[] = [
+  {
+    id: "news",
+    title: "News",
+    sites: [
+      { name: "Moneycontrol", mark: "MC", url: "https://www.moneycontrol.com/news/business/markets/",
+        what: "Market news, results and company updates" },
+      { name: "Sovrenn", mark: "S", url: "https://www.sovrenn.com/",
+        what: "Small and micro-cap company news, digested" },
+      { name: "Investing.com", mark: "IN", url: "https://in.investing.com/news/stock-market-news",
+        what: "Indian and global markets news" },
+    ],
+  },
+  {
+    id: "stocks",
+    title: "Stocks",
+    sites: [
+      { name: "Tickertape", mark: "TT", url: "https://www.tickertape.in/",
+        what: "Stock pages, screener and scorecards" },
+      { name: "Screener", mark: "SC", url: "https://www.screener.in/",
+        what: "Company financials and screens" },
+    ],
+  },
+  {
+    id: "funds",
+    title: "Mutual funds",
+    sites: [
+      { name: "Smallcase", mark: "SC", url: "https://www.smallcase.com/",
+        what: "Model portfolios and funds by theme" },
+    ],
+  },
   {
     id: "ipo",
     title: "IPO",
@@ -58,6 +88,23 @@ const GROUPS: { id: string; title: string; tip?: ReactNode; sites: Site[] }[] = 
         what: "Investor portfolios" },
     ],
   },
+  {
+    id: "others",
+    title: "Others",
+    // The page title already has an "About Others" button; this one is about
+    // Research 360, and says so.
+    tipTitle: "Research 360",
+    tip: (
+      <p>
+        Research 360 is Motilal Oswal&rsquo;s research platform. Its stock ideas are a broker&rsquo;s
+        paid advice, not Rscreener&rsquo;s &mdash; check the adviser&rsquo;s SEBI registration before acting on one.
+      </p>
+    ),
+    sites: [
+      { name: "Research 360", mark: "R3", url: "https://www.research360.in/",
+        what: "Motilal Oswal's research, scans and screeners" },
+    ],
+  },
 ];
 
 export default function OthersPage() {
@@ -73,7 +120,7 @@ export default function OthersPage() {
           </InfoTip>
         </PageTitle>
         {GROUPS.map((g) => (
-          <Group key={g.id} title={g.title} tip={g.tip}>
+          <Group key={g.id} title={g.title} tip={g.tip} tipTitle={g.tipTitle}>
             {g.sites.map((s) => (
               <Row
                 key={s.url}

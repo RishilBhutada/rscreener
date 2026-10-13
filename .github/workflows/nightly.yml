@@ -327,6 +327,17 @@ jobs:
           RSCREENER_STEP_MINUTES: "5"
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_gold.py
+      - name: Refresh the US economy's history from FRED (inflation, jobs, rates, growth, dollar, oil)
+        # On every run, like gold's calendar above: about twenty-five small
+        # requests, one per series, each answering with the series' whole
+        # history - well inside FRED's 120 a minute. The whole history every
+        # time, not just the newest month, because the agencies revise past
+        # months and FRED carries the revisions. A series FRED refuses keeps
+        # its stored rows. Without the FRED_API_KEY secret it says so and skips.
+        env:
+          RSCREENER_STEP_MINUTES: "6"
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_macro.py
       - name: Refresh the mandi (spot) price beside each NCDEX contract
         # Agmarknet, the Government of India's mandi-price service: about a
         # dozen open requests, every run. Its CAPTCHA-guarded reports are not
@@ -498,6 +509,11 @@ jobs:
         run: python pipeline/export_commodities_json.py
       - name: Write the gold page (events rated, headlines, prices)
         run: python pipeline/export_gold_json.py
+      - name: Write the US economy history
+        # web/public/macro.json - every stored FRED series, its whole history,
+        # for the gold page's charts. Generated, never committed. Written even
+        # before FRED has been read once, so the page can say "not loaded yet".
+        run: python pipeline/export_macro_json.py
       - name: Write the indices page and one file per index
         # web/public/indices.json, idx/<SYM>.json, their valuation and chart
         # files, and a row each in the search index.

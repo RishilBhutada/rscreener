@@ -6,6 +6,7 @@ import TopNav from "@/components/TopNav";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { StarGlyph, ExternalGlyph } from "@/components/Glyphs";
 import { Chips, Icon, Stat, signed, tone } from "@/components/QuoteUI";
+import MacroCharts from "@/components/MacroCharts";
 import { COUNTRY, GoldDoc, GoldEvent, GoldFamily, GoldNews, ago, istDate, istDay, istTime } from "@/lib/gold";
 
 /** Gold: what it costs now, and what moves it - the scheduled releases and
@@ -101,7 +102,7 @@ export default function GoldPage() {
         <h1 className="text-xl font-bold flex items-center gap-1.5">
           Gold
           <InfoTip title="Gold">
-            <p>What gold costs in India and the world, and the events that move it: this week&apos;s scheduled releases, every Fed meeting, and the week&apos;s headlines.</p>
+            <p>What gold costs in India and the world, the US economy&apos;s figures behind it with their history, and the events that move it: this week&apos;s scheduled releases, every Fed meeting, and the week&apos;s headlines.</p>
             <p>Each is rated one to five stars for how much that kind of event has mattered to gold, with the reason. Where enough past events have prices around them the stars are measured - how far gold actually moved the session after - rather than set by rule.</p>
             <p>A record of what has moved gold, not a forecast and not advice to buy or sell.</p>
           </InfoTip>
@@ -145,6 +146,21 @@ export default function GoldPage() {
                 </InfoTip>
               </div>
             </section>
+
+            {/* Between the price and the tabs rather than inside or after them:
+                every tab is a list a week to a year long, so a card after them
+                would sit below a year of events, and the figures are context
+                for all three tabs, not part of any one. */}
+            <Card title="US economy" tip={
+              <InfoTip title="US economy">
+                <p>The US figures gold answers to - inflation, jobs, interest rates, growth, the dollar and oil - each as far back as its publisher&apos;s records go, from FRED, the St. Louis Fed&apos;s database. The &quot;i&quot; beside each chart says what it measures and who publishes it.</p>
+                <p>Why they matter: gold pays no interest, so holding it costs more when interest rates after inflation are high and less when they fall - the 10-year real yield measures that most directly. Gold is priced in dollars, so a stronger dollar tends to weigh on it. Inflation, jobs and growth reach gold mostly through what the Fed is expected to do with rates.</p>
+                <p>Shaded: US recessions, as dated by the National Bureau of Economic Research (NBER).</p>
+                <p>These are FRED&apos;s current figures, revised since first published, so they can differ from the first-published figures in the calendar. Year-on-year changes and monthly averages are FRED&apos;s own calculations. A record, not a forecast.</p>
+              </InfoTip>
+            }>
+              <MacroCharts fredUsed={doc.events.some((e) => e.src.startsWith("FRED"))} />
+            </Card>
 
             <div className="flex items-center border-b border-[var(--line)]" role="tablist">
               {([["calendar", "Calendar"], ["news", `News · ${doc.news.filter((n) => n.stars >= 3).length}`], ["ratings", "How it's rated"]] as [Tab, string][]).map(([k, label]) => (
@@ -226,10 +242,8 @@ export default function GoldPage() {
                   </section>
                   </Fragment>
                 ))}
-                {/* FRED's API terms require this notice, shown prominently. */}
-                {doc.events.some((e) => e.src.startsWith("FRED")) && (
-                  <p className="pt-4 text-[11px] text-[var(--ink3)]">This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis.</p>
-                )}
+                {/* FRED's notice is printed once, by the US economy card above
+                    the tabs (it is passed fredUsed for these actuals). */}
               </>
             )}
 

@@ -43,10 +43,14 @@ export function PageTitle({ children }: { children: ReactNode }) {
   return <h1 className="text-[28px] leading-tight font-bold tracking-tight text-[var(--ink)] mb-6">{children}</h1>;
 }
 
-export function Group({ title, tip, note, children }: {
+export function Group({ title, tip, tipTitle, note, children }: {
   title: string;
   /** Explanation behind an "i" beside the heading, rather than printed under it. */
   tip?: ReactNode;
+  /** What the "i" and its pop-up are called, when the heading alone would
+   *  clash with another "i" on the page (two "About Others" buttons read the
+   *  same to a screen reader). Defaults to the heading. */
+  tipTitle?: string;
   note?: ReactNode;
   children: ReactNode;
 }) {
@@ -54,7 +58,7 @@ export function Group({ title, tip, note, children }: {
     <section className="mb-7">
       <h2 className="px-1 mb-2 flex items-center text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
         {title}
-        {tip && <InfoTip title={title} className="ml-1.5">{tip}</InfoTip>}
+        {tip && <InfoTip title={tipTitle ?? title} className="ml-1.5">{tip}</InfoTip>}
       </h2>
       <div className="rounded-2xl border border-[var(--line)] bg-[var(--card)] overflow-hidden divide-y divide-[var(--line)]">
         {children}
