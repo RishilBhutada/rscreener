@@ -29,6 +29,10 @@ function Stars({ n, size = 13 }: { n: number; size?: number }) {
 
 function basis(f: GoldFamily, min: number): string {
   if (f.fixed) return "Set by rule: an exchange date, not news, so gold's moves around it are not measured.";
+  const s = f.surprise;
+  if (s && f.basis === "surprise" && f.normal_move !== undefined) {
+    return `Measured on surprises: when the 2-year yield moved ${s.bp}bp or more that day - the third of its ${s.n} releases that surprised most - gold moved a median ${s.move}%, against ${f.normal_move}% on an ordinary day (${s.ratio.toFixed(1)}x). Across all of them it moved ${f.median_move}%: in-line months hide what a surprise does.`;
+  }
   if (f.ratio !== undefined && f.median_move !== undefined && f.normal_move !== undefined) {
     const since = f.since ? new Date(`${f.since}T00:00:00Z`).toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" }) : "";
     const rule = f.stars !== f.rule ? ` The rule alone gave ${f.rule}.` : "";
@@ -43,6 +47,29 @@ function basis(f: GoldFamily, min: number): string {
 function subtitle(e: GoldEvent, label?: string): string {
   return label && !e.title.toLowerCase().startsWith(label.toLowerCase()) ? label : e.src;
 }
+
+/** Gold's median move when this kind of release surprised, when it landed in
+ *  line, and on an ordinary day (owner, 13-Oct-2026). */
+function SurpriseStats({ f }: { f: GoldFamily }) {
+  const s = f.surprise;
+  if (!s || f.normal_move === undefined) return null;
+  return (
+    <div className="grid grid-cols-3 gap-2 mt-2">
+      <Stat label={`Surprise (2y ${s.bp}bp+)`} value={`${s.move}%`} />
+      <Stat label="In line" value={`${s.quiet}%`} />
+      <Stat label="Ordinary day" value={`${f.normal_move}%`} />
+    </div>
+  );
+}
+
+/** "+7bp" - the 2-year yield's move, and what it says about the release. */
+function verdict(e: GoldEvent): string | null {
+  if (e.dy === undefined) return null;
+  const bp = `2y ${e.dy > 0 ? "+" : e.dy < 0 ? "−" : ""}${Math.abs(e.dy)}bp`;
+  return e.with ? `${bp} (with ${e.with})` : e.sur === undefined ? bp : `${bp}, ${e.sur ? "a surprise" : "in line"}`;
+}
+
+const pct = (v?: number) => (v === undefined ? "" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(2)}%`);
 
 function Card({ title, tip, children }: { title: string; tip?: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -228,7 +255,8 @@ export default function GoldPage() {
                                 <span className="text-[14px] font-medium truncate">{e.title}</span>
                               </span>
                               <span className="block text-[11px] text-[var(--ink3)] tabular-nums truncate">
-                                {[e.actual && `Actual ${e.actual}`, e.previous && `Previous ${e.previous}`].filter(Boolean).join(" · ")
+                                {[e.actual && `Actual ${e.actual}`, e.previous && `Previous ${e.previous}`,
+                                  e.now?.h !== undefined && `Nowcast ${pct(e.now.h)}`].filter(Boolean).join(" · ")
                                   || subtitle(e, doc.families[e.fam]?.label)}
                               </span>
                               {(e.comex || e.mcx) && (
@@ -237,6 +265,7 @@ export default function GoldPage() {
                                   {e.comex && <span className={tone(e.comex[1])}>COMEX {signed(e.comex[1])}%</span>}
                                   {e.comex && e.mcx && <span className="text-[var(--ink3)]"> · </span>}
                                   {e.mcx && <span className={tone(e.mcx[1])}>MCX {signed(e.mcx[1])}%</span>}
+                                  {verdict(e) && <span className="text-[var(--ink3)]"> · {verdict(e)}</span>}
                                 </span>
                               )}
                             </span>
@@ -284,6 +313,8 @@ export default function GoldPage() {
                 <InfoTip title="How it's rated">
                   <p>Every kind of event starts with stars set by rule, from how it reaches gold: through US interest rates and the dollar, through India&apos;s duty and the rupee, or through demand.</p>
                   <p>Once {doc.min_measured} past events of a kind have gold prices around them, the stars are measured instead: the median move in gold the session after those events, divided by the median move on any day over the same years. Twice an ordinary day or more is five stars; 1.6x four; 1.3x three; 1.1x two.</p>
+                  <p>For US releases the stars also look at surprises, because a release moves gold when it differs from what was expected, not when it lands in line. Forecasts cannot be republished, so the surprise is read from the market itself: how far the 2-year Treasury yield moved that day (US Treasury&apos;s daily curve). Each kind&apos;s releases are split into thirds by that move; the third that moved it most is &quot;Surprise&quot;, the third that moved it least &quot;In line&quot;. The stars are the higher of the two measures - the Fed moves gold every time, CPI mainly when it surprises.</p>
+                  <p>A session with several releases is credited to the most important one only, so jobless claims do not borrow CPI&apos;s move. Tested on 2021-26: CPI days with a 2-year move of 8bp or more saw gold move a median 1.01%; days with as big a move and no release, 0.59%.</p>
                   <p>COMEX settles at 1:30pm New York time, before the Fed&apos;s 2pm decision, so an event after the settlement is measured on the next session.</p>
                 </InfoTip>
               }>
@@ -296,6 +327,7 @@ export default function GoldPage() {
                       </div>
                       <p className="text-[12px] text-[var(--ink2)] mt-1 leading-relaxed">{f.why}</p>
                       <p className={`text-[11px] mt-1 ${f.ratio !== undefined ? "text-[var(--accent-ink)]" : "text-[var(--ink3)]"}`}>{basis(f, doc.min_measured)}</p>
+                      <SurpriseStats f={f} />
                     </li>
                   ))}
                 </ul>
@@ -318,6 +350,30 @@ export default function GoldPage() {
               {ev.previous && <Stat label="Previous" value={ev.previous} />}
             </div>
           )}
+          {ev.now && (
+            <div className="py-1">
+              <div className="flex flex-wrap gap-x-6 gap-y-2">
+                {ev.now.h !== undefined && <Stat label="Nowcast, headline m/m" value={pct(ev.now.h)} />}
+                {ev.now.c !== undefined && <Stat label="Nowcast, core m/m" value={pct(ev.now.c)} />}
+              </div>
+              <p className="text-[11px] text-[var(--ink3)] mt-1">
+                The Cleveland Fed&apos;s model for {new Date(`${ev.now.m}-15T00:00:00Z`).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" })},
+                as of {istDay(`${ev.now.d}T12:00:00Z`)}. A model&apos;s estimate, not the market&apos;s consensus forecast.
+              </p>
+            </div>
+          )}
+          {ev.dy !== undefined && (
+            <p className="text-[12px]">
+              <b>Did it surprise?</b> The 2-year Treasury yield moved {ev.dy > 0 ? "+" : ev.dy < 0 ? "−" : ""}{Math.abs(ev.dy)}bp that day
+              {ev.with
+                ? ` - but ${ev.with} came out the same day, so the move is credited to that.`
+                : ev.sur === undefined
+                  ? "."
+                  : ev.sur
+                    ? ` - a surprise for this kind of release (${evFam.surprise?.bp}bp or more).`
+                    : ` - in line for this kind of release (a surprise is ${evFam.surprise?.bp}bp or more).`}
+            </p>
+          )}
           {(ev.comex || ev.mcx) && (
             <div className="grid grid-cols-2 gap-3 py-1">
               {ev.comex && <Stat label={`COMEX, ${istDay(`${ev.comex[0]}T12:00:00Z`)}`} value={`${signed(ev.comex[1])}%`} className={tone(ev.comex[1])} />}
@@ -326,6 +382,7 @@ export default function GoldPage() {
           )}
           <p><b>Why it matters for gold.</b> {ev.why ? `${ev.why}.` : evFam.why}</p>
           <p className="text-[12px]">{basis(evFam, doc.min_measured)}</p>
+          <SurpriseStats f={evFam} />
           <p className="text-[11px] text-[var(--ink3)]">Source: {ev.src}. A day&apos;s move has many causes; this event is one of them.</p>
           {ev.url && (
             <a href={ev.url} target="_blank" rel="noopener noreferrer"

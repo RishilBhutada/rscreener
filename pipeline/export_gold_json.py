@@ -7,7 +7,9 @@
              five-star announcements from the news - each with its stars, the
              reason, and once it has happened how gold moved on COMEX and MCX
   families   per kind of event: the rule stars, and the measured stars where
-             enough past events have prices around them
+             enough past events have prices around them - for US releases
+             also how gold moved when the release surprised and when it did
+             not (the surprise read from the 2-year Treasury yield's move)
   news       the week's gold headlines, each rated by the rule it matched
 
 How gold "moved that day": the close of the first session to settle after the
@@ -94,6 +96,41 @@ def reaction_days(when_utc: datetime) -> tuple[str, str]:
     return comex.isoformat(), mcx.isoformat()
 
 
+# Surprise (owner, 13-Oct-2026): a release moves gold when it deviates from
+# what was expected, not when it lands in line. Consensus forecasts cannot be
+# republished, so the surprise is the market's own verdict: how far the
+# 2-year Treasury yield moved that day. Tested on 2021-26: CPI days with a
+# 2-year move of 8bp or more saw gold move a median 1.01%; days with as big a
+# move and no release, 0.59% - the release, not the yield move, is what counts.
+# A session with several releases is credited to the most important only,
+# so jobless claims do not borrow CPI's moves.
+SURPRISE_RANK = ["fomc", "us_jobs", "us_cpi", "us_growth", "us_pce", "us_ppi", "fed_chair", "beige_book",
+                 "fomc_minutes", "us_labour_minor", "us_expect", "us_sentiment", "us_claims", "us_yields",
+                 "fed_member"]
+MIN_SURPRISE = 20
+NOWCAST_FOR = {"us_cpi": ("CPI Inflation", "Core CPI Inflation"), "us_pce": ("PCE Inflation", "Core PCE Inflation")}
+
+
+class Curve:
+    """The 2-year yield by day; its move in basis points on a day."""
+    def __init__(self, rows):
+        rows = sorted(rows)
+        self.d = [r[0] for r in rows]
+        self.y = [r[1] for r in rows]
+
+    def move_on(self, day: str) -> float | None:
+        i = bisect.bisect_left(self.d, day)
+        if i <= 0 or i >= len(self.d) or (date.fromisoformat(self.d[i]) - date.fromisoformat(day)).days > 4:
+            return None
+        return (self.y[i] - self.y[i - 1]) * 100
+
+
+def curve_day(when_utc: datetime) -> str:
+    # Treasury reads its curve at about 3:30pm New York.
+    ny = when_utc.astimezone(NY)
+    return (ny.date() + timedelta(days=1 if (ny.hour, ny.minute) >= (15, 30) else 0)).isoformat()
+
+
 def main() -> None:
     con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
     if not con.execute("SELECT 1 FROM sqlite_master WHERE name='gold_events'").fetchone():
@@ -106,6 +143,13 @@ def main() -> None:
     mcx, silver = front_series(con, "GOLD"), front_series(con, "SILVER")
     events = con.execute("SELECT key, when_utc, country, title, impact, forecast, previous, actual, family, source "
                          "FROM gold_events ORDER BY when_utc").fetchall()
+    has = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    curve = Curve(con.execute("SELECT date, y2 FROM ust_curve").fetchall() if "ust_curve" in has else [])
+    nowcast = defaultdict(list)   # (target month, measure) -> [(day, value, actual)]
+    if "inflation_nowcast" in has:
+        for target, meas, day, value, actual in con.execute(
+                "SELECT target, measure, day, value, actual FROM inflation_nowcast ORDER BY day"):
+            nowcast[(target, meas)].append((day, value, actual))
     # MCX gold's expiries: trading ends at 23:30 IST on the day.
     for (exp,) in con.execute("SELECT DISTINCT expiry FROM commodity_contracts WHERE root='GOLD' AND exchange='MCX'"):
         d = date.fromisoformat(exp)
@@ -122,11 +166,23 @@ def main() -> None:
     # India's own events reach gold through the rupee and the duty, so they
     # are measured on MCX; everything else on COMEX.
     fam_days: dict[str, set[str]] = defaultdict(set)
+    fam_curve: dict[str, dict[str, str]] = defaultdict(dict)   # family -> COMEX session -> curve day
     for key, when, country, title, impact, *_rest, family, _src in events:
         w = datetime.fromisoformat(when.replace("Z", "+00:00"))
         if w < now:
             cday, mday = reaction_days(w)
             fam_days[family].add(mday if family in MEASURE_ON_MCX else cday)
+            if family in SURPRISE_RANK:
+                fam_curve[family].setdefault(cday, curve_day(w))
+    # The most important release in each COMEX session and in each yield
+    # reading. Both count: retail sales at 8:30am and the Fed at 2pm fall in
+    # different gold sessions but the same 3:30pm yield reading.
+    owner: dict[str, str] = {}
+    owner_y: dict[str, str] = {}
+    for fam in SURPRISE_RANK:
+        for cday, yday in fam_curve.get(fam, {}).items():
+            owner.setdefault(cday, fam)
+            owner_y.setdefault(yday, fam)
     families = {}
     for fam, (stars, label, why) in FAMILIES.items():
         series, market = (mcx, "MCX") if fam in MEASURE_ON_MCX else (comex, "COMEX")
@@ -139,6 +195,26 @@ def main() -> None:
             med = statistics.median(abs(m) for _, m in priced)
             info.update({"median_move": r2(med), "normal_move": r2(base), "ratio": r2(med / base),
                          "stars": stars_from_ratio(med / base), "since": priced[0][0]})
+            # How gold moved when this release surprised, and when it did not:
+            # its own sessions split into thirds by the 2-year yield's move.
+            own = []
+            for cday, yday in fam_curve.get(fam, {}).items():
+                m, dy = series.move_from(cday), curve.move_on(yday)
+                if owner.get(cday) == fam and owner_y.get(yday) == fam and m and dy is not None:
+                    own.append((abs(m[1]), abs(dy)))
+            if len(own) >= MIN_SURPRISE:
+                own.sort(key=lambda x: x[1])
+                k = len(own) // 3
+                loud = statistics.median(a for a, _ in own[-k:])
+                quiet = statistics.median(a for a, _ in own[:k])
+                s_stars = stars_from_ratio(loud / base)
+                info["surprise"] = {"n": len(own), "bp": round(own[-k][1], 1), "move": r2(loud),
+                                    "quiet": r2(quiet), "ratio": r2(loud / base), "stars": s_stars}
+                # The higher of the two: some releases move gold every time
+                # (the Fed), others only when they surprise (CPI).
+                if s_stars > info["stars"]:
+                    info["stars"] = s_stars
+                    info["basis"] = "surprise"
         families[fam] = info
 
     out_events = []
@@ -164,6 +240,31 @@ def main() -> None:
                 e["comex"] = [cm[0], r2(cm[1])]
             if mm:
                 e["mcx"] = [mm[0], r2(mm[1])]
+            # The 2-year yield's move that day: did the release surprise?
+            if family in SURPRISE_RANK:
+                yday = curve_day(w)
+                dy = curve.move_on(yday)
+                if dy is not None:
+                    e["dy"] = round(dy, 1)
+                    top = owner.get(cday) if owner.get(cday) != family else owner_y.get(yday)
+                    if top and top != family:
+                        e["with"] = families.get(top, {}).get("label", top)
+                    elif "surprise" in fam:
+                        e["sur"] = abs(dy) >= fam["surprise"]["bp"]
+        # CPI and PCE: what the Cleveland Fed's model expected for the month,
+        # as it stood the day before the release (or now, if still ahead).
+        if family in NOWCAST_FOR:
+            ny_day = w.astimezone(NY).date()
+            prior = (ny_day.replace(day=1) - timedelta(days=1))
+            target = f"{prior.year}-{prior.month:02d}"
+            got = {}
+            for meas, key in zip(NOWCAST_FOR[family], ("h", "c")):
+                readings = [r for r in nowcast.get((target, meas), []) if not r[2] and r[0] < ny_day.isoformat()]
+                if readings:
+                    got[key] = round(readings[-1][1], 2)
+                    got["d"] = readings[-1][0]
+            if got:
+                e["now"] = {"m": target, **got}
         out_events.append(e)
 
     # ── announcements: five-star headlines that are events in themselves ──
