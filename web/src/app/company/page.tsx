@@ -79,6 +79,8 @@ type Company = {
   seasons?: Seasons | null;
   /** [index symbol, name, group] - the indices it is a member of, broad market first. */
   indices?: [string, string, string][] | null;
+  /** What the company does: its Wikipedia article (CC BY-SA 4.0), verified by the ticker in its infobox. */
+  about?: { title: string; url: string; short: string | null; text: string | null } | null;
   exchange?: string | null;
   bse_code?: number | string | null;
   /** Written by pipeline/export_company_json.py so this page need not download
@@ -1898,6 +1900,7 @@ function CompanyView() {
           <WatchStar symbol={symbol} />
         </div>
       </div>
+      <AboutCompany about={company.about} />
 
       {price !== null && (() => {
         // The day's move first, as a broker shows it; the distance from the
@@ -2209,6 +2212,35 @@ function CompanyView() {
           </p>
         </InfoTip>
       </footer>
+    </div>
+  );
+}
+
+/** "What it does" under the company's name, opened on tap (owner, 15-Oct-2026).
+ *  From the company's Wikipedia article, shown with its title, link and
+ *  licence as CC BY-SA asks; only an article whose infobox carries this
+ *  company's ticker is used. No article, no control - nothing dead to tap. */
+function AboutCompany({ about }: { about?: Company["about"] }) {
+  const [open, setOpen] = useState(false);
+  if (!about || (!about.text && !about.short)) return null;
+  return (
+    <div className="-mt-4">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
+        className="inline-flex items-center gap-1 text-[13px] text-[var(--accent-ink)]">
+        {about.short ? about.short.charAt(0).toUpperCase() + about.short.slice(1) : "What it does"}
+        <ChevronGlyph size={12} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="mt-2 rounded-xl border border-[var(--line)] bg-[var(--card)] p-3 text-[13px] leading-relaxed text-[var(--ink2)] space-y-2">
+          {(about.text ?? "").split("\n\n").filter(Boolean).map((para, i) => <p key={i}>{para}</p>)}
+          <p className="text-[11px] text-[var(--ink3)]">
+            From Wikipedia&apos;s article{" "}
+            <a href={about.url} target="_blank" rel="noopener noreferrer" className="underline">{about.title}</a>
+            , under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer" className="underline">CC BY-SA 4.0</a>.
+            Written by its editors, not checked by Rscreener.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

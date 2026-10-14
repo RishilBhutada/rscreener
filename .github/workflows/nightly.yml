@@ -79,7 +79,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install pandas requests yfinance google-auth
+      - run: pip install pandas requests yfinance google-auth beautifulsoup4 lxml
       - name: Download the data DB from the data-db release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -347,6 +347,14 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "3"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_spot.py
+      - name: Find what each company does (Wikipedia articles, rotating)
+        if: steps.plan.outputs.earnings == '1'
+        # The article's short description and opening paragraphs, accepted only
+        # when its infobox lists the company's own ticker. Article pages only:
+        # Wikipedia's APIs are disallowed to programs by its robots.txt. About
+        # 500 companies a night, one page a second, verified ones re-read every
+        # 90 days and missing ones every 30 (fetch_about.py).
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_about.py --all --limit 500 --sleep 1.0 --max-minutes 25
       - name: Refresh concall/rating documents (whole universe, rotating)
         if: steps.plan.outputs.earnings == '1'
         # 480 of 2,357 companies covered, and capped at the top 500 it would have

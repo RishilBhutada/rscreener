@@ -64,7 +64,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install pandas requests yfinance
+      - run: pip install pandas requests yfinance beautifulsoup4 lxml
       - name: Which company
         id: sym
         # The title arrives through env, never pasted into the script: an issue
@@ -134,6 +134,7 @@ jobs:
           $F pipeline/fetch_shp_detail.py --symbols "$SYM" --quarters 8 --per-company 8 --max-age-hours 0.01
           $F pipeline/fetch_documents.py --symbols "$SYM" --max-age-hours 0.01
           $F pipeline/fetch_announcement_docs.py --symbols "$SYM" --max-age-hours 0.01
+          $F pipeline/fetch_about.py --symbols "$SYM" --refresh --sleep 0.5
       - name: Rebuild its screener row, page and chart
         env:
           SYM: ${{ steps.sym.outputs.symbol }}

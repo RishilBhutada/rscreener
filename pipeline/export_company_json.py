@@ -761,6 +761,13 @@ def main() -> None:
             indices_by_symbol.setdefault(s, []).append([sym_of(name), name, group_of(name)])
         for lst in indices_by_symbol.values():
             lst.sort(key=lambda x: (order.get(x[2], 9), size.get(x[1], 0), x[1].lower()))
+    # What the company does: its Wikipedia article's short description and
+    # opening paragraphs, verified by the ticker in its infobox (fetch_about.py).
+    about_by_symbol: dict[str, dict] = {}
+    if _table_exists(con, "company_about"):
+        for s, title, url, short, text in con.execute(
+                "SELECT symbol, title, url, short, text FROM company_about WHERE status='ok'"):
+            about_by_symbol[s] = {"title": title, "url": url, "short": short or None, "text": text or None}
     coverage_by_symbol = coverage_notes(con)
     # symbol -> (exchange, bse code). Older databases have no EXCHANGE column,
     # in which case every company is what it always was: NSE.
@@ -878,6 +885,7 @@ def main() -> None:
             "fscore": fscores.get(sym),
             "seasons": seasons_by_symbol.get(sym),
             "indices": indices_by_symbol.get(sym),
+            "about": about_by_symbol.get(sym),
             "no_pe_reason": None if (bands.get(sym, {}) or {}).get("pe") else no_pe.get(sym),
             # Which exchange this company is listed on, because it decides what
             # can exist on the page. The as-filed quarterly table, the P/E band
