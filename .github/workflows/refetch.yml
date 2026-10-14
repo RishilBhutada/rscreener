@@ -125,6 +125,9 @@ jobs:
           # A tiny age forces each fetcher to read the company again (0 would
           # mean "anything ever fetched is done").
           F="bash pipeline/guarded_fetch.sh python"
+          # The universe file the fundamentals fetcher reads (the nightly makes
+          # it first thing; without it that fetcher stops at once).
+          python pipeline/fetch_universe.py || echo "::warning::could not refresh the company list - fundamentals may be skipped"
           $F pipeline/fetch_prices.py --symbols "$SYM" --refresh --sleep 0.2
           $F pipeline/fetch_fundamentals.py --symbols "$SYM" --refresh --statements --sleep 0.2
           $F pipeline/fetch_results_history.py --symbols "$SYM" --refresh --quarters-back 0 --sleep 0.3
