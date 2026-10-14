@@ -1,6 +1,7 @@
 "use client";
 
 import { CheckGlyph, StarGlyph } from "@/components/Glyphs";
+import { useBackClose } from "@/lib/backclose";
 import { useEffect, useRef, useState } from "react";
 import {
   WatchState, createList, inAnyList, listsWith, loadLists, toggleIn,
@@ -18,6 +19,7 @@ import {
 export default function WatchStar({ symbol, size = "lg" }: { symbol: string; size?: "sm" | "lg" }) {
   const [state, setState] = useState<WatchState>({ lists: [], activeId: "" });
   const [open, setOpen] = useState(false);
+  useBackClose(open, () => setOpen(false));
   const [newName, setNewName] = useState("");
   const [adding, setAdding] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
