@@ -18,8 +18,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install requests
+      - run: pip install requests google-auth
       - run: python alerts/check_announcements.py
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          ALERT_UID: ${{ secrets.ALERT_UID }}
           TEST_PUSH: ${{ github.event.inputs.test_push || '0' }}

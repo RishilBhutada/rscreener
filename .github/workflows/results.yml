@@ -48,7 +48,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install pandas requests
+      - run: pip install pandas requests google-auth
       - name: Download the database and the live site
         id: base
         run: |
@@ -131,6 +131,8 @@ jobs:
         continue-on-error: true
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          ALERT_UID: ${{ secrets.ALERT_UID }}
         run: python alerts/results_alerts.py
       - name: Save the fetched results to the data-db release
         # After the deploy, so it does not hold the site back. Without it the

@@ -530,6 +530,20 @@ function AccountScreen() {
               className={`${button} bg-[var(--accent-fill)] text-[var(--accent-fill-ink)]`}>Set a password for the app</button>
           </div>
         )}
+        {/* For the phone alerts' ALERT_UID secret: the runs that send the
+            pushes read this account's stars and holdings by this ID. Not a
+            secret - it identifies the account, it does not open it. */}
+        <div className="mb-5 rounded-2xl border border-[var(--line)] bg-[var(--card)] px-4 py-3">
+          <p className="text-[12px] text-[var(--ink3)]">Account ID, for phone alerts</p>
+          <div className="mt-1 flex items-center gap-2">
+            <code className="flex-1 min-w-0 truncate text-[13px] text-[var(--ink)]">{user.uid}</code>
+            <button type="button"
+              onClick={() => navigator.clipboard.writeText(user.uid).then(
+                () => setMsg({ ok: true, text: "Account ID copied." }),
+                () => setMsg({ ok: false, text: "Copying was blocked here - select the ID and copy it." }))}
+              className="shrink-0 rounded-lg border border-[var(--line)] px-3 py-1.5 text-[13px] text-[var(--accent-ink)]">Copy</button>
+          </div>
+        </div>
         <button type="button" onClick={() => run(signOutOfGoogle, "Signed out. Everything on this device stays as it is.")} disabled={busy}
           className={`${button} border border-[var(--line)] bg-[var(--card)] text-[var(--neg)]`}>Sign out</button>
         {msg && <p role="status" className={`mt-4 px-1 text-sm ${msg.ok ? "text-[var(--pos)]" : "text-[var(--neg)]"}`}>{msg.text}</p>}
@@ -597,7 +611,8 @@ function AlertsScreen() {
           <li><span className="text-[var(--ink2)]">Results figures</span> - sales and profit against a year before, once the company files them.</li>
           <li><span className="text-[var(--ink2)]">Other announcements</span> - checked through the day.</li>
         </ul>
-        <p>The list is a file in the app&apos;s GitHub repository, because that is where the alerts are sent from. Stars in the app stay on this device, so copy them across when your list changes.</p>
+        <p>The alerts are sent from GitHub. Once your account is connected to them (two GitHub secrets, once: FIREBASE_SERVICE_ACCOUNT and ALERT_UID - your Account ID is under Account), every star and holding in your account is included automatically, on the next run after you add it.</p>
+        <p>The list file in the GitHub repository still counts too - anything on it is alerted as well. Until the account is connected, copy your stars into it here.</p>
       </div>
       <button type="button" onClick={copy} className={`${button} bg-[var(--accent-fill)] text-[var(--accent-fill-ink)]`}>Copy my starred stocks</button>
       {text && (

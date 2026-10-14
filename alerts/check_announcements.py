@@ -38,13 +38,9 @@ def push(title: str, message: str, priority: str = "default", tags: str = "chart
 
 
 def load_watchlist() -> set[str]:
-    path = Path(__file__).with_name("watchlist.txt")
-    syms = set()
-    for line in path.read_text(encoding="utf-8").splitlines():
-        s = line.split("#")[0].strip().upper()
-        if s:
-            syms.add(s)
-    return syms
+    # alerts/watchlist.txt plus the stars and holdings in the owner's account.
+    from account_list import alert_symbols
+    return set(alert_symbols())
 
 
 def main() -> None:

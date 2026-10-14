@@ -14,7 +14,8 @@ results evening send each once. Only today's and yesterday's results count:
 a first run, or a night the database was restored from an older copy, does
 not replay last week.
 
-Symbols: alerts/watchlist.txt, the list the announcement alert uses.
+Symbols: alerts/watchlist.txt plus the stars and holdings in the owner's
+account (account_list.py) - the same list the announcement alert uses.
 Facts from the filings only - growth figures, never an opinion on them.
 
 Usage:  python alerts/results_alerts.py     (NTFY_TOPIC unset = print only)
@@ -27,6 +28,8 @@ from pathlib import Path
 
 import requests
 
+from account_list import alert_symbols
+
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
 SITE = "https://rishilbhutada.github.io/rscreener"
@@ -36,8 +39,7 @@ TOPIC = os.environ.get("NTFY_TOPIC", "")
 
 
 def watchlist() -> list[str]:
-    path = Path(__file__).with_name("watchlist.txt")
-    return [s for line in path.read_text(encoding="utf-8").splitlines() if (s := line.split("#")[0].strip().upper())]
+    return alert_symbols()
 
 
 def push(title: str, message: str, click: str) -> None:

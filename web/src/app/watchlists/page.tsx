@@ -500,7 +500,7 @@ export default function WatchlistsPage() {
               </SheetAction>
             </div>
             <InfoTip title="Phone alerts" className="mr-3">
-              <p>Your phone is told within the hour when a company here files an announcement with NSE - results, dividends, board meetings. The checker reads alerts/watchlist.txt in the Rscreener repository, not this list.</p>
+              <p>Your phone is told within the hour when a company here files an announcement with NSE - results, dividends, board meetings. Once your account is connected to the alerts (Settings &gt; Phone alerts), every list here and your holdings are included; until then the checker reads alerts/watchlist.txt in the Rscreener repository.</p>
               <p>This copies the list&apos;s companies, one per line, to paste into that file - the GitHub app on your phone can edit it.</p>
             </InfoTip>
           </div>
