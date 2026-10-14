@@ -1894,6 +1894,7 @@ function CompanyView() {
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <IconButton name="download" label="Export to Excel (CSV)" onClick={exportCompanyCsv} />
+          <RefetchButton symbol={symbol} />
           <WatchStar symbol={symbol} />
         </div>
       </div>
@@ -2209,6 +2210,39 @@ function CompanyView() {
         </InfoTip>
       </footer>
     </div>
+  );
+}
+
+const REPO = "https://github.com/RishilBhutada/rscreener";
+
+/** Data missing or stale on this page? Re-fetch all of it (owner, 15-Oct-2026).
+ *
+ *  The fetching runs on GitHub, and starting a run needs a token - which must
+ *  never ship inside the app, where anyone could lift it. So this opens a
+ *  pre-filled issue "Refetch SYMBOL"; submitting it starts refetch.yml, which
+ *  acts only on issues from the owner's account, re-reads everything for the
+ *  company, republishes its page, replies on the issue and closes it. */
+function RefetchButton({ symbol }: { symbol: string }) {
+  const [open, setOpen] = useState(false);
+  const body = `Requested from the Rscreener app: ${symbol}'s data looks missing or out of date.\n\n`
+    + `Submitting this re-fetches everything for ${symbol} and republishes its page. `
+    + "The run replies here and closes this when it is done.";
+  const url = `${REPO}/issues/new?title=${encodeURIComponent(`Refetch ${symbol}`)}&body=${encodeURIComponent(body)}`;
+  return (
+    <>
+      <IconButton name="refresh" label="Refetch this company's data" onClick={() => setOpen(true)} />
+      {open && (
+        <InfoDialog title={`Refetch ${symbol}'s data`} onClose={() => setOpen(false)}>
+          <p>If something on this page is missing or out of date, this fetches everything for {symbol} again - prices, quarterly results and statements, shareholding, filing dates, corporate actions, annual reports and announcements - and republishes its page.</p>
+          <p>It runs on GitHub. The button opens your request there, already filled in: tap <b>Submit new issue</b>. Only requests from your GitHub account are acted on. It takes about 10 to 20 minutes - longer while the nightly refresh is running - and your phone is told when it is done.</p>
+          <a href={url} target="_blank" rel="noopener noreferrer"
+            className="rs-press mt-1 inline-flex items-center justify-center w-full min-h-[44px] rounded-xl bg-[var(--accent-fill)] text-[var(--accent-fill-ink)] text-[14px] font-semibold">
+            Open the request on GitHub
+          </a>
+          <p className="text-[11px] text-[var(--ink3)]">Sources that refuse programs stay as they are: a company listed only on BSE has fewer sources to fetch from.</p>
+        </InfoDialog>
+      )}
+    </>
   );
 }
 

@@ -1,0 +1,216 @@
+name: Refetch one company
+run-name: "${{ github.event.issue.title || format('Refetch {0}', inputs.symbol) }}"
+
+# Every stock page has a refetch button (owner, 15-Oct-2026): when a company's
+# data looks missing or stale, it opens a pre-filled GitHub issue
+# "Refetch SYMBOL" that the owner submits. The app cannot start a run itself -
+# that needs a token, and a token must never ship inside the app.
+#
+# This runs only for an issue opened by the repository's owner (anyone can open
+# issues on a public repository) or by hand from the Actions tab. It re-fetches
+# everything kept for that one company - prices, fundamentals and statements,
+# every quarterly result, filing dates, corporate actions, shareholding and its
+# detail, annual reports, announcements - rebuilds its screener row, its page
+# and its chart, swaps them into the LIVE site as "Publish new results" does,
+# saves the database, then replies on the issue, closes it and tells the phone.
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      symbol:
+        description: "NSE symbol, e.g. TCS"
+        required: true
+      issue:
+        description: "The request's issue number, to reply on (set by the nightly's sweep)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write    # the database release
+  pages: write
+  id-token: write
+  actions: read      # the live site's files; whether a nightly refresh is running
+  issues: write      # the reply on the request
+
+concurrency:
+  # Its own group, not the publishes': GitHub keeps one WAITING run per group,
+  # and a refetch queued there would cancel a waiting "Publish new results"
+  # (or be cancelled by one). Instead the job waits for running publishes and
+  # nightly refreshes itself, re-bases on the live site before deploying, and
+  # saves by moving its company's rows into the newest stored database.
+  group: refetch
+  cancel-in-progress: false
+
+jobs:
+  refetch:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.issue.user.login == github.repository_owner && startsWith(github.event.issue.title, 'Refetch '))
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url || steps.retry.outputs.page_url }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE: ${{ github.event.issue.number || inputs.issue }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            pipeline
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pandas requests yfinance
+      - name: Which company
+        id: sym
+        # The title arrives through env, never pasted into the script: an issue
+        # title is text anyone could have typed, and only a plain symbol passes.
+        env:
+          TITLE: ${{ github.event.issue.title }}
+          INPUT: ${{ inputs.symbol }}
+        run: |
+          python - <<'EOF'
+          import os, re
+          raw = os.environ.get("INPUT") or os.environ.get("TITLE", "")
+          sym = re.sub(r"^\s*refetch\s+", "", raw, flags=re.I).strip().upper()
+          ok = bool(re.fullmatch(r"[A-Z0-9][A-Z0-9&_-]{0,19}", sym))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"symbol={sym if ok else ''}\n")
+          print(f"symbol: {sym!r} {'ok' if ok else 'REFUSED'}")
+          EOF
+      - name: Refuse anything that is not a plain symbol
+        if: steps.sym.outputs.symbol == ''
+        run: |
+          if [ -n "$ISSUE" ]; then
+            gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "Not refetched: the title must be \`Refetch SYMBOL\`, e.g. \`Refetch TCS\`."
+            gh issue close "$ISSUE" -R "$GITHUB_REPOSITORY"
+          fi
+          exit 1
+      - name: Wait for a nightly refresh or a publish that is running
+        # A nightly refresh restored the database before this started and will
+        # save its own copy when it ends; a publish is deploying the site.
+        run: |
+          for i in $(seq 1 125); do
+            busy=0
+            for wf in nightly.yml results.yml; do
+              for st in in_progress queued; do
+                n=$(gh run list -R "$GITHUB_REPOSITORY" --workflow "$wf" --status "$st" --json databaseId --jq 'length')
+                busy=$((busy + n))
+              done
+            done
+            [ "$busy" = "0" ] && exit 0
+            echo "$busy nightly/publish run(s) going - waiting ($i)"
+            sleep 120
+          done
+          echo "::warning::still busy after four hours - going ahead"
+      - name: Download the database and the live site
+        id: base
+        run: |
+          mkdir -p data site web/public/companies web/public/charts
+          gh release download data-db --pattern rscreener.db.gz --dir data
+          gunzip -f data/rscreener.db.gz
+          RUN=$(python pipeline/live_site.py)
+          echo "run=$RUN" >> "$GITHUB_OUTPUT"
+          gh run download "$RUN" -n github-pages -D base
+          tar -xf base/artifact.tar -C site
+          rm -rf base
+      - name: Fetch everything for the company
+        env:
+          SYM: ${{ steps.sym.outputs.symbol }}
+        run: |
+          # A tiny age forces each fetcher to read the company again (0 would
+          # mean "anything ever fetched is done").
+          F="bash pipeline/guarded_fetch.sh python"
+          $F pipeline/fetch_prices.py --symbols "$SYM" --refresh --sleep 0.2
+          $F pipeline/fetch_fundamentals.py --symbols "$SYM" --refresh --statements --sleep 0.2
+          $F pipeline/fetch_results_history.py --symbols "$SYM" --refresh --quarters-back 0 --sleep 0.3
+          $F pipeline/fetch_filing_dates.py --symbols "$SYM" --max-age-hours 0.01
+          $F pipeline/fetch_corporate_actions.py --symbols "$SYM" --max-age-hours 0.01
+          $F pipeline/fetch_shareholding.py --symbols "$SYM" --max-age-hours 0.01
+          $F pipeline/fetch_shp_detail.py --symbols "$SYM" --quarters 8 --per-company 8 --max-age-hours 0.01
+          $F pipeline/fetch_documents.py --symbols "$SYM" --max-age-hours 0.01
+          $F pipeline/fetch_announcement_docs.py --symbols "$SYM" --max-age-hours 0.01
+      - name: Rebuild its screener row, page and chart
+        env:
+          SYM: ${{ steps.sym.outputs.symbol }}
+        run: |
+          cp site/data.json web/public/data.json
+          python pipeline/export_json.py --symbols "$SYM"
+          python pipeline/export_company_json.py --symbols "$SYM"
+          python pipeline/export_chart_json.py
+          ls -la "web/public/companies/$SYM.json" "web/public/charts/$SYM.json" || true
+      - name: Swap them into the live site (re-based if another publish landed meanwhile)
+        env:
+          SYM: ${{ steps.sym.outputs.symbol }}
+        run: |
+          NOW=$(python pipeline/live_site.py)
+          if [ "$NOW" != "${{ steps.base.outputs.run }}" ]; then
+            echo "run $NOW deployed while this one worked - starting from its site instead"
+            rm -rf site && mkdir site
+            gh run download "$NOW" -n github-pages -D base
+            tar -xf base/artifact.tar -C site
+            rm -rf base
+            # The newer site's data.json, with this company's row patched in again.
+            cp site/data.json web/public/data.json
+            python pipeline/export_json.py --symbols "$SYM"
+          fi
+          cp web/public/data.json site/
+          [ -f "web/public/companies/$SYM.json" ] && cp "web/public/companies/$SYM.json" site/companies/
+          mkdir -p site/charts
+          [ -f "web/public/charts/$SYM.json" ] && cp "web/public/charts/$SYM.json" site/charts/
+          echo "swapped in $SYM"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+          retention-days: 3
+      - id: deployment
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+      - name: Wait, then try the deployment once more
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 45
+      - id: retry
+        if: steps.deployment.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+      - name: Save the company's rows into the newest stored database
+        env:
+          SYM: ${{ steps.sym.outputs.symbol }}
+        run: |
+          mkdir -p newest
+          gh release download data-db --pattern rscreener.db.gz --dir newest --clobber
+          gunzip -f newest/rscreener.db.gz
+          python pipeline/merge_company_rows.py --from data/rscreener.db --into newest/rscreener.db --symbol "$SYM"
+          SIZE=$(stat -c%s newest/rscreener.db 2>/dev/null || echo 0)
+          if [ "$SIZE" -lt 100000000 ]; then
+            echo "database is only $SIZE bytes - refusing to overwrite the stored copy"; exit 0
+          fi
+          gzip -c newest/rscreener.db > rscreener.db.gz
+          for attempt in 1 2 3; do
+            gh release upload data-db rscreener.db.gz --clobber && exit 0
+            echo "upload attempt $attempt failed; retrying in 30s"; sleep 30
+          done
+          echo "could not store the database after three attempts"; exit 1
+      - name: Reply on the request and tell the phone
+        if: always() && steps.sym.outputs.symbol != ''
+        env:
+          SYM: ${{ steps.sym.outputs.symbol }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          OUTCOME: ${{ job.status }}
+        run: |
+          URL="https://rishilbhutada.github.io/rscreener/company/?s=$SYM"
+          if [ "$OUTCOME" = "success" ]; then
+            MSG="Refetched $SYM and republished its page - open it again (pull to refresh): $URL"
+          else
+            MSG="Refetching $SYM did not finish ($OUTCOME). Run log: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          fi
+          if [ -n "$ISSUE" ]; then
+            gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "$MSG"
+            gh issue close "$ISSUE" -R "$GITHUB_REPOSITORY"
+          fi
+          if [ -n "$NTFY_TOPIC" ]; then
+            curl -s -H "Title: $SYM refetch" -H "Tags: arrows_counterclockwise" -H "Click: $URL" -d "$MSG" "https://ntfy.sh/$NTFY_TOPIC" > /dev/null || true
+          fi

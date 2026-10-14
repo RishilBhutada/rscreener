@@ -718,6 +718,21 @@ jobs:
         run: |
           gh workflow run results-watch.yml -R "${{ github.repository }}" \
             || echo "could not start the watcher - its timed starts will"
+      - name: Re-queue refetch requests still open
+        # A refetch request (an issue "Refetch SYMBOL" from the app's button)
+        # is closed when its run finishes. One still open lost its run - GitHub
+        # drops a waiting run when a newer one queues - so it is started again.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue list -R "${{ github.repository }}" --state open --author "${{ github.repository_owner }}" \
+            --search "Refetch in:title" --json number,title --jq '.[] | "\(.number) \(.title)"' |
+          while read -r num rest; do
+            sym=$(echo "$rest" | sed -E 's/^[Rr]efetch[[:space:]]+//' | tr -cd 'A-Za-z0-9&_-' | tr '[:lower:]' '[:upper:]')
+            [ -n "$sym" ] || continue
+            echo "re-queueing #$num ($sym)"
+            gh workflow run refetch.yml -R "${{ github.repository }}" -f symbol="$sym" -f issue="$num" || true
+          done
       - name: Start this evening's US release alerts
         env:
           GH_TOKEN: ${{ github.token }}
