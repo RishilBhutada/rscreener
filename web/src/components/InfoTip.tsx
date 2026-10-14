@@ -2,6 +2,7 @@
 
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useBackClose } from "@/lib/backclose";
 
 /** A circled "i" beside a heading, which opens its explanation as a popup.
  *
@@ -74,6 +75,7 @@ export function InfoDialog({ title, onClose, children }: { title: string; onClos
   // each time, and re-running this would steal focus back on every frame.
   const close = useRef(onClose);
   close.current = onClose;
+  useBackClose(true, onClose);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

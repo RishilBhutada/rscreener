@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { firebaseConfigured, signOutOfGoogle, startAuth, useAuth } from "@/lib/firebase";
 import { syncNow, watchLocalChanges } from "@/lib/sync";
+import { useBackClose } from "@/lib/backclose";
 
 // Start Firebase as soon as this page's code runs, not after the first render.
 if (typeof window !== "undefined") startAuth();
@@ -17,6 +18,7 @@ export default function AccountButton() {
   const { ready, user, hint } = useAuth();
   const [msg, setMsg] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  useBackClose(open, () => setOpen(false));
   const uid = user?.uid ?? null;
 
   // Sync each time a page shows, as before; the setItem wrapper comes off on

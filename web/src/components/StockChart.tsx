@@ -3,6 +3,7 @@
 import { CheckGlyph, ChevronGlyph } from "@/components/Glyphs";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import InfoTip from "@/components/InfoTip";
+import { useBackClose } from "@/lib/backclose";
 import { loadIndex } from "@/lib/index-data";
 import Link from "next/link";
 
@@ -365,6 +366,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   }, [cmpSym]);
   const [on, setOn] = useState<Record<string, boolean>>({});
   const [moreOpen, setMoreOpen] = useState(false);
+  useBackClose(moreOpen, () => setMoreOpen(false));
   const [hover, setHover] = useState<{ t: number; px: number; py: number } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);

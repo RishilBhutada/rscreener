@@ -13,6 +13,7 @@ import {
 } from "@/lib/reload";
 import { applyOrder, loadOrder } from "@/lib/order";
 import { previousPage, recordNavigation } from "@/lib/navdepth";
+import { useBackClose } from "@/lib/backclose";
 import { buildIndex, search, didYouMean, type SearchIndex, type SearchRow } from "@/lib/search";
 import AccountButton from "@/components/AccountButton";
 
@@ -171,6 +172,7 @@ function RefreshButton() {
   // running, when it was made, and whether anything newer has been published.
   // A tap asks the app to move; a hold asks it to explain itself.
   const [details, setDetails] = useState(false);
+  useBackClose(details, () => setDetails(false));
   const [live, setLive] = useState<Version | null>(null);
   const [liveError, setLiveError] = useState(false);
   const [pending, setPending] = useState<Pending>(null);
@@ -441,6 +443,7 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
   const [rows, setRows] = useState<Lite[]>([]);
   const [hi, setHi] = useState(0);
   const [moreOpen, setMoreOpen] = useState(false);
+  useBackClose(moreOpen, () => setMoreOpen(false));
   // Read on mount and refreshed when Settings changes it, so the bar reorders
   // under the panel rather than after the next page load.
   const [navOrder, setNavOrder] = useState<string[]>([]);
