@@ -582,7 +582,10 @@ def save_headline(con, url: str, seen: datetime, title: str, domain: str) -> boo
     now = datetime.now(timezone.utc)
     if seen < now - timedelta(days=7):
         return False
-    seen = min(seen, now)  # a feed that mislabels its time zone is not news from the future
+    # A feed that mislabels its time zone is not news from the future; and the
+    # stored time is UTC - an Indian feed's "+0530" printed with a Z put its
+    # headlines 5.5 hours ahead (found 15-Oct-2026).
+    seen = min(seen, now).astimezone(timezone.utc)
     con.execute("INSERT OR IGNORE INTO gold_news VALUES (?,?,?,?)",
                 (url, seen.strftime("%Y-%m-%dT%H:%M:%SZ"), title, domain.removeprefix("www.")))
     return True

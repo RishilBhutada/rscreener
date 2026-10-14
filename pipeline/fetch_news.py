@@ -236,7 +236,9 @@ def save(con, tag: Tagger, url: str, seen: datetime, title: str, src: str) -> bo
     now = datetime.now(timezone.utc)
     if not url or not title or seen < now - timedelta(days=7):
         return False
-    t = min(seen, now).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # In UTC: a feed's "01:46 +0530" printed as-is with a Z would sit 5.5 hours
+    # in the future (it did, 15-Oct-2026: every new headline read "just now").
+    t = min(seen, now).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     syms = tag(BROKER_RE.sub(" ", title))   # "Morgan Stanley" names a broker, not two stocks
     new = con.execute("INSERT OR IGNORE INTO news VALUES (?,?,?,?,?)", (url, t, title, src, json.dumps(syms))).rowcount
     for c in calls_in(title, tag):
