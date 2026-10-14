@@ -20,3 +20,6 @@ web/public/idx/
 web/public/indices.json
 web/public/gold.json
 web/public/macro.json
+web/public/news.json
+web/public/inst/
+data/news.db

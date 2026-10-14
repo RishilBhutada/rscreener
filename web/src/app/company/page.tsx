@@ -12,6 +12,7 @@ import { Row } from "@/lib/query";
 import { loadNote, pushRecent, saveNote } from "@/lib/store";
 import WatchStar from "@/components/WatchStar";
 import SeasonsCard, { Seasons } from "@/components/Seasons";
+import InstitutionsCard from "@/components/InstitutionsCard";
 import { loadSectionMode, SectionMode } from "@/components/Settings";
 import { isRefreshLoad } from "@/components/TopNav";
 import { applyOrder, loadOrder } from "@/lib/order";
@@ -2141,6 +2142,8 @@ function CompanyView() {
       )}
 
       {company.ratios && <RatiosTable r={company.ratios} />}
+
+      <InstitutionsCard symbol={symbol} />
 
       {company.shareholding && company.shareholding.dates.length > 0 && (
         <div id="shareholding" className="scroll-mt-32"><StatementTable

@@ -1,0 +1,92 @@
+name: Publish news
+run-name: Publish news
+
+# Swaps the News page's files into the LIVE site - news.json and the inst/
+# files behind each stock's Institutions card - and deploys: about three
+# minutes. Started by the news watcher when something new arrived. Nothing
+# else on the site changes.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  actions: read      # the live site's files, from the run that deployed them
+
+concurrency:
+  # Its own group: in the publishes' group a waiting news publish would cancel
+  # a waiting "Publish new results". GitHub keeps the newest waiting run here,
+  # which has every headline the older one had.
+  group: news-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url || steps.retry.outputs.page_url }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: pipeline
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: Wait for another publish that is deploying
+        run: |
+          for i in $(seq 1 15); do
+            busy=0
+            for wf in results.yml refetch.yml nightly.yml; do
+              n=$(gh run list -R "$GITHUB_REPOSITORY" --workflow "$wf" --status in_progress --json displayTitle \
+                  --jq '[.[] | select(.displayTitle != "Nightly data refresh" and .displayTitle != "Data refresh")] | length')
+              busy=$((busy + n))
+            done
+            [ "$busy" = "0" ] && exit 0
+            echo "a publish is deploying - waiting ($i)"; sleep 60
+          done
+      - name: Download the news database and the live site
+        id: base
+        run: |
+          mkdir -p data site
+          gh release download data-db --pattern news.db.gz --dir data
+          gunzip -f data/news.db.gz
+          RUN=$(python pipeline/live_site.py)
+          echo "run=$RUN" >> "$GITHUB_OUTPUT"
+          gh run download "$RUN" -n github-pages -D base
+          tar -xf base/artifact.tar -C site
+          rm -rf base
+      - run: python pipeline/export_news_json.py
+      - name: Swap them into the live site (re-based if another publish landed meanwhile)
+        run: |
+          NOW=$(python pipeline/live_site.py)
+          if [ "$NOW" != "${{ steps.base.outputs.run }}" ]; then
+            echo "run $NOW deployed while this one worked - starting from its site instead"
+            rm -rf site && mkdir site
+            gh run download "$NOW" -n github-pages -D base
+            tar -xf base/artifact.tar -C site
+            rm -rf base
+          fi
+          rm -rf site/inst
+          cp web/public/news.json site/
+          cp -r web/public/inst site/inst
+          echo "swapped in news.json and $(ls site/inst | wc -l) inst files"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+          retention-days: 3
+      - id: deployment
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+      - name: Wait, then try the deployment once more
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 45
+      - id: retry
+        if: steps.deployment.outcome == 'failure'
+        uses: actions/deploy-pages@v4

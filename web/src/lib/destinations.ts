@@ -40,6 +40,9 @@ export const DESTINATIONS: { key: string; label: string; href: string; icon: str
     icon: "M4 19h16M5.5 15l4-4.5 3.5 3 5.5-7" },
   { key: "sectors", label: "Sectors", href: "/sectors",
     icon: "M4.5 4.5h6v6h-6zM13.5 4.5h6v6h-6zM4.5 13.5h6v6h-6zM13.5 13.5h6v6h-6z" },
+  // Headlines, broker calls, bulk/block deals and stake filings, through the day.
+  { key: "news", label: "News", href: "/news",
+    icon: "M5 5h11v14H6a1 1 0 0 1-1-1zM16 9h3v9a1 1 0 0 1-1 1h-2M8 9h5M8 12.5h5M8 16h3" },
   { key: "calendar", label: "Calendar", href: "/calendar",
     icon: "M5.5 6h13A1.5 1.5 0 0 1 20 7.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6zM4 10.5h16M8.5 4v4M15.5 4v4" },
   { key: "status", label: "Data", href: "/status",

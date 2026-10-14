@@ -347,6 +347,21 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "3"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_spot.py
+      - name: News, broker calls, deals and SAST (stock-name index refreshed)
+        # data/news.db is the News page's own small database (fetch_news.py);
+        # the watcher keeps it current through the day. Here the stock-name
+        # index it tags headlines with is rebuilt from tonight's universe.
+        if: steps.plan.outputs.earnings == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download data-db --pattern news.db.gz --dir data --clobber && gunzip -f data/news.db.gz \
+            || echo "no news database stored yet - starting one"
+          DD=7; [ -f data/news.db ] || DD=365
+          bash pipeline/guarded_fetch.sh python pipeline/fetch_news.py --names-from data/rscreener.db --deal-days $DD
+          if [ -f data/news.db ]; then
+            gzip -c data/news.db > news.db.gz && gh release upload data-db news.db.gz --clobber || echo "::warning::news.db not stored"
+          fi
       - name: Find what each company does (Wikipedia articles, rotating)
         if: steps.plan.outputs.earnings == '1'
         # The article's short description and opening paragraphs, accepted only
@@ -519,6 +534,14 @@ jobs:
         run: python pipeline/export_commodities_json.py
       - name: Write the gold page (events rated, headlines, prices)
         run: python pipeline/export_gold_json.py
+      - name: Write the News page and each stock's Institutions file
+        # From data/news.db; a publish-only run fetches nothing, so it reads the
+        # stored copy. news.json is written even with no database (empty).
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -f data/news.db ] || { gh release download data-db --pattern news.db.gz --dir data --clobber && gunzip -f data/news.db.gz; } || true
+          python pipeline/export_news_json.py
       - name: Write the US economy history
         # web/public/macro.json - every stored FRED series, its whole history,
         # for the gold page's charts. Generated, never committed. Written even
@@ -741,6 +764,12 @@ jobs:
             echo "re-queueing #$num ($sym)"
             gh workflow run refetch.yml -R "${{ github.repository }}" -f symbol="$sym" -f issue="$num" || true
           done
+      - name: Start the day's news watch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run news-watch.yml -R "${{ github.repository }}" \
+            || echo "could not start the news watcher - its timed starts will"
       - name: Start this evening's US release alerts
         env:
           GH_TOKEN: ${{ github.token }}
