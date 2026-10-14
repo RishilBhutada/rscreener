@@ -718,6 +718,12 @@ jobs:
         run: |
           gh workflow run results-watch.yml -R "${{ github.repository }}" \
             || echo "could not start the watcher - its timed starts will"
+      - name: Start this evening's US release alerts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run us-alerts.yml -R "${{ github.repository }}" \
+            || echo "could not start the US release watcher - its timed start will"
 
   # A failed refresh is SILENT otherwise: the site keeps serving yesterday's data
   # and looks completely normal. That is what happened on 1-Aug-2026 - the depth
