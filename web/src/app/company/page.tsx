@@ -18,7 +18,7 @@ import { applyOrder, loadOrder } from "@/lib/order";
 import InfoTip, { InfoDialog, InfoPart } from "@/components/InfoTip";
 import { TableKind, arrange, change, changeText, usePct, useRowOrder } from "@/lib/tableprefs";
 import { move } from "@/lib/order";
-import { Icon, IconButton, dayMove, signed as signedNum, tone } from "@/components/QuoteUI";
+import { IconButton, dayMove, signed as signedNum, tone } from "@/components/QuoteUI";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -1894,11 +1894,6 @@ function CompanyView() {
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <IconButton name="download" label="Export to Excel (CSV)" onClick={exportCompanyCsv} />
-          {/* A journal entry for this company - a decision, or one not to act. */}
-          <Link href={`/journey?tab=journal&new=${encodeURIComponent(symbol)}`} aria-label="Journal a decision" title="Journal a decision"
-            className="rs-press shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-full text-[var(--ink2)] active:bg-[var(--card2)]">
-            <Icon name="edit" />
-          </Link>
           <WatchStar symbol={symbol} />
         </div>
       </div>

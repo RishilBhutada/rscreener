@@ -12,7 +12,6 @@
  */
 import { getFirebase } from "./firebase";
 import { WatchState, mergeStates } from "./watchlists";
-import { JOURNAL_KEY, TIME_KEY, mergeById } from "./journey";
 
 /** localStorage keys that represent the person, not the machine. */
 export const SYNCED_KEYS = [
@@ -26,9 +25,6 @@ export const SYNCED_KEYS = [
   "rs_accent",
   "rs_pct_tables",
   "rs_row_order",
-  // The journey page's time log and journal (owner, 14-Oct-2026).
-  "rscreener_timelog",
-  "rscreener_journal",
 ] as const;
 
 type Profile = Record<string, unknown>;
@@ -85,12 +81,6 @@ function merge(local: Profile, remote: Profile): Profile {
     // matched by id and their symbols unioned instead.
     if (k === "rscreener_watchlists") {
       out[k] = mergeStates(l as WatchState, r as WatchState);
-      continue;
-    }
-    // Entries that are edited (a journal entry closed later) and deleted:
-    // matched by id, the newest edit or deletion wins.
-    if (k === TIME_KEY || k === JOURNAL_KEY) {
-      out[k] = mergeById(l, r);
       continue;
     }
     if (Array.isArray(l) && Array.isArray(r)) {

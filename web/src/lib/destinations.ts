@@ -42,9 +42,6 @@ export const DESTINATIONS: { key: string; label: string; href: string; icon: str
     icon: "M4.5 4.5h6v6h-6zM13.5 4.5h6v6h-6zM4.5 13.5h6v6h-6zM13.5 13.5h6v6h-6z" },
   { key: "calendar", label: "Calendar", href: "/calendar",
     icon: "M5.5 6h13A1.5 1.5 0 0 1 20 7.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6zM4 10.5h16M8.5 4v4M15.5 4v4" },
-  // The education plan's time log and decision journal.
-  { key: "journey", label: "Journey", href: "/journey",
-    icon: "M6 4.5h12v15H6zM9 9h6M9 12.5h6M9 16h3" },
   { key: "status", label: "Data", href: "/status",
     icon: "M3 12.5h4l2.5-6 5 11 2.5-5H21" },
 ];
