@@ -193,6 +193,20 @@ def main() -> None:
                                            " ORDER BY day", (early, today)):
             times[sym].append((d, at, doc))
     claimed: set[tuple] = set()
+    # When each company's board-meeting outcomes came out, whatever was decided.
+    mtimes: dict[str, list[tuple]] = defaultdict(list)
+    if has("meeting_times"):
+        for sym, d, at, doc in con.execute("SELECT symbol, day, at, doc FROM meeting_times ORDER BY day"):
+            mtimes[sym].append((d, at, doc))
+    mtime_of = {(s, d): (at, doc) for s, lst in mtimes.items() for d, at, doc in lst}
+
+    def usual_of(lst: list[tuple], before: str):
+        """The middle of its last four times before a day, to five minutes."""
+        ts = [at for day, at, _ in lst if day < before and at][-4:]
+        if len(ts) < 2:
+            return None
+        m = round(statistics.median(int(x[:2]) * 60 + int(x[3:5]) for x in ts) / 5) * 5
+        return f"{m // 60:02d}:{m % 60:02d}", len(ts)
 
     def stamp(sym: str, a: str, b: str):
         """The company's results announcement from day a to day b, the latest
@@ -332,7 +346,13 @@ def main() -> None:
             via_meeting += 1
             continue
         if d < today:
-            past.append({"d": d, "k": "meeting", "s": sym, "p": purpose or "", "x": detail or ""})
+            m = {"d": d, "k": "meeting", "s": sym, "p": purpose or "", "x": detail or ""}
+            got = mtime_of.get((sym, d))
+            if got:
+                m["at"] = got[0][:5]
+                if got[1]:
+                    m["doc"] = got[1]
+            past.append(m)
     # Results announced with no meeting on NSE's calendar and no XBRL yet.
     unlisted = 0
     for sym, lst in times.items():
@@ -365,10 +385,9 @@ def main() -> None:
             e["type"] = "results"
             # When its results usually come out: the middle of its last four
             # announcement times, to five minutes.
-            ts = [at for day, at, _ in times.get(sym, []) if day < d and at][-4:]
-            if len(ts) >= 2:
-                m = round(statistics.median(int(x[:2]) * 60 + int(x[3:5]) for x in ts) / 5) * 5
-                e["usual"], e["un"] = f"{m // 60:02d}:{m % 60:02d}", len(ts)
+            u = usual_of(times.get(sym, []), d) or usual_of(mtimes.get(sym, []), d)
+            if u:
+                e["usual"], e["un"] = u
             ss = season.get(sym)
             if ss and ss["ok"]:
                 q = seasons_lib._fq(int(quarter_reported(d)[5:7]))
@@ -382,6 +401,10 @@ def main() -> None:
                 e["typ"], e["n"] = round(statistics.median(moves), 1), len(moves)
         elif kind == "meeting":
             e["type"] = "meeting"
+            # When its board-meeting outcomes usually come out.
+            u = usual_of(mtimes.get(sym, []), d)
+            if u:
+                e["usual"], e["un"] = u
         else:
             seen_ex.add((sym, d))
             e["type"] = ca_kind(purpose or "")

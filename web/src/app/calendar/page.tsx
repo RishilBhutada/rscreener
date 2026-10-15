@@ -66,8 +66,9 @@ function Cell({ v, loss = false, cls = COL }: { v?: number; loss?: boolean; cls?
 function line(e: CalEvent): string {
   const p = e.past, n = e.next;
   // The time first: on a phone the line is cut off after thirty-odd letters.
+  // "Out 3:41 pm" once it is out, "Expected ~5:55 pm" before (owner, 15-Oct-2026).
   if (p?.k === "results") {
-    return [p.at && clock(p.at), p.q, !p.at && p.rv === undefined && p.pt === undefined && "figures not in yet"]
+    return [p.q, !p.at && p.rv === undefined && p.pt === undefined && "figures not in yet"]
       .filter(Boolean).join(" · ");
   }
   if (p?.k === "dividend") return [p.amt && `${rs(p.amt)} a share`, p.yld !== undefined && `${p.yld}% of the price`, !p.amt && p.x].filter(Boolean).join(" · ");
@@ -77,11 +78,22 @@ function line(e: CalEvent): string {
   if (n?.type === "results") {
     // "Financial Results/Dividend": what else the meeting takes up.
     const also = n.purpose.split("/").map((x) => x.trim()).filter((x) => x && !/^financial results?$/i.test(x));
-    return [n.usual && `~${clock(n.usual)}`, `${quarterDue(n.date)} due`, also.length && `also ${also.join(", ").toLowerCase()}`]
+    return [`${quarterDue(n.date)} due`, also.length && `also ${also.join(", ").toLowerCase()}`]
       .filter(Boolean).join(" · ");
   }
   if (n?.type === "dividend" && n.amt) return [`${rs(n.amt)} a share`, n.yld !== undefined && `${n.yld}% of the price`].filter(Boolean).join(" · ");
   return n?.desc ?? "";
+}
+
+/** When it came out or is due, leading the row so a phone never cuts it off
+ *  (owner, 15-Oct-2026): "Out 4:18 pm" from NSE's announcement stamp; "Due
+ *  ~5:55 pm" from the company's usual time; an ex-date applies from the open. */
+function timeOf(e: CalEvent): string {
+  const p = e.past, n = e.next;
+  if (p?.at) return `Out ${clock(p.at)}`;
+  if (n?.usual) return `Due ~${clock(n.usual)}`;
+  if (n?.kind === "exdate") return "From 9:15 am";
+  return "";
 }
 
 /** The row's second line; a coming result or IPO also says what it is. */
@@ -321,6 +333,7 @@ export default function CalendarPage() {
                                   columns of figures it had room for five letters. */}
                               <span className="block text-[14px] font-medium truncate">{e.name}</span>
                               <span className="flex items-center gap-1.5 min-w-0 text-[12px] text-[var(--ink3)] tabular-nums">
+                                {timeOf(e) && <span className="shrink-0 font-semibold text-[var(--ink2)]">{timeOf(e)}</span>}
                                 <Badge kind={e.kind} />
                                 <span className="shrink-0">{e.symbol}</span>
                                 <span className="truncate">· {sub(e)}</span>
@@ -480,15 +493,24 @@ function Detail({ e, onClose, earlier, basis, pickBasis }: {
           : p.k === "buyback" ? "The company bought back its own shares." : "A change to the company's shares or securities."}</p>
       )}
       {p?.k === "meeting" && p.x && <p className="text-[13px]">{p.x}</p>}
+      {p?.k === "meeting" && p.at && (
+        <div className="grid grid-cols-2 gap-3 py-1">
+          <Stat label="Outcome out at" value={`${clock(p.at)} IST`} />
+          {p.doc && <DocLink href={docUrl(p.doc)}>Outcome announcement</DocLink>}
+        </div>
+      )}
 
       {n && (
         <>
           {n.desc && <p className="text-[13px]">{n.desc}</p>}
-          {n.type === "results" && n.usual && (
+          {n.usual && (
             <>
-              <Stat label="Usually out" value={`~${clock(n.usual)} IST`} />
-              <p className="text-[11px] text-[var(--ink3)]">The middle of the times NSE published its last {n.un} results. When it was, not when it will be.</p>
+              <Stat label={n.type === "results" ? "Usually out" : "Outcome usually out"} value={`~${clock(n.usual)} IST`} />
+              <p className="text-[11px] text-[var(--ink3)]">The middle of the times NSE published its last {n.un} {n.type === "results" ? "results" : "board-meeting outcomes"}. When it was, not when it will be.</p>
             </>
+          )}
+          {n.kind === "exdate" && (
+            <p className="text-[12px]">The ex-date applies from the market&apos;s open at 9:15 am: shares bought that day or later do not carry this entitlement.</p>
           )}
           {n.type === "results" && n.ssn && (
             <p className="text-[13px]">

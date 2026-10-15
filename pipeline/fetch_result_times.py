@@ -58,6 +58,25 @@ def stamp_of(row: dict) -> datetime | None:
         return None
 
 
+def outcomes(rows: list[dict]) -> dict[tuple, tuple]:
+    """(symbol, day) -> (time, document) of its first "Outcome of Board
+    Meeting" announcement, whatever the meeting decided - a dividend, a bonus,
+    a split, a fund raise - so the calendar can say when each came out
+    (owner, 15-Oct-2026)."""
+    best: dict[tuple, tuple] = {}
+    for r in rows:
+        sym, t = r.get("symbol"), stamp_of(r)
+        if not sym or t is None or (r.get("desc") or "").strip().lower() != "outcome of board meeting":
+            continue
+        key = (sym, t.date().isoformat())
+        doc = (r.get("attchmntFile") or "").strip()
+        doc = doc[len(NSE_DOCS):] if doc.startswith(NSE_DOCS) else doc
+        at = t.strftime("%H:%M:%S")
+        if key not in best or at < best[key][0]:
+            best[key] = (at, doc)
+    return best
+
+
 def earliest(rows: list[dict], meeting_days: set[tuple]) -> dict[tuple, tuple]:
     """(symbol, day) -> (time, document) of its first results announcement."""
     best: dict[tuple, tuple] = {}
@@ -86,6 +105,9 @@ def main() -> None:
     con.execute("CREATE TABLE IF NOT EXISTS result_times "
                 "(symbol TEXT, day TEXT, at TEXT, doc TEXT, PRIMARY KEY (symbol, day))")
     con.execute("CREATE TABLE IF NOT EXISTS result_times_log (day TEXT PRIMARY KEY, fetched_at TEXT, n INTEGER)")
+    con.execute("CREATE TABLE IF NOT EXISTS meeting_times "
+                "(symbol TEXT, day TEXT, at TEXT, doc TEXT, PRIMARY KEY (symbol, day))")
+    con.execute("CREATE TABLE IF NOT EXISTS meeting_times_log (day TEXT PRIMARY KEY, fetched_at TEXT, n INTEGER)")
     con.commit()
     has_events = con.execute("SELECT 1 FROM sqlite_master WHERE name='calendar_events'").fetchone()
     meeting_days = {(s, d) for s, d in con.execute(
@@ -94,7 +116,10 @@ def main() -> None:
     today = datetime.now(IST).date()
     days = [today - timedelta(days=i) for i in range(args.days)]
     if args.backfill:
-        held = {r[0] for r in con.execute("SELECT day FROM result_times_log")}
+        # A day counts as held only when both its results and its other
+        # meetings' times are stored (meeting times began 15-Oct-2026).
+        held = ({r[0] for r in con.execute("SELECT day FROM result_times_log")}
+                & {r[0] for r in con.execute("SELECT day FROM meeting_times_log")})
         days += [d for d in (today - timedelta(days=i) for i in range(args.days, 366)) if d.isoformat() not in held]
 
     s = requests.Session()
@@ -132,10 +157,16 @@ def main() -> None:
             con.execute("INSERT INTO result_times VALUES (?,?,?,?) ON CONFLICT(symbol, day) DO UPDATE SET "
                         "at=excluded.at, doc=excluded.doc WHERE excluded.at < result_times.at",
                         (sym, day, at, doc))
+        meets = outcomes(rows)
+        for (sym, day), (at, doc) in meets.items():
+            con.execute("INSERT INTO meeting_times VALUES (?,?,?,?) ON CONFLICT(symbol, day) DO UPDATE SET "
+                        "at=excluded.at, doc=excluded.doc WHERE excluded.at < meeting_times.at",
+                        (sym, day, at, doc))
         # Today is never "held": more results arrive all evening.
         if d < today:
-            con.execute("INSERT OR REPLACE INTO result_times_log VALUES (?,?,?)",
-                        (d.isoformat(), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), len(best)))
+            stamp_now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            con.execute("INSERT OR REPLACE INTO result_times_log VALUES (?,?,?)", (d.isoformat(), stamp_now, len(best)))
+            con.execute("INSERT OR REPLACE INTO meeting_times_log VALUES (?,?,?)", (d.isoformat(), stamp_now, len(meets)))
         con.commit()
         found += len(best)
         done += 1
