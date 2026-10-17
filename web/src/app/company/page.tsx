@@ -1450,6 +1450,8 @@ function CompanyView() {
   // stale the first time a section is added or made conditional.
   const [paneIds, setPaneIds] = useState<string[]>([]);
   const [sectionOrder, setSectionOrder] = useState<string[]>([]);
+  // Whether this company has an Institutions card (it loads on its own).
+  const [hasInst, setHasInst] = useState(false);
   useEffect(() => {
     const read = () => setSectionOrder(loadOrder("sections"));
     read();
@@ -1948,9 +1950,10 @@ function CompanyView() {
           ["peers", "Peers", true],
           ["quarters", "Quarters", Boolean(quarterly)],
           ["profit-loss", "Profit & Loss", Boolean(pnl)],
-          ["balance-sheet", "Balance Sheet", Boolean(balance)],
-          ["cash-flows", "Cash Flow", Boolean(cashflow)],
+          ["balance-sheet", "Balance sheet", Boolean(balance)],
+          ["cash-flows", "Cash flow", Boolean(cashflow)],
           ["ratios", "Ratios", Boolean(company.ratios)],
+          ["institutions", "Institutions", hasInst],
           ["shareholding", "Investors", Boolean(company.shareholding)],
           ["documents", "Documents", true],
           ["notes", "Notes", true],
@@ -1996,8 +1999,17 @@ function CompanyView() {
 
       <div ref={pager} className={mode === "swipe" ? "rs-pager" : "rs-stack"}>
 
-      <div id="summary" className="scroll-mt-32">
+      {/* Notices sit INSIDE a section. A bare child of the pager has no id, so
+          a saved section order gave it CSS order 0 and it jumped to the top,
+          and in swipe mode it was a nameless pane of its own (17-Oct-2026). */}
+      <div id="summary" className="scroll-mt-32 space-y-4">
         <RatioGrid snapshot={s} row={fullRow} cohort={cohort} next={nextResults} />
+        {Object.keys(company.statements).length === 0 && !company.trend?.annual && (
+          <div className="bg-[var(--warn-soft)] border border-[var(--warn-line)] text-[var(--warn-ink)] rounded-xl p-4 text-sm">
+            Financial statements haven&apos;t been fetched for this company yet — showing the snapshot only.
+            Statements coverage grows as the pipeline runs.
+          </div>
+        )}
       </div>
 
       <div id="chart" className="scroll-mt-32 space-y-4">
@@ -2039,8 +2051,24 @@ function CompanyView() {
         <PriceHistory row={fullRow} snapshot={s} />
       </div>
 
-      <div id="analysis" className="scroll-mt-32">
+      <div id="analysis" className="scroll-mt-32 space-y-4">
         <ProsCons row={fullRow} />
+        {/* 2,766 of 4,746 companies have no valuation chart and the page said
+            nothing about any of them, so every one looked like a fault. None is:
+            each is the app declining to publish a P/E that would not mean
+            anything. An unexplained absence is indistinguishable from a bug. */}
+        {company.no_pe_reason && (
+          <p className="text-[13px] leading-relaxed text-[var(--ink3)] border border-[var(--line)] rounded-xl px-3 py-2 bg-[var(--card2)]">
+            <span className="font-semibold text-[var(--ink2)]">No price-to-earnings chart for this company.</span>
+            <InfoTip title="No price-to-earnings chart" className="ml-1">
+              <p>{company.no_pe_reason}</p>
+              <p>
+                The chart is withheld rather than missing: a P/E built on these numbers would
+                not mean anything, so none is published.
+              </p>
+            </InfoTip>
+          </p>
+        )}
       </div>
 
       {company.fscore && (
@@ -2117,33 +2145,9 @@ function CompanyView() {
       {balance && <div id="balance-sheet" className="scroll-mt-32"><StatementTable title="Balance sheet" stmt={balance} subtitle={figuresCaption} boldRows={["Total Assets", "Total Liabilities"]} kind="balance" symbol={symbol} /></div>}
       {cashflow && <div id="cash-flows" className="scroll-mt-32"><StatementTable title="Cash flows" stmt={cashflow} subtitle={figuresCaption} boldRows={["Free Cash Flow"]} kind="cash" symbol={symbol} /></div>}
 
-      {Object.keys(company.statements).length === 0 && !company.trend?.annual && (
-        <div className="bg-[var(--warn-soft)] border border-[var(--warn-line)] text-[var(--warn-ink)] rounded-xl p-4 text-sm">
-          Financial statements haven&apos;t been fetched for this company yet — showing the snapshot only.
-          Statements coverage grows as the pipeline runs.
-        </div>
-      )}
-
-      {/* 2,766 of 4,746 companies have no valuation chart and the page said
-          nothing about any of them, so every one looked like a fault. None is:
-          each is the app declining to publish a P/E that would not mean
-          anything. An unexplained absence is indistinguishable from a bug. */}
-      {company.no_pe_reason && (
-        <p className="text-[13px] leading-relaxed text-[var(--ink3)] border border-[var(--line)] rounded-xl px-3 py-2 bg-[var(--card2)]">
-          <span className="font-semibold text-[var(--ink2)]">No price-to-earnings chart for this company.</span>
-          <InfoTip title="No price-to-earnings chart" className="ml-1">
-            <p>{company.no_pe_reason}</p>
-            <p>
-              The chart is withheld rather than missing: a P/E built on these numbers would
-              not mean anything, so none is published.
-            </p>
-          </InfoTip>
-        </p>
-      )}
-
       {company.ratios && <RatiosTable r={company.ratios} />}
 
-      <InstitutionsCard symbol={symbol} />
+      <InstitutionsCard symbol={symbol} onLoad={setHasInst} />
 
       {company.shareholding && company.shareholding.dates.length > 0 && (
         <div id="shareholding" className="scroll-mt-32"><StatementTable

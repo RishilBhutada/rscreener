@@ -185,7 +185,9 @@ export default function Home() {
               else if (e.key === "Enter" && matches[hi]) go(matches[hi].symbol);
               else if (e.key === "Escape") setQ("");
             }}
-            placeholder="Search a company, index, ETF or commodity"
+            // Short enough to fit a 375px phone whole; the full sentence was cut
+            // to "…ETF or com" at this size (17-Oct-2026).
+            placeholder="Company, index, ETF or commodity"
             aria-label="Search a company, index, ETF or commodity"
             autoComplete="off"
             className="w-full rounded-xl border border-[var(--line2)] bg-[var(--card)] pl-11 pr-4 py-3.5 text-base
@@ -227,7 +229,7 @@ export default function Home() {
         {/* Suggestions only for somebody with no watchlist yet. With one, this
             row repeated the same companies the priced list below shows - the
             watchlist appeared twice on one screen. */}
-        {watch.length === 0 && chips({ title: "Start with", syms: SUGGESTED })}
+        {watch.length === 0 && chips({ title: "Start with", syms: SUGGESTED.filter((s) => !recent.includes(s)) })}
 
         <Markets />
 

@@ -44,9 +44,10 @@ const SECTIONS: { id: string; label: string }[] = [
   { id: "balance-sheet", label: "Balance sheet" },
   { id: "cash-flows", label: "Cash flow" },
   { id: "ratios", label: "Ratios" },
+  { id: "institutions", label: "Institutions" },
   { id: "shareholding", label: "Investors" },
   { id: "documents", label: "Documents" },
-  { id: "notes", label: "Your notes" },
+  { id: "notes", label: "Notes" },
 ];
 
 const THEMES = [["light", "Light"], ["dark", "Dark"], ["black", "Black"], ["system", "Auto"]] as const;
@@ -224,6 +225,7 @@ export function SettingsScreen() {
 }
 
 function MainScreen() {
+  const { user, hint } = useAuth();
   const [theme, setTheme] = useState("system");
   const [accent, setAccent] = useState("indigo");
   const [sections, setSections] = useState<SectionMode>("scroll");
@@ -282,7 +284,8 @@ function MainScreen() {
     : null;
 
   const bar = applyOrder(DESTINATIONS, (d) => d.key, navOrder).slice(0, BAR_SLOTS).map((d) => d.label).join(", ");
-  const secs = applyOrder(SECTIONS, (s) => s.id, secOrder).slice(0, 4).map((s) => s.label).join(", ");
+  const secs = applyOrder(SECTIONS, (s) => s.id, secOrder).slice(0, 3).map((s) => s.label).join(", ");
+  const signedIn = user?.email ?? user?.displayName ?? hint?.email ?? hint?.name ?? null;
 
   return (
     <div>
@@ -350,13 +353,18 @@ function MainScreen() {
         <Row icon={<Glyph d={ICON.bar} />} title="Bottom bar" sub={bar} href="/settings?p=nav" chevron />
       </Group>
 
-      <Group title="Data">
-        <Row icon={<Glyph d={ICON.status} />} title="Data status" sub="How fresh each source is" href="/status" chevron />
+      {/* Subtitles are kept short enough to fit a 375px phone whole: the long
+          ones were cut mid-word ("on every ...", 17-Oct-2026). */}
+      <Group title="Sync and alerts">
         {firebaseConfigured && (
-          <Row icon={<Glyph d={ICON.user} />} title="Account" sub="Your lists, portfolio and notes on every device" href="/settings?p=account" chevron />
+          <Row icon={<Glyph d={ICON.user} />} title="Account" sub={signedIn ?? "Sync your lists across devices"} href="/settings?p=account" chevron />
         )}
-        <Row icon={<Glyph d={ICON.copy} />} title="Move my data" sub="Lists, portfolio and notes to another phone or a reinstalled app" href="/settings?p=data" chevron />
-        <Row icon={<Glyph d={ICON.bell} />} title="Phone alerts" sub="Results and announcements of the stocks you choose" href="/settings?p=alerts" chevron />
+        <Row icon={<Glyph d={ICON.copy} />} title="Move my data" sub="Copy a backup to another device" href="/settings?p=data" chevron />
+        <Row icon={<Glyph d={ICON.bell} />} title="Phone alerts" sub="Results and announcements" href="/settings?p=alerts" chevron />
+      </Group>
+
+      <Group title="App">
+        <Row icon={<Glyph d={ICON.status} />} title="Data status" sub="How fresh each source is" href="/status" chevron />
         <Row
           icon={<Glyph d={ICON.update} />}
           title="Check for updates"
@@ -385,7 +393,7 @@ function MainScreen() {
         <Row
           icon={<Glyph d={ICON.charts} />}
           title="Charts by TradingView"
-          sub="TradingView Lightweight Charts™ · © 2026 TradingView, Inc. · Apache 2.0"
+          sub="Lightweight Charts™ © 2026 TradingView, Inc. Apache 2.0"
           href="https://www.tradingview.com/"
           external
           wrap
@@ -395,16 +403,11 @@ function MainScreen() {
   );
 }
 
-/** A list you put in your own order, on a screen of its own.
- *
- *  Up/down buttons rather than drag-and-drop. Dragging is nicer once it works
- *  and considerably worse when it does not: on a touch screen it fights the
- *  scroll of the page it sits in, and it is unreachable by keyboard. The row
- *  that just moved flashes once, so the eye can follow it. */
 /** Moving this device's data without an account: a backup as text, copied to
  *  the clipboard, pasted on the other side. Text rather than a file, because
  *  the old Android app could not save files at all - this has to work there. */
 function DataScreen() {
+  const { user } = useAuth();
   const [text, setText] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const copy = async () => {
@@ -418,6 +421,9 @@ function DataScreen() {
     }
   };
   const restore = () => {
+    // Never a greyed-out button: a dead-looking button reads as broken
+    // (owner, 12-Oct-2026). An empty box is said instead.
+    if (!text.trim()) { setMsg({ ok: false, text: "Paste a backup in the box first." }); return; }
     try {
       const n = restoreText(text);
       setMsg({ ok: true, text: `Restored ${n} kind${n === 1 ? "" : "s"} of data, added to what was here. Reloading…` });
@@ -430,10 +436,13 @@ function DataScreen() {
   return (
     <div>
       <PageTitle>Move my data</PageTitle>
+      {/* Written before accounts existed, this said the data was "on this
+          device only" - untrue once signed in. */}
       <p className="-mt-4 mb-5 px-1 text-sm text-[var(--ink3)]">
-        Your watchlists, portfolio, notes, saved screens, own ratios and look are kept on this device only.
-        Reinstalling the app or changing phones starts empty - copy a backup first, then paste it on the other side.
-        Restoring adds to what is there; it deletes nothing.
+        {user
+          ? "Your account already carries your lists to every device you sign in on. Use this only to move them without signing in."
+          : "Without an account your lists live on this device only. Copy them here, then paste them on the other device."}
+        {" "}Restoring adds to what is there; it deletes nothing.
       </p>
       <button type="button" onClick={copy} className={`${button} bg-[var(--accent-fill)] text-[var(--accent-fill-ink)]`}>Copy my data</button>
       <textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} spellCheck={false}
@@ -441,8 +450,8 @@ function DataScreen() {
         aria-label="Backup text"
         className="mt-5 w-full rounded-2xl border border-[var(--line2)] bg-[var(--card)] p-3 text-[13px] font-mono text-[var(--ink)]
                    placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)]" />
-      <button type="button" onClick={restore} disabled={!text.trim()}
-        className={`${button} mt-3 border border-[var(--line)] bg-[var(--card)] text-[var(--accent-ink)] disabled:opacity-40`}>Restore</button>
+      <button type="button" onClick={restore}
+        className={`${button} mt-3 border border-[var(--line)] bg-[var(--card)] text-[var(--accent-ink)]`}>Restore</button>
       {msg && <p role="status" className={`mt-4 px-1 text-sm ${msg.ok ? "text-[var(--pos)]" : "text-[var(--neg)]"}`}>{msg.text}</p>}
     </div>
   );
@@ -604,28 +613,39 @@ function AlertsScreen() {
   return (
     <div>
       <PageTitle>Phone alerts</PageTitle>
-      <div className="-mt-4 mb-5 px-1 text-sm text-[var(--ink3)] space-y-2">
-        <p>Pushed through the ntfy app, for the stocks on your alert list:</p>
-        <ul className="list-disc pl-5 space-y-1">
-          <li><span className="text-[var(--ink2)]">Results out</span> - within minutes of NSE publishing them, with the time and the filing.</li>
-          <li><span className="text-[var(--ink2)]">Results figures</span> - sales and profit against a year before, once the company files them.</li>
-          <li><span className="text-[var(--ink2)]">Other announcements</span> - checked through the day.</li>
-        </ul>
-        <p>The alerts are sent from GitHub. Once your account is connected to them (two GitHub secrets, once: FIREBASE_SERVICE_ACCOUNT and ALERT_UID - your Account ID is under Account), every star and holding in your account is included automatically, on the next run after you add it.</p>
-        <p>The list file in the GitHub repository still counts too - anything on it is alerted as well. Until the account is connected, copy your stars into it here.</p>
-      </div>
+      <Group title="Sent through the ntfy app">
+        <Row title="Results out" sub="Within minutes, with the time and the filing" wrap />
+        <Row title="Results figures" sub="Sales and profit against a year before" wrap />
+        <Row title="Other announcements" sub="Checked through the day" wrap />
+      </Group>
+      <Group
+        title="Which stocks"
+        tip={
+          <>
+            <p>The alerts are sent from GitHub, which cannot see the stars in the app. It reads the alert list file in the repository.</p>
+            <p>Once two GitHub secrets are added - FIREBASE_SERVICE_ACCOUNT and ALERT_UID (your Account ID, under Account) - every star and holding in your account is included automatically. The list file keeps counting too.</p>
+          </>
+        }
+        tipTitle="How the alert list works"
+      >
+        <Row title="Alert list on GitHub" sub="Open it and paste your copied stars" href={ALERT_LIST} external wrap />
+      </Group>
       <button type="button" onClick={copy} className={`${button} bg-[var(--accent-fill)] text-[var(--accent-fill-ink)]`}>Copy my starred stocks</button>
       {text && (
         <textarea readOnly value={text} rows={6} aria-label="Starred symbols"
           className="mt-3 w-full rounded-2xl border border-[var(--line2)] bg-[var(--card)] p-3 text-[13px] font-mono text-[var(--ink)]" />
       )}
-      <a href={ALERT_LIST} target="_blank" rel="noopener noreferrer"
-        className={`${button} mt-3 border border-[var(--line)] bg-[var(--card)] text-[var(--accent-ink)]`}>Open the alert list on GitHub</a>
       {msg && <p role="status" className="mt-4 px-1 text-sm text-[var(--ink2)]">{msg}</p>}
     </div>
   );
 }
 
+/** A list you put in your own order, on a screen of its own.
+ *
+ *  Up/down buttons rather than drag-and-drop. Dragging is nicer once it works
+ *  and considerably worse when it does not: on a touch screen it fights the
+ *  scroll of the page it sits in, and it is unreachable by keyboard. The row
+ *  that just moved flashes once, so the eye can follow it. */
 function ReorderScreen({ kind, title, caption, items, split }: {
   kind: OrderKind;
   title: string;

@@ -86,8 +86,6 @@ export const FIELD_CATALOG: FieldDef[] = [
   { key: "volatility_30d", label: "Volatility (30d)", group: "Risk", unit: "%", desc: "Same measure over just the last month — spikes when news hits", short: "Vol 30d" },
 ];
 
-export const FIELD_GROUPS = [...new Set(FIELD_CATALOG.map((f) => f.group))];
-
 /** What the screener can screen besides companies. Each has its own fields,
  *  read from the same files its list page uses. */
 export type Universe = "companies" | "indices" | "commodities";
