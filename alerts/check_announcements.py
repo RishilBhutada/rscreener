@@ -13,6 +13,9 @@ from pathlib import Path
 
 import requests
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pipeline"))
+from business_updates import is_update  # noqa: E402
+
 IST = timezone(timedelta(hours=5, minutes=30))
 API = "https://www.nseindia.com/api/corporate-announcements?index=equities"
 HEADERS = {
@@ -71,6 +74,8 @@ def main() -> None:
             continue
         if ts < cutoff:
             continue
+        if is_update(a):
+            continue  # update_alerts.py pushes these, with what they are
         desc = (a.get("desc") or "announcement").strip()
         detail = (a.get("attchmntText") or desc).strip()
         link = a.get("attchmntFile") or "https://www.nseindia.com/companies-listing/corporate-filings-announcements"

@@ -82,6 +82,9 @@ type Company = {
   indices?: [string, string, string][] | null;
   /** What the company does: its Wikipedia article (CC BY-SA 4.0), verified by the ticker in its infobox. */
   about?: { title: string; url: string; short: string | null; text: string | null } | null;
+  /** Quarterly business updates filed before the results (pipeline/business_updates.py):
+   *  n of the last `of` quarters on record, typical days after the quarter ended, the latest. */
+  updates?: Updates | null;
   exchange?: string | null;
   bse_code?: number | string | null;
   /** Written by pipeline/export_company_json.py so this page need not download
@@ -274,6 +277,8 @@ function quarterBefore(day: string): string {
   return `${qy}-${String(qm).padStart(2, "0")}-${String(new Date(Date.UTC(qy, qm, 0)).getUTCDate()).padStart(2, "0")}`;
 }
 
+/** pipeline/business_updates.py summary(). */
+type Updates = { n: number; of: number; typ: number | null; last: { q: string; d: string; at?: string; doc?: string } };
 /** The next results meeting on NSE's calendar: undefined while loading, null if none. */
 type NextResults = { date: string; purpose: string } | null | undefined;
 
@@ -694,6 +699,11 @@ const METRIC_INFO: Record<string, { how: string; means: string; watch?: string }
     how: "Dividend per share over the last year divided by the current price.",
     means: "The cash return at today's price, before any capital gain.",
     watch: "A high yield is as often a collapsed price as a generous dividend.",
+  },
+  "Business update": {
+    how: "The company's own early look at the quarter - sales, loans, deposits, store count - filed with NSE before its results. Read off NSE's announcements each day; \"usually day N\" is the middle of the days after quarter end it filed them, from two quarters or more.",
+    means: "Some of the quarter is known before the results. Over five quarters (116 companies), the share made a big move on 16.5% of update days - against 5.6% of ordinary days and 25-33% of results days.",
+    watch: "Which way the share moved on the update did not tell which way it would move on results day - 46% the same way, close to a coin toss. Voluntary: a company can stop at any quarter.",
   },
   "ROCE": {
     how: "Operating profit divided by capital employed - total assets less current liabilities - from the filed annual statements.",
@@ -1291,7 +1301,9 @@ function industryMedian(cohort: Cohort, field: string): { value: number; n: numb
   return { value: m, n: vs.length };
 }
 
-function RatioGrid({ snapshot, row, cohort, next }: { snapshot: Row; row: Row | null; cohort: Cohort | null; next?: NextResults }) {
+function RatioGrid({ snapshot, row, cohort, next, updates }: {
+  snapshot: Row; row: Row | null; cohort: Cohort | null; next?: NextResults; updates?: Updates | null;
+}) {
   const g = (k: string) => num(row, k) ?? num(snapshot, k);
   const method = String((row?.["vol_method"] ?? snapshot["vol_method"]) ?? "");
   const vol = (k: string) => {
@@ -1332,6 +1344,10 @@ function RatioGrid({ snapshot, row, cohort, next }: { snapshot: Row; row: Row | 
     ["What it earns", [
       ["Next results", next === undefined ? "—" : next === null ? "Not announced"
         : new Date(`${next.date}T00:00:00`).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" }), ""],
+      // Only for a company that files them: on every other page the row
+      // would be a dash that says nothing (owner: no dead rows).
+      ...(updates ? [["Business update", new Date(`${updates.last.d}T00:00:00`).toLocaleDateString("en-IN",
+        { day: "numeric", month: "short", year: "numeric" }), ""] as [string, string, string]] : []),
       ["ROCE", pct(g("roce")), "roce"],
       ["ROE", pct(g("roe")), "roe"],
       ["Sales growth 5Y", pct(g("sales_cagr_5y")), "sales_cagr_5y"],
@@ -1387,6 +1403,9 @@ function RatioGrid({ snapshot, row, cohort, next }: { snapshot: Row; row: Row | 
             {cells.map(([label, value, field]) => {
               const ctx = label === "Next results"
                 ? (next ? `${periodLabel(quarterBefore(next.date))} quarter · board meeting` : next === null ? "No date on NSE's calendar yet" : null)
+                : label === "Business update" && updates
+                ? [`${updates.last.q}`, `${updates.n} of ${updates.of} quarters`, updates.typ != null && `usually day ${updates.typ}`]
+                  .filter(Boolean).join(" · ")
                 : context(field);
               return (
                 <div key={label} className="border-b border-[var(--line)] py-1.5">
@@ -2003,7 +2022,7 @@ function CompanyView() {
           a saved section order gave it CSS order 0 and it jumped to the top,
           and in swipe mode it was a nameless pane of its own (17-Oct-2026). */}
       <div id="summary" className="scroll-mt-32 space-y-4">
-        <RatioGrid snapshot={s} row={fullRow} cohort={cohort} next={nextResults} />
+        <RatioGrid snapshot={s} row={fullRow} cohort={cohort} next={nextResults} updates={company.updates} />
         {Object.keys(company.statements).length === 0 && !company.trend?.annual && (
           <div className="bg-[var(--warn-soft)] border border-[var(--warn-line)] text-[var(--warn-ink)] rounded-xl p-4 text-sm">
             Financial statements haven&apos;t been fetched for this company yet — showing the snapshot only.

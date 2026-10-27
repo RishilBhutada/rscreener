@@ -1,7 +1,7 @@
 /** The calendar page's two files (pipeline/export_calendar_json.py), and one
  *  shape for both so the page can list, filter and search them together. */
 
-export type CalKind = "results" | "dividend" | "bonus" | "split" | "rights" | "buyback" | "other" | "ipo" | "meeting";
+export type CalKind = "results" | "dividend" | "bonus" | "split" | "rights" | "buyback" | "other" | "ipo" | "meeting" | "update";
 
 /** calendar.json - what is coming. The home page's "Coming up" reads it too,
  *  so its first six fields keep their old names. */
@@ -28,7 +28,9 @@ export type UpcomingDoc = {
   recent_from?: string; recent?: PastEvent[]; recent_names?: Record<string, string>;
 };
 
-/** calendar-past.json - the past year, in short keys (about 11,000 events). */
+/** calendar-past.json - the past year, in short keys (about 11,000 events).
+ *  k "update": a quarterly business update filed before that quarter's
+ *  results (pipeline/business_updates.py) - x is its subject line. */
 export type PastEvent = {
   d: string; k: CalKind; s: string;
   /** Sales (rv) and net profit (pt) in ₹ crore; growth against a year before
@@ -53,13 +55,13 @@ export type CalEvent = {
 
 export const KIND_LABEL: Record<CalKind, string> = {
   results: "Results", dividend: "Dividend", bonus: "Bonus", split: "Split", rights: "Rights",
-  buyback: "Buyback", other: "Other", ipo: "IPO", meeting: "Meeting",
+  buyback: "Buyback", other: "Other", ipo: "IPO", meeting: "Meeting", update: "Update",
 };
 
 /** The type filter: each chip and the kinds it covers. */
 export const GROUPS: [string, string, CalKind[]][] = [
   ["all", "All", []],
-  ["results", "Results", ["results"]],
+  ["results", "Results", ["results", "update"]],
   ["dividend", "Dividends", ["dividend"]],
   ["reshape", "Splits & bonuses", ["split", "bonus"]],
   ["ipo", "IPOs", ["ipo"]],
@@ -86,6 +88,7 @@ export function fromUpcoming(e: UpcomingEvent, i: number, short: (n: string, s: 
 export function fromPast(e: PastEvent, i: number, names: Record<string, string>, short: (n: string, s: string) => string): CalEvent {
   const name = short(names[e.s] ?? "", e.s);
   const what = e.k === "results" ? `${e.q ?? ""} results`.trim()
+    : e.k === "update" ? `${e.q ?? ""} business update`.trim()
     : e.k === "ipo" ? "Listed"
     : e.k === "meeting" ? (e.p || "Board meeting")
     : (e.x || KIND_LABEL[e.k]);

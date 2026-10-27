@@ -1,8 +1,9 @@
 """Rscreener - keeps the News page current through the day (owner, 15-Oct-2026).
 
 Every twenty minutes from 07:00 to 23:59 IST: fetch_news.py (feeds, GDELT,
-NSE deals and SAST) into data/news.db. When anything new arrived, the
-database is stored on the data-db release (news.db.gz) and "Publish news"
+NSE deals and SAST) into data/news.db, and alerts/update_alerts.py, which
+pushes a starred company's quarterly business update. When anything new
+arrived, the database is stored on the data-db release (news.db.gz) and "Publish news"
 (publish-news.yml) is started - at most every forty minutes, because each
 publish is a GitHub Pages deployment and Pages limits how many an hour.
 
@@ -88,6 +89,11 @@ def main() -> None:
         r = subprocess.run(args, capture_output=True, text=True)
         out = (r.stdout or "") + (r.stderr or "")
         print(f"{now:%H:%M} " + " | ".join(line for line in out.splitlines() if line.startswith(("news:", "deals:", "sast:"))))
+        # A starred company's quarterly business update, pushed within twenty
+        # minutes (alerts/update_alerts.py; it never repeats one).
+        u = subprocess.run([sys.executable, str(ROOT / "alerts" / "update_alerts.py")], capture_output=True, text=True)
+        print("   " + " | ".join(line for line in ((u.stdout or "") + (u.stderr or "")).splitlines()
+                              if line.startswith(("updates:", "account list:"))))
         m = re.search(r"NEW_ROWS=(\d+)", out)
         if m and int(m.group(1)) > 0:
             pending = True

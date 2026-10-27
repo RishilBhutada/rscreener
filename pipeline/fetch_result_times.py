@@ -10,6 +10,9 @@ few hundred small requests, once.
 
 Table result_times(symbol, day, at, doc): each company's earliest results
 announcement on each day - its time (HH:MM:SS, IST) and the filing's PDF.
+The same day lists carry the quarterly business updates some companies file
+before their results (business_updates.py): table business_updates(symbol,
+quarter, day, at, doc, subject), each company's first update per quarter.
 
   every run         the last --days days (default 3)
   with --backfill   also every day of the past year not fetched yet, a day a
@@ -27,6 +30,7 @@ from pathlib import Path
 import requests
 
 import budget
+import business_updates
 import nse_session
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -108,6 +112,9 @@ def main() -> None:
     con.execute("CREATE TABLE IF NOT EXISTS meeting_times "
                 "(symbol TEXT, day TEXT, at TEXT, doc TEXT, PRIMARY KEY (symbol, day))")
     con.execute("CREATE TABLE IF NOT EXISTS meeting_times_log (day TEXT PRIMARY KEY, fetched_at TEXT, n INTEGER)")
+    con.execute("CREATE TABLE IF NOT EXISTS business_updates (symbol TEXT, quarter TEXT, day TEXT, at TEXT, "
+                "doc TEXT, subject TEXT, PRIMARY KEY (symbol, quarter))")
+    con.execute("CREATE TABLE IF NOT EXISTS business_updates_log (day TEXT PRIMARY KEY, fetched_at TEXT, n INTEGER)")
     con.commit()
     has_events = con.execute("SELECT 1 FROM sqlite_master WHERE name='calendar_events'").fetchone()
     meeting_days = {(s, d) for s, d in con.execute(
@@ -116,10 +123,12 @@ def main() -> None:
     today = datetime.now(IST).date()
     days = [today - timedelta(days=i) for i in range(args.days)]
     if args.backfill:
-        # A day counts as held only when both its results and its other
-        # meetings' times are stored (meeting times began 15-Oct-2026).
+        # A day counts as held only when its results, its other meetings'
+        # times and its business updates are all stored (meeting times began
+        # 15-Oct-2026, business updates 27-Oct-2026).
         held = ({r[0] for r in con.execute("SELECT day FROM result_times_log")}
-                & {r[0] for r in con.execute("SELECT day FROM meeting_times_log")})
+                & {r[0] for r in con.execute("SELECT day FROM meeting_times_log")}
+                & {r[0] for r in con.execute("SELECT day FROM business_updates_log")})
         days += [d for d in (today - timedelta(days=i) for i in range(args.days, 366)) if d.isoformat() not in held]
 
     s = requests.Session()
@@ -162,19 +171,29 @@ def main() -> None:
             con.execute("INSERT INTO meeting_times VALUES (?,?,?,?) ON CONFLICT(symbol, day) DO UPDATE SET "
                         "at=excluded.at, doc=excluded.doc WHERE excluded.at < meeting_times.at",
                         (sym, day, at, doc))
+        updates = business_updates.found(rows)
+        for (sym, qe), (day, at, doc, subject) in updates.items():
+            # The first update of the quarter wins, as with results.
+            con.execute("INSERT INTO business_updates VALUES (?,?,?,?,?,?) ON CONFLICT(symbol, quarter) DO UPDATE SET "
+                        "day=excluded.day, at=excluded.at, doc=excluded.doc, subject=excluded.subject "
+                        "WHERE excluded.day || excluded.at < business_updates.day || business_updates.at",
+                        (sym, qe, day, at, doc, subject))
         # Today is never "held": more results arrive all evening.
         if d < today:
             stamp_now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             con.execute("INSERT OR REPLACE INTO result_times_log VALUES (?,?,?)", (d.isoformat(), stamp_now, len(best)))
             con.execute("INSERT OR REPLACE INTO meeting_times_log VALUES (?,?,?)", (d.isoformat(), stamp_now, len(meets)))
+            con.execute("INSERT OR REPLACE INTO business_updates_log VALUES (?,?,?)", (d.isoformat(), stamp_now, len(updates)))
         con.commit()
         found += len(best)
         done += 1
         if i + 1 < len(days):
             time.sleep(args.sleep)
     n = con.execute("SELECT COUNT(*) FROM result_times").fetchone()[0]
+    nu = con.execute("SELECT COUNT(*) FROM business_updates").fetchone()[0]
     con.close()
-    print(f"result times: {done} of {len(days)} days read, {found} results announcements in them; {n} held")
+    print(f"result times: {done} of {len(days)} days read, {found} results announcements in them; {n} held; "
+          f"{nu} business updates held")
 
 
 if __name__ == "__main__":

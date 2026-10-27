@@ -194,9 +194,12 @@ jobs:
       - name: Record when each company's results came out
         # NSE's announcements list, one call a day: the time each results
         # announcement was published, which the calendar shows and dates
-        # results by (pipeline/fetch_result_times.py). The last three days on
-        # every run, and any day of the past year not held yet - the whole
-        # year the first time, about six minutes, then nothing.
+        # results by (pipeline/fetch_result_times.py), and the quarterly
+        # business updates some companies file before results
+        # (pipeline/business_updates.py). The last three days on every run,
+        # and any day of the past year not held yet - the whole year the
+        # first time (again from 27-Oct-2026, for the updates), about six
+        # minutes, then nothing.
         env:
           RSCREENER_STEP_MINUTES: "12"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_result_times.py --days 3 --backfill

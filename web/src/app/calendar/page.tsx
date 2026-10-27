@@ -24,6 +24,7 @@ const RECHECK_MS = 3 * 60_000;
 const COLOR: Record<CalKind, string> = {
   results: "var(--accent)", dividend: "var(--ca-div)", bonus: "var(--ca-bon)", split: "var(--ca-spl)",
   rights: "var(--ca-rgt)", buyback: "var(--ca-buy)", other: "var(--ca-oth)", ipo: "var(--warn)", meeting: "var(--ink3)",
+  update: "var(--accent)",
 };
 
 function Badge({ kind }: { kind: CalKind }) {
@@ -74,6 +75,7 @@ function line(e: CalEvent): string {
   if (p?.k === "dividend") return [p.amt && `${rs(p.amt)} a share`, p.yld !== undefined && `${p.yld}% of the price`, !p.amt && p.x].filter(Boolean).join(" · ");
   if (p?.k === "ipo") return [p.seg, p.ip && `issue ${rs(p.ip)}`, p.lc && `first close ${rs(p.lc)}`].filter(Boolean).join(" · ");
   if (p?.k === "meeting") return p.x ?? "";
+  if (p?.k === "update") return `${p.q} · before its results`;
   if (p) return p.x ?? "";
   if (n?.type === "results") {
     // "Financial Results/Dividend": what else the meeting takes up.
@@ -106,7 +108,7 @@ function sub(e: CalEvent): string {
 /** The figure on the right: how the stock moved. */
 function figure(e: CalEvent): { v: number; label: string } | null {
   const p = e.past;
-  if (p?.k === "results" && p.mv !== undefined) return { v: p.mv, label: "stock" };
+  if ((p?.k === "results" || p?.k === "update") && p.mv !== undefined) return { v: p.mv, label: "stock" };
   if (p?.k === "ipo" && p.lg !== undefined) return { v: p.lg, label: "day one" };
   return null;
 }
@@ -492,6 +494,19 @@ function Detail({ e, onClose, earlier, basis, pickBasis }: {
           : p.k === "rights" ? "Shareholders on the record date could buy new shares at the stated price."
           : p.k === "buyback" ? "The company bought back its own shares." : "A change to the company's shares or securities."}</p>
       )}
+      {p?.k === "update" && (
+        <>
+          {p.x && <p className="text-[13px]">{p.x}</p>}
+          <div className="grid grid-cols-2 gap-3 py-1">
+            {p.at && <Stat label="Out at" value={`${clock(p.at)} IST`} />}
+            {p.mv !== undefined && <Stat label="Stock, over the update" value={pctText(p.mv, 2)} className={tone(p.mv)} />}
+            {p.nf !== undefined && <Stat label="Nifty 50, same days" value={pctText(p.nf, 2)} className={tone(p.nf)} />}
+            {rel !== undefined && <Stat label="Stock against Nifty" value={`${signed(rel, 2)} pts`} className={tone(rel)} />}
+          </div>
+          <p className="text-[11px] text-[var(--ink3)]">A voluntary early look at the quarter, filed before the results. Over five quarters of these, the stock&apos;s move on the update day did not tell which way it would move on results day.</p>
+          {p.doc && <DocLink href={docUrl(p.doc)}>The update</DocLink>}
+        </>
+      )}
       {p?.k === "meeting" && p.x && <p className="text-[13px]">{p.x}</p>}
       {p?.k === "meeting" && p.at && (
         <div className="grid grid-cols-2 gap-3 py-1">
@@ -539,7 +554,7 @@ function Detail({ e, onClose, earlier, basis, pickBasis }: {
         className="rs-press inline-flex items-center justify-center w-full min-h-[44px] rounded-xl bg-[var(--accent-fill)] text-[var(--accent-fill-ink)] text-[14px] font-semibold">
         Open {e.name}
       </Link>
-      <p className="text-[11px] text-[var(--ink3)]">Source: NSE - {e.upcoming ? "event calendar and corporate actions" : p?.k === "results" ? "results filings and daily prices" : p?.k === "ipo" ? "IPO list and daily prices" : "corporate actions"}.</p>
+      <p className="text-[11px] text-[var(--ink3)]">Source: NSE - {e.upcoming ? "event calendar and corporate actions" : p?.k === "results" ? "results filings and daily prices" : p?.k === "update" ? "company announcements and daily prices" : p?.k === "ipo" ? "IPO list and daily prices" : "corporate actions"}.</p>
     </InfoDialog>
   );
 }

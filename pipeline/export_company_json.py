@@ -20,6 +20,7 @@ from export_json import freshen_prices
 from fetch_corporate_actions import dividend_detail
 from trend_lib import build_trends, net_debt_series, ratio_bands
 import fund_units
+import business_updates
 import seasons_lib
 from export_indices_json import group_of, sym_of
 
@@ -769,6 +770,15 @@ def main() -> None:
                 "SELECT symbol, title, url, short, text FROM company_about WHERE status='ok'"):
             about_by_symbol[s] = {"title": title, "url": url, "short": short or None, "text": text or None}
     coverage_by_symbol = coverage_notes(con)
+    # Quarterly business updates filed before the results (business_updates.py):
+    # how often, how many days after the quarter, and the latest.
+    updates_by_symbol: dict[str, dict] = {}
+    if _table_exists(con, "business_updates_log"):
+        since = con.execute("SELECT MIN(day) FROM business_updates_log").fetchone()[0]
+        if since:
+            for s_, lst in business_updates.load(con).items():
+                if (summ := business_updates.summary(lst, since)):
+                    updates_by_symbol[s_] = summ
     # symbol -> (exchange, bse code). Older databases have no EXCHANGE column,
     # in which case every company is what it always was: NSE.
     try:
@@ -886,6 +896,7 @@ def main() -> None:
             "seasons": seasons_by_symbol.get(sym),
             "indices": indices_by_symbol.get(sym),
             "about": about_by_symbol.get(sym),
+            "updates": updates_by_symbol.get(sym),
             "no_pe_reason": None if (bands.get(sym, {}) or {}).get("pe") else no_pe.get(sym),
             # Which exchange this company is listed on, because it decides what
             # can exist on the page. The as-filed quarterly table, the P/E band
