@@ -1,0 +1,2 @@
+# One rule a line: SYMBOL > price  or  SYMBOL < price  (alerts/price_alerts.py)
+# e.g. RELIANCE > 1300

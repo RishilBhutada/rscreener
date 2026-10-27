@@ -363,6 +363,10 @@ function PeerTable({ symbol, self, peers, industry }: { symbol: string; self: Ro
           <h2 className="text-base font-semibold text-[var(--ink)]">Peer comparison</h2>
           <p className="text-xs text-[var(--ink3)] mt-0.5">{industry}</p>
         </div>
+        <Link href={`/compare?s=${[symbol, ...peers.slice(0, 3).map((p) => String(p.symbol))].map(encodeURIComponent).join(",")}`}
+          className="shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold text-[var(--accent-ink)] bg-[var(--accent-soft)] inline-flex items-center">
+          Compare
+        </Link>
         <button type="button" onClick={() => setEditing(!editing)} aria-expanded={editing}
           className={`shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold border ${editing ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]" : "text-[var(--ink2)] border-[var(--line)]"}`}>
           {editing ? "Done" : "Edit columns"}
@@ -2075,6 +2079,7 @@ function CompanyView() {
   // The next results meeting, from the calendar the Calendar page reads
   // (8 KB on the wire). Undefined while loading, null if NSE lists none.
   const [nextResults, setNextResults] = useState<NextResults>(undefined);
+  const [alertsOpen, setAlertsOpen] = useState(false);
   useEffect(() => {
     if (!symbol) return;
     const d = new Date();
@@ -2242,11 +2247,13 @@ function CompanyView() {
           <IndexChips list={company.indices} />
         </div>
         <div className="flex items-center gap-1 shrink-0">
+          <IconButton name="bell" label="Price alerts" onClick={() => setAlertsOpen(true)} />
           <IconButton name="download" label="Export to Excel" onClick={exportCompanyXlsx} />
           <RefetchButton symbol={symbol} />
           <WatchStar symbol={symbol} />
         </div>
       </div>
+      {alertsOpen && <PriceAlerts symbol={symbol} price={price} onClose={() => setAlertsOpen(false)} />}
       <AboutCompany about={company.about} />
 
       {price !== null && (() => {
@@ -2531,6 +2538,61 @@ function CompanyMark({ name, symbol, logo }: { name: string; symbol: string; log
   return (
     <span aria-hidden="true" className="w-11 h-11 rounded-xl shrink-0 inline-flex items-center justify-center text-[15px] font-bold text-white"
       style={{ background: `hsl(${h} 45% 42%)` }}>{initials}</span>
+  );
+}
+
+/** Price alerts for this company (alerts/price_alerts.py): a push when the
+ *  price crosses a level, checked every twenty minutes in market hours on a
+ *  quote about fifteen minutes behind NSE. Kept as rs_price_alerts, synced -
+ *  the cloud check reads them from the signed-in account. */
+type PriceAlert = { s: string; op: ">" | "<"; p: number };
+function loadAlerts(): PriceAlert[] {
+  try {
+    const v = JSON.parse(localStorage.getItem("rs_price_alerts") ?? "[]");
+    return Array.isArray(v) ? v.filter((a) => a && typeof a.s === "string" && (a.op === ">" || a.op === "<") && typeof a.p === "number") : [];
+  } catch { return []; }
+}
+function PriceAlerts({ symbol, price, onClose }: { symbol: string; price: number | null; onClose: () => void }) {
+  const [all, setAll] = useState<PriceAlert[]>([]);
+  const [op, setOp] = useState<">" | "<">(">");
+  const [level, setLevel] = useState("");
+  useEffect(() => { setAll(loadAlerts()); }, []);
+  const save = (next: PriceAlert[]) => {
+    setAll(next);
+    try { localStorage.setItem("rs_price_alerts", JSON.stringify(next)); } catch { /* not remembered */ }
+  };
+  const mine = all.filter((a) => a.s === symbol);
+  const n = Number(level.replace(/,/g, ""));
+  const ok = Number.isFinite(n) && n > 0;
+  return (
+    <InfoDialog title="Price alerts" onClose={onClose}>
+      <div className="space-y-3 text-sm">
+        <p className="text-[var(--ink3)] text-xs">A push to your phone when {symbol} crosses a price, once a day per alert. Checked every 20 minutes in market hours on a quote about 15 minutes behind NSE.{price ? ` Now ₹${fmtNum(price)}.` : ""}</p>
+        <div className="flex items-center gap-2">
+          <div className="inline-flex gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs" role="radiogroup" aria-label="Direction">
+            {([[">", "Above"], ["<", "Below"]] as const).map(([k, label]) => (
+              <button key={k} type="button" role="radio" aria-checked={op === k} onClick={() => setOp(k)}
+                className={`rounded-md px-2.5 py-1.5 font-medium ${op === k ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>{label}</button>
+            ))}
+          </div>
+          <input inputMode="decimal" value={level} onChange={(e) => setLevel(e.target.value)} placeholder="₹ price"
+            className="min-w-0 flex-1 rounded-lg border border-[var(--line)] bg-[var(--card2)] px-3 py-2 text-[var(--ink)]" />
+          <button type="button" disabled={!ok} onClick={() => { save([...all, { s: symbol, op, p: n }]); setLevel(""); }}
+            className="rounded-lg px-3 py-2 font-semibold bg-[var(--accent-fill)] text-[var(--accent-fill-ink)] disabled:opacity-40">Add</button>
+        </div>
+        {mine.length > 0 && (
+          <ul className="divide-y divide-[var(--line)]">
+            {mine.map((a, i) => (
+              <li key={i} className="py-1.5 flex items-center justify-between">
+                <span>{a.op === ">" ? "Above" : "Below"} ₹{fmtNum(a.p)}</span>
+                <button type="button" onClick={() => save(all.filter((x) => x !== a))} className="text-xs text-[var(--ink3)]">Remove</button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="text-[11px] text-[var(--ink3)]">Pushes reach your phone once you are signed in (the cloud check reads your account) and the ntfy app is subscribed - Settings › Phone alerts.</p>
+      </div>
+    </InfoDialog>
   );
 }
 

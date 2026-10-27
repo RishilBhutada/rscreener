@@ -91,9 +91,12 @@ def main() -> None:
         print(f"{now:%H:%M} " + " | ".join(line for line in out.splitlines() if line.startswith(("news:", "deals:", "sast:"))))
         # A starred company's quarterly business update, pushed within twenty
         # minutes (alerts/update_alerts.py; it never repeats one).
-        u = subprocess.run([sys.executable, str(ROOT / "alerts" / "update_alerts.py")], capture_output=True, text=True)
-        print("   " + " | ".join(line for line in ((u.stdout or "") + (u.stderr or "")).splitlines()
-                              if line.startswith(("updates:", "account list:"))))
+        # ...and price alerts set with the bell on a company page
+        # (alerts/price_alerts.py; market hours only).
+        for script in ("update_alerts.py", "price_alerts.py"):
+            u = subprocess.run([sys.executable, str(ROOT / "alerts" / script)], capture_output=True, text=True)
+            print("   " + " | ".join(line for line in ((u.stdout or "") + (u.stderr or "")).splitlines()
+                                  if line.startswith(("updates:", "price alerts:", "account list:"))))
         m = re.search(r"NEW_ROWS=(\d+)", out)
         if m and int(m.group(1)) > 0:
             pending = True
