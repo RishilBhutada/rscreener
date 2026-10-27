@@ -35,10 +35,14 @@ NSE_ITEMS = [
     "revenue", "pat", "eps", "total_expenses", "finance_cost", "depreciation",
     "cost_materials", "purchases", "inv_change", "equity", "share_capital",
     "gross_profit", "op_profit_direct", "interest_expended", "operating_expenses",
+    # The profit breakdown screener.in shows under "+" (27-Oct-2026): stored for
+    # ~2,290 companies all along, never exported.
+    "other_income", "pbt", "tax", "employee_cost",
 ]
 MONEY = {  # fields to convert Rs -> Rs crore on emit (eps / margins / book-value-per-share excluded)
     "revenue", "pat", "total_expenses", "finance_cost", "depreciation",
     "cost_materials", "purchases", "inv_change", "equity", "ebitda_direct", "cogs_direct",
+    "other_income", "pbt", "tax", "employee_cost",
 }
 KEEP_ANNUAL = 25
 KEEP_QUARTERLY = 88  # ~22 years, matching screener.in's Max span on the ratio charts
@@ -747,6 +751,42 @@ def cross_source_outliers(con: sqlite3.Connection) -> dict[tuple[str, str], dict
     return out
 
 
+BREAKDOWN_KEYS = ("other_income", "pbt", "tax_pct", "material_pct", "employee_pct", "other_cost_pct")
+
+
+def profit_breakdown(slot: dict, rev, ebitda) -> dict:
+    """The lines under screener.in's "+" buttons, from the filing itself.
+
+    Other income, profit before tax and tax rate are filed lines. The expense
+    split is the filing's own heads as a share of sales: materials (consumed +
+    bought for resale + change in inventories), employees, and everything else
+    in operating expenses. Filings carry no separate manufacturing line - it
+    sits inside "other expenses" - so there is no "Manufacturing Cost %" here.
+    """
+    def f(k):
+        v = slot.get(k)
+        return v if (v is not None and pd.notna(v)) else None
+    out = {k: None for k in BREAKDOWN_KEYS}
+    out["other_income"] = _cr(f("other_income")) if f("other_income") is not None else None
+    pbt, tax = f("pbt"), f("tax")
+    out["pbt"] = _cr(pbt) if pbt is not None else None
+    if pbt is not None and tax is not None and pbt > 0:
+        out["tax_pct"] = round(tax / pbt * 100, 1)
+    if rev and rev > 0:
+        mats = [f("cost_materials"), f("purchases"), f("inv_change")]
+        mat = sum(m for m in mats if m is not None) if any(m is not None for m in mats) else None
+        emp = f("employee_cost")
+        if mat is not None:
+            out["material_pct"] = round(mat / rev * 100, 1)
+        if emp is not None:
+            out["employee_pct"] = round(emp / rev * 100, 1)
+        if ebitda is not None and mat is not None and emp is not None:
+            other = (rev - ebitda) - mat - emp
+            if other >= 0:
+                out["other_cost_pct"] = round(other / rev * 100, 1)
+    return out
+
+
 def sales_per_share(ordered: list, rev: list, periods: dict, sh: float | None,
                     ev: list | None, adj_eps, demerger, trusted: bool) -> list:
     """Sales (revenue from operations) per share, each quarter on today's
@@ -837,6 +877,68 @@ def sales_per_share(ordered: list, rev: list, periods: dict, sh: float | None,
     return out
 
 
+# Items a year is the sum of its quarters for; balance items are not.
+FLOW_ITEMS = ("revenue", "pat", "eps", "total_expenses", "finance_cost", "depreciation", "cost_materials",
+              "purchases", "inv_change", "other_income", "pbt", "tax", "employee_cost", "gross_profit",
+              "op_profit_direct", "interest_expended", "operating_expenses")
+
+
+def _months_back(iso: str, n: int) -> str:
+    y, m = int(iso[:4]), int(iso[5:7]) - n
+    while m <= 0:
+        m += 12
+        y -= 1
+    last = [31, 29 if (y % 4 == 0 and (y % 100 or y % 400 == 0)) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1]
+    return f"{y:04d}-{m:02d}-{last:02d}"
+
+
+def years_from_quarters(comps: dict, splits: dict | None = None) -> None:
+    """A financial year with no annual filing on record, taken as the sum of its
+    four filed quarters.
+
+    NSE's annual results index stops around FY24 in our store (later years moved
+    to the integrated-filing regime), so FY25 and FY26 came from the second
+    source: revenue, profit and EPS only - no other income, tax or expense heads
+    - and its profit is owners-only (see asfiled_table). Every quarter of those
+    years IS filed, so the year is rebuilt from them, tagged "nse-4q". Applied
+    only when all four quarters are filed, and only to flow items; equity and
+    share capital come from the year's last quarter. EPS is each quarter's on
+    the share count at the year's end: a bonus inside the year (Reliance,
+    Oct-2024) would otherwise add two quarters of pre-bonus EPS to two after.
+    """
+    for (sym, ptype), years in list(comps.items()):
+        if ptype != "annual":
+            continue
+        qs = comps.get((sym, "quarterly")) or {}
+        filed_q = {p: q for p, q in qs.items() if q.get("_source") == "nse"}
+        if len(filed_q) < 4:
+            continue
+        ends = set(years) | {p for p in filed_q if p[5:7] == "03"}
+        for fy in sorted(ends):
+            slot = years.get(fy)
+            if slot and slot.get("_source") == "nse":
+                continue
+            four = [filed_q.get(fy if k == 0 else _months_back(fy, k)) for k in (0, 3, 6, 9)]
+            if any(q is None for q in four):
+                continue
+            new = {"_source": "nse-4q"}
+            ev = (splits or {}).get(sym)
+            qends = [fy if k == 0 else _months_back(fy, k) for k in (0, 3, 6, 9)]
+            for item in FLOW_ITEMS:
+                vals = [q.get(item) for q in four]
+                if item == "eps" and all(v is not None for v in vals):
+                    vals = [v / (adj_factor(ev, qe) / adj_factor(ev, fy)) for v, qe in zip(vals, qends)]
+                if all(v is not None and pd.notna(v) for v in vals):
+                    new[item] = float(sum(vals))
+            if "revenue" not in new or "pat" not in new:
+                continue
+            for item in ("equity", "share_capital"):
+                v = four[0].get(item) if four[0].get(item) is not None else (slot or {}).get(item)
+                if v is not None:
+                    new[item] = v
+            years[fy] = new
+
+
 def build_trends(con: sqlite3.Connection, shares: dict | None = None,
                  only: set | None = None) -> dict[str, dict]:
     shares = shares or {}
@@ -862,6 +964,7 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None,
                     for item_ in items_:
                         row_.pop(item_, None)
     splits = split_factors(con)
+    years_from_quarters(comps, splits)
     price_adjust.ensure(con)
     dmg = price_adjust.events(con)   # demergers, applied as the prices are
     known = splits_trustworthy(con, shares)
@@ -916,6 +1019,7 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None,
         # filings give paid-up capital only; the balance sheet gives net worth
         sc_ref = share_capital_ref(periods)
         equity = [net_worth(periods[p], sc_ref) or bal.get((symbol, p)) for p in ordered]
+        breakdown = [profit_breakdown(periods[p], rev[i], ebitda[i]) for i, p in enumerate(ordered)]
         trend = {
             "periods": ordered,
             "revenue": [_cr(v) for v in rev],
@@ -935,6 +1039,15 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None,
             "book_value": [round(e / sh * price_adjust.factor_at(dm, p2), 2) if (pd.notna(e) and sh) else None
                            for e, p2 in zip(equity, ordered)],
             "opm": [pct(ebitda[i], rev[i]) for i in range(len(ordered))],
+            # Expenses as screener.in shows them: sales less operating profit,
+            # so the table's three rows add up. "expenses" above is the filing's
+            # total, which also holds interest and depreciation.
+            "opex": [_cr(rev[i] - ebitda[i]) if (rev[i] is not None and ebitda[i] is not None) else None
+                     for i in range(len(ordered))],
+            **{k: [b[k] for b in breakdown] for k in BREAKDOWN_KEYS},
+            # Return on equity per year (annual rows), net profit over net worth.
+            "roe": [pct(pat[i], equity[i]) if (equity[i] and pd.notna(equity[i]) and equity[i] > 0) else None
+                    for i in range(len(ordered))],
             "gpm": [pct(gp[i], rev[i]) for i in range(len(ordered))],
             "npm": [pct(pat[i], rev[i]) for i in range(len(ordered))],
             "source": [periods[p]["_source"] for p in ordered],

@@ -18,7 +18,7 @@ import pandas as pd
 
 from export_json import freshen_prices
 from fetch_corporate_actions import dividend_detail
-from trend_lib import build_trends, net_debt_series, ratio_bands
+from trend_lib import adj_factor, build_trends, net_debt_series, ratio_bands, split_factors
 import fund_units
 import business_updates
 import seasons_lib
@@ -492,7 +492,7 @@ def _table_exists(con: sqlite3.Connection, name: str) -> bool:
     return bool(con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone())
 
 
-def asfiled_table(trend: dict | None, announced: dict | None = None) -> dict | None:
+def asfiled_table(trend: dict | None, announced: dict | None = None, payout: list | None = None) -> dict | None:
     """A results table built from the AS-FILED NSE figures, quarterly or annual.
 
     Both sources were being exported and the page rendered the wrong one. Yahoo
@@ -515,18 +515,30 @@ def asfiled_table(trend: dict | None, announced: dict | None = None) -> dict | N
         return None
     per = trend["periods"]
     declared = [(announced or {}).get(p) for p in per]
+    # (label, values, parent): a row with a parent is folded under that row's
+    # "+" on the page, as screener.in does.
+    opex = trend.get("opex") if any(v is not None for v in (trend.get("opex") or [])) else trend.get("expenses")
     rows = [
-        ("Revenue", trend.get("revenue")),
-        ("Expenses", trend.get("expenses")),
-        ("Operating Profit", trend.get("ebitda")),
-        ("OPM %", trend.get("opm")),
-        ("Interest", trend.get("interest")),
-        ("Depreciation", trend.get("depreciation")),
-        ("Net Profit", trend.get("pat")),
-        ("EPS (Rs)", trend.get("eps")),
+        ("Revenue", trend.get("revenue"), None),
+        ("Expenses", opex, None),
+        ("Material Cost %", trend.get("material_pct"), "Expenses"),
+        ("Employee Cost %", trend.get("employee_pct"), "Expenses"),
+        ("Other Cost %", trend.get("other_cost_pct"), "Expenses"),
+        ("Operating Profit", trend.get("ebitda"), None),
+        ("OPM %", trend.get("opm"), None),
+        ("Other Income", trend.get("other_income"), None),
+        ("Interest", trend.get("interest"), None),
+        ("Depreciation", trend.get("depreciation"), None),
+        ("Profit before tax", trend.get("pbt"), None),
+        ("Tax %", trend.get("tax_pct"), None),
+        ("Net Profit", trend.get("pat"), None),
+        ("EPS (Rs)", trend.get("eps"), None),
+        ("Dividend Payout %", payout, None),
     ]
-    items = [{"label": lab, "values": vals} for lab, vals in rows
-             if vals and any(v is not None for v in vals)]
+    # A row that is blank or zero throughout says nothing (a software company
+    # has no material cost) and is left out.
+    items = [{"label": lab, "values": vals, **({"parent": par} if par else {})} for lab, vals, par in rows
+             if vals and any(v not in (None, 0) for v in vals)]
     if not items:
         return None
     out = {"periods": per, "items": items}
@@ -534,6 +546,82 @@ def asfiled_table(trend: dict | None, announced: dict | None = None) -> dict | N
         out["declared"] = declared   # shown in brackets after each period
     return out
 
+
+
+def dividends_per_share(con: sqlite3.Connection) -> dict[str, list[tuple[str, float, bool]]]:
+    """{symbol: [(ex_date, rupees per share, is_final), ...]} from corporate actions."""
+    out: dict[str, list] = {}
+    if not _table_exists(con, "corporate_actions"):
+        return out
+    import re as _re
+    for sym, d, detail, subject in con.execute(
+            "SELECT symbol, ex_date, detail, subject FROM corporate_actions WHERE kind='dividend' ORDER BY ex_date"):
+        # Every amount on the subject line: "Interim Dividend Rs 11 Per Share/
+        # Special Dividend Rs 46 Per Share" is Rs 57, while `detail` holds 11.
+        pat_ = r"(?:Rs\.?|Re\.?|INR|₹)\s*([0-9]+(?:\.[0-9]+)?)"
+        amts = ([float(x) for x in _re.findall(pat_, subject or "", _re.I)]
+                or [float(x) for x in _re.findall(pat_, detail or "", _re.I)][:1])
+        amt = sum(amts)
+        if amt <= 0 or amt > 1e5:
+            continue
+        # A final dividend is usually filed as plain "Dividend - Rs 30 Per Share";
+        # only interim and special ones say so.
+        final = not _re.search(r"interim|special", subject or "", _re.I)
+        out.setdefault(sym, []).append((str(d)[:10], amt, final))
+    return out
+
+
+def dividend_payout(trend: dict | None, dps: list | None, splits: list | None) -> list | None:
+    """Dividend Payout % per financial year: dividends per share for the year over
+    EPS, both on today's share base (EPS already is; a dividend is divided by the
+    splits and bonuses since its ex-date).
+
+    A final dividend is paid after the year it belongs to (TCS's FY26 final went
+    ex in June 2026), so a final within nine months after a year-end counts for
+    that year; interim and special dividends count for the year they fall in.
+    """
+    if not trend or not dps or not trend.get("periods"):
+        return None
+    ends = trend["periods"]
+    per_year = {e: 0.0 for e in ends}
+    seen = set()
+    for d, amt, final in dps:
+        adj = amt / adj_factor(splits, d)
+        if final:
+            year = max((e for e in ends if e < d and (date.fromisoformat(d) - date.fromisoformat(e)).days <= 270), default=None)
+        else:
+            year = min((e for e in ends if e >= d and (date.fromisoformat(e) - date.fromisoformat(d)).days < 366), default=None)
+        if year is not None:
+            per_year[year] += adj
+            seen.add(year)
+    out = []
+    for e, eps in zip(ends, trend.get("eps") or []):
+        if e in seen and eps and eps > 0:
+            out.append(round(per_year[e] / eps * 100, 1))
+        elif e in seen or not eps:
+            out.append(None)
+        else:
+            # A profitable year with no dividend on record within our window of
+            # corporate actions is shown blank, not 0% - the record may start later.
+            out.append(None)
+    return out if any(v is not None for v in out) else None
+
+
+def cfo_ebitda(cash_flow: dict | None, annual: dict | None) -> None:
+    """Adds "CFO / EBITDA %" to the cash-flow table: how much of operating profit
+    arrived as cash. Matched by financial year (periods end on the same date)."""
+    if not cash_flow or not annual or not annual.get("periods"):
+        return
+    eb = dict(zip(annual["periods"], annual.get("ebitda") or []))
+    cfo = next((it for it in cash_flow.get("items", []) if it.get("label") == "Cash from Operations"), None)
+    if not cfo:
+        return
+    vals = []
+    for p_, v in zip(cash_flow.get("periods", []), cfo.get("values", [])):
+        e = eb.get(str(p_)[:10])
+        vals.append(round(v / e * 100) if (v is not None and e) else None)
+    if any(v is not None for v in vals):
+        cash_flow["items"].append({"label": "CFO / EBITDA %", "values": vals})
 
 
 def reporting_basis(con: sqlite3.Connection) -> dict[str, str]:
@@ -770,6 +858,20 @@ def main() -> None:
                 "SELECT symbol, title, url, short, text FROM company_about WHERE status='ok'"):
             about_by_symbol[s] = {"title": title, "url": url, "short": short or None, "text": text or None}
     coverage_by_symbol = coverage_notes(con)
+    # Face value (NSE's equity list / BSE's) and dividends per share, for the
+    # Face Value tile and the Dividend Payout % row.
+    face_value: dict[str, float] = {}
+    try:
+        for s_, fv in con.execute('SELECT SYMBOL, "FACE VALUE" FROM universe'):
+            try:
+                if fv not in (None, "") and float(fv) > 0:
+                    face_value[s_] = float(fv)
+            except (TypeError, ValueError):
+                pass
+    except Exception:  # noqa: BLE001 - an older universe table has no such column
+        pass
+    dps_by_symbol = dividends_per_share(con)
+    splits_by_symbol = split_factors(con)
     # Quarterly business updates filed before the results (business_updates.py):
     # how often, how many days after the quarter, and the latest.
     updates_by_symbol: dict[str, dict] = {}
@@ -896,6 +998,7 @@ def main() -> None:
             "seasons": seasons_by_symbol.get(sym),
             "indices": indices_by_symbol.get(sym),
             "about": about_by_symbol.get(sym),
+            "face_value": face_value.get(sym),
             "updates": updates_by_symbol.get(sym),
             "no_pe_reason": None if (bands.get(sym, {}) or {}).get("pe") else no_pe.get(sym),
             # Which exchange this company is listed on, because it decides what
@@ -929,13 +1032,15 @@ def main() -> None:
         # what put Yahoo's owners-only profit on screen next to the filed figure.
         for key, tkey, yf_key in (("quarterly_results", "quarterly", "_yf_quarterly"),
                                   ("annual_pnl", "annual", "_yf_annual")):
-            asf = asfiled_table((trends.get(sym) or {}).get(tkey),
-                                {q["end"]: q.get("announced") for q in (quarters_by_symbol.get(sym) or [])})
+            tr = (trends.get(sym) or {}).get(tkey)
+            asf = asfiled_table(tr, {q["end"]: q.get("announced") for q in (quarters_by_symbol.get(sym) or [])},
+                                dividend_payout(tr, dps_by_symbol.get(sym), splits_by_symbol.get(sym)) if tkey == "annual" else None)
             fallback = payload["statements"].pop(yf_key, None)
             chosen = asf or fallback
             if chosen:
                 payload["statements"][key] = chosen
                 payload.setdefault("sources", {})[key] = "as-filed (NSE)" if asf else "Yahoo Finance"
+        cfo_ebitda(payload["statements"].get("cash_flow"), (trends.get(sym) or {}).get("annual"))
         if payload["statements"]:
             n_with += 1
         else:

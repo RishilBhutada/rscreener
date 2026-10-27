@@ -23,7 +23,8 @@ import { IconButton, dayMove, signed as signedNum, tone } from "@/components/Quo
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
-type Stmt = { periods: string[]; items: { label: string; values: (number | null)[] }[]; declared?: (string | null)[] };
+/** `parent`: a breakdown row, folded under that row's "+" (Material Cost % under Expenses). */
+type Stmt = { periods: string[]; items: { label: string; values: (number | null)[]; parent?: string }[]; declared?: (string | null)[] };
 type AnnualReport = { from: string; to: string; url: string };
 type AnnDoc = { date: string; title: string; url: string };
 type Trend = {
@@ -37,6 +38,8 @@ type Trend = {
   opm?: (number | null)[];
   gpm?: (number | null)[];
   npm?: (number | null)[];
+  /** Return on equity per year, % (annual trend). */
+  roe?: (number | null)[];
   source: string[];
 };
 type Shareholding = {
@@ -85,6 +88,8 @@ type Company = {
   /** Quarterly business updates filed before the results (pipeline/business_updates.py):
    *  n of the last `of` quarters on record, typical days after the quarter ended, the latest. */
   updates?: Updates | null;
+  /** Face value per share, Rs (the exchange's equity list). */
+  face_value?: number | null;
   exchange?: string | null;
   bse_code?: number | string | null;
   /** Written by pipeline/export_company_json.py so this page need not download
@@ -301,11 +306,17 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol }:
   const coming = next !== undefined && total ? quarterAfter(stmt.periods[total - 1]) : null;
   // The meeting's date belongs on that column only if it is that quarter's.
   const due = coming && next && quarterBefore(next.date) === coming ? next.date : null;
-  const labels = stmt.items.map((it) => it.label);
+  // Breakdown rows (with a parent) fold under their parent's "+" and move with it.
+  const [openRows, setOpenRows] = useState<Record<string, boolean>>({});
+  const top = stmt.items.filter((it) => !it.parent);
+  const kids = (l: string) => stmt.items.filter((it) => it.parent === l);
+  const labels = top.map((it) => it.label);
   const arranged = arrange(labels, saved.order);
   const order = draft ?? arranged;
-  const byLabel = new Map(stmt.items.map((it) => [it.label, it]));
+  const byLabel = new Map(top.map((it) => [it.label, it]));
   const rows = order.map((l) => byLabel.get(l)).filter((it): it is Stmt["items"][number] => Boolean(it));
+  const shown = rows.flatMap((it, r) => [{ it, r, child: false },
+    ...(openRows[it.label] && !draft ? kids(it.label).map((k) => ({ it: k, r, child: true })) : [])]);
   const finish = () => {
     if (!draft || draft.join("|") === arranged.join("|")) { setDraft(null); return; }
     setAsking(true);
@@ -384,12 +395,13 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol }:
             </tr>
           </thead>
           <tbody>
-            {rows.map((it, r) => {
+            {shown.map(({ it, r, child }) => {
               const bold = boldRows?.includes(it.label);
+              const hasKids = !child && kids(it.label).length > 0;
               return (
-                <tr key={it.label} className="border-b border-[var(--line)] hover:bg-[var(--card2)]">
-                  <td className={`px-3 py-2 sm:py-1.5 truncate max-w-[42vw] sm:max-w-none sm:whitespace-nowrap sticky left-0 bg-[var(--card)] ${bold ? "font-semibold text-[var(--ink)]" : "text-[var(--ink2)]"}`}>
-                    {draft && (
+                <tr key={it.label} className={`border-b border-[var(--line)] hover:bg-[var(--card2)] ${child ? "text-[13px]" : ""}`}>
+                  <td className={`px-3 py-2 sm:py-1.5 truncate max-w-[42vw] sm:max-w-none sm:whitespace-nowrap sticky left-0 bg-[var(--card)] ${child ? "pl-7 text-[var(--ink3)]" : bold ? "font-semibold text-[var(--ink)]" : "text-[var(--ink2)]"}`}>
+                    {draft && !child && (
                       <span className="inline-flex align-middle mr-1.5">
                         <button type="button" disabled={r === 0} onClick={() => setDraft(move(order, it.label, -1))}
                           aria-label={`Move ${it.label} up`}
@@ -399,7 +411,13 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol }:
                           className="w-7 h-7 ml-1 inline-flex items-center justify-center rounded-md border border-[var(--line)] text-[var(--ink2)] disabled:opacity-30">▼</button>
                       </span>
                     )}
-                    {it.label}
+                    {hasKids && !draft ? (
+                      <button type="button" onClick={() => setOpenRows({ ...openRows, [it.label]: !openRows[it.label] })}
+                        aria-expanded={!!openRows[it.label]} className="inline-flex items-center gap-1 text-left">
+                        {it.label}
+                        <span className="text-[var(--accent-ink)] font-semibold">{openRows[it.label] ? "−" : "+"}</span>
+                      </button>
+                    ) : it.label}
                   </td>
                   {it.values.slice(from).map((v, i) => {
                     // Against the period before - the one off-screen to the
@@ -550,8 +568,18 @@ function CompoundedGrowth({ trend, prices }: { trend?: { annual?: Trend }; price
     ["Compounded profit growth", [["10 years", cagr(a.pat, 10, a.periods)], ["5 years", cagr(a.pat, 5, a.periods)], ["3 years", cagr(a.pat, 3, a.periods)], ["1 year", cagr(a.pat, 1, a.periods)]]],
     ["Stock price CAGR", [["10 years", stockCagr(120)], ["5 years", stockCagr(60)], ["3 years", stockCagr(36)], ["1 year", stockCagr(12)]]],
   ];
+  // Return on equity, averaged over the years (as screener.in shows it): the
+  // middle of a run of years says more than one year's figure.
+  const roeAvg = (n: number): number | null => {
+    const v = (a.roe ?? []).filter((x): x is number => x !== null && x !== undefined).slice(-n);
+    return v.length >= Math.min(n, 2) && v.length >= (n === 1 ? 1 : Math.ceil(n * 0.8))
+      ? Math.round(v.reduce((s, x) => s + x, 0) / v.length) : null;
+  };
+  if ((a.roe ?? []).some((x) => x !== null && x !== undefined)) {
+    cards.push(["Return on equity", [["10 years", roeAvg(10)], ["5 years", roeAvg(5)], ["3 years", roeAvg(3)], ["Last year", roeAvg(1)]]]);
+  }
   return (
-    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 grid sm:grid-cols-3 gap-6">
+    <section className={`bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 grid sm:grid-cols-2 ${cards.length > 3 ? "lg:grid-cols-4" : "lg:grid-cols-3"} gap-6`}>
       {cards.map(([title, rows]) => (
         <GrowthCard key={title} title={title} rows={rows} />
       ))}
@@ -1301,8 +1329,8 @@ function industryMedian(cohort: Cohort, field: string): { value: number; n: numb
   return { value: m, n: vs.length };
 }
 
-function RatioGrid({ snapshot, row, cohort, next, updates }: {
-  snapshot: Row; row: Row | null; cohort: Cohort | null; next?: NextResults; updates?: Updates | null;
+function RatioGrid({ snapshot, row, cohort, next, updates, faceValue }: {
+  snapshot: Row; row: Row | null; cohort: Cohort | null; next?: NextResults; updates?: Updates | null; faceValue?: number | null;
 }) {
   const g = (k: string) => num(row, k) ?? num(snapshot, k);
   const method = String((row?.["vol_method"] ?? snapshot["vol_method"]) ?? "");
@@ -1339,6 +1367,7 @@ function RatioGrid({ snapshot, row, cohort, next, updates }: {
     ["What it costs", [
       ["Stock P/E", plain(g("pe")), "pe"],
       ["Book Value", money(g("book_value")), ""],
+      ...(faceValue ? [["Face Value", `₹ ${fmtNum(faceValue, faceValue % 1 ? 2 : 0)}`, ""] as [string, string, string]] : []),
       ["Dividend Yield", pct(g("div_yield")), "div_yield"],
     ]],
     ["What it earns", [
@@ -2022,7 +2051,7 @@ function CompanyView() {
           a saved section order gave it CSS order 0 and it jumped to the top,
           and in swipe mode it was a nameless pane of its own (17-Oct-2026). */}
       <div id="summary" className="scroll-mt-32 space-y-4">
-        <RatioGrid snapshot={s} row={fullRow} cohort={cohort} next={nextResults} updates={company.updates} />
+        <RatioGrid snapshot={s} row={fullRow} cohort={cohort} next={nextResults} updates={company.updates} faceValue={company.face_value} />
         {Object.keys(company.statements).length === 0 && !company.trend?.annual && (
           <div className="bg-[var(--warn-soft)] border border-[var(--warn-line)] text-[var(--warn-ink)] rounded-xl p-4 text-sm">
             Financial statements haven&apos;t been fetched for this company yet — showing the snapshot only.
