@@ -897,6 +897,15 @@ def main() -> None:
         pass
     dps_by_symbol = dividends_per_share(con)
     fno = {r[0] for r in con.execute("SELECT symbol FROM fno_lots")} if _table_exists(con, "fno_lots") else set()
+    # Each company's own icon (fetch_logos.py), written beside the company
+    # files as logos/<SYM>.<ext>; the page shows initials where there is none.
+    LOGO_EXT = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/x-icon": "ico"}
+    logos: dict[str, tuple[str, bytes]] = {}
+    if _table_exists(con, "logos"):
+        for s_, mime, data in con.execute("SELECT symbol, mime, data FROM logos WHERE status='ok' AND data IS NOT NULL"):
+            if mime in LOGO_EXT:
+                logos[s_] = (LOGO_EXT[mime], data)
+    logo_dir = OUT_DIR.parent / "logos"
     splits_by_symbol = split_factors(con)
     # Quarterly business updates filed before the results (business_updates.py):
     # how often, how many days after the quarter, and the latest.
@@ -984,6 +993,13 @@ def main() -> None:
                 {"date": d, "title": t, "url": u}
                 for d, t, u in zip(grp["date"], grp["title"], grp["url"])
             ]
+    # The Announcements list (fetch_announcement_docs.py): [at, category,
+    # subject, url, important] - short keys, fifty to a company.
+    anns_by_symbol: dict[str, list] = {}
+    if _table_exists(con, "announcements"):
+        for s_, at, cat, subj, url, imp in con.execute(
+                "SELECT symbol, at, category, subject, url, important FROM announcements ORDER BY at DESC"):
+            anns_by_symbol.setdefault(s_, []).append([at, cat, subj, url, imp])
     has_docs_table = con.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='documents'"
     ).fetchone()
@@ -1021,7 +1037,10 @@ def main() -> None:
             "documents": {
                 "annual_reports": docs_by_symbol.get(sym, []),
                 "concalls": anndocs_by_symbol.get(sym, {}).get("concall", []),
+                "ppts": anndocs_by_symbol.get(sym, {}).get("ppt", []),
+                "recordings": anndocs_by_symbol.get(sym, {}).get("rec", []),
                 "ratings": anndocs_by_symbol.get(sym, {}).get("rating", []),
+                "announcements": anns_by_symbol.get(sym, []),
             },
             "trend": trends.get(sym, {}),
             "shareholding": shp_by_symbol.get(sym),
@@ -1041,6 +1060,7 @@ def main() -> None:
             "about": about_by_symbol.get(sym),
             "face_value": face_value.get(sym),
             "fno": True if sym in fno else None,
+            "logo": f"logos/{sym}.{logos[sym][0]}" if sym in logos else None,
             "updates": updates_by_symbol.get(sym),
             "no_pe_reason": None if (bands.get(sym, {}) or {}).get("pe") else no_pe.get(sym),
             # Which exchange this company is listed on, because it decides what
@@ -1083,6 +1103,9 @@ def main() -> None:
                 payload["statements"][key] = chosen
                 payload.setdefault("sources", {})[key] = "as-filed (NSE)" if asf else "Yahoo Finance"
         cfo_ebitda(payload["statements"].get("cash_flow"), (trends.get(sym) or {}).get("annual"))
+        if sym in logos:
+            logo_dir.mkdir(parents=True, exist_ok=True)
+            (logo_dir / f"{sym}.{logos[sym][0]}").write_bytes(logos[sym][1])
         if payload["statements"]:
             n_with += 1
         else:

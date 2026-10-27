@@ -188,6 +188,13 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "20"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_fundamentals.py --symbols "${{ steps.plan.outputs.target }}" --statements --max-age-hours 720 --limit 500 --sleep 0.4
+      - name: Company icons from their own websites
+        if: steps.plan.outputs.prices == '1'
+        # pipeline/fetch_logos.py: robots.txt first, raster images only, once a
+        # year per company; 150 a night until every company has been asked.
+        env:
+          RSCREENER_STEP_MINUTES: "10"
+        run: python pipeline/fetch_logos.py --limit 150 --sleep 0.5
       - name: Refresh upcoming events calendar
         # On EVERY run, publish-only included: two NSE calls, seconds. Events
         # are stored in the database and the page is exported from it, so a

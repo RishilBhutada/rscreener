@@ -1,7 +1,14 @@
-"""Rscreener - concall transcripts & credit-rating documents per company.
+"""Rscreener - a company's announcements, concall documents and credit ratings.
 
-One announcements-API call per symbol returns full filing history; we keep the
-newest N concall/transcript and credit-rating items with their PDF links.
+One announcements-API call per symbol returns full filing history; we keep:
+  announcement_docs  the newest N of each kind with their PDF links: concall
+                     transcripts, investor presentations ("ppt"), call
+                     recordings ("rec") and credit-rating updates
+  announcements      the newest ANN_KEEP announcements of every kind - the
+                     company page's Announcements list (Recent / Important /
+                     search) - each with NSE's category, its time and PDF, and
+                     whether it is one of the kinds that move a share (results,
+                     board outcomes, dividends, ratings, deals, orders, ...)
 
 Usage:
   python fetch_announcement_docs.py --symbols @data/nse_symbols.txt [--max-age-hours 156]
@@ -30,7 +37,20 @@ HEADERS = {
 }
 CONCALL_RE = re.compile(r"transcript|con\.? ?call|concall|analyst|investor meet|earnings call", re.I)
 RATING_RE = re.compile(r"credit rating", re.I)
+# Concall material comes in three kinds (screener.in shows them side by side):
+# the presentation, the recording, the transcript.
+PPT_RE = re.compile(r"investor presentation|earnings presentation|presentation", re.I)
+REC_RE = re.compile(r"audio|video|recording|webcast|youtube|weblink|web link", re.I)
 KEEP_PER_TYPE = 15
+ANN_KEEP = 50
+# NSE's own category ("desc") for the filings that matter to a shareholder.
+IMPORTANT_RE = re.compile(
+    r"financial result|outcome of board meeting|board meeting|dividend|bonus|split|buy ?back|rights|credit rating"
+    r"|acquisition|amalgamation|merger|demerger|scheme of arrangement|bagging|receiving of orders|order|"
+    r"resignation of (?:director|kmp)|change in (?:management|director)|auditor|insolvency|fraud|default"
+    r"|press release|investor presentation|updates?$|general updates", re.I)
+NOT_IMPORTANT_RE = re.compile(r"newspaper|trading window|certificate under|loss of share|duplicate share|esop|esos|esps"
+                              r"|shareholders meeting|postal ballot|record date|copy of", re.I)
 
 
 def now_utc() -> str:
@@ -60,6 +80,10 @@ def main() -> None:
     )
     con.execute(
         "CREATE TABLE IF NOT EXISTS anndocs_fetch_log (symbol TEXT PRIMARY KEY, fetched_at TEXT, error TEXT)"
+    )
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS announcements (symbol TEXT, at TEXT, category TEXT, subject TEXT, url TEXT,"
+        " important INTEGER)"
     )
     if args.max_age_hours > 0:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=args.max_age_hours)).strftime("%Y-%m-%d %H:%M:%S")
@@ -91,7 +115,8 @@ def main() -> None:
         try:
             r = nse_session.get(s, API.format(sym=nse_session.q(sym)), timeout=30)
             rows = r.json()
-            buckets: dict[str, list] = {"concall": [], "rating": []}
+            buckets: dict[str, list] = {"concall": [], "ppt": [], "rec": [], "rating": []}
+            anns = []
             for a in rows:
                 text = f"{a.get('desc', '')} {a.get('attchmntText', '')}"
                 url = a.get("attchmntFile")
@@ -103,7 +128,21 @@ def main() -> None:
                 except (ValueError, IndexError):
                     continue
                 title = (a.get("attchmntText") or a.get("desc") or "")[:140]
-                if CONCALL_RE.search(text):
+                desc = (a.get("desc") or "").strip()
+                try:
+                    at = datetime.strptime(dt_raw.strip(), "%d-%b-%Y %H:%M:%S").strftime("%Y-%m-%d %H:%M")
+                except ValueError:
+                    at = iso
+                subject = re.sub(r"^.{0,120}?has informed the exchange (?:about|regarding)\s*", "",
+                                 " ".join((a.get("attchmntText") or desc).split()), flags=re.I).strip(" '\".")
+                important = 1 if (IMPORTANT_RE.search(desc) and not NOT_IMPORTANT_RE.search(desc)
+                                  and not re.search(r"newspaper|clipping", subject, re.I)) else 0
+                anns.append((sym, at, desc[:80], (subject[:1].upper() + subject[1:])[:240], url, important))
+                if REC_RE.search(text) and CONCALL_RE.search(text):
+                    buckets["rec"].append((sym, "rec", iso, title, url))
+                elif PPT_RE.search(text):
+                    buckets["ppt"].append((sym, "ppt", iso, title, url))
+                elif CONCALL_RE.search(text):
                     buckets["concall"].append((sym, "concall", iso, title, url))
                 elif RATING_RE.search(text):
                     buckets["rating"].append((sym, "rating", iso, title, url))
@@ -113,10 +152,14 @@ def main() -> None:
                 recs.extend(items[:KEEP_PER_TYPE])
             con.execute("DELETE FROM announcement_docs WHERE symbol=?", (sym,))
             con.executemany("INSERT INTO announcement_docs VALUES (?,?,?,?,?)", recs)
+            anns.sort(key=lambda x: x[1], reverse=True)
+            con.execute("DELETE FROM announcements WHERE symbol=?", (sym,))
+            con.executemany("INSERT INTO announcements VALUES (?,?,?,?,?,?)", anns[:ANN_KEEP])
             con.execute("INSERT OR REPLACE INTO anndocs_fetch_log VALUES (?,?,?)", (sym, now_utc(), None))
             con.commit()
             ok += 1
-            print(f"[{i}/{len(symbols)}] {sym}: {len(buckets['concall'])} concall, {len(buckets['rating'])} rating (kept {len(recs)})")
+            print(f"[{i}/{len(symbols)}] {sym}: {len(buckets['concall'])} concall, {len(buckets['ppt'])} ppt, "
+                  f"{len(buckets['rec'])} rec, {len(buckets['rating'])} rating, {len(anns)} announcements (kept {len(recs)})")
         except Exception as e:  # noqa: BLE001
             err += 1
             con.execute("INSERT OR REPLACE INTO anndocs_fetch_log VALUES (?,?,?)", (sym, now_utc(), str(e)[:200]))

@@ -28,7 +28,7 @@ const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 /** `parent`: a breakdown row, folded under that row's "+" (Material Cost % under Expenses). */
 type Stmt = { periods: string[]; items: { label: string; values: (number | null)[]; parent?: string }[]; declared?: (string | null)[] };
 type AnnualReport = { from: string; to: string; url: string };
-type AnnDoc = { date: string; title: string; url: string };
+type AnnDoc = { date: string; title: string; url: string; kind?: string };
 type Trend = {
   periods: string[];
   revenue: (number | null)[];
@@ -70,7 +70,13 @@ type Company = {
   generated_at: string;
   snapshot: Row;
   statements: Record<string, Stmt>;
-  documents?: { annual_reports?: AnnualReport[]; concalls?: AnnDoc[]; ratings?: AnnDoc[] };
+  documents?: {
+    annual_reports?: AnnualReport[]; concalls?: AnnDoc[]; ratings?: AnnDoc[];
+    /** Concall presentations and recordings, beside the transcripts. */
+    ppts?: AnnDoc[]; recordings?: AnnDoc[];
+    /** [at "YYYY-MM-DD HH:MM", NSE category, subject, PDF, important 0/1]. */
+    announcements?: [string, string, string, string, number][];
+  };
   trend?: { annual?: Trend; quarterly?: Trend };
   shareholding?: Shareholding;
   prices?: Prices | null;
@@ -99,6 +105,8 @@ type Company = {
   face_value?: number | null;
   /** In NSE's futures & options segment (fetch_fno.py). */
   fno?: boolean | null;
+  /** The company's icon, relative to the site root (logos/SYM.png). */
+  logo?: string | null;
   exchange?: string | null;
   bse_code?: number | string | null;
   /** Written by pipeline/export_company_json.py so this page need not download
@@ -1109,6 +1117,56 @@ function PriceHistory({ row, snapshot }: { row: Row | null; snapshot: Row }) {
   );
 }
 
+/** The company's announcements as NSE lists them (fetch_announcement_docs.py,
+ *  newest 50): Recent, or only the kinds that move a share (results, board
+ *  outcomes, dividends, ratings, deals, orders), and a search over the subject
+ *  and NSE's category - screener.in's Announcements box, without its AI
+ *  summaries (the app shows no model-written text). */
+function Announcements({ list }: { list: [string, string, string, string, number][] }) {
+  const [tab, setTab] = useState<"recent" | "important">("recent");
+  const [q, setQ] = useState("");
+  const [all, setAll] = useState(false);
+  const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const rows = list.filter((a) => (tab === "recent" || a[4] === 1)
+    && words.every((w) => `${a[1]} ${a[2]}`.toLowerCase().includes(w)));
+  const shown = all || words.length ? rows : rows.slice(0, 8);
+  const when = (at: string) => new Date(`${at.slice(0, 10)}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <h3 className="text-[13px] font-semibold text-[var(--ink)] mr-auto">Announcements</h3>
+        <div className="inline-flex gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs" role="radiogroup" aria-label="Announcements">
+          {([["recent", "Recent"], ["important", "Important"]] as const).map(([k, label]) => (
+            <button key={k} type="button" role="radio" aria-checked={tab === k} onClick={() => setTab(k)}
+              className={`rounded-md px-2.5 py-1 font-medium ${tab === k ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>{label}</button>
+          ))}
+        </div>
+      </div>
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search announcements"
+        className="w-full rounded-lg border border-[var(--line)] bg-[var(--card2)] px-3 py-2 text-sm text-[var(--ink)] placeholder:text-[var(--ink3)]" />
+      {shown.length === 0 ? (
+        <p className="text-xs text-[var(--ink3)]">{words.length ? "No announcement matches." : "None in the latest fifty."}</p>
+      ) : (
+        <ul className="divide-y divide-[var(--line)]">
+          {shown.map((a, i) => (
+            <li key={`${a[0]}-${i}`} className="py-1.5">
+              <a href={a[3]} target="_blank" rel="noopener noreferrer" className="block hover:underline">
+                <span className="text-[13px] text-[var(--ink)] line-clamp-2">{a[2] || a[1]}</span>
+                <span className="text-[11px] text-[var(--ink3)]">{when(a[0])} · {a[1]}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!words.length && rows.length > 8 && (
+        <button type="button" onClick={() => setAll(!all)} className="text-[13px] font-semibold text-[var(--accent-ink)]">
+          {all ? "Fewer" : `All ${rows.length}`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** Documents grouped by the financial year they belong to.
  *
  *  They were three flat lists by type: annual-report chips, the newest eight
@@ -1147,10 +1205,13 @@ function DocumentsByYear({ docs }: { docs: NonNullable<Company["documents"]> }) 
       const y = Number(r.to);
       if (Number.isFinite(y)) get(y).reports.push(r);
     }
-    for (const d of docs.concalls ?? []) {
-      const y = fyOf(d.date);
-      if (y !== null) get(y).concalls.push(d);
+    for (const [list, kind] of [[docs.concalls, ""], [docs.ppts, "PPT"], [docs.recordings, "Recording"]] as const) {
+      for (const d of list ?? []) {
+        const y = fyOf(d.date);
+        if (y !== null) get(y).concalls.push(kind ? { ...d, kind } : d);
+      }
     }
+    for (const g of bucket.values()) g.concalls.sort((a, b) => b.date.localeCompare(a.date));
     for (const d of docs.ratings ?? []) {
       const y = fyOf(d.date);
       if (y !== null) get(y).ratings.push(d);
@@ -1175,7 +1236,8 @@ function DocumentsByYear({ docs }: { docs: NonNullable<Company["documents"]> }) 
       <a href={d.url} target="_blank" rel="noopener noreferrer"
          className="text-[var(--accent-ink)] hover:underline line-clamp-2 sm:truncate block">
         <span className="text-[var(--ink3)] font-mono text-xs mr-2">{d.date}</span>
-        {d.title || "document"}
+        {d.kind && <span className="text-[10px] font-bold rounded px-1.5 py-0.5 mr-1.5 bg-[var(--accent-soft)] text-[var(--accent-ink)]">{d.kind}</span>}
+        {(d.title || "document").replace(/^.{0,120}?has informed the exchange (?:about|regarding)\s*/i, "")}
       </a>
     </li>
   );
@@ -2156,6 +2218,7 @@ function CompanyView() {
       {/* Name, then the ticker and where it sits on one quiet line; the
           export is an icon beside the star, not a button above the price. */}
       <div className="flex items-start gap-2">
+        <CompanyMark name={String(s.name ?? symbol)} symbol={symbol} logo={company.logo} />
         <div className="flex-1 min-w-0">
           <h1 className="text-2xl font-bold text-[var(--ink)] leading-tight">{titleCase(String(s.name ?? "")) || symbol}</h1>
           <p className="text-sm text-[var(--ink3)] mt-0.5">
@@ -2167,6 +2230,14 @@ function CompanyView() {
               <Link href={`/sectors?s=${encodeURIComponent(String(s.sector))}`} className="hover:text-[var(--accent-ink)] hover:underline">{String(s.sector)}</Link>
             ) : "—"}
             {s.industry ? ` · ${String(s.industry)}` : ""}
+            {typeof s.website === "string" && /^https?:\/\//.test(s.website) && (
+              <>
+                {" · "}
+                <a href={s.website} target="_blank" rel="noopener noreferrer" className="hover:text-[var(--accent-ink)] hover:underline">
+                  {s.website.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}
+                </a>
+              </>
+            )}
           </p>
           <IndexChips list={company.indices} />
         </div>
@@ -2401,6 +2472,7 @@ function CompanyView() {
             </p>
           </InfoTip>
         </h2>
+        {(company.documents?.announcements?.length ?? 0) > 0 && <Announcements list={company.documents!.announcements!} />}
         {company.documents && <DocumentsByYear docs={company.documents} />}
         <div className="flex gap-4 flex-wrap text-sm">
           <a href={`https://www.nseindia.com/get-quotes/equity?symbol=${encodeURIComponent(symbol)}`} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-ink)] font-semibold hover:underline">
@@ -2438,6 +2510,27 @@ function CompanyView() {
         </InfoTip>
       </footer>
     </div>
+  );
+}
+
+/** The company's own icon (fetch_logos.py), else its initials on a colour
+ *  taken from the ticker - every company gets the same tile every time. */
+function CompanyMark({ name, symbol, logo }: { name: string; symbol: string; logo?: string | null }) {
+  const [broken, setBroken] = useState(false);
+  const words = name.replace(/\b(limited|ltd|india|industries|corporation|company|the)\b\.?/gi, " ").trim().split(/\s+/).filter(Boolean);
+  const initials = ((words[0]?.[0] ?? symbol[0] ?? "") + (words[1]?.[0] ?? symbol[1] ?? "")).toUpperCase();
+  let h = 0;
+  for (const c of symbol) h = (h * 31 + c.charCodeAt(0)) % 360;
+  if (logo && !broken) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={`${BASE}/${logo}`} alt="" width={44} height={44} onError={() => setBroken(true)}
+        className="w-11 h-11 rounded-xl bg-white object-contain p-1 border border-[var(--line)] shrink-0" />
+    );
+  }
+  return (
+    <span aria-hidden="true" className="w-11 h-11 rounded-xl shrink-0 inline-flex items-center justify-center text-[15px] font-bold text-white"
+      style={{ background: `hsl(${h} 45% 42%)` }}>{initials}</span>
   );
 }
 
