@@ -76,6 +76,9 @@ export type ChartTrendQ = {
   revenue: (number | null)[];
   pat: (number | null)[];
   eps: (number | null)[];
+  /** Sales (revenue from operations) per share, on today's share base like
+   *  EPS (pipeline/trend_lib.py sales_per_share). */
+  sps?: (number | null)[];
   expenses?: (number | null)[];
   ebitda?: (number | null)[];
   book_value?: (number | null)[];
@@ -327,6 +330,12 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const [view, setView] = useState<View>("price");
   const [range, setRange] = useState("5Yr");
   const [peWin, setPeWin] = useState("ttm");
+  /** What the bars under the ratio line are: earnings per share (with the P/E
+   *  line) or sales per share (with the Price / Sales line). Price over sales
+   *  per share IS market cap over sales, so the line has to change with the
+   *  bars - a P/E line over sales bars would be a ratio built from figures the
+   *  chart is not showing. */
+  const [perShare, setPerShare] = useState<"eps" | "sps">("eps");
   // The line on each day a quarter's results were declared. It used to sit
   // behind a "Quarterly results" button that only opened a second "Result
   // dates" button; the owner asked for the dates themselves (11-Oct-2026).
@@ -427,6 +436,9 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const FS = isMobile ? 19 : 12;
 
   const isOn = (k: string, dflt = true) => on[k] ?? dflt;
+  // Sales per share needs both its bars and the Price / Sales line.
+  const spsAvail = !!psBand && !!trendQ?.sps?.some((v) => v !== null && v !== undefined);
+  const spsOn = perShare === "sps" && spsAvail;
   const toggle = (k: string) => setOn({ ...on, [k]: !isOn(k) });
 
   const years = RANGES.find(([r]) => r === range)?.[1] ?? 5;
@@ -531,13 +543,17 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
 
     if (view === "pe") {
       // earnings bars follow the selected window, annualised the same way the
-      // PE line is, so the two always describe the same earnings
-      const nQ = peWin === "q1" ? 1 : 4;
-      const mult = peWin === "q1" ? 4 : 1;
+      // PE line is, so the two always describe the same earnings. Sales per
+      // share is drawn the same way, on the trailing four quarters only - the
+      // only basis the Price / Sales line has.
+      const sales = spsOn;
+      const nQ = !sales && peWin === "q1" ? 1 : 4;
+      const mult = !sales && peWin === "q1" ? 4 : 1;
+      const src = sales ? trendQ?.sps ?? [] : trendQ?.eps ?? [];
       const allEpsBars: XY[] = [];
       if (trendQ) {
         for (let i = nQ - 1; i < trendQ.periods.length; i++) {
-          const w = trendQ.eps.slice(i - nQ + 1, i + 1);
+          const w = src.slice(i - nQ + 1, i + 1);
           if (w.length === nQ && w.every((v) => v !== null && v !== undefined)) {
             const end = trendQ.periods[i];
             const t = toT(end);
@@ -617,8 +633,12 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
           median_5y: band.alt_median_5y?.[peWin] ?? band.median_5y,
         };
       }
-      bandView(band, `PE${suffix}`, "Median PE", "plain", epsBars,
-        peWin === "ttm" ? "EPS (4 quarters added up)" : "EPS (latest quarter x4)", "plain");
+      if (sales) {
+        bandView(psBand, "Price / Sales", "Median Price to Sales", "plain", epsBars, "Sales per share (4 quarters added up)", "rupee");
+      } else {
+        bandView(band, `PE${suffix}`, "Median PE", "plain", epsBars,
+          peWin === "ttm" ? "EPS (4 quarters added up)" : "EPS (latest quarter x4)", "plain");
+      }
     }
 
     if (view === "ev") bandView(evBand, "EV / EBITDA", "Median EV Multiple", "plain", ttmBars(trendQ?.ebitda), "EBITDA (TTM)", "cr");
@@ -648,7 +668,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         return base ? src.map((d) => ({ t: d.t, v: (d.v / base - 1) * 100 })) : [];
       };
       const band: ChartBand =
-        view === "pe" ? peer.pe ?? null : view === "pb" ? peer.pb ?? null
+        view === "pe" ? (spsOn ? peer.ps ?? null : peer.pe ?? null) : view === "pb" ? peer.pb ?? null
         : view === "ps" ? peer.ps ?? null : view === "ev" ? peer.ev ?? null : null;
       if (view === "price") {
         const src: Pt[] = peer.prices?.weekly ?? peer.prices?.monthly ?? [];
@@ -680,7 +700,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     }
 
     return defs;
-  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, epsCmp, quarters, cmp, symbol, exchange, years]);
+  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, epsCmp, quarters, cmp, symbol, exchange, years, spsOn]);
 
   // With the quarterly-results overlay on, the per-quarter EPS bars are already
   // on screen. Keeping the summed TTM bars too puts two different quantities in
@@ -690,7 +710,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     return (
       <ChartShell range={range} setRange={setRange} view={view} setView={setView}
         expandHref={symbol ? `/chart?s=${encodeURIComponent(symbol)}` : undefined}
-        moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand }}>
+        moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand }} peLabel={spsOn ? "P/S Ratio" : "PE Ratio"}>
         <div className="h-64 flex items-center justify-center text-sm text-[var(--ink3)]">No data yet for this view.</div>
       </ChartShell>
     );
@@ -752,7 +772,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
 
   const primary = visible.find((s) => s.kind !== "bars" && s.kind !== "dashed") ?? visible[0];
   const activeBand: ChartBand =
-    view === "pe" ? peBand ?? null : view === "pb" ? pbBand ?? null
+    view === "pe" ? (spsOn ? psBand ?? null : peBand ?? null) : view === "pb" ? pbBand ?? null
     : view === "ps" ? psBand ?? null : view === "ev" ? evBand ?? null : null;
   const hoverPt = hover && primary ? nearest(primary.data, hover.t) : null;
   const barW = (s: SeriesDef) => Math.max(1.5, Math.min(26, (plotW / Math.max(1, s.data.length)) * 0.62));
@@ -761,7 +781,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   return (
     <ChartShell range={range} setRange={setRange} view={view} setView={setView}
         expandHref={symbol ? `/chart?s=${encodeURIComponent(symbol)}` : undefined}
-      moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand }}
+      moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand }} peLabel={spsOn ? "P/S Ratio" : "PE Ratio"}
       onViewChange={() => setHover(null)}>
       <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
         <span className="text-[var(--ink3)]">Compare with</span>
@@ -931,7 +951,19 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
               )}
             </div>
           )}
-          {view === "pe" && peBand?.alt && (
+          {view === "pe" && spsAvail && (
+            <div className="flex items-center gap-0.5 rounded-lg border border-[var(--line)] p-0.5">
+              {([["eps", "EPS", "Earnings per share, under the P/E line"],
+                 ["sps", "Sales/share", "Sales (revenue from operations) per share, under the Price / Sales line - the same line as Market Cap / Sales"]] as const).map(([k, label, tip]) => (
+                <button key={k} onClick={() => { setPerShare(k); setHover(null); }} title={tip}
+                  className={`rounded-md px-2 py-1 sm:py-0.5 font-medium ${perShare === k
+                    ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)] hover:bg-[var(--card2)]"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          {view === "pe" && !spsOn && peBand?.alt && (
             <div className="flex items-center gap-1 flex-wrap">
               <span className="text-[var(--ink3)] mr-0.5">Earnings</span>
               {PE_WINDOWS.filter(([k]) => k === "ttm" || peBand.alt?.[k]).map(([k, label, tip]) => (
@@ -1194,7 +1226,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             {(() => {
               if (!hoverPt || !activeBand?.parts || (dragging && boxW < 520)) return null;
               const idx = activeBand.series.findIndex((r) => toT(r[0]) === hoverPt.t);
-              const w = idx >= 0 ? workingFor(view, activeBand, idx, quarters) : null;
+              const w = idx >= 0 ? workingFor(view === "pe" && spsOn ? "ps" : view, activeBand, idx, quarters) : null;
               if (!w) return null;
               return (
                 <div className="mt-1.5 pt-1.5 border-t border-[var(--line)] space-y-0.5">
@@ -1233,8 +1265,10 @@ const MORE_VIEWS: [View, string][] = [
 ];
 
 function ChartShell({
-  range, setRange, view, setView, moreOpen, setMoreOpen, avail, onViewChange, expandHref, children,
+  range, setRange, view, setView, moreOpen, setMoreOpen, avail, onViewChange, expandHref, peLabel = "PE Ratio", children,
 }: {
+  /** The ratio tab's name: it reads P/S Ratio while sales per share is shown. */
+  peLabel?: string;
   /** The full-screen chart for this company. */
   expandHref?: string;
   range: string; setRange: (r: string) => void;
@@ -1260,7 +1294,7 @@ function ChartShell({
         </div>
         <div className="flex gap-1 text-xs flex-wrap items-center">
           <button onClick={() => pick("price")} className={btn(view === "price")}>Price</button>
-          {avail.pe && <button onClick={() => pick("pe")} className={btn(view === "pe")}>PE Ratio</button>}
+          {avail.pe && <button onClick={() => pick("pe")} className={btn(view === "pe")}>{peLabel}</button>}
           {moreItems.length > 0 && (
             <div className="relative">
               <button onClick={() => setMoreOpen(!moreOpen)} className={btn(!!activeMore)}>

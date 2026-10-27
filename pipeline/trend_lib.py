@@ -747,6 +747,96 @@ def cross_source_outliers(con: sqlite3.Connection) -> dict[tuple[str, str], dict
     return out
 
 
+def sales_per_share(ordered: list, rev: list, periods: dict, sh: float | None,
+                    ev: list | None, adj_eps, demerger, trusted: bool) -> list:
+    """Sales (revenue from operations) per share, each quarter on today's
+    share base - the base the adjusted price and EPS are on.
+
+    The count at a past quarter is today's, scaled by that quarter's filed
+    paid-up capital against today's, with bonuses since put back:
+        count(p) = shares now x capital(p) x bonus factor after p / capital now
+    A split leaves capital unchanged (the face value falls as the count rises),
+    so it needs nothing; a bonus raises capital and the count together, and the
+    price series is bonus-adjusted, so it is multiplied back in. Which events in
+    the split list were bonuses is read off the capital itself: a jump by the
+    event's ratio across its date (TCS's 2006, 2009 and 2018 "splits" doubled
+    capital - they were 1:1 bonuses). Real issues - HDFC Bank's 2023 merger,
+    QIPs, buybacks - move capital and so move the count.
+
+    Two guards. A filing whose capital, bonuses put back, sits outside 0.67-1.5x
+    the median of its neighbours is a unit slip, not an issue (HDFC Bank's
+    Dec-2016 filing read a thousandth of its neighbours; Honasa's pre-listing
+    quarter under half) and is skipped. And a company whose split history is
+    not trusted (splits_trustworthy - Bajaj Finance's 2025 4:1 bonus is
+    missing from it) does not use capital at all: an unseen bonus would read as
+    a five-fold share issue.
+
+    Where capital is not used the count falls back to PAT / EPS - not as
+    the count itself (group PAT includes outside shareholders' part of
+    subsidiaries and EPS does not: Reliance read 1,500-1,650 cr against 1,353)
+    but as its change, today's count x its 5-quarter median then / its median
+    over the latest 4. Checked 27-Oct-2026: TCS 2016 394 cr (197 x the 2018
+    bonus), Reliance 2019 1,185 cr (593 x the 2024 bonus), HDFC Bank 2022
+    1,110 cr (555 x the 2025 bonus).
+    """
+    if not sh:
+        return [None] * len(ordered)
+    cap = [periods[p].get("share_capital") for p in ordered] if trusted else [None] * len(ordered)
+    cap = [c if (c and c > 0 and not math.isnan(c)) else None for c in cap]
+    raw = [(p, c) for p, c in zip(ordered, cap) if c]
+
+    bonuses = []
+    for d, r in ev or []:
+        before = [c for q, c in raw if q < d]
+        after = [c for q, c in raw if q >= d]
+        if before and after and r > 1 and abs(after[0] / before[-1] / r - 1) < 0.15:
+            bonuses.append((d, r))
+
+    def bonus_after(p):
+        f = 1.0
+        for d, r in bonuses:
+            if d > p:
+                f *= r
+        return f
+
+    # Capital with bonuses put back moves only on real issues; a value far
+    # from its neighbours is a slip in the filing.
+    cb = [(p, c * bonus_after(p)) for p, c in raw]
+    known = []
+    for i_, (p, v) in enumerate(cb):
+        near = [x for _, x in cb[max(0, i_ - 3):i_ + 4]]
+        if 0.67 <= v / median(near) <= 1.5:
+            known.append((p, v))
+
+    def cap_near(p):
+        before = [c for q, c in known if q <= p]
+        after = [c for q, c in known if q > p]
+        return before[-1] if before else (after[0] if after else None)
+
+    cap_now = median([c for _, c in known[-2:]]) if known else None
+    implied = []
+    for p in ordered:
+        e, pat_v = adj_eps(p), periods[p].get("pat")
+        n_ = pat_v / e if (e and pat_v) else None
+        implied.append(n_ if (n_ and n_ > 0 and sh / 50 <= n_ <= sh * 5) else None)
+    ok = [v for v in implied if v is not None]
+    latest = median(ok[-4:]) if len(ok) >= 2 else None
+
+    out = []
+    for k, (p, r) in enumerate(zip(ordered, rev)):
+        if r is None or (isinstance(r, float) and math.isnan(r)):
+            out.append(None)
+            continue
+        c = cap_near(p)
+        if cap_now and c:
+            n_ = sh * c / cap_now
+        else:
+            win = [v for v in implied[max(0, k - 2):k + 3] if v is not None]
+            n_ = sh * median(win) / latest if (latest and len(win) >= 2) else sh
+        out.append(round(r / n_ * demerger(p), 2) if n_ else None)
+    return out
+
+
 def build_trends(con: sqlite3.Connection, shares: dict | None = None,
                  only: set | None = None) -> dict[str, dict]:
     shares = shares or {}
@@ -817,6 +907,8 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None,
         rev = [periods[p].get("revenue") for p in ordered]
         pat = [periods[p].get("pat") for p in ordered]
         eps = [None if (x := adj_eps(p)) is None else round(x * price_adjust.factor_at(dm, p), 2) for p in ordered]
+        sps = sales_per_share(ordered, rev, periods, sh, ev, adj_eps,
+                              lambda p_: price_adjust.factor_at(dm, p_), symbol in known)
         exp = [periods[p].get("total_expenses") for p in ordered]
         deriv = [_derive(periods[p]) for p in ordered]
         ebitda = [d["ebitda"] for d in deriv]
@@ -829,6 +921,9 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None,
             "revenue": [_cr(v) for v in rev],
             "pat": [_cr(v) for v in pat],
             "eps": [round(v, 2) if v is not None else None for v in eps],
+            # Sales (revenue from operations) per share, for the chart's
+            # "Sales per share" bars under the Price / Sales line.
+            "sps": sps,
             "expenses": [_cr(v) for v in exp],
             "ebitda": [_cr(v) for v in ebitda],
             # carried so the quarterly table can show the same rows screener does
