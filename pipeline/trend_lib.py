@@ -38,11 +38,13 @@ NSE_ITEMS = [
     # The profit breakdown screener.in shows under "+" (27-Oct-2026): stored for
     # ~2,290 companies all along, never exported.
     "other_income", "pbt", "tax", "employee_cost",
+    "pat_owners", "minority", "associates", "exceptional",
 ]
 MONEY = {  # fields to convert Rs -> Rs crore on emit (eps / margins / book-value-per-share excluded)
     "revenue", "pat", "total_expenses", "finance_cost", "depreciation",
     "cost_materials", "purchases", "inv_change", "equity", "ebitda_direct", "cogs_direct",
     "other_income", "pbt", "tax", "employee_cost",
+    "pat_owners", "minority", "associates", "exceptional",
 }
 KEEP_ANNUAL = 25
 KEEP_QUARTERLY = 88  # ~22 years, matching screener.in's Max span on the ratio charts
@@ -751,7 +753,8 @@ def cross_source_outliers(con: sqlite3.Connection) -> dict[tuple[str, str], dict
     return out
 
 
-BREAKDOWN_KEYS = ("other_income", "pbt", "tax_pct", "material_pct", "employee_pct", "other_cost_pct")
+BREAKDOWN_KEYS = ("other_income", "pbt", "tax_pct", "material_pct", "employee_pct", "other_cost_pct",
+                  "associates", "minority", "pat_owners", "exceptional")
 
 
 def profit_breakdown(slot: dict, rev, ebitda) -> dict:
@@ -770,6 +773,11 @@ def profit_breakdown(slot: dict, rev, ebitda) -> dict:
     out["other_income"] = _cr(f("other_income")) if f("other_income") is not None else None
     pbt, tax = f("pbt"), f("tax")
     out["pbt"] = _cr(pbt) if pbt is not None else None
+    # Net profit's parts: share of associates' profit, the part belonging to
+    # outside shareholders of subsidiaries, the owners' part, and exceptional
+    # items (before tax, as filed).
+    for k in ("associates", "minority", "pat_owners", "exceptional"):
+        out[k] = _cr(f(k)) if f(k) is not None else None
     if pbt is not None and tax is not None and pbt > 0:
         out["tax_pct"] = round(tax / pbt * 100, 1)
     if rev and rev > 0:
@@ -880,7 +888,8 @@ def sales_per_share(ordered: list, rev: list, periods: dict, sh: float | None,
 # Items a year is the sum of its quarters for; balance items are not.
 FLOW_ITEMS = ("revenue", "pat", "eps", "total_expenses", "finance_cost", "depreciation", "cost_materials",
               "purchases", "inv_change", "other_income", "pbt", "tax", "employee_cost", "gross_profit",
-              "op_profit_direct", "interest_expended", "operating_expenses")
+              "op_profit_direct", "interest_expended", "operating_expenses",
+              "pat_owners", "minority", "associates", "exceptional")
 
 
 def _months_back(iso: str, n: int) -> str:

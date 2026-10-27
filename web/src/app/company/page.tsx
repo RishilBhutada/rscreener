@@ -45,6 +45,11 @@ type Trend = {
   source: string[];
 };
 type Shareholding = {
+  /** Central and state governments, %; number of shareholders; holders the
+   *  filing names (promoters, and others above 1%), aligned with dates. */
+  gov?: (number | null)[];
+  holders_n?: (number | null)[];
+  named?: { cat: string; name: string; values: (number | null)[] }[];
   dates: string[];
   promoter: (number | null)[];
   public: (number | null)[];
@@ -467,14 +472,20 @@ function ShareholdingTable({ sh, symbol }: { sh: NonNullable<Company["shareholdi
   const [yearly, setYearly] = useState(false);
   const idx = sh.dates.map((d, i) => [d, i] as const).filter(([d]) => !yearly || String(d).slice(5, 7) === "03").map(([, i]) => i);
   const pickV = (v?: (number | null)[] | null) => (v ? idx.map((i) => v[i] ?? null) : null);
+  const parentOf: Record<string, string> = { Promoters: "Promoters %", FIIs: "FIIs %", DIIs: "DIIs %", Public: "Public %", "DR holders": "Public %" };
+  const named = (sh.named ?? []).map((h) => ({ label: `${h.name} %`, values: pickV(h.values) ?? [], parent: parentOf[h.cat] ?? "Public %" }))
+    .filter((h) => h.values.some((v) => v !== null));
   const items = [
     { label: "Promoters %", values: pickV(sh.promoter) },
     { label: "FIIs %", values: pickV(sh.fii) },
     { label: "DIIs %", values: pickV(sh.dii) },
     { label: "Mutual funds %", values: pickV(sh.mf) },
+    { label: "Government %", values: pickV(sh.gov) },
     { label: "Public %", values: pickV(sh.public) },
     { label: "Employee trusts %", values: pickV(sh.employee) },
-  ].filter((it): it is { label: string; values: (number | null)[] } => !!it.values);
+    { label: "No. of shareholders", values: pickV(sh.holders_n) },
+  ].filter((it): it is { label: string; values: (number | null)[] } => !!it.values && it.values.some((v) => v !== null && v !== 0))
+    .concat(named.filter((h, i, a) => a.findIndex((x) => x.label === h.label && x.parent === h.parent) === i));
   return (
     <>
       <div className="flex justify-end mb-1.5">

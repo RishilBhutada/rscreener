@@ -553,6 +553,10 @@ def asfiled_table(trend: dict | None, announced: dict | None = None, payout: lis
         ("Profit before tax", trend.get("pbt"), None),
         ("Tax %", trend.get("tax_pct"), None),
         ("Net Profit", trend.get("pat"), None),
+        ("Profit from associates", trend.get("associates"), "Net Profit"),
+        ("Minority share", trend.get("minority"), "Net Profit"),
+        ("Profit to owners", trend.get("pat_owners"), "Net Profit"),
+        ("Exceptional items (pre-tax)", trend.get("exceptional"), "Net Profit"),
         ("EPS (Rs)", trend.get("eps"), None),
         ("Dividend Payout %", payout, None),
     ]
@@ -941,8 +945,15 @@ def main() -> None:
         # Who holds the public part, from each quarter's XBRL (fetch_shp_detail.py).
         detail: dict[tuple, tuple] = {}
         if _table_exists(con, "shareholding_detail"):
-            for s_, d_, fii, dii, mf in con.execute("SELECT symbol, date, fii, dii, mf FROM shareholding_detail"):
-                detail[(s_, str(d_)[:10])] = (fii, dii, mf)
+            has_new = "n_holders" in {r[1] for r in con.execute("PRAGMA table_info(shareholding_detail)")}
+            q_ = ("SELECT symbol, date, fii, dii, mf, gov, n_holders FROM shareholding_detail" if has_new
+                  else "SELECT symbol, date, fii, dii, mf, NULL, NULL FROM shareholding_detail")
+            for s_, d_, fii, dii, mf, gov, nh in con.execute(q_):
+                detail[(s_, str(d_)[:10])] = (fii, dii, mf, gov, nh)
+        named: dict[str, dict[tuple, dict]] = {}
+        if _table_exists(con, "shp_holders"):
+            for s_, d_, cat, nm, pc in con.execute("SELECT symbol, date, category, name, pct FROM shp_holders"):
+                named.setdefault(s_, {}).setdefault((cat, nm), {})[str(d_)[:10]] = pc
         for sym_key, grp in shp.groupby("symbol"):
             # Eleven years: the page's Yearly view reads the March filing of each.
             tail = grp.tail(44)
@@ -953,10 +964,17 @@ def main() -> None:
                 "public": [None if pd.isna(v) else float(v) for v in tail["public"]],
                 "employee": [None if pd.isna(v) else float(v) for v in tail["employee_trusts"]],
             }
-            for i, key in enumerate(("fii", "dii", "mf")):
-                vals = [detail.get((sym_key, str(d)[:10]), (None, None, None))[i] for d in dates]
+            for i, key in enumerate(("fii", "dii", "mf", "gov", "holders_n")):
+                vals = [detail.get((sym_key, str(d)[:10]), (None,) * 5)[i] for d in dates]
                 if any(v is not None for v in vals):
                     entry[key] = vals
+            # Named holders, each across the same dates (blank where not named).
+            hl = [{"cat": cat, "name": nm, "values": [by.get(str(d)[:10]) for d in dates]}
+                  for (cat, nm), by in (named.get(sym_key) or {}).items()]
+            hl = [h for h in hl if any(v is not None for v in h["values"])]
+            if hl:
+                hl.sort(key=lambda h: (h["cat"], -(next((v for v in reversed(h["values"]) if v is not None), 0))))
+                entry["named"] = hl
             shp_by_symbol[sym_key] = entry
     anndocs_by_symbol: dict[str, dict] = {}
     if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='announcement_docs'").fetchone():

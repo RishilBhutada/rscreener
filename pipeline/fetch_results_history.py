@@ -62,6 +62,13 @@ TAGS = {
     "TaxExpense": "tax",
     "ProfitLossForPeriod": "pat",
     "ProfitLossForPeriodAttributableToOwnersOfParent": "pat_owners",
+    # What sits between the group's profit and the owners' (screener.in's
+    # "Net Profit +"). NSE's names, read off a live filing 27-Oct-2026 - the
+    # owners' tag above is not the one NSE uses, which is why it never stored.
+    "ProfitOrLossAttributableToOwnersOfParent": "pat_owners",
+    "ProfitOrLossAttributableToNonControllingInterests": "minority",
+    "ShareOfProfitLossOfAssociatesAndJointVenturesAccountedForUsingEquityMethod": "associates",
+    "ExceptionalItemsBeforeTax": "exceptional",
     "BasicEarningsLossPerShareFromContinuingAndDiscontinuedOperations": "eps",
     # banks file a different P&L shape
     "InterestEarned": "revenue_bank",
