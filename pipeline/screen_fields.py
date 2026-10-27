@@ -109,7 +109,9 @@ def quarter_growth(trends: dict[str, dict]) -> dict[str, dict]:
         if i < 0:
             continue
         p = per[i]
-        res: dict[str, float | None] = {}
+        # The quarter's own figures (Rs crore), for the peer table's "Sales
+        # Qtr" and "NP Qtr" columns.
+        res: dict[str, float | None] = {"qtr_sales": rev[i], "qtr_profit": pat[i]}
         year_ago = f"{int(p[:4]) - 1}{p[4:]}"
         if year_ago in per:
             j = per.index(year_ago)

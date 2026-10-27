@@ -67,6 +67,9 @@ export const FIELD_CATALOG: FieldDef[] = [
 
   { key: "qtr_sales_yoy", label: "Quarter sales growth (YoY)", group: "Results", unit: "%", desc: "Latest quarter's sales against the same quarter a year earlier", short: "Qtr sales YoY" },
   { key: "qtr_profit_yoy", label: "Quarter profit growth (YoY)", group: "Results", unit: "%", desc: "Latest quarter's profit against the same quarter a year earlier. Left blank when that quarter was a loss", short: "Qtr profit YoY" },
+  { key: "qtr_sales", label: "Sales, latest quarter", group: "Results", unit: "₹ Cr", desc: "Sales (revenue from operations) in the latest filed quarter", short: "Sales qtr" },
+  { key: "qtr_profit", label: "Net profit, latest quarter", group: "Results", unit: "₹ Cr", desc: "Net profit in the latest filed quarter", short: "NP qtr" },
+  { key: "in_fno", label: "In F&O segment", group: "Results", unit: "", desc: "1 when the stock trades in NSE's futures & options segment, else 0", short: "F&O" },
   { key: "qtr_sales_qoq", label: "Quarter sales growth (QoQ)", group: "Results", unit: "%", desc: "Latest quarter's sales against the quarter before", short: "Qtr sales QoQ" },
   { key: "qtr_profit_qoq", label: "Quarter profit growth (QoQ)", group: "Results", unit: "%", desc: "Latest quarter's profit against the quarter before. Left blank when that quarter was a loss", short: "Qtr profit QoQ" },
 

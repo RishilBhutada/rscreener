@@ -73,6 +73,7 @@ export const NUMERIC_FIELDS = [
   "volatility_1y", "volatility_30d",
   "ret_1d", "vs_dma50", "vs_dma200", "dma50_200", "rsi14", "vol_surge",
   "qtr_sales_yoy", "qtr_profit_yoy", "qtr_sales_qoq", "qtr_profit_qoq",
+  "qtr_sales", "qtr_profit", "in_fno",
   "promoter_chg_qtr", "promoter_chg_1y", "f_score",
   "season_peak", "season_low", "season_swing",
   "fii_holding", "dii_holding", "mf_holding", "fii_chg_qtr", "dii_chg_qtr",

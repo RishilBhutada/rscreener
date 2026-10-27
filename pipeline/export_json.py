@@ -56,6 +56,7 @@ RENAME = {
 # list cannot drift apart.
 SCREEN_FIELDS = ["vs_dma50", "vs_dma200", "dma50_200", "rsi14", "vol_surge",
                  "qtr_sales_yoy", "qtr_profit_yoy", "qtr_sales_qoq", "qtr_profit_qoq",
+                 "qtr_sales", "qtr_profit", "in_fno",
                  "promoter_chg_qtr", "promoter_chg_1y", "f_score",
                  "season_peak", "season_low", "season_swing",
                  "fii_holding", "dii_holding", "mf_holding", "fii_chg_qtr", "dii_chg_qtr"]
@@ -537,6 +538,13 @@ def main() -> None:
                  seasons_lib.screen_fields(seasons_lib.seasons(con))):
         for sym, vals in part.items():
             extra_fields.setdefault(sym, {}).update(vals)
+    # In NSE's futures & options segment: 1, else 0 (fetch_fno.py) - so
+    # "in_fno = 1" screens for it. Left blank everywhere if the list is absent.
+    if con.execute("SELECT 1 FROM sqlite_master WHERE name='fno_lots'").fetchone():
+        fno = {r[0] for r in con.execute("SELECT symbol FROM fno_lots")}
+        if fno:
+            for sym in df["symbol"]:
+                extra_fields.setdefault(sym, {})["in_fno"] = 1 if sym in fno else 0
     con.close()
 
     # computed ratios need RAW rupee values - run before any unit conversion

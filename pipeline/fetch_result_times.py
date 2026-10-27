@@ -129,7 +129,9 @@ def main() -> None:
         held = ({r[0] for r in con.execute("SELECT day FROM result_times_log")}
                 & {r[0] for r in con.execute("SELECT day FROM meeting_times_log")}
                 & {r[0] for r in con.execute("SELECT day FROM business_updates_log")})
-        days += [d for d in (today - timedelta(days=i) for i in range(args.days, 366)) if d.isoformat() not in held]
+        # Three years: the page's quarterly table shows twelve quarters, each
+        # with its results PDF (27-Oct-2026); the calendar uses the last year.
+        days += [d for d in (today - timedelta(days=i) for i in range(args.days, 1100)) if d.isoformat() not in held]
 
     s = requests.Session()
     s.headers.update(nse_session.HEADERS)

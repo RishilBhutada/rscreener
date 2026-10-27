@@ -271,6 +271,8 @@ export type Quarter = {
   eps: number;
   announced?: string | null;
   q: number;      // Indian fiscal quarter — Apr-Jun is 1
+  /** The results announcement's PDF (path under nsearchives/corporate). */
+  pdf?: string;
 };
 
 /** A dividend, bonus, split, rights issue or the like, on its EX-DATE - the day

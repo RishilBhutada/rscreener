@@ -135,6 +135,11 @@ jobs:
           echo "Run plan: scope=$SCOPE symbols=${SYMS:-all}"
           echo "Fetching stops at $(date -u -d '+260 minutes' '+%H:%M UTC'), leaving 90 minutes to publish."
       - run: python pipeline/fetch_universe.py
+      - name: Which stocks trade in F&O
+        # NSE's public market-lot file: the "F&O" tag and the in_fno screen
+        # field (pipeline/fetch_fno.py). One small CSV; a failure keeps the
+        # last list.
+        run: python pipeline/fetch_fno.py
       - name: Write the symbol lists every fetcher works from
         # TWO lists, because the sources do not cover the same companies.
         # Yahoo answers for both exchanges once the universe carries the right

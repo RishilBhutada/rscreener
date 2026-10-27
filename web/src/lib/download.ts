@@ -18,8 +18,8 @@ type CapacitorBridge = {
   nativePromise?: (plugin: string, method: string, options: object) => Promise<unknown>;
 };
 
-function base64(text: string): string {
-  const bytes = new TextEncoder().encode(text);
+function base64(data: string | Uint8Array): string {
+  const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
   let bin = "";
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return btoa(bin);
@@ -37,7 +37,7 @@ function note(text: string) {
   setTimeout(() => el.remove(), 3200);
 }
 
-export async function saveFile(name: string, text: string, mime = "text/csv;charset=utf-8"): Promise<void> {
+export async function saveFile(name: string, text: string | Uint8Array, mime = "text/csv;charset=utf-8"): Promise<void> {
   const cap = (window as unknown as { Capacitor?: CapacitorBridge }).Capacitor;
   if (cap?.isNativePlatform?.() && cap.nativePromise) {
     try {
@@ -50,7 +50,7 @@ export async function saveFile(name: string, text: string, mime = "text/csv;char
     }
     return;
   }
-  const file = new File([text], name, { type: mime });
+  const file = new File([typeof text === "string" ? text : new Blob([text.buffer as ArrayBuffer])], name, { type: mime });
   const nav = navigator as Navigator & { standalone?: boolean };
   const homeScreen = window.matchMedia?.("(display-mode: standalone)").matches || nav.standalone === true;
   if (homeScreen && /iPhone|iPad|iPod/.test(nav.userAgent) && nav.canShare?.({ files: [file] })) {

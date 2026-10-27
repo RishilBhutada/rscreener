@@ -5,6 +5,8 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { saveFile } from "@/lib/download";
+import { buildXlsx, Cell, XLSX_MIME } from "@/lib/xlsx";
+import { FIELD_CATALOG } from "@/lib/fields";
 import TopNav from "@/components/TopNav";
 import { shortName, titleCase } from "@/lib/names";
 import StockChart, { CorpAction, Quarter } from "@/components/StockChart";
@@ -90,6 +92,8 @@ type Company = {
   updates?: Updates | null;
   /** Face value per share, Rs (the exchange's equity list). */
   face_value?: number | null;
+  /** In NSE's futures & options segment (fetch_fno.py). */
+  fno?: boolean | null;
   exchange?: string | null;
   bse_code?: number | string | null;
   /** Written by pipeline/export_company_json.py so this page need not download
@@ -287,8 +291,210 @@ type Updates = { n: number; of: number; typ: number | null; last: { q: string; d
 /** The next results meeting on NSE's calendar: undefined while loading, null if none. */
 type NextResults = { date: string; purpose: string } | null | undefined;
 
-function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol }: {
+/** Peer comparison, with screener.in's columns: the quarter's profit and sales
+ *  and their change from a year before, a median row across the companies
+ *  shown, and a column picker (rs_peer_cols, synced). */
+const PEER_COLS: { key: string; label: string; dec: number }[] = [
+  { key: "price", label: "CMP ₹", dec: 2 },
+  { key: "pe", label: "P/E", dec: 2 },
+  { key: "mcap", label: "MCap ₹Cr", dec: 0 },
+  { key: "div_yield", label: "Div Yld %", dec: 2 },
+  { key: "qtr_profit", label: "NP Qtr ₹Cr", dec: 0 },
+  { key: "qtr_profit_yoy", label: "Qtr Profit Var %", dec: 1 },
+  { key: "qtr_sales", label: "Sales Qtr ₹Cr", dec: 0 },
+  { key: "qtr_sales_yoy", label: "Qtr Sales Var %", dec: 1 },
+  { key: "roce", label: "ROCE %", dec: 1 },
+  { key: "roe", label: "ROE %", dec: 1 },
+  { key: "pb", label: "P/B", dec: 2 },
+  { key: "de", label: "Debt / Eq", dec: 2 },
+  { key: "net_margin", label: "Net margin %", dec: 1 },
+  { key: "sales_cagr_5y", label: "Sales gr 5Y %", dec: 1 },
+  { key: "profit_cagr_5y", label: "Profit gr 5Y %", dec: 1 },
+];
+const PEER_DEFAULT = ["price", "pe", "mcap", "div_yield", "qtr_profit", "qtr_profit_yoy", "qtr_sales", "qtr_sales_yoy", "roce"];
+
+function PeerTable({ symbol, self, peers, industry }: { symbol: string; self: Row; peers: Row[]; industry: string }) {
+  const [cols, setCols] = useState<string[]>(PEER_DEFAULT);
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem("rs_peer_cols") ?? "null");
+      if (Array.isArray(v) && v.length) setCols(v.filter((k: string) => PEER_COLS.some((c) => c.key === k)));
+    } catch { /* the default columns */ }
+  }, []);
+  const pick = (k: string) => {
+    const next = cols.includes(k) ? cols.filter((x) => x !== k) : PEER_COLS.map((c) => c.key).filter((x) => x === k || cols.includes(x));
+    setCols(next);
+    try { localStorage.setItem("rs_peer_cols", JSON.stringify(next)); } catch { /* not remembered */ }
+  };
+  const shownCols = PEER_COLS.filter((c) => cols.includes(c.key));
+  const all = [self, ...peers];
+  const med = (k: string): number | null => {
+    const v = all.map((r) => r[k]).filter((x): x is number => typeof x === "number" && Number.isFinite(x)).sort((a, b) => a - b);
+    if (v.length < 3) return null;
+    return v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2;
+  };
+  const cell = (v: unknown, dec: number, k: string, bold = false) => {
+    const n = typeof v === "number" && Number.isFinite(v) ? v : null;
+    const signed = k.endsWith("_yoy");
+    return (
+      <td key={k} className={`px-3 py-1.5 text-right tabular-nums whitespace-nowrap ${bold ? "font-semibold" : ""} ${signed && n !== null ? (n < 0 ? "text-[var(--neg)]" : n > 0 ? "text-[var(--pos)]" : "") : ""}`}>
+        {n === null ? "—" : fmtNum(n, dec)}
+      </td>
+    );
+  };
+  return (
+    <section id="peers" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
+      <div className="px-4 pt-3.5 pb-2 flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <h2 className="text-base font-semibold text-[var(--ink)]">Peer comparison</h2>
+          <p className="text-xs text-[var(--ink3)] mt-0.5">{industry}</p>
+        </div>
+        <button type="button" onClick={() => setEditing(!editing)} aria-expanded={editing}
+          className={`shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold border ${editing ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]" : "text-[var(--ink2)] border-[var(--line)]"}`}>
+          {editing ? "Done" : "Edit columns"}
+        </button>
+      </div>
+      {editing && (
+        <div className="px-4 pb-3 flex flex-wrap gap-1.5">
+          {PEER_COLS.map((c) => (
+            <button key={c.key} type="button" onClick={() => pick(c.key)} aria-pressed={cols.includes(c.key)}
+              className={`rounded-full px-2.5 py-1 text-[12px] font-medium border ${cols.includes(c.key) ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]" : "text-[var(--ink3)] border-[var(--line)]"}`}>
+              {c.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="text-xs text-[var(--ink3)] border-y border-[var(--line)]">
+              <th className="px-3 py-2 text-left font-medium sticky left-0 bg-[var(--card)]">Name</th>
+              {shownCols.map((c) => <th key={c.key} className="px-3 py-2 text-right font-medium whitespace-nowrap">{c.label}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="border-b border-[var(--line)] bg-[var(--card2)]">
+              <td className="px-3 py-1.5 sticky left-0 bg-[var(--card2)]"><span className="font-semibold text-[var(--ink)]">{symbol}</span></td>
+              {shownCols.map((c) => cell(self[c.key], c.dec, c.key, true))}
+            </tr>
+            {peers.map((p) => (
+              <tr key={String(p.symbol)} className="border-b border-[var(--line)] hover:bg-[var(--card2)]">
+                <td className="px-3 py-1.5 sticky left-0 bg-[var(--card)] max-w-[40vw] truncate"><Link className="font-medium text-[var(--accent-ink)] hover:underline" href={`/company?s=${encodeURIComponent(String(p.symbol))}`}>{shortName(String(p.name ?? ""), String(p.symbol)) || String(p.symbol)}</Link></td>
+                {shownCols.map((c) => cell(p[c.key], c.dec, c.key))}
+              </tr>
+            ))}
+            <tr className="text-[var(--ink2)]">
+              <td className="px-3 py-1.5 sticky left-0 bg-[var(--card)] font-medium">Median · {all.length} cos</td>
+              {shownCols.map((c) => cell(med(c.key), c.dec, `${c.key}_m`))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+/** Your own picks on the top grid - any screener field or a ratio you defined
+ *  (screener's "Add ratio to table"). Kept as rs_grid_pins, synced. */
+function PinnedRatios({ row }: { row: Row | null }) {
+  const [pins, setPins] = useState<string[]>([]);
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  useEffect(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem("rs_grid_pins") ?? "[]");
+      if (Array.isArray(v)) setPins(v.filter((x): x is string => typeof x === "string"));
+    } catch { /* none */ }
+  }, []);
+  const save = (next: string[]) => {
+    setPins(next);
+    try { localStorage.setItem("rs_grid_pins", JSON.stringify(next)); } catch { /* not remembered */ }
+  };
+  const byKey = new Map(FIELD_CATALOG.map((f) => [f.key, f]));
+  const hits = q.trim().length < 1 ? [] : FIELD_CATALOG
+    .filter((f) => !pins.includes(f.key) && `${f.label} ${f.key} ${f.short ?? ""}`.toLowerCase().includes(q.trim().toLowerCase()))
+    .slice(0, 8);
+  const value = (k: string, unit: string) => {
+    const v = num(row, k);
+    if (v === null) return "—";
+    return unit === "₹ Cr" ? `₹ ${fmtNum(v, 0)} Cr` : unit === "₹" ? `₹ ${fmtNum(v)}` : unit === "%" ? `${fmtNum(v)} %` : fmtNum(v);
+  };
+  return (
+    <div className="mt-4 pt-3 border-t border-[var(--line)]">
+      {pins.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6">
+          {pins.map((k) => {
+            const f = byKey.get(k);
+            if (!f) return null;
+            return (
+              <div key={k} className="border-b border-[var(--line)] py-1.5 flex items-baseline justify-between gap-2">
+                <span className="text-sm text-[var(--ink3)] truncate">{f.label}</span>
+                <span className="flex items-baseline gap-2">
+                  <span className="text-sm font-semibold text-[var(--ink)] tabular-nums">{value(k, f.unit)}</span>
+                  <button type="button" onClick={() => save(pins.filter((x) => x !== k))} aria-label={`Remove ${f.label}`}
+                    className="text-[var(--ink3)] text-xs px-1">✕</button>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {open ? (
+        <div className="mt-2">
+          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a ratio, e.g. PEG or debtor days"
+            className="w-full rounded-lg border border-[var(--line)] bg-[var(--card2)] px-3 py-2 text-sm text-[var(--ink)] placeholder:text-[var(--ink3)]" />
+          <div className="mt-1">
+            {hits.map((f) => (
+              <button key={f.key} type="button" onClick={() => { save([...pins, f.key]); setQ(""); setOpen(false); }}
+                className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-[var(--card2)] flex items-baseline justify-between gap-3">
+                <span className="text-sm text-[var(--ink)]">{f.label}</span>
+                <span className="text-xs text-[var(--ink3)] tabular-nums">{value(f.key, f.unit)}</span>
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={() => { setOpen(false); setQ(""); }} className="mt-1 text-xs text-[var(--ink3)]">Cancel</button>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setOpen(true)} className="mt-2 text-[13px] font-semibold text-[var(--accent-ink)]">+ Add ratio</button>
+      )}
+    </div>
+  );
+}
+
+/** Shareholding, quarterly or year by year (the March filing of each year). */
+function ShareholdingTable({ sh, symbol }: { sh: NonNullable<Company["shareholding"]>; symbol: string }) {
+  const [yearly, setYearly] = useState(false);
+  const idx = sh.dates.map((d, i) => [d, i] as const).filter(([d]) => !yearly || String(d).slice(5, 7) === "03").map(([, i]) => i);
+  const pickV = (v?: (number | null)[] | null) => (v ? idx.map((i) => v[i] ?? null) : null);
+  const items = [
+    { label: "Promoters %", values: pickV(sh.promoter) },
+    { label: "FIIs %", values: pickV(sh.fii) },
+    { label: "DIIs %", values: pickV(sh.dii) },
+    { label: "Mutual funds %", values: pickV(sh.mf) },
+    { label: "Public %", values: pickV(sh.public) },
+    { label: "Employee trusts %", values: pickV(sh.employee) },
+  ].filter((it): it is { label: string; values: (number | null)[] } => !!it.values);
+  return (
+    <>
+      <div className="flex justify-end mb-1.5">
+        <div className="inline-flex gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs" role="radiogroup" aria-label="Shareholding periods">
+          {([[false, "Quarterly"], [true, "Yearly"]] as const).map(([y, label]) => (
+            <button key={label} type="button" role="radio" aria-checked={yearly === y} onClick={() => setYearly(y)}
+              className={`rounded-md px-2.5 py-1 font-medium ${yearly === y ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>{label}</button>
+          ))}
+        </div>
+      </div>
+      <StatementTable title="Shareholding pattern" subtitle="Figures in %" kind="shareholding" symbol={symbol}
+        stmt={{ periods: idx.map((i) => sh.dates[i]), items }} />
+    </>
+  );
+}
+
+function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, pdfs }: {
   title: string; stmt: Stmt; subtitle?: string; boldRows?: string[];
+  /** The results PDF for each period, aligned with stmt.periods ("Raw PDF" row). */
+  pdfs?: (string | null)[];
   /** Adds the coming quarter as a blank last column - the quarterly table only. */
   next?: NextResults;
   /** Which table this is, for its "%" switch and row order; and whose page. */
@@ -440,6 +646,18 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol }:
                 </tr>
               );
             })}
+            {pdfs && !draft && pdfs.slice(from).some(Boolean) && (
+              <tr className="border-b border-[var(--line)]">
+                <td className="px-3 py-2 sm:py-1.5 sticky left-0 bg-[var(--card)] text-[var(--ink2)]">Raw PDF</td>
+                {pdfs.slice(from).map((u, i) => (
+                  <td key={i} className="px-3 py-2 sm:py-1.5 text-right">
+                    {u ? <a href={u.includes("://") ? u : `https://nsearchives.nseindia.com/corporate/${u}`} target="_blank" rel="noopener noreferrer"
+                      aria-label={`Results PDF, ${periodLabel(stmt.periods[from + i])}`} className="inline-flex text-[var(--accent-ink)]"><ExternalGlyph size={14} /></a> : null}
+                  </td>
+                ))}
+                {coming && <td />}
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -1456,7 +1674,7 @@ function RatioGrid({ snapshot, row, cohort, next, updates, faceValue }: {
           </div>
         ))}
       </div>
-
+      <PinnedRatios row={row} />
     </section>
   );
 }
@@ -1879,27 +2097,22 @@ function CompanyView() {
     : company?.basis === "consolidated" ? "Consolidated figures in ₹ Crores"
     : "Figures in ₹ Crores";
 
-  const exportCompanyCsv = () => {
+  const exportCompanyXlsx = () => {
     if (!company) return;
-    const esc = (v: unknown) => {
-      const sv = v === null || v === undefined ? "" : String(v);
-      return /[",\n]/.test(sv) ? `"${sv.replace(/"/g, '""')}"` : sv;
-    };
-    const lines: string[] = [`${symbol} — Rscreener export,${company.generated_at}`, ""];
-    lines.push("SNAPSHOT");
-    for (const [k, v] of Object.entries(company.snapshot)) lines.push(`${k},${esc(v)}`);
-    const pushStmt = (title: string, stmt: Stmt) => {
-      lines.push("", title.toUpperCase());
-      lines.push(`,${stmt.periods.join(",")}`);
-      for (const it of stmt.items) lines.push(`${esc(it.label)},${it.values.map(esc).join(",")}`);
-    };
-    if (company.trend?.annual) pushStmt("Track record annual", trendToStmt(company.trend.annual));
-    if (company.trend?.quarterly) pushStmt("Track record quarterly", trendToStmt(company.trend.quarterly));
+    // One workbook, a sheet per table - screener.in's "Export to Excel".
+    const sheets: { name: string; rows: Cell[][] }[] = [];
+    const sheetOf = (name: string, stmt: Stmt) => sheets.push({
+      name,
+      rows: [["", ...stmt.periods], ...stmt.items.map((it) => [it.parent ? `  ${it.label}` : it.label, ...it.values] as Cell[])],
+    });
+    sheets.push({ name: "Summary", rows: [[`${symbol} - Rscreener export`, company.generated_at], [], ...Object.entries(company.snapshot).map(([k, v]) => [k, typeof v === "number" ? v : v === null || v === undefined ? "" : String(v)] as Cell[])] });
     for (const [key, title] of Object.entries(STMT_TITLES)) {
-      if (company.statements[key]) pushStmt(title, company.statements[key]);
+      if (company.statements[key]) sheetOf(title, company.statements[key]);
     }
+    if (company.trend?.annual) sheetOf("Track record annual", trendToStmt(company.trend.annual));
+    if (company.trend?.quarterly) sheetOf("Track record quarterly", trendToStmt(company.trend.quarterly));
     if (company.shareholding && company.shareholding.dates.length > 0) {
-      pushStmt("Shareholding pattern", {
+      sheetOf("Shareholding", {
         periods: company.shareholding.dates,
         items: [
           { label: "Promoters %", values: company.shareholding.promoter },
@@ -1911,8 +2124,8 @@ function CompanyView() {
         ],
       });
     }
-    const bom = String.fromCharCode(0xfeff);
-    void saveFile(`${symbol}_rscreener.csv`, bom + lines.join("\r\n"));
+    sheets.push({ name: "Notes", rows: [["Figures from free sources (NSE / BSE filings, Yahoo); unverified until checked against the company's filing."], ["Rscreener screens; it never recommends."]] });
+    void saveFile(`${symbol}_rscreener.xlsx`, buildXlsx(sheets), XLSX_MIME);
   };
 
   if (!symbol) return <p className="text-[var(--ink3)] p-6">No company selected. <Link className="text-[var(--accent-ink)] underline" href="/">Back to screener</Link></p>;
@@ -1937,6 +2150,7 @@ function CompanyView() {
           <p className="text-sm text-[var(--ink3)] mt-0.5">
             <span className="font-semibold text-[var(--ink2)]">{symbol}</span>
             {company.exchange ? ` · ${company.exchange}` : ""}
+            {company.fno && <span className="ml-1.5 align-middle text-[10px] font-bold rounded px-1.5 py-0.5 bg-[var(--accent-soft)] text-[var(--accent-ink)]" title="Trades in NSE's futures & options segment">F&amp;O</span>}
             {" · "}
             {s.sector ? (
               <Link href={`/sectors?s=${encodeURIComponent(String(s.sector))}`} className="hover:text-[var(--accent-ink)] hover:underline">{String(s.sector)}</Link>
@@ -1946,7 +2160,7 @@ function CompanyView() {
           <IndexChips list={company.indices} />
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          <IconButton name="download" label="Export to Excel (CSV)" onClick={exportCompanyCsv} />
+          <IconButton name="download" label="Export to Excel" onClick={exportCompanyXlsx} />
           <RefetchButton symbol={symbol} />
           <WatchStar symbol={symbol} />
         </div>
@@ -2130,55 +2344,16 @@ function CompanyView() {
       )}
 
       {peers.length > 0 && (
-        <section id="peers" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
-          <div className="px-4 pt-3.5 pb-2">
-            <h2 className="text-base font-semibold text-[var(--ink)]">Peer comparison</h2>
-            <p className="text-xs text-[var(--ink3)] mt-0.5">{String(s.industry)}</p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse">
-              <thead>
-                <tr className="text-xs text-[var(--ink3)] border-y border-[var(--line)]">
-                  <th className="px-3 py-2 text-left font-medium">Name</th>
-                  <th className="px-3 py-2 text-right font-medium">CMP ₹</th>
-                  <th className="px-3 py-2 text-right font-medium">P/E</th>
-                  <th className="px-3 py-2 text-right font-medium">MCap ₹Cr</th>
-                  <th className="px-3 py-2 text-right font-medium">Div Yld %</th>
-                  <th className="px-3 py-2 text-right font-medium">ROCE %</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="border-b border-[var(--line)] bg-[var(--card2)]">
-                  <td className="px-3 py-1.5"><span className="font-semibold text-[var(--ink)]">{symbol}</span></td>
-                  <td className="px-3 py-1.5 text-right tabular-nums font-semibold">{fmtNum(price)}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums font-semibold">{fmtNum(num(fullRow, "pe"))}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums font-semibold">{fmtNum(num(fullRow, "mcap"), 0)}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums font-semibold">{fmtNum(num(fullRow, "div_yield"))}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums font-semibold">{fmtNum(num(fullRow, "roce"))}</td>
-                </tr>
-                {peers.map((p) => (
-                  <tr key={String(p.symbol)} className="border-b border-[var(--line)] hover:bg-[var(--card2)]">
-                    <td className="px-3 py-1.5"><Link className="font-medium text-[var(--accent-ink)] hover:underline" href={`/company?s=${encodeURIComponent(String(p.symbol))}`}>{shortName(String(p.name ?? ""), String(p.symbol)) || String(p.symbol)}</Link></td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.price as number)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.pe as number)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.mcap as number, 0)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.div_yield as number)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.roce as number)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+        <PeerTable symbol={symbol} self={{ ...(fullRow ?? {}), price }} peers={peers} industry={String(s.industry)} />
       )}
-
       {/* The caption says what the figures ACTUALLY are. It read "Consolidated"
           on every company, hardcoded, and 1,347 of the 3,198 with filed results
           file standalone - which excludes subsidiaries, so for a holding company
           the label named a different business from the one in the table. */}
       {quarterly && (
         <div id="quarters" className="scroll-mt-32 space-y-6">
-          <StatementTable title="Quarterly results" stmt={quarterly} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} next={nextResults} kind="quarterly" symbol={symbol} />
+          <StatementTable title="Quarterly results" stmt={quarterly} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} next={nextResults} kind="quarterly" symbol={symbol}
+            pdfs={quarterly.periods.map((p) => company.quarters?.find((q) => q.end === p)?.pdf ?? null)} />
           <SeasonsCard seasons={company.seasons} />
         </div>
       )}
@@ -2198,23 +2373,7 @@ function CompanyView() {
       <InstitutionsCard symbol={symbol} onLoad={setHasInst} />
 
       {company.shareholding && company.shareholding.dates.length > 0 && (
-        <div id="shareholding" className="scroll-mt-32"><StatementTable
-          title="Shareholding pattern"
-          subtitle="Figures in %"
-          kind="shareholding"
-          symbol={symbol}
-          stmt={{
-            periods: company.shareholding.dates,
-            items: [
-              { label: "Promoters %", values: company.shareholding.promoter },
-              ...(company.shareholding.fii ? [{ label: "FIIs %", values: company.shareholding.fii }] : []),
-              ...(company.shareholding.dii ? [{ label: "DIIs %", values: company.shareholding.dii }] : []),
-              ...(company.shareholding.mf ? [{ label: "Mutual funds %", values: company.shareholding.mf }] : []),
-              { label: "Public %", values: company.shareholding.public },
-              { label: "Employee trusts %", values: company.shareholding.employee },
-            ],
-          }}
-        />
+        <div id="shareholding" className="scroll-mt-32"><ShareholdingTable sh={company.shareholding} symbol={symbol} />
           <div className="bg-[var(--card)] rounded-b-xl border border-t-0 border-[var(--line)] -mt-px">
             <HoldingTrend s={company.shareholding} />
           </div>

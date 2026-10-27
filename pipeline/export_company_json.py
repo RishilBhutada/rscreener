@@ -435,6 +435,26 @@ def quarter_blocks(con: sqlite3.Connection) -> dict[str, list[dict]]:
                 "SELECT symbol, period_end, announced_on FROM filing_dates"
             ) if a
         }
+    # The results announcement's PDF (fetch_result_times.py): the first one
+    # after the quarter ended - screener.in's "Raw PDF" under each quarter.
+    pdfs: dict[str, list[tuple[str, str]]] = {}
+    if _table_exists(con, "result_times"):
+        for s_, d_, doc in con.execute("SELECT symbol, day, doc FROM result_times WHERE doc <> '' ORDER BY day"):
+            pdfs.setdefault(s_, []).append((d_, doc))
+
+    def pdf_for(sym: str, end: str, announced: str | None) -> str | None:
+        lst = pdfs.get(sym)
+        if not lst:
+            return None
+        # Results are due within 45 days of a quarter (60 for March); 75
+        # allows a late filer without reaching the next quarter's results.
+        lo, hi = end, (date.fromisoformat(end) + timedelta(days=75)).isoformat()
+        if announced:
+            for d_, doc in lst:
+                if d_ == announced:
+                    return doc
+        return next((doc for d_, doc in lst if lo < d_ <= hi), None)
+
     rows = con.execute(
         "SELECT symbol, period_start, period_end, value FROM results_history "
         "WHERE period_type='quarterly' AND item='eps' AND period_start<>'' "
@@ -454,6 +474,7 @@ def quarter_blocks(con: sqlite3.Connection) -> dict[str, list[dict]]:
             "eps": round(float(eps), 2),
             "announced": announced.get((sym, end)),
             "q": fq,
+            **({"pdf": pdf} if (pdf := pdf_for(sym, end, announced.get((sym, end)))) else {}),
         })
     return out
 
@@ -673,7 +694,7 @@ def screener_context(data_json: Path) -> tuple[dict, dict, dict]:
     # whole row for eight peers would put most of the saving straight back.
     PEER_FIELDS = ("symbol", "name", "price", "mcap", "pe", "pb", "roce", "roe",
                    "div_yield", "net_margin", "sales_cagr_5y", "profit_cagr_5y",
-                   "de", "exchange")
+                   "de", "exchange", "qtr_sales", "qtr_profit", "qtr_sales_yoy", "qtr_profit_yoy")
     MEDIAN_FIELDS = ("pe", "div_yield", "roce", "roe", "sales_cagr_5y",
                      "profit_cagr_5y", "de", "promoter_holding",
                      "volatility_1y", "volatility_30d")
@@ -871,6 +892,7 @@ def main() -> None:
     except Exception:  # noqa: BLE001 - an older universe table has no such column
         pass
     dps_by_symbol = dividends_per_share(con)
+    fno = {r[0] for r in con.execute("SELECT symbol FROM fno_lots")} if _table_exists(con, "fno_lots") else set()
     splits_by_symbol = split_factors(con)
     # Quarterly business updates filed before the results (business_updates.py):
     # how often, how many days after the quarter, and the latest.
@@ -922,7 +944,8 @@ def main() -> None:
             for s_, d_, fii, dii, mf in con.execute("SELECT symbol, date, fii, dii, mf FROM shareholding_detail"):
                 detail[(s_, str(d_)[:10])] = (fii, dii, mf)
         for sym_key, grp in shp.groupby("symbol"):
-            tail = grp.tail(12)
+            # Eleven years: the page's Yearly view reads the March filing of each.
+            tail = grp.tail(44)
             dates = tail["date"].tolist()
             entry = {
                 "dates": dates,
@@ -999,6 +1022,7 @@ def main() -> None:
             "indices": indices_by_symbol.get(sym),
             "about": about_by_symbol.get(sym),
             "face_value": face_value.get(sym),
+            "fno": True if sym in fno else None,
             "updates": updates_by_symbol.get(sym),
             "no_pe_reason": None if (bands.get(sym, {}) or {}).get("pe") else no_pe.get(sym),
             # Which exchange this company is listed on, because it decides what
