@@ -415,6 +415,15 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "40"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols "${{ steps.plan.outputs.nse_target }}" --max-age-hours 168 --limit 800 --quarters-back ${{ steps.plan.outputs.qb }} --sleep 0.25
+      - name: Standalone figures for consolidated filers (rotating)
+        if: steps.plan.outputs.earnings == '1'
+        # The company page's Consolidated / Standalone switch: each company's
+        # standalone filings, recent 12 quarters and 6 years, into their own
+        # table (results_history_sa) so the main one keeps one basis per period.
+        # 200 a night, each company again after two weeks.
+        env:
+          RSCREENER_STEP_MINUTES: "25"
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols @data/nse_symbols.txt --standalone --max-age-hours 336 --limit 200 --quarters-back 12 --sleep 0.25 --max-minutes 25
       - name: Refresh corporate actions (dividends, bonuses, splits, rights)
         if: steps.plan.outputs.actions == '1'
         # One index call per symbol against the same NSE host as the filing dates,

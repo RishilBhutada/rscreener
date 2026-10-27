@@ -18,7 +18,7 @@ import pandas as pd
 
 from export_json import freshen_prices
 from fetch_corporate_actions import dividend_detail
-from trend_lib import adj_factor, build_trends, net_debt_series, ratio_bands, split_factors
+from trend_lib import adj_factor, build_trends, net_debt_series, ratio_bands, split_factors, standalone_tables
 import fund_units
 import business_updates
 import seasons_lib
@@ -932,6 +932,7 @@ def main() -> None:
     # order. Falls back silently when absent so a standalone run still works.
     row_by_sym, peers_by_sym, ctx_by_sym = screener_context(OUT_DIR.parent / "data.json")
     trends = build_trends(con, shares_by_symbol, only)
+    standalone = standalone_tables(con, only)
     bands = ratio_bands(con, shares_by_symbol, netdebt_by_symbol, only)
     prices_by_symbol: dict[str, dict] = {}
     if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='prices'").fetchone():
@@ -1130,6 +1131,13 @@ def main() -> None:
             if chosen:
                 payload["statements"][key] = chosen
                 payload.setdefault("sources", {})[key] = "as-filed (NSE)" if asf else "Yahoo Finance"
+        # The standalone figures, for the Consolidated / Standalone switch -
+        # only where the main tables are consolidated (else they ARE standalone).
+        if basis_by_symbol.get(sym) == "consolidated" and sym in standalone:
+            for key, tkey in (("quarterly_results_sa", "quarterly"), ("annual_pnl_sa", "annual")):
+                t_sa = asfiled_table(standalone[sym].get(tkey))
+                if t_sa:
+                    payload["statements"][key] = t_sa
         cfo_ebitda(payload["statements"].get("cash_flow"), (trends.get(sym) or {}).get("annual"))
         if sym in logos:
             logo_dir.mkdir(parents=True, exist_ok=True)

@@ -948,6 +948,57 @@ def years_from_quarters(comps: dict, splits: dict | None = None) -> None:
             years[fy] = new
 
 
+def standalone_tables(con: sqlite3.Connection, only: set | None = None) -> dict[str, dict]:
+    """{symbol: {"quarterly": trend-like dict, "annual": ...}} from
+    results_history_sa - the company's standalone filings, for the page's
+    Consolidated / Standalone switch. The same rows as the as-filed tables;
+    EPS put on today's split/bonus base where the split history is on record.
+    A year with no annual filing is the sum of its four quarters."""
+    if not _table_exists(con, "results_history_sa"):
+        return {}
+    df = pd.read_sql("SELECT symbol, period_type, period_end, item, value FROM results_history_sa", con)
+    if df.empty:
+        return {}
+    comps: dict = {}
+    for (sym, pt), grp in df.groupby(["symbol", "period_type"]):
+        if only is not None and sym not in only:
+            continue
+        per: dict = {}
+        for _, r in grp.iterrows():
+            per.setdefault(r["period_end"], {"_source": "nse"})[r["item"]] = r["value"]
+        comps[(sym, pt)] = per
+    splits = split_factors(con)
+    years_from_quarters(comps, splits)
+    out: dict = {}
+    for (sym, pt), per in comps.items():
+        ordered = sorted(per)[-(12 if pt == "quarterly" else 10):]
+        if not ordered:
+            continue
+        ev = splits.get(sym)
+        rev = [per[p].get("revenue") for p in ordered]
+        deriv = [_derive(per[p]) for p in ordered]
+        ebitda = [d["ebitda"] for d in deriv]
+        br = [profit_breakdown(per[p], rev[i], ebitda[i]) for i, p in enumerate(ordered)]
+
+        def pct(a, b):
+            return round(a / b * 100, 2) if (a is not None and b) else None
+        t = {
+            "periods": ordered,
+            "revenue": [_cr(v) for v in rev],
+            "opex": [_cr(rev[i] - ebitda[i]) if (rev[i] is not None and ebitda[i] is not None) else None for i in range(len(ordered))],
+            "ebitda": [_cr(v) for v in ebitda],
+            "opm": [pct(ebitda[i], rev[i]) for i in range(len(ordered))],
+            "interest": [_cr(per[p].get("finance_cost")) for p in ordered],
+            "depreciation": [_cr(per[p].get("depreciation")) for p in ordered],
+            "pat": [_cr(per[p].get("pat")) for p in ordered],
+            "eps": [round(e / adj_factor(ev, p), 2) if (e := per[p].get("eps")) is not None and pd.notna(e) else None for p in ordered],
+            **{k: [b[k] for b in br] for k in BREAKDOWN_KEYS},
+        }
+        if any(v is not None for v in t["revenue"]):
+            out.setdefault(sym, {})[pt] = t
+    return out
+
+
 def build_trends(con: sqlite3.Connection, shares: dict | None = None,
                  only: set | None = None) -> dict[str, dict]:
     shares = shares or {}

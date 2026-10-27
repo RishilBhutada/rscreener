@@ -2147,6 +2147,7 @@ function CompanyView() {
   // (8 KB on the wire). Undefined while loading, null if NSE lists none.
   const [nextResults, setNextResults] = useState<NextResults>(undefined);
   const [alertsOpen, setAlertsOpen] = useState(false);
+  const [basisView, setBasisView] = useState<"consolidated" | "standalone">("consolidated");
   useEffect(() => {
     if (!symbol) return;
     const d = new Date();
@@ -2280,8 +2281,22 @@ function CompanyView() {
   const s = company.snapshot;
   const price = num(fullRow, "price") ?? num(s, "price");
   const off = num(fullRow, "off_52w_high");
-  const quarterly = company.statements.quarterly_results ?? (company.trend?.quarterly ? trendToStmt(company.trend.quarterly) : null);
-  const pnl = company.statements.annual_pnl ?? (company.trend?.annual ? trendToStmt(company.trend.annual) : null);
+  // Consolidated / Standalone (the switch shows only where both are filed).
+  const hasSa = !!(company.statements.quarterly_results_sa || company.statements.annual_pnl_sa);
+  const sa = hasSa && basisView === "standalone";
+  const quarterly = (sa && company.statements.quarterly_results_sa) || company.statements.quarterly_results || (company.trend?.quarterly ? trendToStmt(company.trend.quarterly) : null);
+  const pnl = (sa && company.statements.annual_pnl_sa) || company.statements.annual_pnl || (company.trend?.annual ? trendToStmt(company.trend.annual) : null);
+  const tableCaption = sa ? "Standalone figures in ₹ Crores" : figuresCaption;
+  const basisSwitch = hasSa ? (
+    <div className="flex justify-end">
+      <div className="inline-flex gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs" role="radiogroup" aria-label="Figures basis">
+        {([["consolidated", "Consolidated"], ["standalone", "Standalone"]] as const).map(([k, label]) => (
+          <button key={k} type="button" role="radio" aria-checked={basisView === k} onClick={() => setBasisView(k)}
+            className={`rounded-md px-2.5 py-1 font-medium ${basisView === k ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>{label}</button>
+        ))}
+      </div>
+    </div>
+  ) : null;
   const balance = company.statements.balance_sheet;
   const cashflow = company.statements.cash_flow;
 
@@ -2508,8 +2523,9 @@ function CompanyView() {
           the label named a different business from the one in the table. */}
       {quarterly && (
         <div id="quarters" className="scroll-mt-32 space-y-6">
-          <StatementTable title="Quarterly results" stmt={quarterly} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} next={nextResults} kind="quarterly" symbol={symbol}
-            pdfs={quarterly.periods.map((p) => company.quarters?.find((q) => q.end === p)?.pdf ?? null)} />
+          {basisSwitch}
+          <StatementTable title="Quarterly results" stmt={quarterly} subtitle={tableCaption} boldRows={["Net Profit", "Net profit"]} next={nextResults} kind="quarterly" symbol={symbol}
+            pdfs={sa ? undefined : quarterly.periods.map((p) => company.quarters?.find((q) => q.end === p)?.pdf ?? null)} />
           {company.segments && <SegmentsTable segs={company.segments} symbol={symbol} />}
           <SeasonsCard seasons={company.seasons} />
         </div>
@@ -2517,7 +2533,8 @@ function CompanyView() {
 
       {pnl && (
         <div id="profit-loss" className="scroll-mt-32 space-y-6">
-          <StatementTable title="Profit & loss" stmt={pnl} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} kind="pnl" symbol={symbol} />
+          {basisSwitch}
+          <StatementTable title="Profit & loss" stmt={pnl} subtitle={tableCaption} boldRows={["Net Profit", "Net profit"]} kind="pnl" symbol={symbol} />
           <CompoundedGrowth trend={company.trend} prices={company.prices} />
         </div>
       )}
