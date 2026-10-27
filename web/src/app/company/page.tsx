@@ -124,6 +124,11 @@ type Company = {
     rank_of?: number;
     ind_rank?: number | null;
     ind_rank_of?: number;
+    /** NSE's sector and basic industry where its index files carry them. */
+    nse_sector?: string | null;
+    nse_basic?: string | null;
+    /** What the peers were picked by: NSE's basic industry, or the source's industry. */
+    peer_group?: string | null;
   } | null;
 };
 
@@ -897,24 +902,29 @@ function CompoundedGrowth({ trend, prices }: { trend?: { annual?: Trend }; price
 
 /** The indices the company is in: the first few, the rest one tap away. */
 function IndexChips({ list }: { list?: [string, string, string][] | null }) {
-  const [all, setAll] = useState(false);
+  // Behind a small button on the ticker line (owner, 27-Oct-2026: "only by
+  // drop down beside the name, not always").
+  const [open, setOpen] = useState(false);
   if (!list?.length) return null;
-  const shown = all ? list : list.slice(0, 4);
   return (
-    <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12px]">
-      <span className="text-[var(--ink3)]">In {list.length} {list.length === 1 ? "index" : "indices"}:</span>
-      {shown.map(([sym, name]) => (
-        <Link key={sym} href={`/indices/view?s=${encodeURIComponent(sym)}`}
-          className="rounded-full border border-[var(--line)] px-2 py-0.5 text-[var(--ink2)] hover:bg-[var(--card2)]">
-          {name.replace(/^NIFTY\b/, "Nifty")}
-        </Link>
-      ))}
-      {list.length > 4 && (
-        <button type="button" onClick={() => setAll(!all)} className="text-[var(--accent-ink)] font-medium px-1">
-          {all ? "Fewer" : `+${list.length - 4} more`}
-        </button>
+    <>
+      {" · "}
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
+        className="inline-flex items-center gap-0.5 text-[var(--accent-ink)] font-medium">
+        {list.length} {list.length === 1 ? "index" : "indices"}
+        <ChevronGlyph size={11} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <span className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12px]">
+          {list.map(([sym, name]) => (
+            <Link key={sym} href={`/indices/view?s=${encodeURIComponent(sym)}`}
+              className="rounded-full border border-[var(--line)] px-2 py-0.5 text-[var(--ink2)] hover:bg-[var(--card2)]">
+              {name.replace(/^NIFTY\b/, "Nifty")}
+            </Link>
+          ))}
+        </span>
       )}
-    </p>
+    </>
   );
 }
 
@@ -2280,6 +2290,8 @@ function CompanyView() {
 
   const s = company.snapshot;
   const price = num(fullRow, "price") ?? num(s, "price");
+  const nseSector = (company.context?.nse_sector as string | undefined) ?? (fullRow?.["nse_sector"] as string | undefined);
+  const nseBasic = (company.context?.nse_basic as string | undefined) ?? (fullRow?.["nse_basic"] as string | undefined);
   const off = num(fullRow, "off_52w_high");
   // Consolidated / Standalone (the switch shows only where both are filed).
   const hasSa = !!(company.statements.quarterly_results_sa || company.statements.annual_pnl_sa);
@@ -2313,10 +2325,18 @@ function CompanyView() {
             {company.exchange ? ` · ${company.exchange}` : ""}
             {company.fno && <span className="ml-1.5 align-middle text-[10px] font-bold rounded px-1.5 py-0.5 bg-[var(--accent-soft)] text-[var(--accent-ink)]" title="Trades in NSE's futures & options segment">F&amp;O</span>}
             {" · "}
-            {s.sector ? (
-              <Link href={`/sectors?s=${encodeURIComponent(String(s.sector))}`} className="hover:text-[var(--accent-ink)] hover:underline">{String(s.sector)}</Link>
-            ) : "—"}
-            {s.industry ? ` · ${String(s.industry)}` : ""}
+            {/* NSE's own sector (and basic industry) where NSE's index files
+                carry it; the source's sector and industry otherwise. */}
+            {nseSector ? (
+              <span title="NSE's classification">{nseSector}{nseBasic ? ` · ${nseBasic}` : ""}</span>
+            ) : (
+              <>
+                {s.sector ? (
+                  <Link href={`/sectors?s=${encodeURIComponent(String(s.sector))}`} className="hover:text-[var(--accent-ink)] hover:underline">{String(s.sector)}</Link>
+                ) : "—"}
+                {s.industry ? ` · ${String(s.industry)}` : ""}
+              </>
+            )}
             {typeof s.website === "string" && /^https?:\/\//.test(s.website) && (
               <>
                 {" · "}
@@ -2325,8 +2345,8 @@ function CompanyView() {
                 </a>
               </>
             )}
+            <IndexChips list={company.indices} />
           </p>
-          <IndexChips list={company.indices} />
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <IconButton name="bell" label="Price alerts" onClick={() => setAlertsOpen(true)} />
@@ -2515,7 +2535,7 @@ function CompanyView() {
       )}
 
       {peers.length > 0 && (
-        <PeerTable symbol={symbol} self={{ ...(fullRow ?? {}), price }} peers={peers} industry={String(s.industry)} />
+        <PeerTable symbol={symbol} self={{ ...(fullRow ?? {}), price }} peers={peers} industry={String(company.context?.peer_group ?? s.industry)} />
       )}
       {/* The caption says what the figures ACTUALLY are. It read "Consolidated"
           on every company, hardcoded, and 1,347 of the 3,198 with filed results

@@ -63,6 +63,39 @@ SCREEN_FIELDS = ["vs_dma50", "vs_dma200", "dma50_200", "rsi14", "vol_surge",
 RETURN_ANCHORS = {"ret_1m": 1, "ret_3m": 3, "ret_6m": 6, "ret_1y": 12, "ret_3y": 36, "ret_5y": 60}
 
 
+# NSE's 22 sectors (its 2023 classification); any other "Industry" value in an
+# index file is a basic industry.
+NSE_SECTORS = {
+    "automobile and auto components", "capital goods", "chemicals", "construction", "construction materials",
+    "consumer durables", "consumer services", "diversified", "fast moving consumer goods", "financial services",
+    "forest materials", "healthcare", "information technology", "media entertainment & publication",
+    "metals & mining", "oil gas & consumable fuels", "power", "realty", "services", "telecommunication",
+    "textiles", "utilities",
+}
+
+
+def nse_classification(db) -> tuple[dict, dict]:
+    """{symbol: NSE sector}, {symbol: NSE basic industry} from idx_members."""
+    import collections
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        rows = con.execute("SELECT symbol, industry FROM idx_members WHERE industry <> ''").fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    con.close()
+    sec, basic = collections.defaultdict(collections.Counter), collections.defaultdict(collections.Counter)
+    for sym, ind in rows:
+        label = " ".join(ind.replace(",", " ").split())
+        key = label.lower()
+        if key in NSE_SECTORS:
+            # NSE writes it both with and without the comma; keep its own form.
+            sec[sym][ind.strip()] += 1
+        else:
+            basic[sym][ind.strip()] += 1
+    pick = lambda c: max(c.items(), key=lambda kv: (kv[1], "," in kv[0]))[0]  # noqa: E731
+    return {s: pick(c) for s, c in sec.items()}, {s: pick(c) for s, c in basic.items()}
+
+
 def _yang_zhang(o, h, l, c, n: int, ann: float):
     """Yang-Zhang (2000) annualised volatility (%) over the last n days.
 
@@ -556,6 +589,14 @@ def main() -> None:
     for col in comp_df.columns:
         df[col] = comp_df[col].values
     df["promoter_holding"] = df["symbol"].map(promoter_by_symbol)
+    # NSE's own classification, where NSE's index files carry it (fetch_indices.py
+    # reads each index's member list, whose "Industry" column is NSE's sector -
+    # "Oil, Gas & Consumable Fuels" - or, in a few files, its basic industry -
+    # "Refineries & Marketing"). The full four-level path sits only behind
+    # NSE's quote API, which refuses programs; this is the part that is open.
+    nse_sec, nse_basic = nse_classification(DB)
+    df["nse_sector"] = df["symbol"].map(nse_sec)
+    df["nse_basic"] = df["symbol"].map(nse_basic)
     df["median_pe_5y"] = df["symbol"].map(lambda s: pe_by_symbol.get(s, {}).get("median_5y"))
     for vk in ("volatility_1y", "volatility_30d", "vol_method"):
         df[vk] = df["symbol"].map(lambda s, k=vk: vol_by_symbol.get(s, {}).get(k))
@@ -768,7 +809,7 @@ def main() -> None:
     df = df.rename(columns=RENAME)
 
     keep = [
-        "symbol", "name", "sector", "industry", "price", "mcap", "pe", "forward_pe",
+        "symbol", "name", "sector", "industry", "nse_sector", "nse_basic", "price", "mcap", "pe", "forward_pe",
         "pb", "book_value", "roe", "roa", "de", "div_yield", "net_margin", "op_margin",
         "gross_margin", "rev_growth", "earn_growth", "revenue", "net_income",
         "total_debt", "total_cash", "free_cashflow", "wk52_high", "wk52_low", "beta",

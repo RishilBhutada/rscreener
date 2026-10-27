@@ -7,6 +7,14 @@ site's robots.txt is read first and a disallowed site is left alone - the
 page then shows the company's initials, as it does for every company without
 one.
 
+When the company's own site refuses programs (TCS answers 403 to anything
+that is not a browser - a bot check, never worked around) or publishes no
+raster icon, the icon is taken from a public favicon service that serves site
+icons for anyone to show: DuckDuckGo's, then Google's icon CDN (gstatic,
+size 128). Both are read only where their robots.txt allows it (checked
+27-Oct-2026; google.com/s2 does not, so it is not used), and only a real
+200 answer counts - their "unknown site" placeholder comes back as a 404.
+
 Kept only when it is a raster image the browser draws as an <img>: PNG, JPEG,
 WebP, GIF or ICO, at most 80 KB. Never SVG: an SVG served from our own address
 can carry script, and a company's file is not ours to vouch for.
@@ -103,6 +111,31 @@ def fetch_icon(s: requests.Session, site: str) -> tuple[str, bytes, str] | str:
     return "no icon"
 
 
+SERVICES = [
+    "https://icons.duckduckgo.com/ip3/{host}.ico",
+    "https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://{host}&size=128",
+]
+
+
+def from_service(s: requests.Session, site: str) -> tuple[str, bytes, str] | None:
+    host = urlparse(site if "://" in site else f"https://{site}").netloc.lower()
+    host = host[4:] if host.startswith("www.") else host
+    if not host:
+        return None
+    for tpl in SERVICES:
+        url = tpl.format(host=host)
+        try:
+            r = s.get(url, timeout=20)
+        except requests.RequestException:
+            continue
+        if r.status_code != 200 or not r.content or len(r.content) > MAX_BYTES:
+            continue
+        mime = kind(r.content)
+        if mime:
+            return mime, r.content, url
+    return None
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=150)
@@ -131,6 +164,8 @@ def main() -> None:
         if budget.stop(i, len(due)):
             break
         res = fetch_icon(s, sites[sym])
+        if not isinstance(res, tuple):
+            res = from_service(s, sites[sym]) or res
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         if isinstance(res, tuple):
             mime, data, src = res

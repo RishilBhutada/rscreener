@@ -706,6 +706,13 @@ def screener_context(data_json: Path) -> tuple[dict, dict, dict]:
     by_industry: dict[str, list] = {}
     for r in rows:
         by_industry.setdefault(r.get("industry") or "", []).append(r)
+    # Peers by NSE's basic industry where NSE says what it is and at least
+    # three others share it (Refineries & Marketing: IOC, BPCL, HPCL ...);
+    # otherwise by the source's industry, which is finer than NSE's sector.
+    by_basic: dict[str, list] = {}
+    for r in rows:
+        if r.get("nse_basic"):
+            by_basic.setdefault(r["nse_basic"], []).append(r)
 
     # Rank by size, computed once over the whole table rather than per company.
     with_cap = [r for r in rows if isinstance(r.get("mcap"), (int, float))]
@@ -741,13 +748,18 @@ def screener_context(data_json: Path) -> tuple[dict, dict, dict]:
     for r in rows:
         sym, ind = r["symbol"], (r.get("industry") or "")
         row_by[sym] = r
+        group = by_basic.get(r.get("nse_basic") or "", [])
+        pool = group if len(group) >= 4 else by_industry.get(ind, [])
         peers_by[sym] = [
             {k: p.get(k) for k in PEER_FIELDS}
-            for p in sorted((x for x in by_industry.get(ind, []) if x["symbol"] != sym),
+            for p in sorted((x for x in pool if x["symbol"] != sym),
                             key=lambda x: -(x.get("mcap") or 0))[:8]
         ]
         ctx_by[sym] = {
             "industry": ind,
+            "nse_sector": r.get("nse_sector"),
+            "nse_basic": r.get("nse_basic"),
+            "peer_group": r.get("nse_basic") if len(group) >= 4 else ind,
             "medians": medians_by_industry.get(ind, {}),
             "rank": rank_all.get(sym),
             "rank_of": len(with_cap),
