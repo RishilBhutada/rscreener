@@ -648,7 +648,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         };
       }
       if (sales) {
-        bandView(psBand, "Price / Sales", "Median Price to Sales", "plain", epsBars, "Sales per share (4 quarters added up)", "rupee");
+        bandView(psBand, "Price / Sales", "Median Price to Sales", "plain", epsBars, "SPS (4 quarters added up)", "rupee");
       } else {
         bandView(band, `PE${suffix}`, "Median PE", "plain", epsBars,
           peWin === "ttm" ? "EPS (4 quarters added up)" : "EPS (latest quarter x4)", "plain");
@@ -812,7 +812,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const growthVal: "off" | "yoy" | "prev" = showChg ? epsCmp : "off";
   const setGrowth = (g: "off" | "yoy" | "prev") => { if (g === "off") setShowChg(false); else { setShowChg(true); setEpsCmp(g); } };
   const isPe = view === "pe";
-  const pBars = isPe && spsAvail ? seg(perShare, [["eps", "EPS"], ["sps", "Sales/share"]] as const, setPerShare) : null;
+  const pBars = isPe && spsAvail ? seg(perShare, [["eps", "EPS"], ["sps", "SPS"]] as const, setPerShare) : null;
   const pWin = isPe && !spsOn && peBand?.alt ? seg(peWin as "ttm" | "q1", [["ttm", "TTM"], ["q1", "1Q×4"]] as const, (k) => setPeWin(k)) : null;
   const pGrowth = isPe && (quarters?.length ?? 0) > 0
     ? seg(growthVal, [["off", "No growth"], ["yoy", peWin === "ttm" ? "vs year before" : "vs year ago"], ["prev", "vs quarter before"]] as const, setGrowth) : null;
@@ -1376,7 +1376,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
           {view === "pe" && spsAvail && (
             <div className="flex items-center gap-0.5 rounded-lg border border-[var(--line)] p-0.5">
               {([["eps", "EPS", "Earnings per share, under the P/E line"],
-                 ["sps", "Sales/share", "Sales (revenue from operations) per share, under the Price / Sales line - the same line as Market Cap / Sales"]] as const).map(([k, label, tip]) => (
+                 ["sps", "SPS", "Sales per share - revenue from operations per share, under the Price / Sales line - the same line as Market Cap / Sales"]] as const).map(([k, label, tip]) => (
                 <button key={k} onClick={() => { setPerShare(k); setHover(null); }} title={tip}
                   className={`rounded-md px-2 py-1 sm:py-0.5 font-medium ${perShare === k
                     ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)] hover:bg-[var(--card2)]"}`}>

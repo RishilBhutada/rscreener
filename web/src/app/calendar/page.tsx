@@ -113,6 +113,33 @@ function figure(e: CalEvent): { v: number; label: string } | null {
   return null;
 }
 
+/** Top right of the page: re-read NSE and republish the calendar now. The app
+ *  cannot start a run itself (that needs a token), so this opens a pre-filled
+ *  GitHub request the owner submits; refetch-calendar.yml acts on it. */
+function CalendarRefetch() {
+  const [open, setOpen] = useState(false);
+  const url = "https://github.com/RishilBhutada/rscreener/issues/new?title=" + encodeURIComponent("Refetch calendar")
+    + "&body=" + encodeURIComponent("Requested from the Rscreener app: re-read NSE's calendar and republish it.");
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} aria-label="Refetch the calendar" title="Refetch the calendar"
+        className="rs-press inline-flex items-center justify-center w-10 h-10 rounded-full text-[var(--ink2)] active:bg-[var(--card2)]">
+        <Icon name="refresh" size={18} />
+      </button>
+      {open && (
+        <InfoDialog title="Refetch the calendar" onClose={() => setOpen(false)}>
+          <p>Re-reads NSE&apos;s board meetings, result times and newly filed results, and republishes the calendar - about 4 minutes.</p>
+          <a href={url} target="_blank" rel="noopener noreferrer"
+            className="rs-press mt-1 inline-flex items-center justify-center w-full min-h-[44px] rounded-xl bg-[var(--accent-fill)] text-[var(--accent-fill-ink)] text-[14px] font-semibold">
+            Open the request on GitHub
+          </a>
+          <p className="text-[11px] text-[var(--ink3)]">Tap Submit new issue there. Only your own requests are acted on.</p>
+        </InfoDialog>
+      )}
+    </>
+  );
+}
+
 export default function CalendarPage() {
   const [next, setNext] = useState<UpcomingDoc | null>(null);
   const [past, setPast] = useState<PastDoc | null>(null);
@@ -222,6 +249,7 @@ export default function CalendarPage() {
       <main className="rs-page-in max-w-3xl mx-auto px-4 py-5 space-y-3">
         <h1 className="text-xl font-bold flex items-center gap-1.5">
           Calendar
+          <span className="ml-auto order-last"><CalendarRefetch /></span>
           <InfoTip title="Calendar">
             <p>Coming up: board meetings (results, dividends, fund raising), ex-dates for dividends, bonuses, splits and rights, and IPOs, from NSE&apos;s event calendar and each company&apos;s corporate actions.</p>
             <p>Past year: every results announcement with the quarter&apos;s sales and net profit against the same quarter a year before, and how the stock moved; dividends with what they were worth against the price; splits, bonuses, rights, buybacks and demergers; IPO listings with the first day&apos;s close against the issue price.</p>

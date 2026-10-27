@@ -1155,7 +1155,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
           // changes when you zoom.
           const back = epsCmp === "yoy" ? 4 : 1;
           bars.forEach((b, i) => { b.chg = i >= back ? growth(b.v, bars[i - back].v) : { kind: "none" }; });
-          barLabel = spsOn ? "Sales/share (4Q)" : peWin === "ttm" ? "EPS (4Q)" : "EPS (1Q×4)";
+          barLabel = spsOn ? "SPS (4Q)" : peWin === "ttm" ? "EPS (4Q)" : "EPS (1Q×4)";
         } else if (view === "ev") { ttm(tq.ebitda); barLabel = "EBITDA (TTM)"; barFmt = crore; }
         else if (view === "ps") { ttm(tq.revenue); barLabel = "Sales (TTM)"; barFmt = crore; }
         else {
@@ -1658,7 +1658,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
             </>
           ) : view === "pe" && (spsAvail || company?.pe_band?.alt?.q1) ? (
             <>
-              {spsAvail && <Seg value={perShare} options={[["eps", "EPS"], ["sps", "Sales/share"]]} onChange={(v) => { kept.current = null; setPerShare(v as "eps" | "sps"); }} />}
+              {spsAvail && <Seg value={perShare} options={[["eps", "EPS"], ["sps", "SPS"]]} onChange={(v) => { kept.current = null; setPerShare(v as "eps" | "sps"); }} />}
               {!spsOn && company?.pe_band?.alt?.q1 && (
                 <Seg value={peWin} options={PE_WINDOWS.map(([k, label]) => [k, label] as [string, string])} onChange={(v) => { kept.current = null; setPeWin(v); }} />
               )}
@@ -1758,7 +1758,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
                     <Head>On this chart</Head>
                     {LAYERS[view].map(([k, label]) => (
                       <Toggle key={k} on={!isHidden(k)}
-                        label={spsOn ? ({ line: "Price / Sales", median: "Median P/S (5 years)", bars: "Sales/share bars" } as Record<string, string>)[k] ?? label : label}
+                        label={spsOn ? ({ line: "Price / Sales", median: "Median P/S (5 years)", bars: "SPS bars" } as Record<string, string>)[k] ?? label : label}
                         onClick={() => setHidden({ ...hidden, [`${view}:${k}`]: !isHidden(k) })} />
                     ))}
                   </>

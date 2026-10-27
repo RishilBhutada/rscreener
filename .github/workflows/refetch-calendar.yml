@@ -1,0 +1,38 @@
+name: Refetch the calendar
+run-name: Refetch the calendar
+
+# The calendar page's refresh button (owner, 27-Oct-2026) opens a pre-filled
+# GitHub issue "Refetch calendar" that the owner submits - the app cannot start
+# a run itself, since that needs a token and a token must never ship in the app.
+# Only an issue opened by the repository's owner is acted on. It starts
+# "Publish new results" (results.yml), which re-reads NSE's board meetings,
+# result times and newly filed results, rebuilds the calendar and deploys it in
+# about four minutes, then replies on the issue and closes it.
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+
+permissions:
+  actions: write    # start results.yml
+  issues: write     # the reply
+
+jobs:
+  start:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.issue.user.login == github.repository_owner && startsWith(github.event.issue.title, 'Refetch calendar'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE: ${{ github.event.issue.number }}
+    steps:
+      - name: Start "Publish new results"
+        run: gh workflow run results.yml -R "$GITHUB_REPOSITORY"
+      - name: Reply and close
+        if: env.ISSUE != ''
+        run: |
+          gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" --body "Started: the calendar is being re-read from NSE and republished - about 4 minutes. Reload the calendar page after that."
+          gh issue close "$ISSUE" -R "$GITHUB_REPOSITORY"
