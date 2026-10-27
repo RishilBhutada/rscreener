@@ -7,7 +7,7 @@
  *  SYNCED_KEYS (lib/sync.ts), so signed in they follow the reader. */
 import { useEffect, useState } from "react";
 
-export type TableKind = "quarterly" | "pnl" | "balance" | "cash" | "shareholding";
+export type TableKind = "quarterly" | "pnl" | "balance" | "cash" | "shareholding" | "segments";
 
 const PCT_KEY = "rs_pct_tables";
 const ORDER_KEY = "rs_row_order";

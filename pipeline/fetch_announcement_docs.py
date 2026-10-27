@@ -29,6 +29,11 @@ import nse_session
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
 API = "https://www.nseindia.com/api/corporate-announcements?index=equities&symbol={sym}"
+# Insider trades under SEBI's PIT rules (screener.in's "TRADES"). Per company it
+# answers with up to 20 of the latest disclosures - Reliance's newest Feb-2026,
+# TCS's 2022 (27-Oct-2026); a market-wide dated query came back empty. Kept as
+# NSE lists them, labelled as possibly incomplete on the page.
+PIT_API = "https://www.nseindia.com/api/corporates-pit?index=equities&symbol={sym}"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     "Accept": "*/*",
@@ -84,6 +89,10 @@ def main() -> None:
     con.execute(
         "CREATE TABLE IF NOT EXISTS announcements (symbol TEXT, at TEXT, category TEXT, subject TEXT, url TEXT,"
         " important INTEGER)"
+    )
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS insider_trades (symbol TEXT, day TEXT, name TEXT, category TEXT, kind TEXT,"
+        " mode TEXT, shares REAL, value REAL, after_pct REAL, security TEXT)"
     )
     if args.max_age_hours > 0:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=args.max_age_hours)).strftime("%Y-%m-%d %H:%M:%S")
@@ -152,6 +161,24 @@ def main() -> None:
                 recs.extend(items[:KEEP_PER_TYPE])
             con.execute("DELETE FROM announcement_docs WHERE symbol=?", (sym,))
             con.executemany("INSERT INTO announcement_docs VALUES (?,?,?,?,?)", recs)
+            trades = []
+            try:
+                time.sleep(args.sleep)
+                pit = nse_session.get(s, PIT_API.format(sym=nse_session.q(sym)), timeout=30).json()
+                for t in (pit.get("data") or []) if isinstance(pit, dict) else []:
+                    try:
+                        day = datetime.strptime((t.get("acqfromDt") or t.get("date") or "")[:11], "%d-%b-%Y").strftime("%Y-%m-%d")
+                    except ValueError:
+                        continue
+                    num = lambda k: float(t[k]) if str(t.get(k) or "").replace(".", "", 1).isdigit() else None  # noqa: E731
+                    trades.append((sym, day, (t.get("acqName") or "")[:80], (t.get("personCategory") or "")[:60],
+                                   (t.get("tdpTransactionType") or "")[:20], (t.get("acqMode") or "")[:40],
+                                   num("secAcq"), num("secVal"), num("afterAcqSharesPer"), (t.get("secType") or "")[:40]))
+            except Exception:  # noqa: BLE001 - insider trades are extra; never cost the announcements
+                trades = None
+            if trades is not None:
+                con.execute("DELETE FROM insider_trades WHERE symbol=?", (sym,))
+                con.executemany("INSERT INTO insider_trades VALUES (?,?,?,?,?,?,?,?,?,?)", trades)
             anns.sort(key=lambda x: x[1], reverse=True)
             con.execute("DELETE FROM announcements WHERE symbol=?", (sym,))
             con.executemany("INSERT INTO announcements VALUES (?,?,?,?,?,?)", anns[:ANN_KEEP])

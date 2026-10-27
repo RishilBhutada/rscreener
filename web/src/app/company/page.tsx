@@ -107,6 +107,9 @@ type Company = {
   fno?: boolean | null;
   /** The company's icon, relative to the site root (logos/SYM.png). */
   logo?: string | null;
+  segments?: { quarterly?: Segments; annual?: Segments } | null;
+  /** [day, name, category, Buy/Sell, shares, value Rs, mode] - newest first. */
+  insider?: [string, string, string, string, number | null, number | null, string][] | null;
   exchange?: string | null;
   bse_code?: number | string | null;
   /** Written by pipeline/export_company_json.py so this page need not download
@@ -475,6 +478,70 @@ function PinnedRatios({ row }: { row: Row | null }) {
       ) : (
         <button type="button" onClick={() => setOpen(true)} className="mt-2 text-[13px] font-semibold text-[var(--accent-ink)]">+ Add ratio</button>
       )}
+    </div>
+  );
+}
+
+/** Segments, as the company reports them in its results (screener.in's
+ *  "Product segments"): revenue or profit before interest and tax per segment.
+ *  Revenue is before inter-segment sales are removed, so the rows can add up
+ *  to more than the company's sales. */
+type Segments = { periods: string[]; items: { name: string; rev: (number | null)[]; ebit: (number | null)[] }[] };
+function SegmentsTable({ segs, symbol }: { segs: { quarterly?: Segments; annual?: Segments }; symbol: string }) {
+  const [pt, setPt] = useState<"quarterly" | "annual">(segs.quarterly ? "quarterly" : "annual");
+  const [what, setWhat] = useState<"rev" | "ebit">("rev");
+  const sg = segs[pt] ?? segs.quarterly ?? segs.annual;
+  if (!sg) return null;
+  const seg = (v: string, opts: readonly (readonly [string, string])[], set: (k: never) => void, label: string) => (
+    <div className="inline-flex gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs" role="radiogroup" aria-label={label}>
+      {opts.map(([k, l]) => (
+        <button key={k} type="button" role="radio" aria-checked={v === k} onClick={() => set(k as never)}
+          className={`rounded-md px-2.5 py-1 font-medium ${v === k ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>{l}</button>
+      ))}
+    </div>
+  );
+  return (
+    <div id="segments" className="scroll-mt-32 space-y-1.5">
+      <div className="flex justify-end gap-1.5 flex-wrap">
+        {segs.quarterly && segs.annual && seg(pt, [["quarterly", "Quarterly"], ["annual", "Yearly"]], setPt as (k: never) => void, "Segment periods")}
+        {seg(what, [["rev", "Revenue"], ["ebit", "EBIT"]], setWhat as (k: never) => void, "Segment figure")}
+      </div>
+      <StatementTable title="Segments" kind="segments" symbol={symbol}
+        subtitle={what === "rev" ? "Revenue by segment, ₹ Crores, before inter-segment sales" : "Profit before interest and tax by segment, ₹ Crores"}
+        stmt={{ periods: sg.periods, items: sg.items.map((it) => ({ label: it.name, values: what === "rev" ? it.rev : it.ebit })) }} />
+    </div>
+  );
+}
+
+/** Insider trades - directors, promoters and designated employees buying or
+ *  selling, as disclosed under SEBI's insider-trading rules (screener.in's
+ *  "TRADES"). Shown as NSE lists them; its feed gives the latest twenty at
+ *  most and can lag, so the list says so. A trade is a fact, not a signal. */
+function InsiderTrades({ list }: { list: [string, string, string, string, number | null, number | null, string][] }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? list : list.slice(0, 5);
+  const day = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  return (
+    <div className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-2">
+      <h3 className="text-[13px] font-semibold text-[var(--ink)]">Insider trades</h3>
+      <ul className="divide-y divide-[var(--line)]">
+        {shown.map((t, i) => (
+          <li key={i} className="py-1.5 flex items-baseline justify-between gap-3 text-[13px]">
+            <span className="min-w-0">
+              <span className="block text-[var(--ink)] truncate">{t[1]}</span>
+              <span className="block text-[11px] text-[var(--ink3)] truncate">{day(t[0])} · {t[2] || "Insider"}{t[6] ? ` · ${t[6]}` : ""}</span>
+            </span>
+            <span className="text-right shrink-0">
+              <span className="block font-semibold text-[var(--ink2)]">{t[3] || "Trade"}</span>
+              <span className="block text-[11px] text-[var(--ink3)] tabular-nums">
+                {t[4] !== null ? `${fmtNum(t[4], 0)} sh` : ""}{t[5] ? ` · ₹${fmtNum(t[5] / 1e7, 2)} Cr` : ""}
+              </span>
+            </span>
+          </li>
+        ))}
+      </ul>
+      {list.length > 5 && <button type="button" onClick={() => setAll(!all)} className="text-[13px] font-semibold text-[var(--accent-ink)]">{all ? "Fewer" : `All ${list.length}`}</button>}
+      <p className="text-[11px] text-[var(--ink3)]">From NSE&apos;s insider-trading disclosures; its feed lists the latest twenty at most and can be incomplete.</p>
     </div>
   );
 }
@@ -2443,6 +2510,7 @@ function CompanyView() {
         <div id="quarters" className="scroll-mt-32 space-y-6">
           <StatementTable title="Quarterly results" stmt={quarterly} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} next={nextResults} kind="quarterly" symbol={symbol}
             pdfs={quarterly.periods.map((p) => company.quarters?.find((q) => q.end === p)?.pdf ?? null)} />
+          {company.segments && <SegmentsTable segs={company.segments} symbol={symbol} />}
           <SeasonsCard seasons={company.seasons} />
         </div>
       )}
@@ -2466,6 +2534,7 @@ function CompanyView() {
           <div className="bg-[var(--card)] rounded-b-xl border border-t-0 border-[var(--line)] -mt-px">
             <HoldingTrend s={company.shareholding} />
           </div>
+          {(company.insider?.length ?? 0) > 0 && <div className="mt-4"><InsiderTrades list={company.insider!} /></div>}
         </div>
       )}
 

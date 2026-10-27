@@ -1000,6 +1000,32 @@ def main() -> None:
         for s_, at, cat, subj, url, imp in con.execute(
                 "SELECT symbol, at, category, subject, url, important FROM announcements ORDER BY at DESC"):
             anns_by_symbol.setdefault(s_, []).append([at, cat, subj, url, imp])
+    # Segments (fetch_results_history.parse_segments): per period type, the
+    # last 8 quarters / 5 years, each segment's revenue and EBIT in Rs crore.
+    segs_by_symbol: dict[str, dict] = {}
+    if _table_exists(con, "results_segments"):
+        raw_s: dict[tuple, dict] = {}
+        for s_, pt, pe_, nm, rv, eb in con.execute(
+                "SELECT symbol, period_type, period_end, segment, revenue, ebit FROM results_segments"):
+            raw_s.setdefault((s_, pt), {}).setdefault(pe_, {})[nm] = (rv, eb)
+        for (s_, pt), by_p in raw_s.items():
+            per = sorted(by_p)[-(8 if pt == "quarterly" else 5):]
+            names = sorted({nm for p_ in per for nm in by_p[p_]}, key=lambda nm: -((by_p[per[-1]].get(nm) or (0, 0))[0] or 0))
+            cr = lambda v: round(v / 1e7, 1) if v is not None else None  # noqa: E731
+            segs_by_symbol.setdefault(s_, {})[pt] = {
+                "periods": per,
+                "items": [{"name": nm, "rev": [cr((by_p[p_].get(nm) or (None, None))[0]) for p_ in per],
+                           "ebit": [cr((by_p[p_].get(nm) or (None, None))[1]) for p_ in per]} for nm in names],
+            }
+    # Insider trades (fetch_announcement_docs.py, NSE's PIT feed):
+    # [day, name, category, kind, shares, value Rs, mode], newest first.
+    insider_by_symbol: dict[str, list] = {}
+    if _table_exists(con, "insider_trades"):
+        for s_, day, nm, cat, kind, mode, sh, val in con.execute(
+                "SELECT symbol, day, name, category, kind, mode, shares, value FROM insider_trades ORDER BY day DESC"):
+            lst = insider_by_symbol.setdefault(s_, [])
+            if len(lst) < 20:
+                lst.append([day, nm, cat, kind, sh, val, mode])
     has_docs_table = con.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='documents'"
     ).fetchone()
@@ -1060,6 +1086,8 @@ def main() -> None:
             "about": about_by_symbol.get(sym),
             "face_value": face_value.get(sym),
             "fno": True if sym in fno else None,
+            "segments": segs_by_symbol.get(sym),
+            "insider": insider_by_symbol.get(sym),
             "logo": f"logos/{sym}.{logos[sym][0]}" if sym in logos else None,
             "updates": updates_by_symbol.get(sym),
             "no_pe_reason": None if (bands.get(sym, {}) or {}).get("pe") else no_pe.get(sym),
