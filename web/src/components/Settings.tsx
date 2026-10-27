@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useState } from "react";
+import { ChartUi, loadChartUi } from "@/lib/chartui";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { BUILD_TIME, BUILD_COMMIT, BUILD_SUBJECT } from "@/lib/buildinfo";
@@ -164,6 +165,55 @@ function ThemePicker({ value, accent, onChange }: { value: string; accent: strin
   );
 }
 
+/** The chart's control layouts as four small pictures, the way Theme is
+ *  offered: a word like "Strip" says nothing until you have seen it. */
+const CHART_UIS = [["a", "Sheet"], ["b", "Strip"], ["c", "Below"], ["classic", "Classic"]] as const;
+
+function ChartUiMini({ id }: { id: string }) {
+  const bar = (w: string, accent = false) => (
+    <span className="block h-1 rounded-full" style={{ width: w, background: accent ? "var(--accent)" : "var(--line2)" }} />
+  );
+  const plot = <span className="flex-1 min-h-0 rounded-[4px] bg-[var(--accent-soft)] border border-[var(--line)]" />;
+  return (
+    <span className="absolute inset-0 p-1.5 flex flex-col gap-1 bg-[var(--card2)]">
+      <span className="flex items-center gap-1">{bar("30%", true)}{bar("25%")}{id === "a" && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-[var(--accent)]" />}</span>
+      {id === "a" && bar("100%")}
+      {id === "b" && <span className="flex gap-0.5">{bar("22%", true)}{bar("22%")}{bar("22%")}{bar("22%")}</span>}
+      {id === "classic" && <>{bar("100%")}{bar("70%")}{bar("85%")}{bar("60%")}</>}
+      {plot}
+      {id === "c" && <>{bar("100%")}<span className="flex gap-0.5">{bar("22%", true)}{bar("22%")}{bar("22%")}</span></>}
+    </span>
+  );
+}
+
+function ChartUiPicker({ value, onChange }: { value: ChartUi; onChange: (v: ChartUi) => void }) {
+  return (
+    <div className="px-4 pt-3.5 pb-4">
+      <div className="flex items-center gap-3 mb-3">
+        <span className="w-8 h-8 rounded-[10px] bg-[var(--accent-soft)] text-[var(--accent-ink)] flex items-center justify-center shrink-0">
+          <Glyph d={ICON.charts} />
+        </span>
+        <span className="text-[15px] font-medium text-[var(--ink)]">Chart controls</span>
+      </div>
+      <div role="radiogroup" aria-label="Chart controls" className="grid grid-cols-4 gap-2.5">
+        {CHART_UIS.map(([id, label]) => {
+          const on = value === id;
+          return (
+            <button key={id} type="button" role="radio" aria-checked={on} onClick={() => onChange(id)}
+              className="rs-press flex flex-col items-center gap-1.5">
+              <span className={`relative block w-full aspect-[3/4] rounded-xl overflow-hidden border transition-shadow duration-200 ${
+                on ? "border-transparent ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[var(--card)]" : "border-[var(--line2)]"}`}>
+                <ChartUiMini id={id} />
+              </span>
+              <span className={`text-xs ${on ? "text-[var(--ink)] font-semibold" : "text-[var(--ink3)] font-medium"}`}>{label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /** The gear in the header. A link to the Settings page, lit while you are on it. */
 export default function SettingsButton() {
   const pathname = usePathname();
@@ -233,6 +283,7 @@ function MainScreen() {
   const [isDark, setIsDark] = useState(false);
   const [navOrder, setNavOrder] = useState<string[]>([]);
   const [secOrder, setSecOrder] = useState<string[]>([]);
+  const [chartUi, setChartUi] = useState<ChartUi>("a");
   const [upd, setUpd] = useState<"idle" | "checking" | "current" | "error">("idle");
 
   useEffect(() => {
@@ -242,6 +293,7 @@ function MainScreen() {
     setRowOrders(customOrders());
     setNavOrder(loadOrder("nav"));
     setSecOrder(loadOrder("sections"));
+    setChartUi(loadChartUi());
     const resolve = () => setIsDark(document.documentElement.dataset.theme === "dark");
     resolve();
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -255,6 +307,11 @@ function MainScreen() {
   };
   const pickAccent = (a: string) => {
     setAccent(a); localStorage.setItem("rs_accent", a); apply(theme, a);
+  };
+  const pickChartUi = (v: ChartUi) => {
+    setChartUi(v);
+    try { localStorage.setItem("rs_chart_ui", v); } catch { /* the choice just is not remembered */ }
+    window.dispatchEvent(new CustomEvent("rs-chart-ui", { detail: v }));
   };
   const pickSections = (m: SectionMode) => {
     setSections(m); localStorage.setItem("rs_sections", m);
@@ -332,6 +389,7 @@ function MainScreen() {
           right={<Segmented label="Company page layout" value={sections} options={LAYOUTS} onChange={pickSections} />}
         />
         <Row icon={<Glyph d={ICON.order} />} title="Section order" sub={`${secs}…`} href="/settings?p=sections" chevron />
+        <ChartUiPicker value={chartUi} onChange={pickChartUi} />
         {/* Shown only once an order has been saved: a reset with nothing to
             reset is a dead control. */}
         {rowOrders.length > 0 && (

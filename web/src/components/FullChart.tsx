@@ -723,6 +723,9 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [canFull, setCanFull] = useState(false);
   // The company chart's own switches, same defaults.
   const [peWin, setPeWin] = useState("ttm");
+  /** EPS under the P/E line, or sales per share under the Price / Sales line -
+   *  the company chart's switch (StockChart.tsx); the line follows the bars. */
+  const [perShare, setPerShare] = useState<"eps" | "sps">("eps");
   // Events are on by default in the full view - the owner chose to see them.
   const [showDates, setShowDates] = useState(true);
   const [showChg, setShowChg] = useState(true);
@@ -805,6 +808,8 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const name = company?.snapshot?.name || etfDoc?.name || file?.name || index.find((r) => r.symbol === symbol)?.name || "";
   const exch = file?.exch ?? (company?.exchange === "BSE" ? "BSE" : "NSE");
   const tq = company?.trend?.quarterly ?? null;
+  const spsAvail = !!company?.ps_band && !!tq?.sps?.some((v) => v !== null && v !== undefined);
+  const spsOn = view === "pe" && perShare === "sps" && spsAvail;
   const avail: Record<View, boolean> = {
     price: true, pe: !!company?.pe_band, sales: !!tq?.periods?.length,
     ev: !!company?.ev_band, pb: !!company?.pb_band, ps: !!company?.ps_band,
@@ -1082,12 +1087,12 @@ export default function FullChart({ symbol }: { symbol: string }) {
       // A valuation band: the ratio, its five-year median, and the figure it
       // is a multiple of in its own pane underneath - the company chart's
       // three layers, drawn the same way and from the same numbers.
-      const band0 = view === "pe" ? company?.pe_band : view === "ev" ? company?.ev_band : view === "pb" ? company?.pb_band : company?.ps_band;
+      const band0 = view === "pe" ? (spsOn ? company?.ps_band : company?.pe_band) : view === "ev" ? company?.ev_band : view === "pb" ? company?.pb_band : company?.ps_band;
       if (!band0) { chart.remove(); chartRef.current = null; return; }
-      keyWin = `${view}:${peWin}`;
+      keyWin = `${view}:${peWin}:${spsOn ? "sps" : "eps"}`;
       let series = band0.series;
       let median = band0.median_5y;
-      if (view === "pe" && peWin !== "ttm" && band0.alt?.[peWin]) {
+      if (view === "pe" && !spsOn && peWin !== "ttm" && band0.alt?.[peWin]) {
         const alt = band0.alt[peWin];
         series = band0.series.map((q, i) => [q[0], alt[i]] as [string, number | null])
           .filter((q): q is [string, number] => q[1] !== null && q[1] !== undefined);
@@ -1111,7 +1116,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
 
       // The peer's own ratio on the same axis - the company chart's comparison.
       const peerBands = cmps.map((c, k) => {
-        const band = view === "pe" ? c.co?.pe_band : view === "ev" ? c.co?.ev_band : view === "pb" ? c.co?.pb_band : c.co?.ps_band;
+        const band = view === "pe" ? (spsOn ? c.co?.ps_band : c.co?.pe_band) : view === "ev" ? c.co?.ev_band : view === "pb" ? c.co?.pb_band : c.co?.ps_band;
         const color = cmpColour(k, p);
         if (band) {
           const s = line(color, 2);
@@ -1135,9 +1140,10 @@ export default function FullChart({ symbol }: { symbol: string }) {
           }
         };
         if (view === "pe") {
-          const nQ = peWin === "q1" ? 1 : 4, mult = peWin === "q1" ? 4 : 1;
+          const nQ = !spsOn && peWin === "q1" ? 1 : 4, mult = !spsOn && peWin === "q1" ? 4 : 1;
+          const src = spsOn ? tq.sps ?? [] : tq.eps;
           for (let i = nQ - 1; i < periods.length; i++) {
-            const w = tq.eps.slice(i - nQ + 1, i + 1);
+            const w = src.slice(i - nQ + 1, i + 1);
             if (w.length !== nQ || !w.every((x) => x !== null && x !== undefined)) continue;
             const end = periods[i];
             const qi = company?.quarters?.find((x) => x.end === end);
@@ -1149,7 +1155,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
           // changes when you zoom.
           const back = epsCmp === "yoy" ? 4 : 1;
           bars.forEach((b, i) => { b.chg = i >= back ? growth(b.v, bars[i - back].v) : { kind: "none" }; });
-          barLabel = peWin === "ttm" ? "EPS (4Q)" : "EPS (1Q×4)";
+          barLabel = spsOn ? "Sales/share (4Q)" : peWin === "ttm" ? "EPS (4Q)" : "EPS (1Q×4)";
         } else if (view === "ev") { ttm(tq.ebitda); barLabel = "EBITDA (TTM)"; barFmt = crore; }
         else if (view === "ps") { ttm(tq.revenue); barLabel = "Sales (TTM)"; barFmt = crore; }
         else {
@@ -1186,7 +1192,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
       legendAt = (day) => {
         const i = day === null ? bd.length - 1 : atOrBefore(bd, day);
         const items: LItem[] = [];
-        if (!isHidden("line")) items.push({ label: names[view] + (view === "pe" && peWin !== "ttm" ? " (1Q×4)" : ""), value: ratio(bv[i]), color: p.accent });
+        if (!isHidden("line")) items.push({ label: spsOn ? "Price/Sales" : names[view] + (view === "pe" && peWin !== "ttm" ? " (1Q×4)" : ""), value: ratio(bv[i]), color: p.accent });
         if (!isHidden("median") && median !== null && median !== undefined) items.push({ label: "Median", value: ratio(median) });
         if (bars.length && !isHidden("bars")) {
           const j = atOrBefore(barDays, bd[i]);
@@ -1201,8 +1207,8 @@ export default function FullChart({ symbol }: { symbol: string }) {
         }
         // The breakdown behind the ratio, on the trailing basis it was filed on.
         // A 1Q×4 figure has no such breakdown, so none is offered for it.
-        const idx0 = view === "pe" && peWin !== "ttm" ? -1 : band0.series.findIndex((q) => dayOf(q[0]) === bd[i]);
-        const working = idx0 >= 0 ? workingFor(view, band0, idx0, company?.quarters) : null;
+        const idx0 = view === "pe" && !spsOn && peWin !== "ttm" ? -1 : band0.series.findIndex((q) => dayOf(q[0]) === bd[i]);
+        const working = idx0 >= 0 ? workingFor(spsOn ? "ps" : view, band0, idx0, company?.quarters) : null;
         return { date: dateOf(bd[i], "month"), items, working };
       };
     }
@@ -1373,7 +1379,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
     };
     // `range` is applied below without a rebuild.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, company, view, interval, prefs, peWin, showDates, showChg, epsCmp, showCA, caOn, hidden, cmps, themeKey, symbol, etfDoc]);
+  }, [file, company, view, interval, prefs, peWin, showDates, showChg, epsCmp, showCA, caOn, hidden, cmps, themeKey, symbol, etfDoc, spsOn]);
 
   const applyRange = () => {
     const chart = chartRef.current, sp = spanRef.current;
@@ -1650,8 +1656,13 @@ export default function FullChart({ symbol }: { symbol: string }) {
               </div>
               <button onClick={() => setSheet("type")} className={pill(prefs.log)}>{kindLabel}{prefs.log ? " · Log" : ""} <ChevronGlyph size={11} /></button>
             </>
-          ) : view === "pe" && company?.pe_band?.alt?.q1 ? (
-            <Seg value={peWin} options={PE_WINDOWS.map(([k, label]) => [k, label] as [string, string])} onChange={(v) => { kept.current = null; setPeWin(v); }} />
+          ) : view === "pe" && (spsAvail || company?.pe_band?.alt?.q1) ? (
+            <>
+              {spsAvail && <Seg value={perShare} options={[["eps", "EPS"], ["sps", "Sales/share"]]} onChange={(v) => { kept.current = null; setPerShare(v as "eps" | "sps"); }} />}
+              {!spsOn && company?.pe_band?.alt?.q1 && (
+                <Seg value={peWin} options={PE_WINDOWS.map(([k, label]) => [k, label] as [string, string])} onChange={(v) => { kept.current = null; setPeWin(v); }} />
+              )}
+            </>
           ) : null}
           <button onClick={() => setSheet("layers")} className={pill(nLayers > 0)}>
             {view === "price" ? "Indicators" : "Layers"}{nLayers > 0 ? ` · ${nLayers}` : ""}
@@ -1746,7 +1757,8 @@ export default function FullChart({ symbol }: { symbol: string }) {
                   <>
                     <Head>On this chart</Head>
                     {LAYERS[view].map(([k, label]) => (
-                      <Toggle key={k} on={!isHidden(k)} label={label}
+                      <Toggle key={k} on={!isHidden(k)}
+                        label={spsOn ? ({ line: "Price / Sales", median: "Median P/S (5 years)", bars: "Sales/share bars" } as Record<string, string>)[k] ?? label : label}
                         onClick={() => setHidden({ ...hidden, [`${view}:${k}`]: !isHidden(k) })} />
                     ))}
                   </>

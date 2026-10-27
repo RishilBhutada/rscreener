@@ -2,8 +2,9 @@
 
 import { CheckGlyph, ChevronGlyph } from "@/components/Glyphs";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import InfoTip from "@/components/InfoTip";
+import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { useBackClose } from "@/lib/backclose";
+import { ChartUi, loadChartUi } from "@/lib/chartui";
 import { loadIndex } from "@/lib/index-data";
 import Link from "next/link";
 
@@ -336,6 +337,17 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
    *  bars - a P/E line over sales bars would be a ratio built from figures the
    *  chart is not showing. */
   const [perShare, setPerShare] = useState<"eps" | "sps">("eps");
+  // How the controls above the chart are laid out - Settings > Company page >
+  // Chart controls (owner, 27-Oct-2026: "build all" of the three candidates,
+  // plus the layout before them as Classic). Sheet is the default.
+  const [ui, setUi] = useState<ChartUi>("a");
+  const [sheet, setSheet] = useState(false);
+  useEffect(() => {
+    setUi(loadChartUi());
+    const on = (e: Event) => setUi((e as CustomEvent<ChartUi>).detail);
+    window.addEventListener("rs-chart-ui", on);
+    return () => window.removeEventListener("rs-chart-ui", on);
+  }, []);
   // The line on each day a quarter's results were declared. It used to sit
   // behind a "Quarterly results" button that only opened a second "Result
   // dates" button; the owner asked for the dates themselves (11-Oct-2026).
@@ -778,43 +790,88 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const barW = (s: SeriesDef) => Math.max(1.5, Math.min(26, (plotW / Math.max(1, s.data.length)) * 0.62));
   const boxW = svgRef.current?.getBoundingClientRect().width ?? 600;
 
-  return (
-    <ChartShell range={range} setRange={setRange} view={view} setView={setView}
-        expandHref={symbol ? `/chart?s=${encodeURIComponent(symbol)}` : undefined}
-      moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand }} peLabel={spsOn ? "P/S Ratio" : "PE Ratio"}
-      onViewChange={() => setHover(null)}>
-      <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
-        <span className="text-[var(--ink3)]">Compare with</span>
-        <select
-          value={pickAny ? "__any__" : (cmpSym ?? "")}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v === "__any__") { setPickAny(true); return; }
-            setPickAny(false); setAnyQ("");
-            setCmpSym(v || null); setHover(null);
-          }}
-          className="rounded-lg border border-[var(--line)] bg-[var(--card2)] text-[var(--ink2)] px-2 py-1.5 sm:py-1 max-w-[52vw] sm:max-w-none"
-        >
-          <option value="">None</option>
-          {(peers ?? [])
-            .map((p) => ({ sym: String(p.symbol ?? ""), nm: String(p.name ?? p.symbol ?? "") }))
-            .filter((p) => p.sym && p.sym !== symbol)
-            .map((p) => (
-              <option key={p.sym} value={p.sym}>{p.nm} ({p.sym})</option>
-            ))}
-          <option value="__any__">Others - search all companies...</option>
-        </select>
-        {cmp && (
-          <span className="inline-flex items-center gap-1.5 text-[var(--ink3)]">
-            <i className="inline-block w-3 h-1 rounded-sm" style={{ background: "var(--chart-alt)" }} />
-            {cmp.name}
-            {view === "price" && <span>· both shown as % change over the range</span>}
-          </span>
-        )}
-        {cmpErr && <span className="text-[var(--neg)]">{cmpErr}</span>}
+  // ── control pieces shared by the candidate layouts ──
+  const seg = <K extends string>(value: K, opts: readonly (readonly [K, string])[], set: (k: K) => void) => (
+    <div className="inline-flex items-center gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 shrink-0">
+      {opts.map(([k, label]) => (
+        <button key={k} onClick={() => { set(k); setHover(null); }}
+          className={`rounded-md px-2.5 py-1.5 sm:py-1 font-medium whitespace-nowrap ${value === k
+            ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>{label}</button>
+      ))}
+    </div>
+  );
+  const chip = (onNow: boolean, label: string, click: () => void) => (
+    <button onClick={click}
+      className={`shrink-0 inline-flex items-center gap-1 rounded-full px-3 py-1.5 sm:py-1 font-medium whitespace-nowrap border ${onNow
+        ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]" : "text-[var(--ink2)] border-[var(--line)]"}`}>
+      {onNow && <CheckGlyph />}{label}
+    </button>
+  );
+  const growthVal: "off" | "yoy" | "prev" = showChg ? epsCmp : "off";
+  const setGrowth = (g: "off" | "yoy" | "prev") => { if (g === "off") setShowChg(false); else { setShowChg(true); setEpsCmp(g); } };
+  const isPe = view === "pe";
+  const pBars = isPe && spsAvail ? seg(perShare, [["eps", "EPS"], ["sps", "Sales/share"]] as const, setPerShare) : null;
+  const pWin = isPe && !spsOn && peBand?.alt ? seg(peWin as "ttm" | "q1", [["ttm", "TTM"], ["q1", "1Q×4"]] as const, (k) => setPeWin(k)) : null;
+  const pGrowth = isPe && (quarters?.length ?? 0) > 0
+    ? seg(growthVal, [["off", "No growth"], ["yoy", peWin === "ttm" ? "vs year before" : "vs year ago"], ["prev", "vs quarter before"]] as const, setGrowth) : null;
+  const pDates = (quarters?.length ?? 0) > 0 ? chip(showDates, "Result dates", () => setShowDates(!showDates)) : null;
+  const pCA = (actions?.length ?? 0) > 0 ? chip(showCA, "Corporate actions", () => setShowCA(!showCA)) : null;
+  const pCAKinds = showCA && CA_ORDER.some((k) => caCount[k]) ? (
+    <div className="flex items-center gap-3 flex-wrap text-xs text-[var(--ink2)]">
+      {CA_ORDER.filter((k) => caCount[k]).map((k) => (
+        <label key={k} className="inline-flex items-center gap-1.5 cursor-pointer">
+          <input type="checkbox" checked={caIsOn(k)} onChange={() => setCaOn({ ...caOn, [k]: !caIsOn(k) })} className="accent-[var(--accent)]" />
+          <i className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: CA_COLOUR[k] }} />{CA_LABEL[k]} ({caCount[k]})
+        </label>
+      ))}
+    </div>
+  ) : null;
+  const pCompare = (
+    <select value={pickAny ? "__any__" : (cmpSym ?? "")}
+      onChange={(e) => {
+        const v = e.target.value;
+        if (v === "__any__") { setPickAny(true); setSheet(false); return; }
+        setPickAny(false); setAnyQ(""); setCmpSym(v || null); setHover(null);
+      }}
+      className={`shrink-0 rounded-full border px-3 py-1.5 sm:py-1 font-medium max-w-[38vw] sm:max-w-none ${cmpSym
+        ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]" : "bg-transparent text-[var(--ink2)] border-[var(--line)]"}`}>
+      <option value="">Compare</option>
+      {(peers ?? []).map((pp) => ({ sym: String(pp.symbol ?? ""), nm: String(pp.name ?? pp.symbol ?? "") }))
+        .filter((pp) => pp.sym && pp.sym !== symbol)
+        .map((pp) => <option key={pp.sym} value={pp.sym}>vs {pp.nm}</option>)}
+      <option value="__any__">Any company...</option>
+    </select>
+  );
+  const qLegend = isPe ? (
+    <div className="flex items-center justify-center gap-3 flex-wrap text-[11px] text-[var(--ink3)] mt-1">
+      {[1, 2, 3, 4].map((n) => (
+        <span key={n} className="inline-flex items-center gap-1"><i className="inline-block w-2 h-2 rounded-full" style={{ background: Q_COLOUR[n] }} />{Q_LABEL[n].slice(0, 2)}</span>
+      ))}
+      {showDates && <span className="inline-flex items-center gap-1"><i className="inline-block w-3 border-t-2 border-dashed border-[var(--ink3)]" />declared</span>}
+    </div>
+  ) : null;
+  const strip = (
+    <div className="flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 pb-1 text-xs [scrollbar-width:none]">
+      {pBars}{pCompare}{pGrowth}{pDates}{pCA}{pWin}
+    </div>
+  );
+  // What is switched on beyond the defaults - growth labels are on by default.
+  const activeCount = [spsOn, showDates, showCA, !!cmpSym, isPe && !spsOn && peWin !== "ttm"].filter(Boolean).length;
+  const label = (t: string) => <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">{t}</span>;
+  const optionsSheet = sheet && (
+    <InfoDialog title="Chart options" onClose={() => setSheet(false)}>
+      <div className="flex flex-col gap-4 text-xs">
+        {pBars && <div className="flex flex-col items-start gap-1.5">{label("Bars")}{pBars}</div>}
+        {pWin && <div className="flex flex-col items-start gap-1.5">{label("Earnings")}{pWin}</div>}
+        {pGrowth && <div className="flex flex-col items-start gap-1.5">{label("Growth on bars")}{pGrowth}</div>}
+        <div className="flex flex-col items-start gap-1.5">{label("Show on chart")}
+          <div className="flex gap-1.5 flex-wrap">{pDates}{pCA}</div>{pCAKinds}</div>
+        <div className="flex flex-col items-start gap-1.5">{label("Compare")}{pCompare}</div>
       </div>
-      {pickAny && (
-        <div className="mb-2 rounded-xl border border-[var(--line2)] bg-[var(--card2)] p-3">
+    </InfoDialog>
+  );
+  const anyPanel = pickAny ? (
+<div className="mb-2 rounded-xl border border-[var(--line2)] bg-[var(--card2)] p-3">
           <div className="flex items-center justify-between gap-3">
             <span className="text-xs text-[var(--ink3)]">Compare against any listed company</span>
             <button
@@ -865,143 +922,15 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             })()}
           </div>
         </div>
-      )}
-      {(actions?.length ?? 0) > 0 && (
-        <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
-          <button
-            onClick={() => setShowCA(!showCA)}
-            title="Mark dividends, bonuses, splits and rights issues on their ex-date"
-            className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium border ${
-              showCA
-                ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
-                : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
-            }`}
-          >
-            {showCA ? "\u2713 " : ""}Corporate actions
-          </button>
-          {showCA && CA_ORDER.filter((k) => caCount[k]).map((k) => (
-            <label key={k} className="inline-flex items-center gap-1.5 cursor-pointer text-[var(--ink2)]">
-              <input
-                type="checkbox"
-                checked={caIsOn(k)}
-                onChange={() => setCaOn({ ...caOn, [k]: !caIsOn(k) })}
-                className="accent-[var(--accent)] cursor-pointer"
-              />
-              <i className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: CA_COLOUR[k] }} />
-              {CA_LABEL[k]} <span className="text-[var(--ink3)]">({caCount[k]})</span>
-            </label>
-          ))}
-          {showCA && caShown.length === 0 && (
-            <span className="text-[var(--ink3)]">None in this range</span>
-          )}
-        </div>
-      )}
-      {(quarters?.length ?? 0) > 0 && (
-        <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
-          <button
-            onClick={() => setShowDates(!showDates)}
-            title="Mark the day each quarter's results were declared"
-            className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium border ${
-              showDates
-                ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
-                : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
-            }`}
-          >
-            {showDates && <CheckGlyph className="mr-1" />}Result dates
-          </button>
-          {view === "pe" && (
-            <div className="flex items-center gap-1 flex-wrap">
-              <button
-                onClick={() => setShowChg(!showChg)}
-                title="Print each bar's earnings growth above it"
-                className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium border ${
-                  showChg
-                    ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
-                    : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
-                }`}
-              >
-                {showChg && <CheckGlyph className="mr-1" />}Growth %
-              </button>
-              {showChg && (
-                <div className="flex items-center gap-0.5 rounded-lg border border-[var(--line)] p-0.5">
-                  {/* Same two choices in both windows, described in the terms of
-                      whichever window is showing - a bar means a quarter in one
-                      and twelve months in the other, so one wording cannot serve
-                      both without misleading in one of them. */}
-                  {(peWin === "ttm"
-                    ? ([["yoy", "Year before", "Compare these twelve months with the TWELVE MONTHS BEFORE THEM. The two periods share no quarter, so it is a full year measured against a full year."],
-                        ["prev", "Quarter before", "Compare these twelve months with the twelve months ending one quarter earlier. They share three of their four quarters, so the figure moves by one quarter's news spread across a whole year of earnings - smoother, and smaller, than the same news in the 1Q x4 view."]] as const)
-                    : ([["yoy", "Year ago", "Compare each quarter with the SAME quarter a year earlier. Quarterly earnings are seasonal, so this is the comparison filings and analysts use."],
-                        ["prev", "Previous", "Compare each quarter with the one immediately before it. Reads momentum, but mixes in seasonality - a December quarter is not a June quarter."]] as const)
-                  ).map(([k, label, tip]) => (
-                    <button
-                      key={k}
-                      onClick={() => setEpsCmp(k)}
-                      title={tip}
-                      className={`rounded-md px-2 py-1 sm:py-0.5 font-medium ${
-                        epsCmp === k
-                          ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]"
-                          : "text-[var(--ink2)] hover:bg-[var(--card2)]"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          {view === "pe" && spsAvail && (
-            <div className="flex items-center gap-0.5 rounded-lg border border-[var(--line)] p-0.5">
-              {([["eps", "EPS", "Earnings per share, under the P/E line"],
-                 ["sps", "Sales/share", "Sales (revenue from operations) per share, under the Price / Sales line - the same line as Market Cap / Sales"]] as const).map(([k, label, tip]) => (
-                <button key={k} onClick={() => { setPerShare(k); setHover(null); }} title={tip}
-                  className={`rounded-md px-2 py-1 sm:py-0.5 font-medium ${perShare === k
-                    ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)] hover:bg-[var(--card2)]"}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
-          {view === "pe" && !spsOn && peBand?.alt && (
-            <div className="flex items-center gap-1 flex-wrap">
-              <span className="text-[var(--ink3)] mr-0.5">Earnings</span>
-              {PE_WINDOWS.filter(([k]) => k === "ttm" || peBand.alt?.[k]).map(([k, label, tip]) => (
-                <button
-                  key={k}
-                  onClick={() => { setPeWin(k); setHover(null); }}
-                  title={tip}
-                  className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium ${
-                    peWin === k
-                      ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]"
-                      : "text-[var(--ink2)] hover:bg-[var(--card2)]"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
-          {view === "pe" && (
-            <div className="flex items-center gap-2.5 flex-wrap text-[var(--ink3)]">
-              {[1, 2, 3, 4].map((n) => (
-                <span key={n} className="inline-flex items-center gap-1">
-                  <i className="inline-block w-3 h-3 rounded-sm" style={{ background: Q_COLOUR[n] }} />
-                  {Q_LABEL[n]}
-                </span>
-              ))}
-            </div>
-          )}
-          {showDates && (
-            <div className="flex items-center gap-2.5 flex-wrap text-[var(--ink3)]">
-              <span className="inline-flex items-center gap-1">
-                <i className="inline-block w-4 border-t-2 border-dashed border-[var(--ink3)]" />
-                declared
-              </span>
-            </div>
-          )}
-        </div>
-      )}
+    ) : null;
+  const shellProps = {
+    range, setRange, view, setView, moreOpen, setMoreOpen,
+    expandHref: symbol ? `/chart?s=${encodeURIComponent(symbol)}` : undefined,
+    avail: { pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand },
+    peLabel: spsOn ? "P/S Ratio" : "PE Ratio", onViewChange: () => setHover(null),
+  };
+  const plotAndLegend = (
+    <>
       {(() => {
         // A ratio line that starts years after the price line is not a property of
         // the company - it is the depth of earnings we have fetched. 1,994 of 2,236
@@ -1256,6 +1185,244 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
           </button>
         ))}
       </div>
+    </>
+  );
+
+  if (ui !== "classic") {
+    return (
+      <ChartShell {...shellProps} ui={ui} onOptions={() => setSheet(true)} optionsCount={activeCount}
+        footer={ui === "c" ? <div className="mt-2 flex flex-col gap-2">{strip}{pCAKinds}</div> : null}>
+        {ui === "b" && <div className="mb-2 flex flex-col gap-2">{strip}{pCAKinds}</div>}
+        {anyPanel}
+        {plotAndLegend}
+        {qLegend}
+        {optionsSheet}
+      </ChartShell>
+    );
+  }
+
+  return (
+    <ChartShell {...shellProps}>
+      <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
+        <span className="text-[var(--ink3)]">Compare with</span>
+        <select
+          value={pickAny ? "__any__" : (cmpSym ?? "")}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "__any__") { setPickAny(true); return; }
+            setPickAny(false); setAnyQ("");
+            setCmpSym(v || null); setHover(null);
+          }}
+          className="rounded-lg border border-[var(--line)] bg-[var(--card2)] text-[var(--ink2)] px-2 py-1.5 sm:py-1 max-w-[52vw] sm:max-w-none"
+        >
+          <option value="">None</option>
+          {(peers ?? [])
+            .map((p) => ({ sym: String(p.symbol ?? ""), nm: String(p.name ?? p.symbol ?? "") }))
+            .filter((p) => p.sym && p.sym !== symbol)
+            .map((p) => (
+              <option key={p.sym} value={p.sym}>{p.nm} ({p.sym})</option>
+            ))}
+          <option value="__any__">Others - search all companies...</option>
+        </select>
+        {cmp && (
+          <span className="inline-flex items-center gap-1.5 text-[var(--ink3)]">
+            <i className="inline-block w-3 h-1 rounded-sm" style={{ background: "var(--chart-alt)" }} />
+            {cmp.name}
+            {view === "price" && <span>· both shown as % change over the range</span>}
+          </span>
+        )}
+        {cmpErr && <span className="text-[var(--neg)]">{cmpErr}</span>}
+      </div>
+      {pickAny && (
+        <div className="mb-2 rounded-xl border border-[var(--line2)] bg-[var(--card2)] p-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-[var(--ink3)]">Compare against any listed company</span>
+            <button
+              onClick={() => { setPickAny(false); setAnyQ(""); }}
+              className="text-xs text-[var(--ink3)] hover:text-[var(--ink)]"
+            >
+              close
+            </button>
+          </div>
+          <input
+            autoFocus
+            value={anyQ}
+            onChange={(e) => setAnyQ(e.target.value)}
+            placeholder="Search by name or symbol"
+            className="mt-2 w-full rounded-lg border border-[var(--line)] bg-[var(--card)] px-3 py-2 text-sm
+                       text-[var(--ink)] placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)]"
+          />
+          <div className="mt-2 max-h-52 overflow-y-auto">
+            {(() => {
+              const q = anyQ.trim().toLowerCase();
+              if (q.length < 1) {
+                return <p className="text-xs text-[var(--ink3)] px-1 py-2">
+                  Type to search all {allCos.length ? allCos.length.toLocaleString("en-IN") : ""} companies.
+                </p>;
+              }
+              const hits = allCos
+                .map((c) => {
+                  const s = c.symbol.toLowerCase(), n = c.name.toLowerCase();
+                  const sc = s.startsWith(q) ? 0 : n.startsWith(q) ? 1 : n.includes(` ${q}`) ? 2
+                    : s.includes(q) || n.includes(q) ? 3 : 9;
+                  return [sc, c] as const;
+                })
+                .filter(([sc, c]) => sc < 9 && c.symbol !== symbol)
+                .sort((a, b) => a[0] - b[0] || b[1].mcap - a[1].mcap)
+                .slice(0, 12)
+                .map(([, c]) => c);
+              if (!hits.length) return <p className="text-xs text-[var(--ink3)] px-1 py-2">No match.</p>;
+              return hits.map((c) => (
+                <button
+                  key={c.symbol}
+                  onClick={() => { setCmpSym(c.symbol); setPickAny(false); setAnyQ(""); setHover(null); }}
+                  className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-[var(--card)] flex items-baseline justify-between gap-3"
+                >
+                  <span className="text-sm text-[var(--ink)] truncate">{c.name || c.symbol}</span>
+                  <span className="text-xs text-[var(--ink3)] shrink-0">{c.symbol}</span>
+                </button>
+              ));
+            })()}
+          </div>
+        </div>
+      )}
+      {(actions?.length ?? 0) > 0 && (
+        <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
+          <button
+            onClick={() => setShowCA(!showCA)}
+            title="Mark dividends, bonuses, splits and rights issues on their ex-date"
+            className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium border ${
+              showCA
+                ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
+                : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
+            }`}
+          >
+            {showCA ? "\u2713 " : ""}Corporate actions
+          </button>
+          {showCA && CA_ORDER.filter((k) => caCount[k]).map((k) => (
+            <label key={k} className="inline-flex items-center gap-1.5 cursor-pointer text-[var(--ink2)]">
+              <input
+                type="checkbox"
+                checked={caIsOn(k)}
+                onChange={() => setCaOn({ ...caOn, [k]: !caIsOn(k) })}
+                className="accent-[var(--accent)] cursor-pointer"
+              />
+              <i className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: CA_COLOUR[k] }} />
+              {CA_LABEL[k]} <span className="text-[var(--ink3)]">({caCount[k]})</span>
+            </label>
+          ))}
+          {showCA && caShown.length === 0 && (
+            <span className="text-[var(--ink3)]">None in this range</span>
+          )}
+        </div>
+      )}
+      {(quarters?.length ?? 0) > 0 && (
+        <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
+          <button
+            onClick={() => setShowDates(!showDates)}
+            title="Mark the day each quarter's results were declared"
+            className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium border ${
+              showDates
+                ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
+                : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
+            }`}
+          >
+            {showDates && <CheckGlyph className="mr-1" />}Result dates
+          </button>
+          {view === "pe" && (
+            <div className="flex items-center gap-1 flex-wrap">
+              <button
+                onClick={() => setShowChg(!showChg)}
+                title="Print each bar's earnings growth above it"
+                className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium border ${
+                  showChg
+                    ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
+                    : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
+                }`}
+              >
+                {showChg && <CheckGlyph className="mr-1" />}Growth %
+              </button>
+              {showChg && (
+                <div className="flex items-center gap-0.5 rounded-lg border border-[var(--line)] p-0.5">
+                  {/* Same two choices in both windows, described in the terms of
+                      whichever window is showing - a bar means a quarter in one
+                      and twelve months in the other, so one wording cannot serve
+                      both without misleading in one of them. */}
+                  {(peWin === "ttm"
+                    ? ([["yoy", "Year before", "Compare these twelve months with the TWELVE MONTHS BEFORE THEM. The two periods share no quarter, so it is a full year measured against a full year."],
+                        ["prev", "Quarter before", "Compare these twelve months with the twelve months ending one quarter earlier. They share three of their four quarters, so the figure moves by one quarter's news spread across a whole year of earnings - smoother, and smaller, than the same news in the 1Q x4 view."]] as const)
+                    : ([["yoy", "Year ago", "Compare each quarter with the SAME quarter a year earlier. Quarterly earnings are seasonal, so this is the comparison filings and analysts use."],
+                        ["prev", "Previous", "Compare each quarter with the one immediately before it. Reads momentum, but mixes in seasonality - a December quarter is not a June quarter."]] as const)
+                  ).map(([k, label, tip]) => (
+                    <button
+                      key={k}
+                      onClick={() => setEpsCmp(k)}
+                      title={tip}
+                      className={`rounded-md px-2 py-1 sm:py-0.5 font-medium ${
+                        epsCmp === k
+                          ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]"
+                          : "text-[var(--ink2)] hover:bg-[var(--card2)]"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {view === "pe" && spsAvail && (
+            <div className="flex items-center gap-0.5 rounded-lg border border-[var(--line)] p-0.5">
+              {([["eps", "EPS", "Earnings per share, under the P/E line"],
+                 ["sps", "Sales/share", "Sales (revenue from operations) per share, under the Price / Sales line - the same line as Market Cap / Sales"]] as const).map(([k, label, tip]) => (
+                <button key={k} onClick={() => { setPerShare(k); setHover(null); }} title={tip}
+                  className={`rounded-md px-2 py-1 sm:py-0.5 font-medium ${perShare === k
+                    ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)] hover:bg-[var(--card2)]"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          {view === "pe" && !spsOn && peBand?.alt && (
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-[var(--ink3)] mr-0.5">Earnings</span>
+              {PE_WINDOWS.filter(([k]) => k === "ttm" || peBand.alt?.[k]).map(([k, label, tip]) => (
+                <button
+                  key={k}
+                  onClick={() => { setPeWin(k); setHover(null); }}
+                  title={tip}
+                  className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium ${
+                    peWin === k
+                      ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]"
+                      : "text-[var(--ink2)] hover:bg-[var(--card2)]"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          {view === "pe" && (
+            <div className="flex items-center gap-2.5 flex-wrap text-[var(--ink3)]">
+              {[1, 2, 3, 4].map((n) => (
+                <span key={n} className="inline-flex items-center gap-1">
+                  <i className="inline-block w-3 h-3 rounded-sm" style={{ background: Q_COLOUR[n] }} />
+                  {Q_LABEL[n]}
+                </span>
+              ))}
+            </div>
+          )}
+          {showDates && (
+            <div className="flex items-center gap-2.5 flex-wrap text-[var(--ink3)]">
+              <span className="inline-flex items-center gap-1">
+                <i className="inline-block w-4 border-t-2 border-dashed border-[var(--ink3)]" />
+                declared
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+      {plotAndLegend}
     </ChartShell>
   );
 }
@@ -1266,9 +1433,13 @@ const MORE_VIEWS: [View, string][] = [
 
 function ChartShell({
   range, setRange, view, setView, moreOpen, setMoreOpen, avail, onViewChange, expandHref, peLabel = "PE Ratio", children,
+  ui = "classic", onOptions, optionsCount = 0, footer,
 }: {
   /** The ratio tab's name: it reads P/S Ratio while sales per share is shown. */
   peLabel?: string;
+  /** Control layout (Settings > Chart controls): a = options sheet, b = chip
+   *  strip, c = controls under the chart, classic = every row stacked above. */
+  ui?: ChartUi; onOptions?: () => void; optionsCount?: number; footer?: React.ReactNode;
   /** The full-screen chart for this company. */
   expandHref?: string;
   range: string; setRange: (r: string) => void;
@@ -1283,6 +1454,57 @@ function ChartShell({
   const activeMore = moreItems.find(([v]) => v === view);
   const btn = (active: boolean) =>
     `rounded-lg px-3 py-2 sm:py-1.5 min-h-[38px] sm:min-h-0 inline-flex items-center whitespace-nowrap font-medium ${active ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)] hover:bg-[var(--card2)]"}`;
+
+  if (ui !== "classic") {
+    const tab = (active: boolean) =>
+      `shrink-0 px-1 pb-2 pt-1 text-[13px] font-semibold border-b-2 whitespace-nowrap ${active ? "border-[var(--accent)] text-[var(--ink)]" : "border-transparent text-[var(--ink3)]"}`;
+    const tabs = (
+      <div className="flex items-end gap-4 min-w-0 overflow-x-auto [scrollbar-width:none]">
+        <button onClick={() => pick("price")} className={tab(view === "price")}>Price</button>
+        {avail.pe && <button onClick={() => pick("pe")} className={tab(view === "pe")}>{peLabel}</button>}
+        {moreItems.map(([v, label]) => <button key={v} onClick={() => pick(v)} className={tab(view === v)}>{label}</button>)}
+      </div>
+    );
+    const iconBtn = "shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-lg text-[var(--ink2)] hover:bg-[var(--card2)] relative";
+    const full = expandHref && (
+      <Link href={expandHref} aria-label="Open the full-screen chart" className={iconBtn}
+        onClick={() => { try { sessionStorage.setItem("rs_chart_from", location.pathname + location.search); } catch { /* private mode */ } }}>
+        <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
+      </Link>
+    );
+    const opts = ui === "a" && onOptions && (
+      <button onClick={onOptions} aria-label="Chart options" className={iconBtn}>
+        <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" /></svg>
+        {optionsCount > 0 && <span className="absolute top-1 right-1 min-w-3.5 h-3.5 px-0.5 rounded-full bg-[var(--accent)] text-white text-[9px] leading-[14px] font-bold">{optionsCount}</span>}
+      </button>
+    );
+    const rangesSeg = (
+      <div className="grid grid-cols-7 gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs">
+        {RANGES.map(([r]) => (
+          <button key={r} onClick={() => setRange(r)}
+            className={`rounded-md py-1.5 font-medium ${range === r ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>{r.replace("Yr", "Y")}</button>
+        ))}
+      </div>
+    );
+    const rangePill = (
+      <select value={range} onChange={(e) => setRange(e.target.value)} aria-label="Range"
+        className="shrink-0 rounded-full border border-[var(--line)] bg-transparent px-2.5 py-1.5 text-xs font-semibold text-[var(--ink)]">
+        {RANGES.map(([r]) => <option key={r} value={r}>{r.replace("Yr", "Y")}</option>)}
+      </select>
+    );
+    return (
+      <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4">
+        <div className="flex items-center justify-between gap-2 border-b border-[var(--line)] mb-2">
+          {tabs}
+          <div className="flex items-center gap-0.5 pb-1">{ui === "b" && rangePill}{opts}{full}</div>
+        </div>
+        {ui === "a" && <div className="mb-2">{rangesSeg}</div>}
+        {children}
+        {ui === "c" && <div className="mt-3">{rangesSeg}</div>}
+        {footer}
+      </section>
+    );
+  }
 
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4">
