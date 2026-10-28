@@ -28,7 +28,8 @@ const DEFAULT_QUERY = "roce > 20 and pe < 25";
 type Data = { generated_at: string; price_asof?: string | null; rows: Row[] };
 type Cond = { field: string; op: string; value: string };
 type Ratio = { name: string; formula: string };
-type Tab = "screen" | "ready" | "saved";
+/** The Screens menu's two lists. */
+type Tab = "ready" | "saved";
 type Sheet =
   | { kind: "pick" }
   | { kind: "cond"; index: number | null; field: string }
@@ -40,6 +41,7 @@ type Sheet =
   | { kind: "ratios" }
   | { kind: "row"; sym: string }
   | { kind: "saved"; name: string }
+  | { kind: "screens" }
   | null;
 
 type ByKey = Map<string, FieldDef>;
@@ -48,6 +50,17 @@ const UNIVERSES: [Universe, string][] = [["companies", "Companies"], ["indices",
 const OPS: [string, string, string][] = [
   [">", "Above", ">"], [">=", "At least", "≥"], ["<", "Below", "<"], ["<=", "At most", "≤"], ["=", "Equals", "="],
 ];
+/** Over becomes under and back: one tap on a filter row's sign. */
+const FLIP: Record<string, string> = { ">": "<", "<": ">", ">=": "<=", "<=": ">=", "=": "=", "!=": "!=" };
+/** A -/+ step that suits the number: 1 for 20, 100 for 1,500, 0.1 for 5. */
+function stepOf(v: number): number {
+  const a = Math.abs(v);
+  return a === 0 ? 1 : Math.max(0.01, Math.pow(10, Math.floor(Math.log10(a)) - 1));
+}
+function roundTo(v: number, step: number): number {
+  const d = Math.max(0, -Math.floor(Math.log10(step)));
+  return Number(v.toFixed(d));
+}
 const OP_SYM: Record<string, string> = { ">": ">", ">=": "≥", "<": "<", "<=": "≤", "=": "=", "!=": "≠" };
 const MONEY = new Set(["revenue", "net_income", "total_debt", "total_cash", "free_cashflow"]);
 const UNIT_SUFFIX: Record<string, string> = { "%": "%", "%/yr": "%", "₹Cr": " Cr", pts: " pts", "×": "×" };
@@ -116,7 +129,7 @@ function ScreensInner() {
   const [idxRows, setIdxRows] = useState<Row[] | null>(null);
   const [comRows, setComRows] = useState<Row[] | null>(null);
   const [loadError, setLoadError] = useState("");
-  const [tab, setTab] = useState<Tab>("screen");
+  const [tab, setTab] = useState<Tab>("ready");
   const [sheet, setSheet] = useState<Sheet>(null);
   const [sort, setSort] = useState<{ key: string; desc: boolean } | null>(null);
   const [rowLimit, setRowLimit] = useState(25);
@@ -273,20 +286,29 @@ function ScreensInner() {
   }, [saved, data, ratiosMap]);
   const newCount = savedState.reduce((n, x) => n + x.added.length, 0);
 
+  /** Close the open sheet, then navigate. A sheet steps the history back one
+   *  entry as it closes; navigating before that step lands would be undone by
+   *  it. So wait for it (or, if no step comes, a moment), then go. */
+  const afterClose = (fn: () => void) => {
+    if (!sheet) { fn(); return; }
+    let done = false;
+    const run = () => { if (done) return; done = true; window.removeEventListener("popstate", run); fn(); };
+    window.addEventListener("popstate", run);
+    setSheet(null);
+    window.setTimeout(run, 400);
+  };
+
   const openSaved = (s: SavedScreen) => {
     const now = data ? matchesOf(s, data.rows, ratiosMap) : null;
     if (now) setSaved(storeSaved(saved.map((x) => (x.name === s.name ? { ...x, seen: now, seenAsof: data?.price_asof ?? undefined } : x))));
     setSort(null);
-    setTab("screen");
-    setSheet(null);
-    go({ q: s.query, sec: s.sectors ?? [], lib: s.lib ?? null, u: "companies" }, true);
+    afterClose(() => go({ q: s.query, sec: s.sectors ?? [], lib: s.lib ?? null, u: "companies" }, true));
   };
 
   const openLibrary = (l: LibraryScreen) => {
     setSort(null);
-    setTab("screen");
     const sec = l.excludeSectors ? allSectors.filter((x) => !l.excludeSectors!.includes(x)) : [];
-    go({ q: l.query, sec, lib: l.id, u: "companies" }, true);
+    afterClose(() => go({ q: l.query, sec, lib: l.id, u: "companies" }, true));
   };
 
   const saveScreen = () => {
@@ -351,6 +373,34 @@ function ScreensInner() {
     setSheet(null);
   };
 
+  // How many pass each filter on its own (within the chosen sectors).
+  const condCounts = useMemo(() => {
+    if (!rows || !parsed) return [] as (number | null)[];
+    const sec = sectors.length ? new Set(sectors) : null;
+    const pool = sec ? rows.filter((r) => sec.has(String(r.sector ?? ""))) : rows;
+    return parsed.conds.map((c) => {
+      try {
+        const { run } = compile(`${c.field} ${c.op} ${c.value}`, uni === "companies" ? ratiosMap : {}, uni === "companies" ? undefined : catalog.map((f) => f.key));
+        let n = 0;
+        for (const r of pool) if (run(r) === true) n++;
+        return n;
+      } catch { return null; }
+    });
+  }, [rows, parsed, sectors, uni, ratiosMap, catalog]);
+
+  // The spread of the figure being set in the value sheet: every value across
+  // the rows, so the sheet can draw where the cut-off falls (Step 4, B's bars).
+  const spread = useMemo(() => {
+    if (sheet?.kind !== "cond" || !rows) return null;
+    const vs = rows.map((r) => r[sheet.field]).filter((x): x is number => typeof x === "number" && Number.isFinite(x)).sort((a, b) => a - b);
+    if (vs.length < 10) return null;
+    const lo = vs[Math.floor(vs.length * 0.02)], hi = vs[Math.floor(vs.length * 0.98)];
+    if (!(hi > lo)) return null;
+    const n = 24, w = (hi - lo) / n, bins = new Array(n).fill(0);
+    for (const v of vs) if (v >= lo && v <= hi) bins[Math.min(n - 1, Math.floor((v - lo) / w))]++;
+    return { vs, lo, hi, w, bins };
+  }, [sheet, rows]);
+
   const pickList = useMemo(() => {
     const q = pickText.trim().toLowerCase();
     return catalog.filter((f) => !q || f.label.toLowerCase().includes(q) || f.key.includes(q) || (f.short ?? "").toLowerCase().includes(q));
@@ -375,33 +425,30 @@ function ScreensInner() {
           {data?.price_asof && <span className="ml-auto text-[11px] text-[var(--ink3)] tabular-nums">Close {shortDay(data.price_asof)}</span>}
         </div>
 
-        <div className="flex items-center border-b border-[var(--line)] mb-3" role="tablist">
-          {([["screen", "Screen"], ["ready", "Ready-made"], ["saved", "Saved"]] as [Tab, string][]).map(([k, label]) => (
-            <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
-              className={`px-3 pt-1 pb-2 -mb-px border-b-2 text-[14px] ${
-                tab === k ? "border-[var(--accent)] text-[var(--accent-ink)] font-semibold" : "border-transparent text-[var(--ink2)]"}`}>
-              {label}
-              {k === "saved" && newCount > 0 && (
-                <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-[var(--accent-fill)] text-[var(--accent-fill-ink)] text-[10px] font-bold tabular-nums">{newCount}</span>
-              )}
-            </button>
-          ))}
-        </div>
-
         {loadError && <p className="text-[13px] text-[var(--neg)] mb-3">{loadError}</p>}
 
         {/* ── your screen ── */}
-        {tab === "screen" && (
+        {(
           <>
-            <div role="radiogroup" aria-label="What to screen" className="flex gap-1 mb-3">
+            <div className="flex items-center gap-1 mb-3">
+            <div role="radiogroup" aria-label="What to screen" className="inline-flex gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs">
               {UNIVERSES.map(([k, label]) => (
                 <button key={k} type="button" role="radio" aria-checked={uni === k}
                   onClick={() => { if (k !== uni) { setSort(null); go({ u: k, q: k === "companies" ? DEFAULT_QUERY : "", sec: [], lib: null }, true); } }}
-                  className={`min-h-[32px] px-3 rounded-full text-[13px] border ${uni === k
-                    ? "bg-[var(--card2)] text-[var(--ink)] border-[var(--line2)] font-semibold" : "text-[var(--ink3)] border-transparent"}`}>
+                  className={`min-h-[28px] px-2.5 rounded-md font-medium ${uni === k
+                    ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>
                   {label}
                 </button>
               ))}
+            </div>
+            {/* Ready-made and saved screens, and saving this one: one menu
+                instead of three tabs (Step 4). */}
+            <button type="button" onClick={() => setSheet({ kind: "screens" })}
+              className="ml-auto inline-flex items-center gap-1 min-h-[32px] px-3 rounded-lg border border-[var(--line2)] text-[13px] font-medium text-[var(--ink)]">
+              Screens
+              {newCount > 0 && <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-[var(--accent-fill)] text-[var(--accent-fill-ink)] text-[10px] font-bold tabular-nums">{newCount}</span>}
+              <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+            </button>
             </div>
             {lib && (
               <div className="flex items-center gap-2 mb-2">
@@ -411,43 +458,84 @@ function ScreensInner() {
                   className="ml-auto p-1 -m-1 text-[var(--ink3)]"><Icon name="close" size={14} /></button>
               </div>
             )}
-            <div className="flex flex-wrap gap-2 mb-3">
-              {parsed ? (
-                <>
-                  {parsed.conds.map((c, i) => (
-                    <span key={`${c.field}-${i}`} className={`${chip} pr-1 bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-semibold`}>
-                      <button type="button" onClick={() => openCond(i, c.field)} className="tabular-nums">
-                        {labelOf(c.field, by)} {OP_SYM[c.op] ?? c.op} {c.value}{UNIT_SUFFIX[by.get(c.field)?.unit ?? ""] ?? ""}
+            {/* Every filter as a row, edited in place: the sign flips over and
+                under, -/+ steps the number, the number itself opens the sheet
+                with the figure's spread. Beside it, how many pass that filter on
+                its own, and the median for scale (Step 4, A). */}
+            {parsed ? (
+              <div className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden mb-3">
+                <div className="flex items-center gap-2 px-3 py-2">
+                  <h2 className="text-[13px] font-semibold text-[var(--ink)]">Filters</h2>
+                  {parsed.conds.length > 1 && (
+                    <div role="radiogroup" aria-label="Match" className="inline-flex gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs">
+                      {([["and", "Match all"], ["or", "Any"]] as const).map(([j, label]) => (
+                        <button key={j} type="button" role="radio" aria-checked={parsed.joiner === j} onClick={() => setConds(parsed.conds, j)}
+                          className={`rounded-md px-2.5 min-h-[26px] font-medium ${parsed.joiner === j ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>{label}</button>
+                      ))}
+                    </div>
+                  )}
+                  <button type="button" onClick={() => setSheet({ kind: "sectors" })}
+                    className={`ml-auto text-[12.5px] font-semibold ${sectors.length ? "text-[var(--accent-ink)]" : "text-[var(--accent-ink)]"}`}>
+                    {sectors.length === 0 ? (uni === "indices" ? "All groups" : uni === "commodities" ? "MCX and NCDEX" : "All sectors")
+                      : sectors.length === 1 ? sectors[0] : `${sectors.length} ${uni === "indices" ? "groups" : uni === "commodities" ? "exchanges" : "sectors"}`}
+                  </button>
+                </div>
+                {parsed.conds.map((c, i) => {
+                  const v = parseFloat(c.value);
+                  const step = Number.isFinite(v) ? stepOf(v) : 1;
+                  const bump = (dir: number) => {
+                    if (!Number.isFinite(v)) return;
+                    const conds = [...parsed.conds];
+                    conds[i] = { ...c, value: String(roundTo(v + dir * step, step)) };
+                    setConds(conds);
+                  };
+                  const med = medians(c.field);
+                  const n = condCounts[i];
+                  const unit = UNIT_SUFFIX[by.get(c.field)?.unit ?? ""] ?? "";
+                  return (
+                    <div key={`${c.field}-${i}`} className="grid grid-cols-[minmax(0,1fr)_30px_104px_70px_24px] items-center gap-1.5 px-3 py-1.5 border-t border-[var(--line)]">
+                      <button type="button" onClick={() => openCond(i, c.field)} className="min-w-0 truncate text-left text-[13.5px] font-semibold text-[var(--ink)]">
+                        {labelOf(c.field, by)}
                       </button>
+                      <button type="button" onClick={() => setConds(parsed.conds.map((x, j) => (j === i ? { ...x, op: FLIP[x.op] ?? x.op } : x)))}
+                        aria-label={`Flip to ${OPS.find(([o]) => o === (FLIP[c.op] ?? c.op))?.[1] ?? c.op}`} title="Over or under"
+                        className="h-7 rounded-md bg-[var(--card2)] text-[14px] font-bold text-[var(--ink)]">{OP_SYM[c.op] ?? c.op}</button>
+                      <span className="flex items-center gap-1">
+                        <button type="button" onClick={() => bump(-1)} aria-label={`Lower ${labelOf(c.field, by)}`}
+                          className="w-7 h-7 shrink-0 rounded-md bg-[var(--card2)] text-[var(--ink2)] text-[15px] leading-none">−</button>
+                        <button type="button" onClick={() => openCond(i, c.field)} className="flex-1 min-w-0 text-center text-[14px] font-semibold tabular-nums text-[var(--ink)] truncate">
+                          {c.value}{unit}
+                        </button>
+                        <button type="button" onClick={() => bump(1)} aria-label={`Raise ${labelOf(c.field, by)}`}
+                          className="w-7 h-7 shrink-0 rounded-md bg-[var(--card2)] text-[var(--ink2)] text-[15px] leading-none">+</button>
+                      </span>
+                      <span className="text-right text-[11px] leading-tight tabular-nums text-[var(--ink3)]">
+                        <span className="block whitespace-nowrap text-[var(--ink2)]">{n === null || n === undefined ? "—" : n.toLocaleString("en-IN")} pass</span>
+                        {med !== null && <span className="block whitespace-nowrap">med {fmtVal(c.field, med, by)}</span>}
+                      </span>
                       <button type="button" onClick={() => setConds(parsed.conds.filter((_, j) => j !== i))}
-                        aria-label={`Remove ${labelOf(c.field, by)}`} className="w-6 h-6 inline-flex items-center justify-center opacity-70">
+                        aria-label={`Remove ${labelOf(c.field, by)}`} className="w-6 h-6 inline-flex items-center justify-center text-[var(--ink3)]">
                         <Icon name="close" size={13} />
                       </button>
-                    </span>
-                  ))}
-                  {parsed.conds.length > 1 && (
-                    <button type="button" onClick={() => setConds(parsed.conds, parsed.joiner === "and" ? "or" : "and")}
-                      className={`${chip} border-[var(--line)] text-[var(--ink2)]`} title="Switch between all filters and any filter">
-                      {parsed.joiner === "and" ? "Match all" : "Match any"}
-                    </button>
-                  )}
-                </>
-              ) : (
+                    </div>
+                  );
+                })}
+                <button type="button" onClick={() => { setPickText(""); setSheet({ kind: "pick" }); }}
+                  className="w-full text-left px-3 py-2.5 border-t border-[var(--line)] text-[13px] font-semibold text-[var(--accent-ink)]">
+                  + Add filter
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2 mb-3">
                 <button type="button" onClick={() => { setFormulaText(query); setSheet({ kind: "formula" }); }}
                   className={`${chip} bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-mono text-[12px] max-w-full`}>
                   <span className="truncate">{query}</span>
                 </button>
-              )}
-              <button type="button" onClick={() => { setPickText(""); setSheet({ kind: "pick" }); }}
-                className={`${chip} border-dashed border-[var(--line2)] text-[var(--ink2)]`}>
-                <Icon name="plus" size={14} /> Filter
-              </button>
-              <button type="button" onClick={() => setSheet({ kind: "sectors" })}
-                className={`${chip} ${sectors.length ? "bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-semibold" : "border-[var(--line)] text-[var(--ink2)]"}`}>
-                {sectors.length === 0 ? (uni === "indices" ? "All groups" : uni === "commodities" ? "MCX and NCDEX" : "All sectors")
-                  : sectors.length === 1 ? sectors[0] : `${sectors.length} ${uni === "indices" ? "groups" : uni === "commodities" ? "exchanges" : "sectors"}`}
-              </button>
-            </div>
+                <button type="button" onClick={() => setSheet({ kind: "sectors" })} className={`${chip} border-[var(--line)] text-[var(--ink2)]`}>
+                  {sectors.length === 0 ? "All sectors" : `${sectors.length} sectors`}
+                </button>
+              </div>
+            )}
 
             {result?.error && <p className="text-[13px] text-[var(--neg)] mb-2">{result.error}</p>}
 
@@ -541,51 +629,72 @@ function ScreensInner() {
           </>
         )}
 
-        {/* ── ready-made ── */}
-        {tab === "ready" && (
-          <ul className="divide-y divide-[var(--line)]">
-            {LIBRARY.map((l) => (
-              <li key={l.id} className="flex items-center gap-2">
-                <button type="button" onClick={() => openLibrary(l)} className="flex-1 min-w-0 py-3 text-left active:bg-[var(--card2)]">
-                  <p className="text-[15px] font-medium text-[var(--ink)]">{l.name}</p>
-                  <p className="text-[12px] text-[var(--ink3)] truncate">{l.blurb}</p>
-                </button>
-                <InfoTip title={l.name}><p>{l.about}</p><p className="font-mono text-[12px]">{l.query}</p></InfoTip>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {/* ── saved ── */}
-        {tab === "saved" && (
-          savedState.length === 0 ? (
-            <div className="py-14 text-center">
-              <p className="text-[15px] text-[var(--ink2)] mb-1">No saved screens</p>
-              <p className="text-[13px] text-[var(--ink3)]">Build one, then Save from <Icon name="more" size={14} className="inline" /> above the results. Each night&apos;s new entries and exits show here.</p>
-            </div>
-          ) : (
-            <ul className="divide-y divide-[var(--line)]">
-              {savedState.map(({ s, now, added, removed }) => (
-                <li key={s.name} className="flex items-center gap-2">
-                  <button type="button" onClick={() => openSaved(s)} className="flex-1 min-w-0 py-3 text-left active:bg-[var(--card2)]">
-                    <p className="flex items-center gap-2 text-[15px] font-medium text-[var(--ink)]">
-                      <span className="truncate">{s.name}</span>
-                      <span className="text-[12px] font-normal text-[var(--ink3)] tabular-nums">{now === null ? "Broken" : now.length}</span>
-                    </p>
-                    <p className="text-[12px] tabular-nums truncate">
-                      {added.length > 0 && <span className="text-[var(--pos)] font-semibold">+{added.length} new </span>}
-                      {removed.length > 0 && <span className="text-[var(--neg)] font-semibold">−{removed.length} left </span>}
-                      {added.length + removed.length === 0 && <span className="text-[var(--ink3)]">No change</span>}
-                      {s.seenAsof && <span className="text-[var(--ink3)]"> since {shortDay(s.seenAsof)}</span>}
-                    </p>
-                  </button>
-                  <IconButton name="more" label={`${s.name} details`} onClick={() => { setConfirmDelete(false); setSheet({ kind: "saved", name: s.name }); }} />
-                </li>
-              ))}
-            </ul>
-          )
-        )}
       </main>
+
+      {/* ── Screens: ready-made, saved, and saving this one ── */}
+      {sheet?.kind === "screens" && (
+        <InfoDialog title="Screens" onClose={() => setSheet(null)}>
+          <div role="radiogroup" aria-label="Screens" className="inline-flex gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs self-start">
+            {([["ready", `Ready-made ${LIBRARY.length}`], ["saved", "Saved"]] as [Tab, string][]).map(([k, label]) => (
+              <button key={k} type="button" role="radio" aria-checked={tab === k} onClick={() => setTab(k)}
+                className={`rounded-md px-3 min-h-[30px] font-medium ${tab === k ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>
+                {label}
+                {k === "saved" && newCount > 0 && <span className="ml-1 text-[var(--accent-ink)] font-bold tabular-nums">{newCount}</span>}
+              </button>
+            ))}
+          </div>
+          <div className="max-h-[52vh] overflow-y-auto -mx-1 px-1">
+            {tab === "ready" ? (
+              <ul className="divide-y divide-[var(--line)]">
+                {LIBRARY.map((l) => (
+                  <li key={l.id} className="flex items-center gap-2">
+                    <button type="button" onClick={() => openLibrary(l)} className="flex-1 min-w-0 py-3 text-left active:bg-[var(--card2)]">
+                      <p className="text-[15px] font-medium text-[var(--ink)]">{l.name}</p>
+                      <p className="text-[12px] text-[var(--ink3)] truncate">{l.blurb}</p>
+                    </button>
+                    <InfoTip title={l.name}><p>{l.about}</p><p className="font-mono text-[12px]">{l.query}</p></InfoTip>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              savedState.length === 0 ? (
+                <div className="py-14 text-center">
+                  <p className="text-[15px] text-[var(--ink2)] mb-1">No saved screens</p>
+                  <p className="text-[13px] text-[var(--ink3)]">Build one, then Save this screen below. Each night&apos;s new entries and exits show here.</p>
+                </div>
+              ) : (
+                <ul className="divide-y divide-[var(--line)]">
+                  {savedState.map(({ s, now, added, removed }) => (
+                    <li key={s.name} className="flex items-center gap-2">
+                      <button type="button" onClick={() => openSaved(s)} className="flex-1 min-w-0 py-3 text-left active:bg-[var(--card2)]">
+                        <p className="flex items-center gap-2 text-[15px] font-medium text-[var(--ink)]">
+                          <span className="truncate">{s.name}</span>
+                          <span className="text-[12px] font-normal text-[var(--ink3)] tabular-nums">{now === null ? "Broken" : now.length}</span>
+                        </p>
+                        <p className="text-[12px] tabular-nums truncate">
+                          {added.length > 0 && <span className="text-[var(--pos)] font-semibold">+{added.length} new </span>}
+                          {removed.length > 0 && <span className="text-[var(--neg)] font-semibold">−{removed.length} left </span>}
+                          {added.length + removed.length === 0 && <span className="text-[var(--ink3)]">No change</span>}
+                          {s.seenAsof && <span className="text-[var(--ink3)]"> since {shortDay(s.seenAsof)}</span>}
+                        </p>
+                      </button>
+                      <IconButton name="more" label={`${s.name} details`} onClick={() => { setConfirmDelete(false); setSheet({ kind: "saved", name: s.name }); }} />
+                    </li>
+                  ))}
+                </ul>
+              )
+            )}
+          </div>
+          <div className="flex gap-2 pt-1">
+            {uni === "companies" && (
+              <button type="button" onClick={() => { setNameText(lib?.name ?? ""); setSheet({ kind: "save" }); }}
+                className="rs-press flex-1 min-h-[42px] rounded-xl bg-[var(--accent-fill)] text-[var(--accent-fill-ink)] text-[13.5px] font-semibold">Save this screen</button>
+            )}
+            <button type="button" onClick={() => setSheet({ kind: "more" })}
+              className="rs-press flex-1 min-h-[42px] rounded-xl border border-[var(--line)] text-[13.5px] font-medium text-[var(--ink2)]">Link, CSV, formula</button>
+          </div>
+        </InfoDialog>
+      )}
 
       {/* ── field picker ── */}
       {sheet?.kind === "pick" && (
@@ -641,6 +750,32 @@ function ScreensInner() {
                   className="flex-1 min-w-0 bg-transparent outline-none text-[16px] tabular-nums text-[var(--ink)]" />
                 <span className="text-[13px] text-[var(--ink3)]">{f?.unit}</span>
               </label>
+              {spread && (() => {
+                const v = parseFloat(valText);
+                const cutAt = Number.isFinite(v) ? Math.min(spread.hi, Math.max(spread.lo, v)) : null;
+                const passes = (x: number) => !Number.isFinite(v) ? false
+                  : opText === ">" ? x > v : opText === ">=" ? x >= v : opText === "<" ? x < v : opText === "<=" ? x <= v : x === v;
+                const n = Number.isFinite(v) ? spread.vs.filter(passes).length : null;
+                const top = Math.max(...spread.bins);
+                return (
+                  <div>
+                    <div className="flex items-end gap-[2px] h-14" aria-hidden="true">
+                      {spread.bins.map((c, i) => {
+                        const mid = spread.lo + (i + 0.5) * spread.w;
+                        return <span key={i} className="flex-1 rounded-t-sm" style={{ height: `${Math.max(2, (c / top) * 100)}%`, background: passes(mid) ? "var(--accent)" : "var(--line2)" }} />;
+                      })}
+                    </div>
+                    <input type="range" min={spread.lo} max={spread.hi} step={stepOf((spread.hi - spread.lo) / 10)}
+                      value={cutAt ?? spread.lo} onChange={(e) => setValText(String(roundTo(parseFloat(e.target.value), stepOf((spread.hi - spread.lo) / 10))))}
+                      aria-label="Cut-off" className="w-full mt-1 accent-[var(--accent)]" />
+                    <div className="flex justify-between text-[11px] text-[var(--ink3)] tabular-nums">
+                      <span>{fmtVal(sheet.field, spread.lo, by)}</span>
+                      <span className="font-semibold text-[var(--ink)]">{n === null ? "" : `${n.toLocaleString("en-IN")} of ${spread.vs.length.toLocaleString("en-IN")} pass`}</span>
+                      <span>{fmtVal(sheet.field, spread.hi, by)}</span>
+                    </div>
+                  </div>
+                );
+              })()}
               {med !== null && (
                 <p className="text-[12px] text-[var(--ink3)]">
                   Median across {uni === "companies" ? "companies" : uni}: <button type="button" onClick={() => setValText(String(Math.round(med * 10) / 10))}
