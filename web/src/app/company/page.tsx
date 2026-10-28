@@ -344,7 +344,7 @@ function PeerTable({ symbol, self, peers, industry }: { symbol: string; self: Ro
     <section id="peers" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
       <div className="px-4 pt-3.5 pb-2 flex items-start gap-2">
         <div className="flex-1 min-w-0">
-          <h2 className="text-base font-semibold text-[var(--ink)]">Peer comparison</h2>
+          <h2 className="text-base font-semibold text-[var(--ink)]">Peers</h2>
           <p className="text-xs text-[var(--ink3)] mt-0.5">{industry}</p>
         </div>
         <Link href={`/compare?s=${[symbol, ...peers.slice(0, 3).map((p) => String(p.symbol))].map(encodeURIComponent).join(",")}`}
@@ -353,7 +353,7 @@ function PeerTable({ symbol, self, peers, industry }: { symbol: string; self: Ro
         </Link>
         <button type="button" onClick={() => setEditing(!editing)} aria-expanded={editing}
           className={`shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold border ${editing ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]" : "text-[var(--ink2)] border-[var(--line)]"}`}>
-          {editing ? "Done" : "Edit columns"}
+          {editing ? "Done" : "Columns"}
         </button>
       </div>
       {editing && (
@@ -1224,23 +1224,6 @@ const METRIC_INFO: Record<string, { how: string; means: string; watch?: string }
  *  that raised the question, and on a phone often off-screen entirely. Now
  *  it is the same "i" used everywhere else, and the words arrive on top of
  *  the page rather than under it. */
-function MetricInfo({ label, method }: { label: string; method: string }) {
-  const info = METRIC_INFO[label];
-  if (!info) return null;
-  return (
-    <InfoTip title={label} label={`How ${label} is worked out`} className="ml-1">
-      <InfoPart head="How it is worked out">{info.how}</InfoPart>
-      <InfoPart head="What it tells you">{info.means}</InfoPart>
-      {info.watch && <InfoPart head="Where it misleads">{info.watch}</InfoPart>}
-      {label.startsWith("Volatility") && method && (
-        <p className="text-[var(--ink3)]">
-          Method used for this company: {method === "yang-zhang" ? "Yang-Zhang (OHLC)" : "close-to-close"}.
-        </p>
-      )}
-    </InfoTip>
-  );
-}
-
 /** Price history and performance, in one block.
  *
  *  Every figure here was already being published in data.json and none of it
@@ -1255,72 +1238,63 @@ function MetricInfo({ label, method }: { label: string; method: string }) {
 function PriceHistory({ row, snapshot }: { row: Row | null; snapshot: Row }) {
   const g = (k: string) => num(row, k) ?? num(snapshot, k);
   const price = g("price"), hi = g("wk52_high"), lo = g("wk52_low");
-
   const returns: [string, number | null][] = [
-    ["1 month", g("ret_1m")], ["3 months", g("ret_3m")], ["6 months", g("ret_6m")],
-    ["1 year", g("ret_1y")], ["3 years", g("ret_3y")], ["5 years", g("ret_5y")],
+    ["1M", g("ret_1m")], ["3M", g("ret_3m")], ["6M", g("ret_6m")],
+    ["1Y", g("ret_1y")], ["3Y", g("ret_3y")], ["5Y", g("ret_5y")],
   ];
   const shown = returns.filter(([, v]) => v !== null && v !== undefined);
   const at = price !== null && hi !== null && lo !== null && hi > lo
     ? Math.min(100, Math.max(0, ((price - lo) / (hi - lo)) * 100))
     : null;
+  const off = price !== null && hi ? ((price - hi) / hi) * 100 : null;
   const beta = g("beta");
-
   if (shown.length === 0 && at === null) return null;
-
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
       <h2 className="text-base font-semibold text-[var(--ink)]">
         Price history
         <InfoTip title="Price history" className="ml-1.5">
           <p>Change in the share price alone.</p>
-          <p>
-            Dividends are not added back, so a high-yield company has done better than these
-            figures say.
-          </p>
+          <p>Dividends are not added back, so a high-yield company has done better than these figures say.</p>
+          {beta !== null && beta !== undefined && (
+            <p>
+              Beta {fmtNum(beta)}: over the last year this share moved about{" "}
+              {Math.abs(beta) < 0.05 ? "independently of" : `${fmtNum(Math.abs(beta))}× as far as`} the market on an
+              average day. A number below 1 is not safety; it is only a smaller swing.
+            </p>
+          )}
         </InfoTip>
       </h2>
-
-      {at !== null && (
-        <div className="mt-3">
-          <div className="relative h-2 rounded-full bg-[var(--card2)] border border-[var(--line)]">
-            <div className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-[var(--accent)]"
-                 style={{ left: `calc(${at}% - 5px)` }} />
-          </div>
-          <div className="flex justify-between text-[11px] text-[var(--ink3)] mt-1 tabular-nums">
-            <span>52w low ₹{fmtNum(lo, 0)}</span>
-            <span className="text-[var(--ink2)]">₹{fmtNum(price)} — {at.toFixed(0)}% up the range</span>
-            <span>52w high ₹{fmtNum(hi, 0)}</span>
-          </div>
-        </div>
-      )}
-
       {shown.length > 0 && (
-        <div className="mt-3 grid grid-cols-3 sm:grid-cols-6 gap-x-3 gap-y-2">
+        <div className="mt-2.5 grid grid-cols-6 gap-1 text-center">
           {shown.map(([label, v]) => (
             <div key={label}>
-              <p className="text-[11px] text-[var(--ink3)]">{label}</p>
-              <p className="text-sm font-semibold tabular-nums"
-                 style={{ color: (v as number) >= 0 ? "var(--pos)" : "var(--neg)" }}>
-                {(v as number) >= 0 ? "+" : ""}{fmtNum(v)}%
+              <p className="text-[10.5px] text-[var(--ink3)]">{label}</p>
+              <p className="text-[13px] font-semibold tabular-nums" style={{ color: (v as number) > 0 ? "var(--pos)" : (v as number) < 0 ? "var(--neg)" : "var(--ink2)" }}>
+                {(v as number) > 0 ? "+" : (v as number) < 0 ? "−" : ""}{fmtNum(Math.abs(v as number), 1)}%
               </p>
             </div>
           ))}
         </div>
       )}
-
+      {at !== null && (
+        <div className="mt-3">
+          <div className="flex items-center gap-2 text-[11px] text-[var(--ink3)] tabular-nums">
+            <span>₹{fmtNum(lo, 0)}</span>
+            <div className="relative flex-1 h-1 rounded-full bg-[var(--line)]">
+              <div className="absolute -top-1 w-[2px] h-3 bg-[var(--ink)]" style={{ left: `calc(${at}% - 1px)` }} />
+            </div>
+            <span>₹{fmtNum(hi, 0)}</span>
+          </div>
+          <div className="flex justify-between text-[10.5px] text-[var(--ink3)] mt-0.5">
+            <span>52-week low</span>
+            {off !== null && <span className="tabular-nums">From high {off > 0 ? "+" : off < 0 ? "−" : ""}{Math.abs(off).toFixed(1)}%</span>}
+            <span>52-week high</span>
+          </div>
+        </div>
+      )}
       {beta !== null && beta !== undefined && (
-        <p className="text-[11px] text-[var(--ink3)] mt-3">
-          Beta {fmtNum(beta)}
-          <InfoTip title="Beta" className="ml-1">
-            <p>
-              Over the last year this share moved about{" "}
-              {Math.abs(beta) < 0.05 ? "independently of" : `${fmtNum(Math.abs(beta))}× as far as`}{" "}
-              the market on an average day.
-            </p>
-            <p>A number below 1 is not safety; it is only a smaller swing.</p>
-          </InfoTip>
-        </p>
+        <p className="text-[11px] text-[var(--ink3)] mt-2">Beta {fmtNum(beta)}</p>
       )}
     </section>
   );
@@ -1607,75 +1581,65 @@ type FScoreData = {
  *  the past, not a view about the price.
  */
 function FScore({ f }: { f: FScoreData }) {
-  const total = f.measured || 1;
-  // Green above two thirds, red below a third - the same reading Piotroski
-  // gave the score, stated on screen rather than left to a colour.
-  const tone = f.score / total >= 0.67 ? "var(--pos)"
-    : f.score / total <= 0.33 ? "var(--neg)" : "var(--warn)";
+  const [all, setAll] = useState(false);
+  const failed = f.checks.filter((c) => c.pass !== true);
+  const listed = all ? f.checks : failed;
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h2 className="text-base font-semibold text-[var(--ink)]">
-            Nine tests on the accounts
-            <InfoTip title="Nine tests on the accounts" className="ml-1.5">
-              <p>
-                The Piotroski F-score, comparing {f.years[1].slice(0, 4)} against{" "}
-                {f.years[0].slice(0, 4)}. Every test is arithmetic on two filed years, and all
-                nine are shown — a score whose workings are hidden cannot be argued with.
-              </p>
-              <p>
-                A test whose inputs are missing counts as neither a pass nor a fail. Scoring an
-                absent figure as zero would turn missing data into bad news, which is not what
-                it is.
-              </p>
-            </InfoTip>
-          </h2>
-          <p className="text-xs text-[var(--ink3)] mt-0.5 tabular-nums">
-            {f.years[1].slice(0, 4)} vs {f.years[0].slice(0, 4)}
-          </p>
-        </div>
-        <div className="text-right shrink-0">
-          <div className="flex items-baseline gap-0.5">
-            <span className="text-3xl font-bold tabular-nums" style={{ color: tone }}>{f.score}</span>
-            <span className="text-sm text-[var(--ink3)]">/{f.measured}</span>
-          </div>
-          {f.measured < f.of && (
-            <p className="text-[11px] text-[var(--ink3)]">
-              {f.of - f.measured} of {f.of} not measurable
+      <div className="flex items-baseline gap-2">
+        <h2 className="flex-1 text-base font-semibold text-[var(--ink)]">
+          Nine tests
+          <InfoTip title="Nine tests on the accounts" className="ml-1.5">
+            <p>
+              The Piotroski F-score, comparing {f.years[1].slice(0, 4)} against {f.years[0].slice(0, 4)}. Every test is
+              arithmetic on two filed years, and all nine are shown — a score whose workings are hidden cannot be argued with.
             </p>
-          )}
-        </div>
+            <p>
+              A test whose inputs are missing counts as neither a pass nor a fail. Scoring an absent figure as zero would
+              turn missing data into bad news, which is not what it is.
+            </p>
+          </InfoTip>
+        </h2>
+        <span className="text-sm font-semibold tabular-nums text-[var(--ink)]">{f.score}/{f.measured}</span>
+        <button type="button" onClick={() => setAll(!all)} aria-expanded={all}
+          className="text-[12px] font-semibold text-[var(--accent-ink)]">{all ? "Failed only" : `All ${f.checks.length}`}</button>
       </div>
-
-      <ul className="mt-3 divide-y divide-[var(--line)]">
+      <div className="mt-2.5 grid grid-cols-9 gap-1" role="list" aria-label="Test results">
         {f.checks.map((c) => (
-          <li key={c.test} className="py-2 flex items-start gap-2.5">
-            <span
-              aria-hidden="true"
-              className="mt-0.5 shrink-0 w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold"
-              style={{
-                background: c.pass === null ? "var(--card2)" : c.pass ? "var(--pos)" : "var(--neg)",
-                color: c.pass === null ? "var(--ink3)" : "var(--card)",
-                border: c.pass === null ? "1px solid var(--line2)" : "none",
-              }}
-            >
-              {c.pass === null ? "?" : c.pass ? "\u2713" : "\u2715"}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="text-sm text-[var(--ink)]">{c.name}</span>
-              <span className="sr-only">
-                {c.pass === null ? " - not measurable" : c.pass ? " - passed" : " - failed"}
-              </span>
-              <span className="block text-[11px] text-[var(--ink3)]">
-                {c.test}
-                {c.detail ? ` — ${c.detail}` : " — not reported in both years, so not scored"}
-              </span>
-            </span>
-          </li>
+          <span key={c.test} role="listitem" title={`${c.name} - ${c.pass === null ? "not measurable" : c.pass ? "passed" : "failed"}`}
+            className="h-6 rounded-md flex items-center justify-center"
+            style={{ background: c.pass === null ? "var(--card2)" : `color-mix(in srgb, var(${c.pass ? "--pos" : "--neg"}) 16%, transparent)` }}>
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+              stroke={c.pass === null ? "var(--ink3)" : c.pass ? "var(--pos)" : "var(--neg)"}>
+              <path d={c.pass === null ? "M12 7v6M12 17v.5" : c.pass ? "M5 12.5l4.5 4.5L19 7.5" : "M7 7l10 10M17 7L7 17"} />
+            </svg>
+            <span className="sr-only">{c.name}: {c.pass === null ? "not measurable" : c.pass ? "passed" : "failed"}</span>
+          </span>
         ))}
-      </ul>
-
+      </div>
+      {listed.length > 0 && (
+        <>
+          <p className="mt-2.5 text-[10.5px] font-semibold uppercase tracking-wide text-[var(--ink3)]">
+            {all ? "All tests" : "Failed or not measurable"} · {f.years[1].slice(0, 4)} vs {f.years[0].slice(0, 4)}
+          </p>
+          <ul className="divide-y divide-[var(--line)]">
+            {listed.map((c) => (
+              <li key={c.test} className="py-1.5 flex items-baseline gap-2 text-[13px]">
+                <span className="shrink-0 w-3 text-center font-bold" aria-hidden="true"
+                  style={{ color: c.pass === null ? "var(--ink3)" : c.pass ? "var(--pos)" : "var(--neg)" }}>
+                  {c.pass === null ? "?" : c.pass ? "\u2713" : "\u2715"}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="text-[var(--ink)]">{c.name}</span>
+                  <span className="block text-[11px] text-[var(--ink3)]">
+                    {c.test}{c.detail ? ` — ${c.detail}` : " — not reported in both years, so not scored"}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </section>
   );
 }
@@ -1744,7 +1708,7 @@ function ValuationHistory({ company }: { company: Company }) {
 
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
-      <h2 className="text-base font-semibold text-[var(--ink)] mb-3">
+      <h2 className="text-base font-semibold text-[var(--ink)] mb-1">
         Against its own history
         <InfoTip title="Against its own history" className="ml-1.5">
           <p>Where today&rsquo;s valuation sits in this company&rsquo;s own record.</p>
@@ -1759,36 +1723,30 @@ function ValuationHistory({ company }: { company: Company }) {
           </p>
         </InfoTip>
       </h2>
-      <div className="space-y-3.5">
+      <div className="divide-y divide-[var(--line)]">
         {rows.map((r) => {
-          // Position on the bar, clamped: the newest point IS the max or the
-          // min often enough that an unclamped marker sits half off the track.
-          const span = r.hi - r.lo;
-          const at = span > 0 ? Math.min(100, Math.max(0, ((r.value - r.lo) / span) * 100)) : 50;
+          // Today's value against the median of its own record, on one scale
+          // from zero; the gap is printed, never coloured as good or bad.
+          const top = Math.max(r.value, r.median, 0) * 1.15 || 1;
+          const gap = r.median ? ((r.value - r.median) / Math.abs(r.median)) * 100 : null;
           return (
-            <div key={r.label}>
-              <div className="flex items-baseline justify-between gap-2 text-sm">
-                <span className="text-[var(--ink2)]">{r.label}</span>
-                <span className="font-semibold text-[var(--ink)] tabular-nums">{fmtNum(r.value)}</span>
-              </div>
-              <div className="relative h-1.5 rounded-full bg-[var(--card2)] mt-1.5 border border-[var(--line)]">
-                <div className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-[var(--accent)]"
-                     style={{ left: `calc(${at}% - 4px)` }} />
-              </div>
-              <div className="flex justify-between text-[11px] leading-snug text-[var(--ink3)] mt-1 tabular-nums">
-                <span>Low {fmtNum(r.lo)}</span>
-                {/* The window is stated, not just its length. These four
-                    series do NOT reach equally far back: P/E and MCap/Sales
-                    come from filed quarterly results to 2006, while EV/EBITDA
-                    needs debt and cash, which the balance sheets only give for
-                    about four years. "2% of 42 months" invites a conclusion
-                    that "42 months since 2023-03" does not. */}
-                <span>
-                  {r.short} was lower than this on <strong className="text-[var(--ink2)]">{r.pct}%</strong>{" "}
-                  of {r.n.toLocaleString("en-IN")} readings since {periodLabel(`${r.from}-01`)} · median {fmtNum(r.median)}
+            <div key={r.label} className="py-1.5">
+              <div className="grid grid-cols-[76px_44px_minmax(0,1fr)_auto] items-center gap-2 text-[13px]">
+                <span className="text-[var(--ink2)] truncate">{r.short}</span>
+                <span className="text-right font-semibold text-[var(--ink)] tabular-nums">{fmtNum(r.value)}</span>
+                <span className="relative h-1.5 rounded-full bg-[var(--line)]" aria-hidden="true">
+                  <span className="absolute left-0 top-0 h-1.5 rounded-full bg-[var(--ink3)]" style={{ width: `${Math.max(0, (r.value / top) * 100)}%` }} />
+                  <span className="absolute -top-[3px] w-[2px] h-3 bg-[var(--accent)]" style={{ left: `${Math.max(0, (r.median / top) * 100)}%` }} />
                 </span>
-                <span>High {fmtNum(r.hi)}</span>
+                <span className="text-[11px] text-[var(--ink3)] tabular-nums whitespace-nowrap">
+                  Med {fmtNum(r.median)}{gap !== null && <> · <span className="text-[var(--ink2)]">{gap > 0 ? "+" : gap < 0 ? "−" : ""}{Math.abs(gap).toFixed(0)}%</span></>}
+                </span>
               </div>
+              {/* The window is stated, not just its length: these series do not
+                  reach equally far back. */}
+              <p className="text-[10.5px] text-[var(--ink3)] tabular-nums mt-0.5">
+                Lower than now on {r.pct}% of {r.n.toLocaleString("en-IN")} months since {periodLabel(`${r.from}-01`)} · range {fmtNum(r.lo)}–{fmtNum(r.hi)}
+              </p>
             </div>
           );
         })}
@@ -1829,133 +1787,137 @@ function industryMedian(cohort: Cohort, field: string): { value: number; n: numb
   return { value: m, n: vs.length };
 }
 
+/** A ₹ crore figure short enough for a tile whose label carries "₹Cr":
+ *  8.13L (lakh crore) or 45,031. */
+function crShort(v: number | null): string {
+  if (v === null) return "—";
+  const a = Math.abs(v), sign = v < 0 ? "−" : "";
+  if (a >= 1e5) return `${sign}${(a / 1e5).toFixed(2)}L`;
+  return `${sign}${fmtNum(a, 0)}`;
+}
+
+type Tile = { label: string; value: string; sub?: string | null; field?: string; full?: string; info?: string };
+
 function RatioGrid({ snapshot, row, cohort, next, updates, faceValue }: {
   snapshot: Row; row: Row | null; cohort: Cohort | null; next?: NextResults; updates?: Updates | null; faceValue?: number | null;
 }) {
   const g = (k: string) => num(row, k) ?? num(snapshot, k);
   const method = String((row?.["vol_method"] ?? snapshot["vol_method"]) ?? "");
-  const vol = (k: string) => {
-    const v = g(k);
-    return v === null ? "—" : `${v.toFixed(1)} %`;
-  };
-  // Volatility now sits in the list at the same weight as everything else. It was
-  // a large separate card, which gave it an importance out of proportion to market
-  // cap, price or P/E.
-  // A missing value is shown as a bare dash, not "₹ — Cr". Wrapping a currency
-  // symbol and a unit around nothing dresses an absence up as a figure, which is
-  // the one thing this app is not supposed to do.
-  const money = (v: unknown, dec = 2, suffix = "") =>
-    v === null || v === undefined ? "—" : `₹ ${fmtNum(v as number, dec)}${suffix}`;
-  const pct = (v: unknown) =>
-    v === null || v === undefined ? "—" : `${fmtNum(v as number)} %`;
-  const plain = (v: unknown) =>
-    v === null || v === undefined ? "—" : fmtNum(v as number);
+  // A missing value is a bare dash, never "₹ — Cr": a unit wrapped round
+  // nothing dresses an absence up as a figure.
+  const pct = (v: number | null) => (v === null ? "—" : `${fmtNum(v, Math.abs(v) >= 100 ? 0 : 1)}%`);
+  const plain = (v: number | null) => (v === null ? "—" : fmtNum(v));
+  const rupee = (v: number | null, dec = 2) => (v === null ? "—" : `₹${fmtNum(v, dec)}`);
+  const price = g("price"), hi = g("wk52_high"), lo = g("wk52_low");
+  const fromHi = price !== null && hi ? ((price - hi) / hi) * 100 : null;
+  const fromLo = price !== null && lo ? ((price - lo) / lo) * 100 : null;
+  const signedPct = (v: number | null) => (v === null ? null : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(1)}%`);
+  const debt = g("total_debt"), cash = g("total_cash"), mcap = g("mcap");
+  const ev = mcap === null ? null : mcap + ((debt ?? 0) - (cash ?? 0)) / 1e7;
+  const day = (d: string, opts: Intl.DateTimeFormatOptions) => new Date(`${d}T00:00:00`).toLocaleDateString("en-IN", opts);
 
-  // Grouped by the question each one answers. Fourteen numbers in one flat grid
-  // is a list to read end to end; four short groups is a page to scan.
-  /** Third entry is the data.json field this row can be compared on, or "" for
-   *  the ones where an industry median would be nonsense: a book value per
-   *  share or a share price is a function of how many shares exist, so its
-   *  median across an industry compares nothing. */
-  const groups: [string, [string, string, string][]][] = [
+  // Grouped by the question each one answers; four short groups is a page to
+  // scan where fourteen rows were a list to read. `field` is the data.json
+  // field an industry median is taken on - none for a per-share figure, whose
+  // median across an industry compares nothing.
+  const groups: [string, Tile[]][] = [
     ["Size and price", [
-      ["Market Cap", money(g("mcap"), 0, " Cr"), "mcap"],
-      ["Current Price", money(g("price")), ""],
-      ["High / Low", g("wk52_high") == null && g("wk52_low") == null ? "—"
-        : `₹ ${fmtNum(g("wk52_high"), 0)} / ${fmtNum(g("wk52_low"), 0)}`, ""],
+      { label: "MCap ₹Cr", info: "Market Cap", value: crShort(mcap), full: mcap === null ? undefined : `₹${fmtNum(mcap, 0)} Cr`,
+        sub: cohort?.rank ? `#${cohort.rank.toLocaleString("en-IN")} of ${cohort.rankOf.toLocaleString("en-IN")}` : null },
+      { label: "Ind. rank", value: cohort?.indRank ? `#${cohort.indRank}` : "—", sub: cohort?.indRank ? `of ${cohort.indRankOf}` : null },
+      { label: "52W high", info: "High / Low", value: rupee(hi, 0), sub: fromHi === null ? null : signedPct(fromHi) },
+      { label: "52W low", value: rupee(lo, 0), sub: fromLo === null ? null : signedPct(fromLo) },
     ]],
     ["What it costs", [
-      ["Stock P/E", plain(g("pe")), "pe"],
-      ["Book Value", money(g("book_value")), ""],
-      ...(faceValue ? [["Face Value", `₹ ${fmtNum(faceValue, faceValue % 1 ? 2 : 0)}`, ""] as [string, string, string]] : []),
-      ["Dividend Yield", pct(g("div_yield")), "div_yield"],
+      { label: "Stock P/E", value: plain(g("pe")), field: "pe" },
+      { label: "Book value", info: "Book Value", value: rupee(g("book_value")), sub: "Per share" },
+      { label: "Div. yield", info: "Dividend Yield", value: pct(g("div_yield")), field: "div_yield" },
+      ...(faceValue ? [{ label: "Face value", value: `₹${fmtNum(faceValue, faceValue % 1 ? 2 : 0)}`, sub: "Per share" }] : []),
     ]],
     ["What it earns", [
-      ["Next results", next === undefined ? "—" : next === null ? "Not announced"
-        : new Date(`${next.date}T00:00:00`).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" }), ""],
-      // Only for a company that files them: on every other page the row
-      // would be a dash that says nothing (owner: no dead rows).
-      ...(updates ? [["Business update", new Date(`${updates.last.d}T00:00:00`).toLocaleDateString("en-IN",
-        { day: "numeric", month: "short", year: "numeric" }), ""] as [string, string, string]] : []),
-      ["ROCE", pct(g("roce")), "roce"],
-      ["ROE", pct(g("roe")), "roe"],
-      ["Sales growth 5Y", pct(g("sales_cagr_5y")), "sales_cagr_5y"],
-      ["Profit growth 5Y", pct(g("profit_cagr_5y")), "profit_cagr_5y"],
+      { label: "ROCE", value: pct(g("roce")), field: "roce" },
+      { label: "ROE", value: pct(g("roe")), field: "roe" },
+      { label: "Sales 5Y", info: "Sales growth 5Y", value: pct(g("sales_cagr_5y")), field: "sales_cagr_5y" },
+      { label: "Profit 5Y", info: "Profit growth 5Y", value: pct(g("profit_cagr_5y")), field: "profit_cagr_5y" },
+      { label: "Results", value: next ? day(next.date, { day: "numeric", month: "short" }) : "—",
+        full: next ? day(next.date, { weekday: "short", day: "numeric", month: "short", year: "numeric" }) : undefined,
+        sub: next ? `${periodLabel(quarterBefore(next.date))} qtr` : next === null ? "No date yet" : null },
+      // Only for a company that files them (owner: no dead tiles).
+      ...(updates ? [{ label: "Update", info: "Business update", value: day(updates.last.d, { day: "numeric", month: "short" }),
+        sub: `${updates.n} of ${updates.of} qtrs`,
+        full: [`${updates.last.q}`, `${updates.n} of ${updates.of} quarters`, updates.typ != null && `usually day ${updates.typ}`].filter(Boolean).join(" · ") }] : []),
     ]],
     ["Risk and ownership", [
-      // Absolute debt and cash, not only the ratio. Finology leads with these
-      // and it is right to: "Debt / Equity 0.37" tells you the shape of the
-      // funding, "Rs 2,31,381 crore of debt against Rs 1,08,179 crore of cash"
-      // tells you the size of it, and the second is the one a reader can hold
-      // against the profit. Both were already in the export and neither was on
-      // the page.
-      ["Enterprise value", g("mcap") === null ? "—"
-        : money((g("mcap") ?? 0) + ((g("total_debt") ?? 0) - (g("total_cash") ?? 0)) / 1e7, 0, " Cr"), ""],
-      ["Total debt", g("total_debt") === null ? "—" : money((g("total_debt") ?? 0) / 1e7, 0, " Cr"), ""],
-      ["Cash", g("total_cash") === null ? "—" : money((g("total_cash") ?? 0) / 1e7, 0, " Cr"), ""],
-      ["Debt / Equity", plain(g("de")), "de"],
-      ["Promoter holding", pct(g("promoter_holding")), "promoter_holding"],
-      ["Volatility 1Y", vol("volatility_1y"), "volatility_1y"],
-      ["Volatility 30D", vol("volatility_30d"), "volatility_30d"],
+      // Absolute debt and cash as well as the ratio: the ratio gives the shape
+      // of the funding, these give its size against the profit.
+      { label: "EV ₹Cr", info: "Enterprise value", value: crShort(ev), full: "Market cap plus debt, less cash" },
+      { label: "Debt ₹Cr", value: debt === null ? "—" : crShort(debt / 1e7) },
+      { label: "Cash ₹Cr", value: cash === null ? "—" : crShort(cash / 1e7) },
+      { label: "Debt/equity", info: "Debt / Equity", value: plain(g("de")), field: "de" },
+      { label: "Promoter", info: "Promoter holding", value: pct(g("promoter_holding")), field: "promoter_holding" },
+      { label: "Vol. 1Y", info: "Volatility 1Y", value: pct(g("volatility_1y")), field: "volatility_1y" },
+      { label: "Vol. 30D", info: "Volatility 30D", value: pct(g("volatility_30d")), field: "volatility_30d" },
     ]],
   ];
 
-  /** The grey line under a figure: what the rest of the industry does. */
-  const context = (field: string) => {
-    if (!field || !cohort) return null;
-    if (field === "mcap") {
-      if (!cohort.rank) return null;
-      // The industry name is already printed under the company name at the top
-      // of the page; repeating it here wrapped this line onto three.
-      return `${cohort.rank.toLocaleString("en-IN")} of ${cohort.rankOf.toLocaleString("en-IN")} by size${
-        cohort.indRank ? ` · ${cohort.indRank} of ${cohort.indRankOf} in its industry` : ""}`;
-    }
-    const med = industryMedian(cohort, field);
-    const mine = g(field);
-    if (!med) return null;
-    const shown = Math.abs(med.value) >= 100 ? fmtNum(med.value, 0) : fmtNum(med.value);
-    const side = mine === null ? "" : mine > med.value ? " · above" : mine < med.value ? " · below" : " · at";
-    // Say how many companies it was taken over when that number is small.
-    // NSDL sits in an industry of six: "industry median 40.27" reads like a
-    // fact about an industry, when it is the middle of five other companies.
-    const n = med.n < 15 ? ` (of ${med.n})` : "";
-    return `Industry median ${shown}${n}${side}`;
-  };
   return (
-    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-5">
-        {groups.map(([heading, cells]) => (
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4">
+      <h2 className="text-base font-semibold text-[var(--ink)] px-1">
+        Key figures
+        <InfoTip title="Key figures" label="How these figures are worked out" className="ml-1.5">
+          {groups.flatMap(([, tiles]) => tiles).map((t) => {
+            const info = METRIC_INFO[t.info ?? t.label];
+            if (!info) return null;
+            return (
+              <InfoPart key={t.label} head={t.info ?? t.label}>
+                {info.how} {info.means}{info.watch ? ` ${info.watch}` : ""}
+                {(t.info ?? t.label).startsWith("Volatility") && method && ` Method for this company: ${method === "yang-zhang" ? "Yang-Zhang (OHLC)" : "close-to-close"}.`}
+              </InfoPart>
+            );
+          })}
+          <p className="text-[var(--ink3)]">The bar under a figure puts this company (grey) and its industry median (blue line) on one scale. Neither colour means good or bad.</p>
+        </InfoTip>
+      </h2>
+      <div className="mt-1 space-y-3">
+        {groups.map(([heading, tiles]) => (
           <div key={heading}>
-            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink3)] mb-1.5">
-              {heading}
-            </h3>
-            {cells.map(([label, value, field]) => {
-              const ctx = label === "Next results"
-                ? (next ? `${periodLabel(quarterBefore(next.date))} quarter · board meeting` : next === null ? "No date on NSE's calendar yet" : null)
-                : label === "Business update" && updates
-                ? [`${updates.last.q}`, `${updates.n} of ${updates.of} quarters`, updates.typ != null && `usually day ${updates.typ}`]
-                  .filter(Boolean).join(" · ")
-                : context(field);
-              return (
-                <div key={label} className="border-b border-[var(--line)] py-1.5">
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-sm text-[var(--ink3)]">
-                      {label}
-                      <MetricInfo label={label} method={method} />
-                    </span>
-                    <span className="text-sm font-semibold text-[var(--ink)] tabular-nums">{value}</span>
+            <h3 className="text-[10.5px] font-semibold uppercase tracking-wide text-[var(--ink3)] mb-1.5 px-1">{heading}</h3>
+            <div className="grid grid-cols-4 gap-1.5">
+              {tiles.map((t) => {
+                const med = t.field && cohort ? industryMedian(cohort, t.field) : null;
+                const mine = t.field ? g(t.field) : null;
+                const medTxt = med ? (Math.abs(med.value) >= 100 ? fmtNum(med.value, 0) : fmtNum(med.value, 1)) : null;
+                // Value and industry median on one scale from zero. Grey and
+                // blue, never green or red: above the median is not good news.
+                const top = med && mine !== null && mine > 0 && med.value > 0 ? Math.max(mine, med.value) * 1.1 : null;
+                return (
+                  <div key={t.label} className="min-w-0 rounded-lg bg-[var(--card2)] px-2 py-1.5" title={t.full}>
+                    <p className="text-[10.5px] leading-tight text-[var(--ink3)] truncate">{t.label}</p>
+                    <p className="text-[14px] leading-[18px] font-semibold text-[var(--ink)] tabular-nums truncate">{t.value}</p>
+                    {med ? (
+                      <p className="text-[10px] leading-tight text-[var(--accent-ink)] truncate tabular-nums"
+                        title={`Industry median ${medTxt} across ${med.n} companies`}>
+                        Ind {medTxt}{med.n < 15 ? ` (${med.n})` : ""}
+                      </p>
+                    ) : t.sub ? (
+                      <p className="text-[10px] leading-tight text-[var(--ink3)] truncate">{t.sub}</p>
+                    ) : null}
+                    {top && mine !== null && med && (
+                      <div className="relative h-[3px] mt-1.5 rounded-full bg-[var(--line)]" aria-hidden="true">
+                        <div className="h-[3px] rounded-full bg-[var(--ink3)]" style={{ width: `${(mine / top) * 100}%` }} />
+                        <div className="absolute -top-[2px] w-[2px] h-[7px] bg-[var(--accent)]" style={{ left: `${(med.value / top) * 100}%` }} />
+                      </div>
+                    )}
                   </div>
-                  {/* Grey and unemphasised, and never green or red. Tickertape
-                      and Trendlyne both colour this line as good or bad news;
-                      a P/E above the industry median is neither, and this app
-                      does not hand out opinions it cannot defend. */}
-                  {ctx && <p className="text-[11px] leading-snug text-[var(--ink3)] text-right tabular-nums">{ctx}</p>}
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         ))}
       </div>
+      <p className="mt-2 px-1 text-[10.5px] text-[var(--ink3)] flex flex-wrap gap-x-3 gap-y-0.5">
+        <span>Bar: this company <span className="inline-block align-middle w-3 h-[3px] rounded bg-[var(--ink3)]" /> vs industry median <span className="inline-block align-middle w-[2px] h-[7px] bg-[var(--accent)]" /></span>
+      </p>
       <PinnedRatios row={row} />
     </section>
   );
@@ -2512,12 +2474,16 @@ function CompanyView() {
       <div className="flex items-start gap-2">
         <CompanyMark name={String(s.name ?? symbol)} symbol={symbol} logo={company.logo} />
         <div className="flex-1 min-w-0">
-          <h1 className="text-2xl font-bold text-[var(--ink)] leading-tight">{titleCase(String(s.name ?? "")) || symbol}</h1>
-          <p className="text-sm text-[var(--ink3)] mt-0.5">
+          <h1 className="text-xl font-bold text-[var(--ink)] leading-tight line-clamp-2">{titleCase(String(s.name ?? "")) || symbol}</h1>
+          <p className="text-[13px] text-[var(--ink3)] mt-0.5">
             <span className="font-semibold text-[var(--ink2)]">{symbol}</span>
             {company.exchange ? ` · ${company.exchange}` : ""}
             {company.fno && <span className="ml-1.5 align-middle text-[10px] font-bold rounded px-1.5 py-0.5 bg-[var(--accent-soft)] text-[var(--accent-ink)]" title="Trades in NSE's futures & options segment">F&amp;O</span>}
-            {" · "}
+            <IndexChips list={company.indices} />
+          </p>
+          {/* Sector on a line of its own, one line high: it wrapped the header
+              onto four lines when it shared the ticker's line. */}
+          <p className="text-[12px] text-[var(--ink3)] mt-0.5 truncate">
             {/* NSE's own sector (and basic industry) where NSE's index files
                 carry it; the source's sector and industry otherwise. */}
             {nseSector ? (
@@ -2538,32 +2504,44 @@ function CompanyView() {
                 </a>
               </>
             )}
-            <IndexChips list={company.indices} />
           </p>
-        </div>
-        <div className="flex items-center gap-1 shrink-0">
-          <IconButton name="bell" label="Price alerts" onClick={() => setAlertsOpen(true)} />
-          <IconButton name="download" label="Export to Excel" onClick={exportCompanyXlsx} />
-          <RefetchButton symbol={symbol} />
-          <WatchStar symbol={symbol} />
         </div>
       </div>
       {alertsOpen && <PriceAlerts symbol={symbol} price={price} onClose={() => setAlertsOpen(false)} />}
       <AboutCompany about={company.about} />
 
+      {/* No price: the icons still need a home. */}
+      {price === null && (
+        <div className="flex justify-end">
+        <div className="flex items-center gap-1 shrink-0 self-center">
+          <IconButton name="bell" label="Price alerts" onClick={() => setAlertsOpen(true)} />
+          <IconButton name="download" label="Export to Excel" onClick={exportCompanyXlsx} />
+          <RefetchButton symbol={symbol} />
+          <WatchStar symbol={symbol} />
+        </div>
+        </div>
+      )}
       {price !== null && (() => {
         // The day's move first, as a broker shows it; the distance from the
         // year's high is the second line.
         const chg = num(fullRow, "ret_1d");
         return (
           <div>
-            <div className="flex flex-wrap items-baseline gap-x-2.5">
-              <span className="text-3xl font-bold text-[var(--ink)] tabular-nums">₹ {fmtNum(price)}</span>
-              {chg !== null && (
-                <span className={`text-[15px] font-semibold tabular-nums ${tone(chg)}`}>
-                  {signedNum(dayMove(price, chg))} ({signedNum(chg)}%)
-                </span>
-              )}
+            <div className="flex items-center gap-2">
+              <div className="min-w-0 flex flex-wrap items-baseline gap-x-2.5">
+                <span className="text-3xl font-bold text-[var(--ink)] tabular-nums">₹ {fmtNum(price)}</span>
+                {chg !== null && (
+                  <span className={`text-[15px] font-semibold tabular-nums ${tone(chg)}`}>
+                    {signedNum(dayMove(price, chg))} ({signedNum(chg)}%)
+                  </span>
+                )}
+              </div>
+            <div className="ml-auto flex items-center gap-1 shrink-0 self-center">
+              <IconButton name="bell" label="Price alerts" onClick={() => setAlertsOpen(true)} />
+              <IconButton name="download" label="Export to Excel" onClick={exportCompanyXlsx} />
+              <RefetchButton symbol={symbol} />
+              <WatchStar symbol={symbol} />
+            </div>
             </div>
             <p className="flex flex-wrap items-baseline gap-x-2 mt-0.5">
               {off !== null && (
