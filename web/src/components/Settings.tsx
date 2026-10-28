@@ -5,7 +5,6 @@ import { ChartUi, loadChartUi } from "@/lib/chartui";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { BUILD_TIME, BUILD_COMMIT, BUILD_SUBJECT } from "@/lib/buildinfo";
-import { DESTINATIONS, BAR_SLOTS } from "@/lib/destinations";
 import { applyOrder, clearOrder, loadOrder, move, saveOrder, OrderKind } from "@/lib/order";
 import { reloadBypassingCache } from "@/lib/reload";
 import { clearOrders, customOrders } from "@/lib/tableprefs";
@@ -247,17 +246,6 @@ export default function SettingsButton() {
  *  static export, and they still give the back arrow a page to return to. */
 export function SettingsScreen() {
   const p = useSearchParams().get("p");
-  if (p === "nav") {
-    return (
-      <ReorderScreen
-        kind="nav"
-        title="Bottom bar"
-        caption={`The first ${BAR_SLOTS} sit in the bar at the bottom of the screen. The rest are under More.`}
-        items={DESTINATIONS.map((d) => ({ id: d.key, label: d.label, icon: d.icon }))}
-        split={BAR_SLOTS}
-      />
-    );
-  }
   if (p === "data") return <DataScreen />;
   if (p === "alerts") return <AlertsScreen />;
   if (p === "account") return <AccountScreen />;
@@ -281,7 +269,6 @@ function MainScreen() {
   const [sections, setSections] = useState<SectionMode>("scroll");
   const [rowOrders, setRowOrders] = useState<string[]>([]);
   const [isDark, setIsDark] = useState(false);
-  const [navOrder, setNavOrder] = useState<string[]>([]);
   const [secOrder, setSecOrder] = useState<string[]>([]);
   const [chartUi, setChartUi] = useState<ChartUi>("a");
   const [upd, setUpd] = useState<"idle" | "checking" | "current" | "error">("idle");
@@ -291,7 +278,6 @@ function MainScreen() {
     setAccent(localStorage.getItem("rs_accent") || "indigo");
     setSections(loadSectionMode());
     setRowOrders(customOrders());
-    setNavOrder(loadOrder("nav"));
     setSecOrder(loadOrder("sections"));
     setChartUi(loadChartUi());
     const resolve = () => setIsDark(document.documentElement.dataset.theme === "dark");
@@ -340,7 +326,6 @@ function MainScreen() {
         { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
     : null;
 
-  const bar = applyOrder(DESTINATIONS, (d) => d.key, navOrder).slice(0, BAR_SLOTS).map((d) => d.label).join(", ");
   const secs = applyOrder(SECTIONS, (s) => s.id, secOrder).slice(0, 3).map((s) => s.label).join(", ");
   const signedIn = user?.email ?? user?.displayName ?? hint?.email ?? hint?.name ?? null;
 
@@ -405,10 +390,6 @@ function MainScreen() {
             }
           />
         )}
-      </Group>
-
-      <Group title="Navigation">
-        <Row icon={<Glyph d={ICON.bar} />} title="Bottom bar" sub={bar} href="/settings?p=nav" chevron />
       </Group>
 
       {/* Subtitles are kept short enough to fit a 375px phone whole: the long

@@ -171,6 +171,17 @@ def volatility_fields(con: sqlite3.Connection) -> dict[str, dict]:
     return out
 
 
+def at_52w(r: dict):
+    """Where the price sits in its 52-week range, 0-100; None without a range."""
+    p, hi, lo = r.get("price"), r.get("wk52_high"), r.get("wk52_low")
+    try:
+        if p is None or hi is None or lo is None or not hi > lo:
+            return None
+        return int(round(min(100, max(0, (p - lo) / (hi - lo) * 100))))
+    except TypeError:
+        return None
+
+
 def price_returns(con: sqlite3.Connection) -> dict[str, dict]:
     """Trailing returns (%) per symbol, from the close nearest each anchor date.
 
@@ -890,12 +901,15 @@ def main() -> None:
         # index serving four pages beats a second file or a 5.6 MB download.
         # kind: 0 company, 1 ETF, 2 commodity (those two files append their
         # own rows). ret_1d is the day's change in %, for the watchlist.
+        # at_52w: where the price sits in its 52-week range, 0 (low) to 100
+        # (high), for the home page's watchlist bar. One small integer rather
+        # than the two prices it is worked out from.
         "fields": ["symbol", "name", "exchange", "price", "ret_1m", "mcap",
-                   "pe", "roe", "roce", "div_yield", "kind", "ret_1d"],
+                   "pe", "roe", "roce", "div_yield", "kind", "ret_1d", "at_52w"],
         "rows": [[r.get("symbol"), r.get("name"), r.get("exchange"),
                   r.get("price"), r.get("ret_1m"), r.get("mcap"),
                   r.get("pe"), r.get("roe"), r.get("roce"), r.get("div_yield"),
-                  0, r.get("ret_1d")]
+                  0, r.get("ret_1d"), at_52w(r)]
                  for r in payload["rows"]],
     }), ensure_ascii=False, allow_nan=False, separators=(",", ":")), encoding="utf-8")
     ikb = idx.stat().st_size / 1024

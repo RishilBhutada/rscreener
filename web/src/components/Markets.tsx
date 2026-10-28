@@ -58,32 +58,30 @@ export default function Markets() {
 
   if (!idx.length && !com.length) return null;
   return (
-    <section className="mt-7">
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="text-xs uppercase tracking-wide text-[var(--ink3)]">Markets</h2>
-        <Link href={tab === "indices" ? "/indices" : "/commodities"} className="text-xs font-semibold text-[var(--accent-ink)]">See all</Link>
-      </div>
-      <div role="tablist" aria-label="Markets" className="flex gap-1 mb-2">
-        {TABS.map(([k, label]) => (
-          <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
-            className={`min-h-[32px] px-3 rounded-full text-[13px] border ${tab === k
-              ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)] font-semibold"
-              : "text-[var(--ink2)] border-[var(--line)]"}`}>
-            {label}
-          </button>
-        ))}
+    <section className="mt-6">
+      <div className="flex items-center gap-2 mb-2">
+        <h2 className="text-[13.5px] font-semibold text-[var(--ink)]">Markets</h2>
+        <div role="tablist" aria-label="Markets" className="ml-auto inline-flex gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs">
+          {TABS.map(([k, label]) => (
+            <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+              className={`min-h-[28px] rounded-md px-2.5 font-medium ${tab === k ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <Link href={tab === "indices" ? "/indices" : "/commodities"} className="text-xs font-semibold text-[var(--accent-ink)]">All</Link>
       </div>
       {tiles.length === 0 ? (
         <p className="text-[13px] text-[var(--ink3)] py-4">No prices yet</p>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
           {tiles.map((t) => (
             <Link key={t.href} href={t.href}
-              className="rs-press rounded-xl border border-[var(--line)] bg-[var(--card)] px-3 py-2.5 active:bg-[var(--card2)]">
-              <p className="text-[12px] text-[var(--ink2)] truncate">{t.name}</p>
-              <p className="text-[15px] font-semibold tabular-nums text-[var(--ink)]">{t.value}</p>
-              <p className={`text-[12px] tabular-nums ${t.chg === null ? "text-[var(--ink3)]" : t.chg >= 0 ? "text-[var(--pos)]" : "text-[var(--neg)]"}`}>
-                {t.chg === null ? t.sub ?? "—" : `${t.chg > 0 ? "+" : ""}${t.chg.toFixed(2)}%`}
+              className="rs-press min-w-0 rounded-xl border border-[var(--line)] bg-[var(--card)] px-2.5 py-2 active:bg-[var(--card2)]">
+              <p className="text-[11px] text-[var(--ink3)] truncate">{t.name}</p>
+              <p className="text-[14px] font-semibold tabular-nums text-[var(--ink)] truncate">{t.value}</p>
+              <p className={`text-[11.5px] tabular-nums ${t.chg === null ? "text-[var(--ink3)]" : t.chg > 0 ? "text-[var(--pos)]" : t.chg < 0 ? "text-[var(--neg)]" : "text-[var(--ink3)]"}`}>
+                {t.chg === null ? t.sub ?? "—" : `${t.chg > 0 ? "+" : t.chg < 0 ? "−" : ""}${Math.abs(t.chg).toFixed(2)}%`}
               </p>
             </Link>
           ))}

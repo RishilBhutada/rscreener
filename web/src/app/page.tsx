@@ -14,10 +14,18 @@ import { buildIndex, search, didYouMean, type SearchIndex, type SearchRow } from
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
-type Lite = SearchRow & { price?: number; ret_1m?: number; ret_1d?: number; exchange?: string };
+type Lite = SearchRow & { price?: number; ret_1m?: number; ret_1d?: number; exchange?: string; mcap?: number; at52?: number };
 
 /** A spread across sectors, shown only until there is something of the user's own. */
-type CalEvent = { kind?: string; symbol: string; purpose: string; date: string };
+type CalEvent = { kind?: string; symbol: string; purpose: string; date: string; type?: string; usual?: string | null; company?: string };
+/** A result already declared (calendar.json "recent"). */
+type Declared = { d: string; k: string; s: string };
+type Headline = { t: string; title: string; url: string; src: string; syms?: string[] };
+type Deal = { d: string };
+
+/** Today in India, as YYYY-MM-DD. */
+const istToday = () => new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
+const dayLabel = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
 /** How far ahead "Coming up" looks. */
 const AHEAD_DAYS = 14;
 
@@ -42,6 +50,9 @@ export default function Home() {
   const [events, setEvents] = useState<CalEvent[]>([]);
   const [held, setHeld] = useState<string[]>([]);
   const [holdings, setHoldings] = useState<Holding[]>([]);
+  const [declared, setDeclared] = useState<Declared[]>([]);
+  const [heads, setHeads] = useState<Headline[]>([]);
+  const [deals, setDeals] = useState<Deal[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -56,8 +67,22 @@ export default function Home() {
     // small; a failure just leaves the section out.
     fetch(`${BASE}/calendar.json`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (d?.events) setEvents(d.events); })
+      .then((d) => {
+        if (d?.events) setEvents(d.events);
+        if (d?.recent) setDeclared(d.recent);
+      })
       .catch(() => {});
+    // Headlines and the day's deals. The news file is the largest the home
+    // reads, so it waits until the page is up; a failure leaves the block out.
+    const later = window.setTimeout(() => {
+      fetch(`${BASE}/news.json`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (Array.isArray(d?.items)) setHeads([...d.items].sort((a: Headline, b: Headline) => (a.t < b.t ? 1 : -1)).slice(0, 3));
+          if (Array.isArray(d?.deals)) setDeals(d.deals);
+        })
+        .catch(() => {});
+    }, 800);
     // The landing page needs a name, a symbol, a price and a one-month return.
     // It used to download the entire screener table to get them.
     loadIndex()
@@ -68,6 +93,7 @@ export default function Home() {
         setAsof(d.price_modal ?? d.price_asof);
       })
       .catch(() => { /* search degrades to nothing rather than an error wall */ });
+    return () => window.clearTimeout(later);
   }, []);
 
   // The same matcher the top bar uses. This box had its own copy of the old
@@ -113,6 +139,25 @@ export default function Home() {
     const until = new Date(Date.now() + AHEAD_DAYS * 86400000).toISOString().slice(0, 10);
     return events.filter((e) => mine.has(e.symbol) && e.date >= today && e.date <= until).slice(0, 12);
   }, [watch, held, events]);
+
+  // Today, across the market: results declared on the latest day that has
+  // any, the next day results are due (largest companies first), and the
+  // latest day's bulk and block deals.
+  const today = useMemo(() => {
+    const t = istToday();
+    const res = declared.filter((x) => x.k === "results" && x.d <= t);
+    const outDay = res.reduce((m, x) => (x.d > m ? x.d : m), "");
+    const out = res.filter((x) => x.d === outDay).length;
+    const due = events.filter((e) => (e.type === "results" || /result/i.test(e.purpose)) && e.date > t);
+    const dueDay = due.reduce((m, e) => (!m || e.date < m ? e.date : m), "");
+    const mcap = new Map(rows.map((r) => [r.symbol, r.mcap ?? 0]));
+    const dueList = due.filter((e) => e.date === dueDay).sort((a, b) => (mcap.get(b.symbol) ?? 0) - (mcap.get(a.symbol) ?? 0));
+    const dealDay = deals.reduce((m, x) => (x.d > m ? x.d : m), "");
+    return { outDay, out, dueDay, dueN: dueList.length, dueTop: dueList.slice(0, 4), dealDay, dealN: deals.filter((x) => x.d === dealDay).length };
+  }, [declared, events, deals, rows]);
+
+  // The 52-week column only once the index carries the field.
+  const has52 = watchRows.some((r) => r.at52 != null);
 
   const go = (sym: string) => router.push(symbolHref(sym));
   const nameOf = (sym: string) => {
@@ -233,34 +278,56 @@ export default function Home() {
 
         <Markets />
 
+        {/* Today across the market (Desk home, Step 2): results out, the next
+            day's results with the largest companies first, and the deals. */}
+        {(today.out > 0 || today.dueN > 0 || today.dealN > 0) && (
+          <section className="mt-6">
+            <div className="flex items-baseline justify-between mb-2">
+              <h2 className="text-[13.5px] font-semibold text-[var(--ink)]">Today</h2>
+              <Link href="/calendar" className="text-xs font-semibold text-[var(--accent-ink)]">Calendar</Link>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+              {[
+                ["Results out", today.out, today.outDay ? dayLabel(today.outDay) : ""],
+                [`Due ${today.dueDay ? dayLabel(today.dueDay).split(" ")[0].replace(",", "") : ""}`.trim(), today.dueN, "Board meetings"],
+                ["Deals", today.dealN, "Bulk / block"],
+              ].map(([label, n, sub]) => (
+                <div key={String(label)} className="min-w-0 rounded-xl bg-[var(--card2)] px-2.5 py-2">
+                  <p className="text-[11px] text-[var(--ink3)] truncate">{label}</p>
+                  <p className="text-[17px] font-semibold tabular-nums text-[var(--ink)]">{Number(n).toLocaleString("en-IN")}</p>
+                  <p className="text-[10.5px] text-[var(--ink3)] truncate">{sub}</p>
+                </div>
+              ))}
+            </div>
+            {today.dueTop.length > 0 && (
+              <div className="mt-2 rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
+                <p className="px-3.5 pt-2 pb-1 text-[10.5px] font-semibold uppercase tracking-wide text-[var(--ink3)]">
+                  Due {dayLabel(today.dueDay)} · largest first
+                </p>
+                {today.dueTop.map((e) => (
+                  <Link key={e.symbol} href={symbolHref(e.symbol)}
+                    className="flex items-center gap-3 px-3.5 min-h-[42px] border-t border-[var(--line)] hover:bg-[var(--card2)] active:bg-[var(--card2)]">
+                    <span className="w-24 shrink-0 text-sm font-semibold text-[var(--ink)] truncate">{e.symbol}</span>
+                    <span className="flex-1 min-w-0 text-[13px] text-[var(--ink2)] truncate">{nameOf(e.symbol)}</span>
+                    {e.usual && <span className="shrink-0 text-[11px] text-[var(--ink3)] tabular-nums">usually {e.usual}</span>}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
         {/* This was a grid of seven tiles - Watchlists, Screener, Sectors, IPO,
             Calendar, Portfolio, Data - every one of them already a link in the
             nav bar directly above. A landing page whose main content is a second
             copy of its own navigation gives the reader nothing to read.
             Replaced with the numbers he came to see: the companies he is
             actually following, priced. */}
-        {/* The portfolio in one line: what it is worth and what today did to it. */}
-        {pf && (
-          <Link href="/portfolio" className="mt-7 flex items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--card)] px-3.5 py-3 active:bg-[var(--card2)]">
-            <span className="flex-1 min-w-0">
-              <span className="block text-xs uppercase tracking-wide text-[var(--ink3)]">Portfolio · {pf.n}</span>
-              <span className="block text-lg font-semibold tabular-nums text-[var(--ink)]">₹{Math.round(pf.current).toLocaleString("en-IN")}</span>
-            </span>
-            <span className="text-right tabular-nums">
-              <span className="block text-xs" style={{ color: pf.day >= 0 ? "var(--pos)" : "var(--neg)" }}>
-                Day {pf.day >= 0 ? "+" : "−"}₹{Math.abs(Math.round(pf.day)).toLocaleString("en-IN")}
-              </span>
-              <span className="block text-sm font-semibold" style={{ color: pf.pnl >= 0 ? "var(--pos)" : "var(--neg)" }}>
-                {pf.pnl >= 0 ? "+" : "−"}₹{Math.abs(Math.round(pf.pnl)).toLocaleString("en-IN")} ({pf.pnlPct >= 0 ? "+" : ""}{pf.pnlPct.toFixed(2)}%)
-              </span>
-            </span>
-          </Link>
-        )}
 
         {watchRows.length > 0 && (
           <section className="mt-7">
             <div className="flex items-baseline justify-between mb-2">
-              <h2 className="text-xs uppercase tracking-wide text-[var(--ink3)]">
+              <h2 className="text-[13.5px] font-semibold text-[var(--ink)]">
                 {lists > 1 ? `Watchlists (${lists})` : "Watchlist"}
               </h2>
               <Link href="/watchlists" className="text-xs font-semibold text-[var(--accent-ink)]">Manage</Link>
@@ -270,6 +337,7 @@ export default function Home() {
                   the list saying what the percentages are. */}
               <div className="flex items-center gap-3 px-3.5 pt-2 pb-1 text-[11px] text-[var(--ink3)]">
                 <span className="flex-1" />
+                {has52 && <span className="w-11">52W</span>}
                 <span className="w-16 text-right">Day</span>
               </div>
               {watchRows.map((r) => (
@@ -288,6 +356,14 @@ export default function Home() {
                     </span>
                     <span className="ml-2 text-[11px] text-[var(--ink3)]">{r.symbol}</span>
                   </span>
+                  {/* Where today's price sits between the year's low and high. */}
+                  {has52 && <span className="w-11 shrink-0" title={r.at52 != null ? `${r.at52}% of the way from the 52-week low to the high` : undefined}>
+                    {r.at52 != null && (
+                      <span className="relative block h-[3px] rounded-full bg-[var(--line)]">
+                        <span className="absolute -top-[3px] w-[2px] h-[9px] bg-[var(--ink)]" style={{ left: `calc(${r.at52}% - 1px)` }} />
+                      </span>
+                    )}
+                  </span>}
                   <span className="text-sm tabular-nums text-[var(--ink)] shrink-0">
                     {r.price != null ? `₹${r.price.toLocaleString("en-IN")}` : "—"}
                   </span>
@@ -327,6 +403,44 @@ export default function Home() {
               ))}
             </div>
           </section>
+        )}
+
+        {heads.length > 0 && (
+          <section className="mt-7">
+            <div className="flex items-baseline justify-between mb-2">
+              <h2 className="text-[13.5px] font-semibold text-[var(--ink)]">News</h2>
+              <Link href="/news" className="text-xs font-semibold text-[var(--accent-ink)]">All news</Link>
+            </div>
+            <div className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden divide-y divide-[var(--line)]">
+              {heads.map((h) => (
+                <a key={h.url} href={h.url} target="_blank" rel="noopener noreferrer" className="block px-3.5 py-2.5 hover:bg-[var(--card2)] active:bg-[var(--card2)]">
+                  <span className="block text-[13.5px] leading-snug text-[var(--ink)] line-clamp-2">{h.title}</span>
+                  <span className="block mt-0.5 text-[11px] text-[var(--ink3)]">
+                    {h.src} · {new Date(h.t).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                    {h.syms?.length ? ` · ${h.syms.slice(0, 2).join(", ")}` : ""}
+                  </span>
+                </a>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* The portfolio in one line: what it is worth and what today did to it. */}
+        {pf && (
+          <Link href="/portfolio" className="mt-7 flex items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--card)] px-3.5 py-3 active:bg-[var(--card2)]">
+            <span className="flex-1 min-w-0">
+              <span className="block text-xs uppercase tracking-wide text-[var(--ink3)]">Portfolio · {pf.n}</span>
+              <span className="block text-lg font-semibold tabular-nums text-[var(--ink)]">₹{Math.round(pf.current).toLocaleString("en-IN")}</span>
+            </span>
+            <span className="text-right tabular-nums">
+              <span className="block text-xs" style={{ color: pf.day >= 0 ? "var(--pos)" : "var(--neg)" }}>
+                Day {pf.day >= 0 ? "+" : "−"}₹{Math.abs(Math.round(pf.day)).toLocaleString("en-IN")}
+              </span>
+              <span className="block text-sm font-semibold" style={{ color: pf.pnl >= 0 ? "var(--pos)" : "var(--neg)" }}>
+                {pf.pnl >= 0 ? "+" : "−"}₹{Math.abs(Math.round(pf.pnl)).toLocaleString("en-IN")} ({pf.pnlPct >= 0 ? "+" : ""}{pf.pnlPct.toFixed(2)}%)
+              </span>
+            </span>
+          </Link>
         )}
 
         {/* The date, and nothing else. The count of companies on that date

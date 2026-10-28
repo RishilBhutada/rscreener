@@ -30,6 +30,8 @@ export type LiteRow = {
   index?: boolean;
   /** The last session's change, close on close, in %. */
   ret_1d?: number;
+  /** Where the price sits in its 52-week range, 0 (low) to 100 (high). */
+  at52?: number;
 };
 
 export type LiteIndex = {
@@ -88,6 +90,7 @@ export function loadIndex(): Promise<LiteIndex> {
         commodity: r[10] === 2 ? true : undefined,
         index: r[10] === 3 ? true : undefined,
         ret_1d: (r[11] as number) ?? undefined,
+        at52: (r[12] as number) ?? undefined,
       }));
       for (const r of rows) {
         if (r.etf) etfs.add(r.symbol);

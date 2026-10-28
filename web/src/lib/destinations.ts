@@ -48,3 +48,30 @@ export const DESTINATIONS: { key: string; label: string; href: string; icon: str
   { key: "status", label: "Data", href: "/status",
     icon: "M3 12.5h4l2.5-6 5 11 2.5-5H21" },
 ];
+
+/** Settings as a destination - a tab of the You hub (the gear stays too). */
+export const SETTINGS_DEST = { key: "settings", label: "Settings", href: "/settings",
+  icon: "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z" };
+
+/** The four hubs of the bottom bar (owner, 28-Oct-2026: Step 2, "Hubs").
+ *  Every page but Home is a tab of one hub, so each is two taps away at most
+ *  and there is no More menu. `tabs` are destination keys, in order. */
+export type Hub = { key: string; label: string; icon: string; tabs: string[] };
+export const HUBS: Hub[] = [
+  { key: "home", label: "Home", icon: DESTINATIONS[0].icon, tabs: ["home"] },
+  { key: "markets", label: "Markets", icon: "M4 19h16M5.5 15l4-4.5 3.5 3 5.5-7",
+    tabs: ["indices", "sectors", "etfs", "commodities", "gold"] },
+  // Screener first: the hub opens on it, so it stays one tap away.
+  { key: "research", label: "Research", icon: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-3.5-3.5",
+    tabs: ["screens", "calendar", "news", "others"] },
+  { key: "you", label: "You", icon: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c0-4 3.6-7 8-7s8 3 8 7",
+    tabs: ["watchlists", "portfolio", "status", "settings"] },
+];
+
+/** The hub a page belongs to, by its destination key. */
+export const HUB_OF: Record<string, string> = Object.fromEntries(HUBS.flatMap((h) => h.tabs.map((t) => [t, h.key])));
+
+/** A destination by key, Settings included. */
+export function destination(key: string) {
+  return key === "settings" ? SETTINGS_DEST : DESTINATIONS.find((x) => x.key === key);
+}
