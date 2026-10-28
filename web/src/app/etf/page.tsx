@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+import { YearsSwitch } from "@/components/YearsChart";
 import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -191,7 +192,9 @@ function EtfView() {
           {doc.index && <p>The index is its price version. The fund tracks the version with dividends reinvested, so the NAV should run slightly ahead of it.{doc.index.fx ? " It is converted to rupees at each day's exchange rate, using the previous US close, as the NAV does." : ""}</p>}
         </InfoTip>
       }>
-        <EtfChart rows={doc.rows} indexLabel={doc.index ? (doc.index.fx ? `${doc.index.label} (₹)` : doc.index.label) : null} />
+        <YearsSwitch files={[doc.s]}>
+          <EtfChart rows={doc.rows} indexLabel={doc.index ? (doc.index.fx ? `${doc.index.label} (₹)` : doc.index.label) : null} />
+        </YearsSwitch>
       </Card>
 
       {doc.valuation && (

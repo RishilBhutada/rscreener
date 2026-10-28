@@ -197,3 +197,63 @@ export default function YearsChart({ prices }: { prices: { weekly?: Pt[]; monthl
     </div>
   );
 }
+
+const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+type Candle = [number, number, number, number, number, number];
+const isoOf = (day: number) => new Date(day * DAY).toISOString().slice(0, 10);
+
+/** A price file from public/charts (index, ETF, commodity): weekly closes
+ *  from its weekly and daily candles, the last close of each week winning,
+ *  plus its monthly closes for files too short for weeks. */
+async function loadCloses(file: string): Promise<{ weekly: Pt[]; monthly: Pt[] } | null> {
+  const r = await fetch(`${BASE}/charts/${encodeURIComponent(file)}.json`);
+  if (!r.ok) return null;
+  const d = await r.json() as { d?: Candle[]; w?: Candle[]; m?: Candle[] };
+  const byWeek = new Map<number, [number, number]>();
+  for (const c of [...(d.w ?? []), ...(d.d ?? [])]) {
+    if (typeof c[4] === "number" && c[4] > 0) byWeek.set(Math.floor((c[0] + 3) / 7), [c[0], c[4]]);
+  }
+  const weekly = [...byWeek.values()].sort((a, b) => a[0] - b[0]).map(([day, v]) => [isoOf(day), v] as Pt);
+  const monthly = (d.m ?? []).filter((c) => typeof c[4] === "number" && c[4] > 0).map((c) => [isoOf(c[0]), c[4]] as Pt);
+  return { weekly, monthly };
+}
+
+/** Chart | Years above a page's own chart (index, ETF, commodity pages).
+ *  `files` are tried in order; the first with two years of closes is used. */
+export function YearsSwitch({ files, children }: { files: string[]; children: import("react").ReactNode }) {
+  const [view, setView] = useState<"chart" | "years">("chart");
+  const [prices, setPrices] = useState<{ weekly: Pt[]; monthly: Pt[] } | null | undefined>(undefined);
+  const key = files.join("|");
+  useEffect(() => {
+    if (view !== "years" || prices !== undefined) return;
+    let live = true;
+    (async () => {
+      for (const f of key.split("|").filter(Boolean)) {
+        try {
+          const got = await loadCloses(f);
+          if (got && (got.weekly.length > 60 || got.monthly.length > 24)) { if (live) setPrices(got); return; }
+        } catch { /* next file */ }
+      }
+      if (live) setPrices(null);
+    })();
+    return () => { live = false; };
+  }, [view, prices, key]);
+  return (
+    <div>
+      <div role="tablist" aria-label="Chart view" className="flex gap-4 px-3 border-b border-[var(--line)] mb-1 text-[13px]">
+        {([["chart", "Chart"], ["years", "Years"]] as const).map(([k, label]) => (
+          <button key={k} type="button" role="tab" aria-selected={view === k} onClick={() => setView(k)}
+            className={`pb-2 pt-1 border-b-2 font-semibold ${view === k ? "border-[var(--accent)] text-[var(--ink)]" : "border-transparent text-[var(--ink3)]"}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {view === "chart" ? children : (
+        <div className="px-3 pb-3 pt-1">
+          {prices === undefined ? <div className="h-[240px] rs-skel" aria-busy="true" aria-label="Loading" />
+            : <YearsChart prices={prices} />}
+        </div>
+      )}
+    </div>
+  );
+}

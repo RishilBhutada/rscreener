@@ -13,6 +13,7 @@ import {
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 // The chart library touches the window, so it loads in the browser only.
+import { YearsSwitch } from "@/components/YearsChart";
 const CommodityChart = dynamic(() => import("@/components/CommodityChart"), {
   ssr: false,
   loading: () => <div className="rs-skel h-[420px]" aria-busy="true" aria-label="Loading chart" />,
@@ -283,16 +284,18 @@ function CommodityView() {
           <p>{doc.spot && !doc.world ? <><b>vs Spot</b>: the contract over that mandi price each day.</> : <><b>vs World</b>: MCX over that world price each day.</>} <b>OI</b>: open interest, the contracts still outstanding - rising with price means new buyers, rising as it falls means new sellers.</p>
         </InfoTip>
       }>
-        <div className="flex gap-1 px-2 pb-1 overflow-x-auto [scrollbar-width:none]">
-          {doc.curve.filter((r) => doc.hist[r.expiry]?.length).map((r) => (
-            <button key={r.expiry} onClick={() => setPick(r.expiry)} aria-pressed={pick === r.expiry}
-              className={`shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold ${pick === r.expiry ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)] active:bg-[var(--card2)]"}`}>
-              {expiryLabel(r.expiry)}
-            </button>
-          ))}
-        </div>
-        <CommodityChart key={pick} bars={bars} cmpTab={doc.spot && !doc.world ? "vs Spot" : "vs World"}
-          worldLabel={pickRow?.world || pickRow?.spot || bars.some((b) => b[7] !== null) ? doc.world?.label ?? doc.spot?.label ?? null : null} />
+        <YearsSwitch files={doc.charts?.continuous ? [doc.charts.continuous.replace(/!$/, ""), doc.charts.continuous] : []}>
+          <div className="flex gap-1 px-2 pb-1 overflow-x-auto [scrollbar-width:none]">
+            {doc.curve.filter((r) => doc.hist[r.expiry]?.length).map((r) => (
+              <button key={r.expiry} onClick={() => setPick(r.expiry)} aria-pressed={pick === r.expiry}
+                className={`shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold ${pick === r.expiry ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)] active:bg-[var(--card2)]"}`}>
+                {expiryLabel(r.expiry)}
+              </button>
+            ))}
+          </div>
+          <CommodityChart key={pick} bars={bars} cmpTab={doc.spot && !doc.world ? "vs Spot" : "vs World"}
+            worldLabel={pickRow?.world || pickRow?.spot || bars.some((b) => b[7] !== null) ? doc.world?.label ?? doc.spot?.label ?? null : null} />
+        </YearsSwitch>
       </Card>
 
       {doc.spread.length > 5 && (

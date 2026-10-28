@@ -16,6 +16,7 @@ import { dayLabel, signClass, signed } from "@/lib/commodity";
  *  prices, and the ETFs that track it. Read-only, like the rest. */
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+import { YearsSwitch } from "@/components/YearsChart";
 const IndexChart = dynamic(() => import("@/components/IndexChart"), {
   ssr: false, loading: () => <div className="rs-skel h-[300px]" aria-busy="true" aria-label="Loading chart" />,
 });
@@ -179,7 +180,9 @@ function IndexView() {
           Full view
         </Link>
       }>
-        <IndexChart symbol={doc.s} />
+        <YearsSwitch files={[doc.s]}>
+          <IndexChart symbol={doc.s} />
+        </YearsSwitch>
       </Card>
 
       <Card title="Returns" tip={

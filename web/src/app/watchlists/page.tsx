@@ -61,6 +61,8 @@ function rememberReturn() {
 }
 
 export default function WatchlistsPage() {
+  // A heading sorts high to low, then low to high, then back to your own order.
+  const [gsort, setGsort] = useState<{ key: string; desc: boolean } | null>(null);
   const [rows, setRows] = useState<LiteRow[]>([]);
   const [asof, setAsof] = useState<string | null>(null);
   const [state, setState] = useState<WatchState>({ lists: [], activeId: "" });
@@ -310,62 +312,143 @@ export default function WatchlistsPage() {
                 </button>
               </div>
             ) : (
-              <ul className="divide-y divide-[var(--line)]">
-                {shown.map((sym) => {
+              !editing ? (() => {
+                // One row per company, one column per figure (Step 3: grid only).
+                const COLS: [string, string, (r: LiteRow) => number | null | undefined, (v: number) => string][] = [
+                  ["price", "Price", (r) => r.price, (v) => money(v)],
+                  ["ret_1d", "Day", (r) => r.ret_1d, (v) => `${signed(v)}%`],
+                  ["ret_1m", "1M", (r) => r.ret_1m, (v) => `${signed(v)}%`],
+                  ["pe", "P/E", (r) => r.pe, (v) => v.toFixed(1)],
+                  ["roe", "ROE", (r) => r.roe, (v) => `${v.toFixed(1)}%`],
+                  ["roce", "ROCE", (r) => r.roce, (v) => `${v.toFixed(1)}%`],
+                  ["div_yield", "Div yld", (r) => r.div_yield, (v) => `${v.toFixed(2)}%`],
+                  ["mcap", "MCap ₹Cr", (r) => r.mcap || null, (v) => v >= 1e5 ? `${(v / 1e5).toFixed(2)}L` : Math.round(v).toLocaleString("en-IN")],
+                ];
+                const get = (sym: string, k: string) => {
                   const r = bySymbol.get(sym);
-                  const chg = r?.ret_1d ?? null;
-                  const move = dayMove(r?.price, chg);
-                  const qty = held.get(sym);
-                  const dragging = drag?.sym === sym;
-                  return (
-                    <li key={sym}
-                      style={dragging ? { transform: `translateY(${drag.dy}px)`, position: "relative", zIndex: 10 } : undefined}
-                      className={dragging ? "bg-[var(--card)] shadow-[0_8px_24px_rgba(0,0,0,0.25)] rounded-lg" : ""}>
-                      <div className="flex items-center min-h-[62px]">
-                        {editing && (
-                          <span onPointerDown={(e) => dragStart(e, sym)} onPointerMove={dragMove}
-                            onPointerUp={dragEnd} onPointerCancel={dragEnd} onLostPointerCapture={dragEnd}
-                            aria-label={`Drag ${sym} to reorder`} role="button"
-                            className="shrink-0 w-10 h-12 -ml-2 inline-flex items-center justify-center text-[var(--ink3)] cursor-grab touch-none">
-                            <Icon name="handle" />
-                          </span>
-                        )}
-                        <button type="button" disabled={editing} onClick={() => setSheet({ kind: "symbol", sym })}
-                          className="flex-1 min-w-0 flex items-center gap-3 py-2.5 text-left active:bg-[var(--card2)] disabled:active:bg-transparent">
-                          <div className="flex-1 min-w-0">
-                            <p className="flex items-center gap-1.5 text-[15px] font-medium text-[var(--ink)]">
-                              <span className="truncate">{r?.index ? r.name : shownSymbol(sym)}</span>
-                              {qty !== undefined && (
-                                <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-semibold text-[var(--accent-ink)]" title={`You hold ${qty}`}>
-                                  <Icon name="bag" size={11} />{qty.toLocaleString("en-IN")}
+                  const c = COLS.find((x) => x[0] === k);
+                  const v = r && c ? c[2](r) : null;
+                  return typeof v === "number" && Number.isFinite(v) ? v : null;
+                };
+                const rowsInOrder = gsort
+                  ? [...shown].sort((x, y) => {
+                    const a2 = get(x, gsort.key), b2 = get(y, gsort.key);
+                    if (a2 === null) return 1;
+                    if (b2 === null) return -1;
+                    return gsort.desc ? b2 - a2 : a2 - b2;
+                  })
+                  : shown;
+                const tap = (k: string) => setGsort(!gsort || gsort.key !== k ? { key: k, desc: true } : gsort.desc ? { key: k, desc: false } : null);
+                const tint = (c: number | null) => c ? `color-mix(in srgb, var(${c > 0 ? "--pos" : "--neg"}) ${Math.round(8 + 18 * Math.min(Math.abs(c) / 3, 1))}%, transparent)` : undefined;
+                return (
+                  <div className="overflow-x-auto -mx-4 px-4 [scrollbar-width:none]">
+                    <table className="w-full text-[13px] border-collapse tabular-nums">
+                      <thead>
+                        <tr className="text-[11px] text-[var(--ink3)] border-b border-[var(--line)]">
+                          <th scope="col" className="px-2 py-2 text-left font-medium sticky left-0 z-10 bg-[var(--bg)]">Name</th>
+                          {COLS.map(([k, label]) => (
+                            <th key={k} scope="col" aria-sort={gsort?.key === k ? (gsort.desc ? "descending" : "ascending") : undefined}
+                              className="px-2 py-2 text-right font-medium whitespace-nowrap">
+                              <button type="button" onClick={() => tap(k)} className={gsort?.key === k ? "text-[var(--accent-ink)] font-semibold" : ""}>
+                                {label}{gsort?.key === k && <span aria-hidden="true">{gsort.desc ? "\u25BE" : "\u25B4"}</span>}
+                              </button>
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rowsInOrder.map((sym) => {
+                          const r = bySymbol.get(sym);
+                          const qty = held.get(sym);
+                          const day = get(sym, "ret_1d");
+                          return (
+                            <tr key={sym} onClick={() => setSheet({ kind: "symbol", sym })}
+                              className="border-b border-[var(--line)] cursor-pointer hover:bg-[var(--card2)] active:bg-[var(--card2)]">
+                              <th scope="row" className="px-2 py-2 text-left font-semibold text-[var(--ink)] sticky left-0 bg-[var(--bg)] max-w-[34vw] sm:max-w-none">
+                                <span className="flex items-center gap-1 min-w-0">
+                                  <button type="button" className="truncate text-left" title={r ? shortName(r.name, sym) : sym}>{r?.index ? r.name : shownSymbol(sym)}</button>
+                                  {qty !== undefined && (
+                                    <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-semibold text-[var(--accent-ink)]" title={`You hold ${qty}`}>
+                                      <Icon name="bag" size={11} />{qty.toLocaleString("en-IN")}
+                                    </span>
+                                  )}
                                 </span>
-                              )}
-                            </p>
-                            <p className="text-[11px] text-[var(--ink3)] truncate">
-                              {r ? <>{r.exchange}{kindOf(r) && ` ${kindOf(r)}`} · {shortName(r.name, sym)}</> : "Not in today's data"}
-                            </p>
-                          </div>
-                          {!editing && (
-                            <div className="shrink-0 text-right">
-                              <p className={`text-[15px] font-medium tabular-nums ${tone(chg)}`}>{money(r?.price)}</p>
-                              <p className="text-[11px] tabular-nums text-[var(--ink3)]">
-                                {chg === null ? "—" : <>{signed(move)} <span className={tone(chg)}>({signed(chg)}%)</span></>}
+                              </th>
+                              {COLS.map(([k, , , fmt]) => {
+                                const v = get(sym, k);
+                                const signedCol = k === "ret_1d" || k === "ret_1m";
+                                return (
+                                  <td key={k} className={`px-2 py-2 text-right whitespace-nowrap ${signedCol ? tone(v) : k === "price" ? "text-[var(--ink)]" : "text-[var(--ink2)]"}`}
+                                    style={k === "ret_1d" ? { background: tint(day) } : undefined}>
+                                    {v === null ? "—" : fmt(v)}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })() : (
+                <ul className="divide-y divide-[var(--line)]">
+                  {shown.map((sym) => {
+                    const r = bySymbol.get(sym);
+                    const chg = r?.ret_1d ?? null;
+                    const move = dayMove(r?.price, chg);
+                    const qty = held.get(sym);
+                    const dragging = drag?.sym === sym;
+                    return (
+                      <li key={sym}
+                        style={dragging ? { transform: `translateY(${drag.dy}px)`, position: "relative", zIndex: 10 } : undefined}
+                        className={dragging ? "bg-[var(--card)] shadow-[0_8px_24px_rgba(0,0,0,0.25)] rounded-lg" : ""}>
+                        <div className="flex items-center min-h-[62px]">
+                          {editing && (
+                            <span onPointerDown={(e) => dragStart(e, sym)} onPointerMove={dragMove}
+                              onPointerUp={dragEnd} onPointerCancel={dragEnd} onLostPointerCapture={dragEnd}
+                              aria-label={`Drag ${sym} to reorder`} role="button"
+                              className="shrink-0 w-10 h-12 -ml-2 inline-flex items-center justify-center text-[var(--ink3)] cursor-grab touch-none">
+                              <Icon name="handle" />
+                            </span>
+                          )}
+                          <button type="button" disabled={editing} onClick={() => setSheet({ kind: "symbol", sym })}
+                            className="flex-1 min-w-0 flex items-center gap-3 py-2.5 text-left active:bg-[var(--card2)] disabled:active:bg-transparent">
+                            <div className="flex-1 min-w-0">
+                              <p className="flex items-center gap-1.5 text-[15px] font-medium text-[var(--ink)]">
+                                <span className="truncate">{r?.index ? r.name : shownSymbol(sym)}</span>
+                                {qty !== undefined && (
+                                  <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-semibold text-[var(--accent-ink)]" title={`You hold ${qty}`}>
+                                    <Icon name="bag" size={11} />{qty.toLocaleString("en-IN")}
+                                  </span>
+                                )}
+                              </p>
+                              <p className="text-[11px] text-[var(--ink3)] truncate">
+                                {r ? <>{r.exchange}{kindOf(r) && ` ${kindOf(r)}`} · {shortName(r.name, sym)}</> : "Not in today's data"}
                               </p>
                             </div>
-                          )}
-                        </button>
-                        {editing && (
-                          <button type="button" onClick={() => setState(removeFrom(active.id, sym))}
-                            aria-label={`Remove ${sym} from ${active.name}`}
-                            className="shrink-0 w-10 h-10 inline-flex items-center justify-center text-[var(--ink3)] active:text-[var(--neg)]">
-                            <Icon name="trash" />
+                            {!editing && (
+                              <div className="shrink-0 text-right">
+                                <p className={`text-[15px] font-medium tabular-nums ${tone(chg)}`}>{money(r?.price)}</p>
+                                <p className="text-[11px] tabular-nums text-[var(--ink3)]">
+                                  {chg === null ? "—" : <>{signed(move)} <span className={tone(chg)}>({signed(chg)}%)</span></>}
+                                </p>
+                              </div>
+                            )}
                           </button>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
+                          {editing && (
+                            <button type="button" onClick={() => setState(removeFrom(active.id, sym))}
+                              aria-label={`Remove ${sym} from ${active.name}`}
+                              className="shrink-0 w-10 h-10 inline-flex items-center justify-center text-[var(--ink3)] active:text-[var(--neg)]">
+                              <Icon name="trash" />
+                            </button>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )
             )}
 
             {stats.n > 1 && !editing && (
