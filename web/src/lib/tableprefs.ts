@@ -7,10 +7,14 @@
  *  SYNCED_KEYS (lib/sync.ts), so signed in they follow the reader. */
 import { useEffect, useState } from "react";
 
-export type TableKind = "quarterly" | "pnl" | "balance" | "cash" | "shareholding" | "segments";
+export type TableKind = "quarterly" | "pnl" | "balance" | "cash" | "shareholding" | "segments" | "ratios";
+
+/** How a table is drawn: one trend line per row, or the full grid of periods. */
+export type TableView = "trend" | "grid";
 
 const PCT_KEY = "rs_pct_tables";
 const ORDER_KEY = "rs_row_order";
+const VIEW_KEY = "rs_table_view";
 const EVENT = "rs-table-prefs";
 
 function read(key: string): Record<string, unknown> {
@@ -30,7 +34,7 @@ function useVersion(): number {
   const [n, setN] = useState(0);
   useEffect(() => {
     const bump = () => setN((x) => x + 1);
-    const other = (e: StorageEvent) => { if (e.key === PCT_KEY || e.key === ORDER_KEY) bump(); };
+    const other = (e: StorageEvent) => { if (e.key === PCT_KEY || e.key === ORDER_KEY || e.key === VIEW_KEY) bump(); };
     window.addEventListener(EVENT, bump);
     window.addEventListener("storage", other);
     bump();
@@ -45,6 +49,15 @@ export function usePct(kind: TableKind): [boolean, (on: boolean) => void] {
   const [on, setOn] = useState(true);
   useEffect(() => { setOn(read(PCT_KEY)[kind] !== false); }, [kind, v]);
   return [on, (next: boolean) => { const all = read(PCT_KEY); all[kind] = next; write(PCT_KEY, all); }];
+}
+
+/** The table's Trend | Grid switch: Trend unless the reader picked Grid for
+ *  this kind, and then Grid on every company's page. */
+export function useView(kind: TableKind): [TableView, (v: TableView) => void] {
+  const v = useVersion();
+  const [view, setView] = useState<TableView>("trend");
+  useEffect(() => { setView(read(VIEW_KEY)[kind] === "grid" ? "grid" : "trend"); }, [kind, v]);
+  return [view, (next: TableView) => { const all = read(VIEW_KEY); all[kind] = next; write(VIEW_KEY, all); }];
 }
 
 const ids = (v: unknown): string[] | null =>

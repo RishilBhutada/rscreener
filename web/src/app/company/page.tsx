@@ -19,7 +19,7 @@ import { loadSectionMode, SectionMode } from "@/components/Settings";
 import { isRefreshLoad } from "@/components/TopNav";
 import { applyOrder, loadOrder } from "@/lib/order";
 import InfoTip, { InfoDialog, InfoPart } from "@/components/InfoTip";
-import { TableKind, arrange, change, changeText, usePct, useRowOrder } from "@/lib/tableprefs";
+import { TableKind, TableView, arrange, change, changeText, usePct, useRowOrder, useView } from "@/lib/tableprefs";
 import { move } from "@/lib/order";
 import { IconButton, dayMove, signed as signedNum, tone } from "@/components/QuoteUI";
 
@@ -220,7 +220,7 @@ function fmtNum(v: number | string | null | undefined, dec = 2): string {
   return v.toLocaleString("en-IN", { maximumFractionDigits: dec });
 }
 
-function RatiosTable({ r }: { r: WcRatios }) {
+function RatiosTable({ r, symbol }: { r: WcRatios; symbol: string }) {
   // The one section screener.in has that this app did not. Every figure is
   // arithmetic on filed lines, and a year missing an input shows a dash rather
   // than a zero - a nought-day cash conversion cycle is a remarkable business,
@@ -234,46 +234,22 @@ function RatiosTable({ r }: { r: WcRatios }) {
     ["ROCE %", "roce", "Operating profit over capital employed"],
   ];
   return (
-    <section id="ratios" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
-      <div className="px-4 pt-3.5 pb-2">
-        <h2 className="text-base font-semibold text-[var(--ink)]">
-          Ratios
+    <div id="ratios" className="scroll-mt-32">
+      <StatementTable title="Ratios" kind="ratios" symbol={symbol} subtitle="Days, and ROCE in %"
+        stmt={{ periods: r.periods, items: ROWS.map(([label, key]) => ({ label, values: (r[key] as (number | null)[]) ?? [] })) }}
+        info={
           <InfoTip title="Ratios" className="ml-1.5">
             <p>How the business is financed, year by year.</p>
+            <ul className="list-disc pl-4 space-y-0.5">
+              {ROWS.map(([label, , help]) => <li key={label}><strong>{label}</strong>: {help}</li>)}
+            </ul>
             <p>
               Computed from the filed balance sheet and income statement — nothing here is
               estimated. A year missing an input shows a dash rather than a zero.
             </p>
           </InfoTip>
-        </h2>
-      </div>
-      <div className="overflow-x-auto" ref={(el) => { if (el) el.scrollLeft = el.scrollWidth; }}>
-        <table className="w-full text-sm border-collapse">
-          <thead>
-            <tr className="text-xs text-[var(--ink3)] border-y border-[var(--line)]">
-              <th className="px-3 py-2 text-left font-medium sticky left-0 bg-[var(--card)]"> </th>
-              {r.periods.map((p) => (
-                <th key={p} className="px-3 py-2 text-right font-medium whitespace-nowrap">{periodLabel(p)}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {ROWS.map(([label, key, help]) => (
-              <tr key={label} className="border-b border-[var(--line)] last:border-b-0">
-                <th title={help} className="px-3 py-2 text-left font-medium text-[var(--ink2)] whitespace-nowrap sticky left-0 bg-[var(--card)]">
-                  {label}
-                </th>
-                {(r[key] as (number | null)[]).map((v, i) => (
-                  <td key={i} className="px-3 py-2 text-right tabular-nums text-[var(--ink)]">
-                    {v === null || v === undefined ? "—" : v.toLocaleString("en-IN", { maximumFractionDigits: 1 })}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
+        } />
+    </div>
   );
 }
 
@@ -586,7 +562,83 @@ function ShareholdingTable({ sh, symbol }: { sh: NonNullable<Company["shareholdi
   );
 }
 
-function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, pdfs }: {
+/** Whether a table's columns are quarters (else years), from the dates. */
+function isQuarterly(periods: string[]): boolean {
+  const n = periods.length;
+  if (n < 2) return false;
+  const a = Date.parse(periods[n - 2].slice(0, 10)), b = Date.parse(periods[n - 1].slice(0, 10));
+  return Number.isFinite(a) && Number.isFinite(b) && (b - a) / 864e5 < 200;
+}
+
+/** The value a year before column i, found by DATE: with a quarter missing,
+ *  counting back four columns would compare against fifteen months ago. */
+function yearBefore(periods: string[], values: (number | null)[], i: number, quarterly: boolean): number | null {
+  if (!quarterly) return i > 0 ? values[i - 1] ?? null : null;
+  const day = 864e5, target = Date.parse(periods[i].slice(0, 10)) - 365.25 * day;
+  for (let j = i - 1; j >= 0; j--) {
+    const d = Date.parse(periods[j].slice(0, 10));
+    if (Math.abs(d - target) <= 45 * day) return values[j] ?? null;
+    if (d < target - 45 * day) break;
+  }
+  return null;
+}
+
+/** One row's last few periods as a line; the end dot says which way it last moved. */
+function Spark({ values }: { values: (number | null)[] }) {
+  const W = 48, H = 18, P = 2;
+  const pts: [number, number][] = [];
+  values.forEach((v, i) => { if (typeof v === "number" && Number.isFinite(v)) pts.push([i, v]); });
+  if (pts.length < 2) return <span className="block w-[48px]" aria-hidden="true" />;
+  const lo = Math.min(...pts.map((p) => p[1])), hi = Math.max(...pts.map((p) => p[1])), r = hi - lo || 1;
+  const x = (i: number) => P + (i * (W - 2 * P)) / Math.max(1, values.length - 1);
+  const y = (v: number) => P + ((hi - v) / r) * (H - 2 * P);
+  const [li, lv] = pts[pts.length - 1], pv = pts[pts.length - 2][1];
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} fill="none" aria-hidden="true" className="block">
+      <polyline points={pts.map(([i, v]) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ")}
+        stroke="var(--ink3)" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={x(li)} cy={y(lv)} r="2" fill={lv > pv ? "var(--pos)" : lv < pv ? "var(--neg)" : "var(--ink3)"} />
+    </svg>
+  );
+}
+
+/** A change, green when the figure rose and red when it fell - the literal
+ *  direction, never a judgement on whether that is good. */
+function Delta({ cur, prev, points }: { cur: number | null | undefined; prev: number | null | undefined; points: boolean }) {
+  const ch = change(cur, prev, points);
+  if (ch === null) return <span className="text-[var(--ink3)]">—</span>;
+  return (
+    <span className={ch > 0 ? "text-[var(--pos)]" : ch < 0 ? "text-[var(--neg)]" : "text-[var(--ink3)]"}>
+      {changeText(ch, points, cur, prev)}
+    </span>
+  );
+}
+
+/** The Trend | Grid switch at the top right of every table. */
+function ViewSwitch({ view, onChange }: { view: TableView; onChange: (v: TableView) => void }) {
+  return (
+    <div className="shrink-0 inline-flex gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs" role="radiogroup" aria-label="Table view">
+      {([["trend", "Trend"], ["grid", "Grid"]] as const).map(([k, label]) => (
+        <button key={k} type="button" role="radio" aria-checked={view === k} onClick={() => onChange(k)}
+          className={`min-h-[28px] rounded-md px-2.5 font-medium ${view === k ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** A grid cell's tint: green if it rose from the period before, red if it fell,
+ *  stronger the bigger the move (full at 25%, or 3 points for a % row). */
+function heatTint(cur: number | null | undefined, prev: number | null | undefined, points: boolean): string | undefined {
+  const ch = change(cur, prev, points);
+  if (ch === null || ch === 0) return undefined;
+  const mag = Math.min(Math.abs(ch) / (points ? 3 : 25), 1);
+  if (mag < 0.04) return undefined;
+  return `color-mix(in srgb, var(${ch > 0 ? "--pos" : "--neg"}) ${Math.round(6 + 20 * mag)}%, transparent)`;
+}
+
+function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, pdfs, info }: {
   title: string; stmt: Stmt; subtitle?: string; boldRows?: string[];
   /** The results PDF for each period, aligned with stmt.periods ("Raw PDF" row). */
   pdfs?: (string | null)[];
@@ -594,9 +646,15 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
   next?: NextResults;
   /** Which table this is, for its "%" switch and row order; and whose page. */
   kind: TableKind; symbol: string;
+  /** The "i" beside the title, where a table has one. */
+  info?: import("react").ReactNode;
 }) {
   const [all, setAll] = useState(false);
   const [showPct, setShowPct] = usePct(kind);
+  const [view, setView] = useView(kind);
+  const trend = view === "trend";
+  const quarterlyCols = isQuarterly(stmt.periods);
+  const decOf = (label: string) => kind === "ratios" ? 1 : label.includes("EPS") || label.includes("%") ? 2 : 0;
   const saved = useRowOrder(kind, symbol);
   // Reordering: the order being edited, and whether to ask where it applies.
   const [draft, setDraft] = useState<string[] | null>(null);
@@ -627,10 +685,12 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
       <div className="px-4 pt-3.5 pb-2 flex items-start gap-1.5">
         <div className="flex-1 min-w-0">
-          <h2 className="text-base font-semibold text-[var(--ink)]">{title}</h2>
+          <h2 className="text-base font-semibold text-[var(--ink)]">{title}{info}</h2>
           <p className="text-xs text-[var(--ink3)] mt-0.5">
             {draft ? "Move rows with the arrows, then Done"
-              : `${subtitle ?? "Figures in ₹ Crores"}${showPct ? " · in brackets, change from the period before" : ""}`}
+              : `${subtitle ?? "Figures in ₹ Crores"}${!trend && showPct ? " · in brackets, change from the period before" : ""}`}
+            {/* The coming quarter is a column in the grid; in the trend view it is said here. */}
+            {!draft && trend && coming && ` · ${periodLabel(coming)} results ${due ? `due ${declaredLabel(due)}` : "date not out"}`}
           </p>
         </div>
         {draft ? (
@@ -646,33 +706,99 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
           </>
         ) : (
           <>
-            {/* On by default; one tap turns this table's figures' change on or off. */}
-            <button type="button" onClick={() => setShowPct(!showPct)} aria-pressed={showPct}
-              aria-label={showPct ? "Hide the % change" : "Show the % change"} title="% change from the period before"
-              className={`shrink-0 min-h-[32px] min-w-[32px] px-2 rounded-lg text-[13px] font-bold border ${showPct
-                ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
-                : "text-[var(--ink3)] border-[var(--line)]"}`}>
-              %
-            </button>
-            <button type="button" onClick={() => setDraft(arranged)} aria-label="Change the order of the rows" title="Row order"
-              className="shrink-0 min-h-[32px] min-w-[32px] px-2 rounded-lg text-[var(--ink2)] border border-[var(--line)] inline-flex items-center justify-center">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M7 4v16M3.5 7.5 7 4l3.5 3.5M17 20V4M13.5 16.5 17 20l3.5-3.5" />
-              </svg>
-            </button>
-            {total > RECENT_PERIODS && (
-              <button type="button" onClick={() => setAll(!all)}
-                className="shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold text-[var(--accent-ink)] bg-[var(--accent-soft)]">
-                {all ? `Last ${RECENT_PERIODS}` : `All ${total}`}
-              </button>
-            )}
+            <ViewSwitch view={view} onChange={setView} />
           </>
         )}
       </div>
+      {/* The table's other tools sit under the title, so the title keeps the row
+          and the Trend | Grid switch stays at the top right. */}
+      {!draft && (
+        <div className="px-4 pb-2 -mt-0.5 flex justify-end gap-1.5">
+              {/* On by default; one tap turns this table's figures' change on or off. */}
+              {!trend && <button type="button" onClick={() => setShowPct(!showPct)} aria-pressed={showPct}
+                aria-label={showPct ? "Hide the % change" : "Show the % change"} title="% change from the period before"
+                className={`shrink-0 min-h-[32px] min-w-[32px] px-2 rounded-lg text-[13px] font-bold border ${showPct
+                  ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
+                  : "text-[var(--ink3)] border-[var(--line)]"}`}>
+                %
+              </button>}
+              <button type="button" onClick={() => setDraft(arranged)} aria-label="Change the order of the rows" title="Row order"
+                className="shrink-0 min-h-[32px] min-w-[32px] px-2 rounded-lg text-[var(--ink2)] border border-[var(--line)] inline-flex items-center justify-center">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M7 4v16M3.5 7.5 7 4l3.5 3.5M17 20V4M13.5 16.5 17 20l3.5-3.5" />
+                </svg>
+              </button>
+              {!trend && total > RECENT_PERIODS && (
+                <button type="button" onClick={() => setAll(!all)}
+                  className="shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold text-[var(--accent-ink)] bg-[var(--accent-soft)]">
+                  {all ? `Last ${RECENT_PERIODS}` : `All ${total}`}
+                </button>
+              )}
+        </div>
+      )}
       {/* Opens on the NEWEST period. These tables carry up to twenty years of
           columns oldest-first, so the page landed on 2005 and the reader had to
           drag sideways every time to reach the year he was actually asking
           about. The pinned label column stays put either way. */}
+      {trend && !draft ? (() => {
+        const last = total - 1;
+        const cols = quarterlyCols ? "grid-cols-[minmax(84px,1fr)_48px_minmax(52px,auto)_46px_46px]" : "grid-cols-[minmax(84px,1fr)_48px_minmax(52px,auto)_56px]";
+        const span = Math.min(8, total);
+        const recentPdfs = pdfs ? pdfs.map((u, i) => [u, stmt.periods[i]] as const).filter(([u]) => Boolean(u)).slice(-4).reverse() : [];
+        return (
+          <div className="px-4 pb-3">
+            <div className={`grid ${cols} gap-x-1.5 items-end py-1.5 border-y border-[var(--line)] text-[11px] text-[var(--ink3)]`}>
+              <span className="truncate">{span} {quarterlyCols ? "quarters" : "years"}</span>
+              <span>Trend</span>
+              <span className="text-right whitespace-nowrap">{last >= 0 ? periodLabel(stmt.periods[last]) : ""}</span>
+              <span className="text-right">{quarterlyCols ? "YoY" : "Change"}</span>
+              {quarterlyCols && <span className="text-right">QoQ</span>}
+            </div>
+            {shown.map(({ it, child }) => {
+              const bold = boldRows?.includes(it.label);
+              const hasKids = !child && kids(it.label).length > 0;
+              const points = it.label.includes("%");
+              const cur = last >= 0 ? it.values[last] ?? null : null;
+              return (
+                <div key={it.label} className={`grid ${cols} gap-x-1.5 items-center py-1.5 border-b border-[var(--line)] text-sm`}>
+                  <span className={`min-w-0 truncate ${child ? "pl-3 text-[13px] text-[var(--ink3)]" : bold ? "font-semibold text-[var(--ink)]" : "text-[var(--ink2)]"}`}>
+                    {hasKids ? (
+                      <button type="button" onClick={() => setOpenRows({ ...openRows, [it.label]: !openRows[it.label] })}
+                        aria-expanded={!!openRows[it.label]} className="inline-flex items-center gap-1 text-left max-w-full">
+                        <span className="truncate">{it.label}</span>
+                        <span className="text-[var(--accent-ink)] font-semibold">{openRows[it.label] ? "−" : "+"}</span>
+                      </button>
+                    ) : it.label}
+                  </span>
+                  <Spark values={it.values.slice(Math.max(0, total - span))} />
+                  <span className={`text-right tabular-nums whitespace-nowrap ${bold ? "font-semibold" : "font-medium"} ${typeof cur === "number" && cur < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
+                    {fmtNum(cur, decOf(it.label))}
+                  </span>
+                  <span className="text-right text-[11px] sm:text-[12px] tabular-nums whitespace-nowrap">
+                    <Delta cur={cur} prev={last >= 0 ? yearBefore(stmt.periods, it.values, last, quarterlyCols) : null} points={points} />
+                  </span>
+                  {quarterlyCols && (
+                    <span className="text-right text-[11px] sm:text-[12px] tabular-nums whitespace-nowrap">
+                      <Delta cur={cur} prev={last > 0 ? it.values[last - 1] : null} points={points} />
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+            {recentPdfs.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 pt-2 text-[12px]">
+                <span className="text-[var(--ink3)]">Raw PDF</span>
+                {recentPdfs.map(([u, p]) => (
+                  <a key={p} href={u!.includes("://") ? u! : `https://nsearchives.nseindia.com/corporate/${u}`} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 rounded-md border border-[var(--line)] px-2 py-0.5 text-[var(--ink2)] hover:text-[var(--accent-ink)]">
+                    {periodLabel(p)} <ExternalGlyph size={12} />
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })() : (
       <div key={from} className="overflow-x-auto" ref={(el) => { if (el) el.scrollLeft = el.scrollWidth; }}>
         <table className="w-full text-sm border-collapse">
           <thead>
@@ -727,8 +853,9 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
                     const prev = at > 0 ? it.values[at - 1] : null;
                     const ch = showPct ? change(v, prev, points) : null;
                     return (
-                      <td key={i} className={`px-3 py-2 sm:py-1.5 text-right whitespace-nowrap tabular-nums ${bold ? "font-semibold" : ""} ${typeof v === "number" && v < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
-                        {fmtNum(v, it.label.includes("EPS") || it.label.includes("%") ? 2 : 0)}
+                      <td key={i} style={{ background: heatTint(v, prev, points) }}
+                        className={`px-3 py-2 sm:py-1.5 text-right whitespace-nowrap tabular-nums ${bold ? "font-semibold" : ""} ${typeof v === "number" && v < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
+                        {fmtNum(v, decOf(it.label))}
                         {ch !== null && (
                           <span className={`ml-1 text-[11px] font-normal ${ch > 0 ? "text-[var(--pos)]" : ch < 0 ? "text-[var(--neg)]" : "text-[var(--ink3)]"}`}>
                             ({changeText(ch, points, v, prev)})
@@ -756,6 +883,7 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
           </tbody>
         </table>
       </div>
+      )}
       {!draft && saved.scope === "company" && (
         <p className="px-4 py-2 text-[11px] text-[var(--ink3)]">Rows in this company&apos;s own order.</p>
       )}
@@ -1835,6 +1963,26 @@ function RatioGrid({ snapshot, row, cohort, next, updates, faceValue }: {
 
 /** The shape of a company page, shimmering, while its data loads - instead of
  *  "Loading TCS..." on an empty screen that then jumps into a full page. */
+/** The page's tabs, and the sections each one holds. Every section of the old
+ *  single scroll lives in exactly one tab, so nothing is lost by the split; a
+ *  link to a section (#quarters, #shareholding) opens the tab that holds it. */
+type TabKey = "overview" | "results" | "accounts" | "owners" | "filings";
+const TABS: { key: TabKey; label: string; sections: string[] }[] = [
+  { key: "overview", label: "Overview", sections: ["summary", "chart", "performance", "analysis", "checks", "valuation", "peers"] },
+  { key: "results", label: "Results", sections: ["quarters", "segments", "profit-loss"] },
+  { key: "accounts", label: "Accounts", sections: ["balance-sheet", "cash-flows", "ratios"] },
+  { key: "owners", label: "Owners", sections: ["institutions", "shareholding"] },
+  { key: "filings", label: "Filings", sections: ["documents", "notes"] },
+];
+const TAB_OF: Record<string, TabKey> = Object.fromEntries(TABS.flatMap((t) => [[t.key, t.key], ...t.sections.map((id) => [id, t.key])]));
+
+/** "26 L" holders, "4.2 K", or the plain count. */
+function holdersShort(n: number): string {
+  if (n >= 1e5) return `${(n / 1e5).toFixed(n >= 1e6 ? 0 : 1)} L`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)} K`;
+  return String(n);
+}
+
 function CompanySkeleton() {
   return (
     <div className="space-y-4" aria-busy="true" aria-label="Loading">
@@ -1878,6 +2026,33 @@ function CompanyView() {
     window.addEventListener("rs-order", read);
     return () => window.removeEventListener("rs-order", read);
   }, []);
+
+  // Which tab is open. A link to a tab (#results) or to a section inside one
+  // (#quarters) opens that tab, then scrolls to the section once it is shown.
+  const [tab, setTab] = useState<TabKey>("overview");
+  const tabAnchor = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const fromHash = () => {
+      const id = decodeURIComponent(window.location.hash.slice(1));
+      const t = TAB_OF[id];
+      if (!t) return;
+      setTab(t);
+      if (id !== t) requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ block: "start" }));
+    };
+    fromHash();
+    window.addEventListener("hashchange", fromHash);
+    return () => window.removeEventListener("hashchange", fromHash);
+  }, [company]);
+  const pickTab = (k: TabKey) => {
+    setTab(k);
+    try { window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#${k}`); } catch { /* the tab still opens */ }
+    // Opening a tab while scrolled down shows it from its top, under the bar.
+    const a = tabAnchor.current;
+    if (a) {
+      const top = a.getBoundingClientRect().top + window.scrollY - (window.matchMedia("(min-width: 640px)").matches ? 56 : 0);
+      if (window.scrollY > top) window.scrollTo({ top });
+    }
+  };
 
   useEffect(() => {
     setMode(loadSectionMode());
@@ -2312,6 +2487,24 @@ function CompanyView() {
   const balance = company.statements.balance_sheet;
   const cashflow = company.statements.cash_flow;
 
+  // Tabs show only when they have something in them; swipe mode keeps its
+  // one-section-per-pane pager and the section menu.
+  const hasHolding = Boolean(company.shareholding && company.shareholding.dates.length > 0);
+  const tabHas: Record<TabKey, boolean> = {
+    overview: true,
+    results: Boolean(quarterly || pnl),
+    accounts: Boolean(balance || cashflow || company.ratios),
+    owners: hasHolding || hasInst,
+    filings: true,
+  };
+  const activeTab: TabKey = tabHas[tab] ? tab : "overview";
+  const tabbed = mode !== "swipe";
+  const holders = company.shareholding?.holders_n?.filter((v): v is number => typeof v === "number").pop();
+  const badge: Partial<Record<TabKey, string>> = {
+    results: quarterly ? `${quarterly.periods.length}Q` : undefined,
+    owners: holders ? holdersShort(holders) : undefined,
+  };
+
   return (
     <div className="space-y-6">
       {/* Name, then the ticker and where it sits on one quiet line; the
@@ -2385,6 +2578,26 @@ function CompanyView() {
       })()}
 
       {/* Built once: four tables share it, and they must not disagree. */}
+      {tabbed ? (
+        <>
+          <div ref={tabAnchor} aria-hidden="true" />
+          <div role="tablist" aria-label="Company sections"
+            className="sticky top-0 sm:top-14 z-20 -mx-4 px-4 !mt-3 bg-[var(--card)] border-b border-[var(--line)] flex justify-between sm:justify-start gap-3 sm:gap-7 overflow-x-auto [scrollbar-width:none] text-[13px] sm:text-[14px]">
+            {TABS.filter((t) => tabHas[t.key]).map((t) => (
+              <button key={t.key} type="button" role="tab" aria-selected={activeTab === t.key} onClick={() => pickTab(t.key)}
+                className={`shrink-0 whitespace-nowrap pt-2.5 pb-2 border-b-2 ${activeTab === t.key
+                  ? "border-[var(--accent)] text-[var(--ink)] font-semibold"
+                  : "border-transparent text-[var(--ink3)] hover:text-[var(--ink2)]"}`}>
+                {t.label}
+                {badge[t.key] && <span className="ml-0.5 text-[10px] font-normal text-[var(--ink3)]">{badge[t.key]}</span>}
+              </button>
+            ))}
+          </div>
+          {/* Sections outside the open tab are hidden, not unmounted, so each
+              keeps its state (a table's switches, an open row) across tabs. */}
+          <style>{`${TABS.filter((t) => t.key !== activeTab).flatMap((t) => t.sections).map((id) => `.rs-stack > #${id}`).join(",")}{display:none}`}</style>
+        </>
+      ) : (
       <nav ref={sectionNav} className="sticky top-0 sm:top-14 z-20 -mx-4 px-4 bg-[var(--card)] border-y border-[var(--line)] flex gap-1 overflow-x-auto text-sm font-medium py-2 sm:py-1.5 [scrollbar-width:none]">
         {/* Built from what this company ACTUALLY has. Five of these sections are
             conditionally rendered - quarters, P&L, balance sheet, cash flow and
@@ -2435,6 +2648,7 @@ function CompanyView() {
           </a>
         ))}
       </nav>
+      )}
 
       {/* Every section below is a child of this one div, which is the whole
           mechanism: in scroll mode it stacks them with a gap, in swipe mode CSS
@@ -2562,7 +2776,7 @@ function CompanyView() {
       {balance && <div id="balance-sheet" className="scroll-mt-32"><StatementTable title="Balance sheet" stmt={balance} subtitle={figuresCaption} boldRows={["Total Assets", "Total Liabilities"]} kind="balance" symbol={symbol} /></div>}
       {cashflow && <div id="cash-flows" className="scroll-mt-32"><StatementTable title="Cash flows" stmt={cashflow} subtitle={figuresCaption} boldRows={["Free Cash Flow"]} kind="cash" symbol={symbol} /></div>}
 
-      {company.ratios && <RatiosTable r={company.ratios} />}
+      {company.ratios && <RatiosTable r={company.ratios} symbol={symbol} />}
 
       <InstitutionsCard symbol={symbol} onLoad={setHasInst} />
 
