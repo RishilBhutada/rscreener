@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { useBackClose } from "@/lib/backclose";
 import { ChartUi, loadChartUi } from "@/lib/chartui";
+import YearsChart from "@/components/YearsChart";
 import { loadIndex } from "@/lib/index-data";
 import Link from "next/link";
 
@@ -88,7 +89,7 @@ export type ChartTrendQ = {
   npm?: (number | null)[];
 } | null;
 
-type View = "price" | "pe" | "sales" | "ev" | "pb" | "ps";
+type View = "price" | "years" | "pe" | "sales" | "ev" | "pb" | "ps";
 type XY = {
   t: number; v: number;
   /** set on the EPS bars: the quarter whose declaration produced this value, and
@@ -720,6 +721,17 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   // on screen. Keeping the summed TTM bars too puts two different quantities in
   // the same visual language, a quarter apart, both called EPS.
   const visible = model.filter((s) => isOn(s.key));
+  // Years: each calendar year as its own line from 1 January. A chart of its
+  // own on a day-of-year axis, inside the same frame and view switch.
+  if (view === "years") {
+    return (
+      <ChartShell range={range} setRange={setRange} view={view} setView={setView} ui={ui}
+        expandHref={symbol ? `/chart?s=${encodeURIComponent(symbol)}` : undefined}
+        moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand }} peLabel={spsOn ? "P/S Ratio" : "PE Ratio"}>
+        <YearsChart prices={prices} />
+      </ChartShell>
+    );
+  }
   if (!model.length || !model.some((s) => s.data.length > 1)) {
     return (
       <ChartShell range={range} setRange={setRange} view={view} setView={setView}
@@ -1463,6 +1475,7 @@ function ChartShell({
     const tabs = (
       <div className="flex items-end gap-4 min-w-0 overflow-x-auto [scrollbar-width:none]">
         <button onClick={() => pick("price")} className={tab(view === "price")}>Price</button>
+        <button onClick={() => pick("years")} className={tab(view === "years")}>Years</button>
         {avail.pe && <button onClick={() => pick("pe")} className={tab(view === "pe")}>{peLabel}</button>}
         {moreItems.map(([v, label]) => <button key={v} onClick={() => pick(v)} className={tab(view === v)}>{label}</button>)}
       </div>
@@ -1498,11 +1511,11 @@ function ChartShell({
       <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4">
         <div className="flex items-center justify-between gap-2 border-b border-[var(--line)] mb-2">
           {tabs}
-          <div className="flex items-center gap-0.5 pb-1">{ui === "b" && rangePill}{opts}{full}</div>
+          <div className="flex items-center gap-0.5 pb-1">{ui === "b" && view !== "years" && rangePill}{view !== "years" && opts}{full}</div>
         </div>
-        {ui === "a" && <div className="mb-2">{rangesSeg}</div>}
+        {ui === "a" && view !== "years" && <div className="mb-2">{rangesSeg}</div>}
         {children}
-        {ui === "c" && <div className="mt-3">{rangesSeg}</div>}
+        {ui === "c" && view !== "years" && <div className="mt-3">{rangesSeg}</div>}
         {footer}
       </section>
     );
@@ -1512,12 +1525,13 @@ function ChartShell({
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:flex-wrap mb-2">
         <div className="flex gap-1 text-xs flex-nowrap overflow-x-auto sm:flex-wrap -mx-1 px-1 [scrollbar-width:none]">
-          {RANGES.map(([r]) => (
+          {view !== "years" && RANGES.map(([r]) => (
             <button key={r} onClick={() => setRange(r)} className={btn(range === r)}>{r}</button>
           ))}
         </div>
         <div className="flex gap-1 text-xs flex-wrap items-center">
           <button onClick={() => pick("price")} className={btn(view === "price")}>Price</button>
+          <button onClick={() => pick("years")} className={btn(view === "years")}>Years</button>
           {avail.pe && <button onClick={() => pick("pe")} className={btn(view === "pe")}>{peLabel}</button>}
           {moreItems.length > 0 && (
             <div className="relative">
