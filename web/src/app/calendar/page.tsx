@@ -145,7 +145,9 @@ export default function CalendarPage() {
   const [past, setPast] = useState<PastDoc | null>(null);
   const [error, setError] = useState("");
   const [pastError, setPastError] = useState("");
-  const [when, setWhen] = useState<"next" | "past">("next");
+  // Always the coming days now (owner, 31-Oct-2026): the past year is reached
+  // by searching, which looks both ways.
+  const when = "next" as "next" | "past";
   const [group, setGroup] = useState("all");
   const [mineOnly, setMineOnly] = useState(false);
   const [mine, setMine] = useState<Set<string>>(new Set());
@@ -227,10 +229,11 @@ export default function CalendarPage() {
   const strip = useMemo(() => {
     const n = new Map<string, number>();
     for (const e of nextList) n.set(e.date, (n.get(e.date) ?? 0) + 1);
-    return [...n.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(0, 7);
+    return [...n.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(0, 14);
   }, [nextList]);
-  const stripOn = when === "next" && !searching && strip.length > 1;
-  const pickedDay = stripOn && day && strip.some(([d]) => d === day) ? day : null;
+  const stripOn = when === "next" && !searching && strip.length > 0;
+  // One day at a time: the one tapped, else the first day with anything.
+  const pickedDay = stripOn ? (day && strip.some(([d]) => d === day) ? day : strip[0][0]) : null;
   const nextShown = pickedDay ? nextList.filter((e) => e.date === pickedDay) : nextList;
 
   const sections: [string, CalEvent[], number][] = searching
@@ -286,9 +289,6 @@ export default function CalendarPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {!searching && (
-            <Chips value={when} options={[["next", "Coming up"], ["past", "Past year"]] as ["next" | "past", string][]} onChange={setWhen} />
-          )}
           <button type="button" onClick={() => setMineOnly(!mineOnly)} aria-pressed={mineOnly}
             className={`rs-press inline-flex items-center gap-1 min-h-[34px] px-3 rounded-full text-[13px] border ${mineOnly
               ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)] font-semibold" : "text-[var(--ink2)] border-[var(--line)]"}`}>
@@ -321,13 +321,13 @@ export default function CalendarPage() {
         {stripOn && (() => {
           const top = Math.max(...strip.map(([, c]) => c));
           return (
-            <div role="group" aria-label="Days" className="flex gap-0.5 rounded-xl border border-[var(--line)] bg-[var(--card)] p-1">
+            <div role="group" aria-label="Days" className="flex gap-0.5 rounded-xl border border-[var(--line)] bg-[var(--card)] p-1 overflow-x-auto [scrollbar-width:none]">
               {strip.map(([d, c]) => {
                 const on = pickedDay === d;
                 const dt = new Date(`${d}T00:00:00`);
                 return (
-                  <button key={d} type="button" aria-pressed={on} onClick={() => setDay(on ? null : d)}
-                    className={`flex-1 min-w-0 flex flex-col items-center rounded-lg py-1.5 ${on ? "bg-[var(--accent-soft)]" : "active:bg-[var(--card2)]"}`}>
+                  <button key={d} type="button" aria-pressed={on} onClick={() => setDay(d)}
+                    className={`flex-1 min-w-[44px] shrink-0 flex flex-col items-center rounded-lg py-1.5 ${on ? "bg-[var(--accent-soft)]" : "active:bg-[var(--card2)]"}`}>
                     <span className={`text-[10.5px] ${on ? "text-[var(--accent-ink)] font-semibold" : "text-[var(--ink3)]"}`}>
                       {d === today ? "Today" : dt.toLocaleDateString("en-IN", { weekday: "short" })}
                     </span>
