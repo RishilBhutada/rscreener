@@ -237,6 +237,17 @@ function fmtVal(v: number, kind: FmtKind): string {
   return kind === "rupee" ? `${s}` : s;
 }
 
+/** Axis labels on a phone: at most five characters, so they fit the margin.
+ *  The pop-up still gives the full figure. */
+function axisVal(v: number, kind: FmtKind, short: boolean): string {
+  if (!short) return fmtVal(v, kind);
+  const trim = (x: number, d: number) => x.toFixed(d).replace(/\.0$/, "");
+  if (kind === "vol" && v >= 1e8) return `${Math.round(v / 1e7)}Cr`;
+  if ((kind === "rupee" || kind === "plain") && Math.abs(v) >= 1e5) return `${trim(v / 1e5, 1)}L`;
+  if ((kind === "rupee" || kind === "plain") && Math.abs(v) >= 1e4) return `${trim(v / 1e3, 1)}k`;
+  return fmtVal(v, kind);
+}
+
 function sma(vals: number[], win: number): (number | null)[] {
   let sum = 0;
   return vals.map((v, i) => {
@@ -452,7 +463,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   }, []);
 
   const W = isMobile ? 470 : 920, H = isMobile ? 420 : 470;
-  const ML = isMobile ? 46 : 62, MR = isMobile ? 46 : 62, MT = 12, MB = isMobile ? 32 : 30;
+  const ML = isMobile ? 60 : 62, MR = isMobile ? 60 : 62, MT = 12, MB = isMobile ? 32 : 30;
   const plotW = W - ML - MR, plotH = H - MT - MB;
   const FS = isMobile ? 19 : 12;
 
@@ -1048,11 +1059,11 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
           {axR && axR.ticks.map((v) => (
             <g key={`r${v}`}>
               <line x1={ML} x2={W - MR} y1={axR.scale(v)} y2={axR.scale(v)} stroke="var(--chart-grid)" strokeWidth="1" />
-              <text x={W - MR + 8} y={axR.scale(v) + 4} fontSize={FS} fill="var(--chart-axis)">{fmtVal(v, fmtKindOf("R"))}</text>
+              <text x={W - MR + 8} y={axR.scale(v) + 4} fontSize={FS} fill="var(--chart-axis)">{axisVal(v, fmtKindOf("R"), isMobile)}</text>
             </g>
           ))}
           {axL && axL.ticks.map((v) => (
-            <text key={`l${v}`} x={ML - 8} y={axL.scale(v) + 4} fontSize={FS} fill="var(--chart-axis)" textAnchor="end">{fmtVal(v, fmtKindOf("L"))}</text>
+            <text key={`l${v}`} x={ML - 8} y={axL.scale(v) + 4} fontSize={FS} fill="var(--chart-axis)" textAnchor="end">{axisVal(v, fmtKindOf("L"), isMobile)}</text>
           ))}
           {xt.map((tk) => (
             <text key={tk.t} x={x(tk.t)} y={H - 8} fontSize={FS} fill="var(--chart-axis)" textAnchor="middle">{tk.label}</text>
