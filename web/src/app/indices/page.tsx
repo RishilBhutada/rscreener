@@ -48,8 +48,8 @@ export default function IndicesPage() {
     if (k === "chg_pct") return <span className={signClass(x.chg_pct)}>{signed(x.chg_pct, 2)}</span>;
     if (k === "r1y") return <span className={signClass(x.r1y)}>{signed(x.r1y, 1)}</span>;
     if (k === "from_ath") return <span className={signClass(x.from_ath)}>{signed(x.from_ath, 1)}</span>;
-    // P/E keeps its own reading: red when dearer than on 80% of ten years' days, green when cheaper.
-    return <span className={x.pe_pct !== null && x.pe_pct >= 80 ? "text-[var(--neg)]" : x.pe_pct !== null && x.pe_pct <= 20 ? "text-[var(--pos)]" : "text-[var(--ink2)]"}>{x.pe !== null ? x.pe.toFixed(1) : "—"}</span>;
+    // P/E is plain (owner, 31-Oct-2026): no good/bad colouring of a ratio.
+    return <span className="text-[var(--ink2)]">{x.pe !== null ? x.pe.toFixed(1) : "—"}</span>;
   };
 
   return (
@@ -60,7 +60,7 @@ export default function IndicesPage() {
           Indices
           <InfoTip title="Indices">
             <p>Every equity index NSE publishes each day, India VIX and the Sensex, grouped as NSE Indices groups them.</p>
-            <p><b>P/E</b> is the index&apos;s own, as NSE publishes it: red when dearer than on 80% of the last ten years&apos; days, green when cheaper than on 80%. <b>From high</b> is the distance below the index&apos;s highest close.</p>
+            <p><b>P/E</b> is the index&apos;s own, as NSE publishes it. Where it sits against its own last ten years is in the Screener (Indices, &quot;P/E against its 10 years&quot;). <b>From high</b> is the distance below the index&apos;s highest close.</p>
             <p>Closes from NSE&apos;s daily index file and NSE Indices; the Sensex from Yahoo. Not checked further.</p>
           </InfoTip>
         </h1>
