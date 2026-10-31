@@ -154,6 +154,8 @@ export default function CalendarPage() {
   const [open, setOpen] = useState<CalEvent | null>(null);
   const [today, setToday] = useState("");
   const [basis, setBasis] = useState<Basis>("y");
+  // The week strip's chosen day; none shows every day.
+  const [day, setDay] = useState<string | null>(null);
   const pickBasis = (b: Basis) => {
     setBasis(b);
     try { localStorage.setItem(BASIS_KEY, b); } catch { /* the choice just is not remembered */ }
@@ -218,11 +220,22 @@ export default function CalendarPage() {
   const nextList = useMemo(() => (searching ? coming : upcoming).filter(keep), [upcoming, coming, searching, group, mineOnly, mine, q]); // eslint-disable-line react-hooks/exhaustive-deps
   const pastList = useMemo(() => history.filter(keep), [history, group, mineOnly, mine, q]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => setShown(PAGE), [when, group, mineOnly, q]);
+  useEffect(() => setShown(PAGE), [when, group, mineOnly, q, day]);
+
+  // The week strip: the next seven days that have something, with how many
+  // each has under the filters in use - so the busy days show before you scroll.
+  const strip = useMemo(() => {
+    const n = new Map<string, number>();
+    for (const e of nextList) n.set(e.date, (n.get(e.date) ?? 0) + 1);
+    return [...n.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(0, 7);
+  }, [nextList]);
+  const stripOn = when === "next" && !searching && strip.length > 1;
+  const pickedDay = stripOn && day && strip.some(([d]) => d === day) ? day : null;
+  const nextShown = pickedDay ? nextList.filter((e) => e.date === pickedDay) : nextList;
 
   const sections: [string, CalEvent[], number][] = searching
     ? [["Coming up", nextList, nextList.length], ["Past year", pastList, pastList.length]]
-    : [["", when === "next" ? nextList : pastList, (when === "next" ? nextList : pastList).length]];
+    : [["", when === "next" ? nextShown : pastList, (when === "next" ? nextShown : pastList).length]];
 
   let budget = shown;
   const drawn = sections.map(([title, list, total]) => {
@@ -304,6 +317,31 @@ export default function CalendarPage() {
             </InfoTip>
           </div>
         )}
+
+        {stripOn && (() => {
+          const top = Math.max(...strip.map(([, c]) => c));
+          return (
+            <div role="group" aria-label="Days" className="flex gap-0.5 rounded-xl border border-[var(--line)] bg-[var(--card)] p-1">
+              {strip.map(([d, c]) => {
+                const on = pickedDay === d;
+                const dt = new Date(`${d}T00:00:00`);
+                return (
+                  <button key={d} type="button" aria-pressed={on} onClick={() => setDay(on ? null : d)}
+                    className={`flex-1 min-w-0 flex flex-col items-center rounded-lg py-1.5 ${on ? "bg-[var(--accent-soft)]" : "active:bg-[var(--card2)]"}`}>
+                    <span className={`text-[10.5px] ${on ? "text-[var(--accent-ink)] font-semibold" : "text-[var(--ink3)]"}`}>
+                      {d === today ? "Today" : dt.toLocaleDateString("en-IN", { weekday: "short" })}
+                    </span>
+                    <span className={`text-[14px] font-semibold tabular-nums ${on ? "text-[var(--accent-ink)]" : "text-[var(--ink)]"}`}>{dt.getDate()}</span>
+                    <span className="h-7 flex items-end mt-0.5" aria-hidden="true">
+                      <span className="w-3.5 rounded-sm" style={{ height: `${Math.max(3, (c / top) * 28)}px`, background: on ? "var(--accent)" : "var(--line2)" }} />
+                    </span>
+                    <span className="text-[10.5px] tabular-nums text-[var(--ink3)]">{c}</span>
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })()}
 
         {error && <p className="text-[var(--neg)] text-sm">The calendar did not load ({error}).</p>}
         {stale > 3 && !searching && when === "next" && (

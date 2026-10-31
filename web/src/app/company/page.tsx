@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronGlyph, ExternalGlyph } from "@/components/Glyphs";
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { saveFile } from "@/lib/download";
@@ -1371,126 +1371,63 @@ function Announcements({ list }: { list: [string, string, string, string, number
   );
 }
 
-/** Documents grouped by the financial year they belong to.
- *
- *  They were three flat lists by type: annual-report chips, the newest eight
- *  concalls, the newest five rating updates. Two problems with that. The caps
- *  threw away everything older without saying so - a company with forty filed
- *  documents showed thirteen. And the shape answered the wrong question: a
- *  reader looking at FY2024 wants that year's annual report next to that year's
- *  four concalls, not to cross-reference three lists sorted three ways.
- *
- *  Tickertape has this right, and it is the one structural idea worth taking
- *  from their documents section.
- *
- *  A financial year here is named for the year it ENDS, the Indian convention:
- *  FY2026 runs April 2025 to March 2026, so a document dated July 2026 belongs
- *  to FY2027.
- */
-function fyOf(iso: string): number | null {
-  const m = /^(\d{4})-(\d{2})/.exec(String(iso));
-  if (!m) return null;
-  const y = Number(m[1]), mo = Number(m[2]);
-  return mo >= 4 ? y + 1 : y;
-}
 
-function DocumentsByYear({ docs }: { docs: NonNullable<Company["documents"]> }) {
-  const [openYears, setOpenYears] = useState<Set<number> | null>(null);
+/** The Filings tab's lists (Step 5): each kind of filing on its own, newest
+ *  first, four shown and the rest one tap away. A results PDF is the one
+ *  attached to that quarter's results announcement on NSE. */
+function FilingLists({ docs, quarters }: { docs?: Company["documents"] | null; quarters?: Quarter[] | null }) {
+  const [all, setAll] = useState<Record<string, boolean>>({});
+  const day = (d: string) => new Date(`${d.slice(0, 10)}T00:00:00`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" });
+  const qName = (end: string) => `${new Date(`${end}T00:00:00`).toLocaleDateString("en-IN", { month: "short", year: "2-digit" })} quarter`;
+  const what = (t: string, kind?: string) => kind === "PPT" ? "Presentation" : kind === "Recording" ? "Recording"
+    : /transcript/i.test(t) ? "Transcript" : /recording/i.test(t) ? "Recording link" : /presentation/i.test(t) ? "Presentation"
+    : /meet/i.test(t) ? "Analyst meet" : (t || "Document").replace(/^.{0,120}?has informed the exchange (?:about|regarding)\s*/i, "").replace(/['".]+$/g, "");
+  const pdfUrl = (u: string) => (u.includes("://") ? u : `https://nsearchives.nseindia.com/corporate/${u}`);
 
-  const years = useMemo(() => {
-    const bucket = new Map<number, { reports: AnnualReport[]; concalls: AnnDoc[]; ratings: AnnDoc[] }>();
-    const get = (y: number) => {
-      if (!bucket.has(y)) bucket.set(y, { reports: [], concalls: [], ratings: [] });
-      return bucket.get(y)!;
-    };
-    // An annual report is FOR a financial year, so it is filed by the year it
-    // covers rather than by the date the PDF appeared.
-    for (const r of docs.annual_reports ?? []) {
-      const y = Number(r.to);
-      if (Number.isFinite(y)) get(y).reports.push(r);
-    }
-    for (const [list, kind] of [[docs.concalls, ""], [docs.ppts, "PPT"], [docs.recordings, "Recording"]] as const) {
-      for (const d of list ?? []) {
-        const y = fyOf(d.date);
-        if (y !== null) get(y).concalls.push(kind ? { ...d, kind } : d);
-      }
-    }
-    for (const g of bucket.values()) g.concalls.sort((a, b) => b.date.localeCompare(a.date));
-    for (const d of docs.ratings ?? []) {
-      const y = fyOf(d.date);
-      if (y !== null) get(y).ratings.push(d);
-    }
-    return [...bucket.entries()].sort((a, b) => b[0] - a[0]);
-  }, [docs]);
+  const lists: { key: string; title: string; rows: { left: string; mid: string; url: string; link: string }[] }[] = [
+    { key: "results", title: "Results filings",
+      rows: [...(quarters ?? [])].filter((q) => q.pdf).reverse()
+        .map((q) => ({ left: qName(q.end), mid: q.announced ? day(q.announced) : "", url: pdfUrl(q.pdf!), link: "PDF" })) },
+    { key: "reports", title: "Annual reports",
+      rows: [...(docs?.annual_reports ?? [])].sort((x, y) => Number(y.to) - Number(x.to))
+        .map((r) => ({ left: `FY${String(r.to).slice(-2)}`, mid: `${r.from}–${String(r.to).slice(-2)}`, url: r.url, link: "PDF" })) },
+    { key: "concalls", title: "Concalls",
+      rows: [...(docs?.concalls ?? []).map((d) => ({ d, k: "" })), ...(docs?.ppts ?? []).map((d) => ({ d, k: "PPT" })), ...(docs?.recordings ?? []).map((d) => ({ d, k: "Recording" }))]
+        .sort((x, y) => y.d.date.localeCompare(x.d.date))
+        .map(({ d, k }) => ({ left: day(d.date), mid: what(d.title, k), url: d.url, link: "Open" })) },
+    { key: "ratings", title: "Credit ratings",
+      rows: [...(docs?.ratings ?? [])].sort((x, y) => y.date.localeCompare(x.date))
+        .map((d) => ({ left: day(d.date), mid: "Credit rating letter", url: d.url, link: "PDF" })) },
+  ].filter((l) => l.rows.length > 0);
 
-  if (years.length === 0) return null;
-
-  // The two newest open, the rest collapsed but counted - so nothing is hidden
-  // without the reader being told how much.
-  const isOpen = (y: number) =>
-    openYears ? openYears.has(y) : years.findIndex(([yy]) => yy === y) < 2;
-  const toggle = (y: number) => {
-    const next = new Set(openYears ?? years.slice(0, 2).map(([yy]) => yy));
-    if (next.has(y)) next.delete(y); else next.add(y);
-    setOpenYears(next);
-  };
-
-  const Doc = ({ d }: { d: AnnDoc }) => (
-    <li className="text-sm">
-      <a href={d.url} target="_blank" rel="noopener noreferrer"
-         className="text-[var(--accent-ink)] hover:underline line-clamp-2 sm:truncate block">
-        <span className="text-[var(--ink3)] font-mono text-xs mr-2">{d.date}</span>
-        {d.kind && <span className="text-[10px] font-bold rounded px-1.5 py-0.5 mr-1.5 bg-[var(--accent-soft)] text-[var(--accent-ink)]">{d.kind}</span>}
-        {(d.title || "document").replace(/^.{0,120}?has informed the exchange (?:about|regarding)\s*/i, "")}
-      </a>
-    </li>
-  );
-
+  if (lists.length === 0) return null;
   return (
-    <div className="space-y-1">
-      {years.map(([y, g]) => {
-        const n = g.reports.length + g.concalls.length + g.ratings.length;
-        const open = isOpen(y);
+    <div className="space-y-4">
+      {lists.map((l) => {
+        const open = all[l.key];
+        const shown = open ? l.rows : l.rows.slice(0, 4);
         return (
-          <div key={y} className="border-t border-[var(--line)] pt-2">
-            <button
-              onClick={() => toggle(y)}
-              aria-expanded={open}
-              className="w-full flex items-baseline justify-between gap-3 min-h-[44px] sm:min-h-0 sm:py-1 text-left"
-            >
-              <span className="text-sm font-semibold text-[var(--ink)]">
-                FY{y}
-                <span className="text-[var(--ink3)] font-normal ml-2 text-xs">
-                  Apr {y - 1} – Mar {y}
-                </span>
-              </span>
-              <span className="text-xs text-[var(--ink3)] shrink-0">
-                {n} {n === 1 ? "document" : "documents"} <ChevronGlyph dir={open ? "down" : "right"} />
-              </span>
-            </button>
-            {open && (
-              <div className="pb-2 space-y-2">
-                {g.reports.length > 0 && (
-                  <div className="flex gap-2 flex-wrap">
-                    {g.reports.map((r) => (
-                      <a key={r.url} href={r.url} target="_blank" rel="noopener noreferrer"
-                         className="text-xs font-semibold bg-[var(--card2)] hover:bg-[var(--accent-soft)] border border-[var(--line)] rounded-full px-3 py-1.5">
-                        Annual report {r.from}–{String(r.to).slice(-2)} <ExternalGlyph size={11} />
-                      </a>
-                    ))}
-                  </div>
-                )}
-                {g.concalls.length > 0 && (
-                  <ul className="space-y-1">{g.concalls.map((d) => <Doc key={d.url} d={d} />)}</ul>
-                )}
-                {g.ratings.length > 0 && (
-                  <div>
-                    <p className="text-[11px] uppercase tracking-wide text-[var(--ink3)] mb-0.5">Credit rating</p>
-                    <ul className="space-y-1">{g.ratings.map((d) => <Doc key={d.url} d={d} />)}</ul>
-                  </div>
-                )}
-              </div>
-            )}
+          <div key={l.key}>
+            <div className="flex items-baseline justify-between mb-1">
+              <h3 className="text-[13.5px] font-semibold text-[var(--ink)]">{l.title}</h3>
+              {l.rows.length > 4 && (
+                <button type="button" onClick={() => setAll({ ...all, [l.key]: !open })} className="text-[12px] font-semibold text-[var(--accent-ink)]">
+                  {open ? "Fewer" : `All ${l.rows.length}`}
+                </button>
+              )}
+            </div>
+            <ul className="divide-y divide-[var(--line)] border-y border-[var(--line)]">
+              {shown.map((r) => (
+                <li key={r.url}>
+                  <a href={r.url} target="_blank" rel="noopener noreferrer"
+                    className="grid grid-cols-[96px_minmax(0,1fr)_40px] items-center gap-2 py-2 text-[13px] hover:bg-[var(--card2)]">
+                    <span className="text-[var(--ink)] tabular-nums truncate">{r.left}</span>
+                    <span className="text-[var(--ink2)] truncate">{r.mid}</span>
+                    <span className="text-right text-[var(--accent-ink)] font-semibold inline-flex items-center justify-end gap-0.5">{r.link}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
           </div>
         );
       })}
@@ -2789,9 +2726,9 @@ function CompanyView() {
       )}
 
       <section id="documents" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-3">
-        <h2 className="text-sm font-bold text-[var(--ink)]">
-          Documents
-          <InfoTip title="Documents" className="ml-1.5">
+        <h2 className="text-base font-semibold text-[var(--ink)]">
+          Filings
+          <InfoTip title="Filings" className="ml-1.5">
             <p>
               Use the cross-check link before trusting any number here — this app&rsquo;s data
               is unverified.
@@ -2799,7 +2736,7 @@ function CompanyView() {
           </InfoTip>
         </h2>
         {(company.documents?.announcements?.length ?? 0) > 0 && <Announcements list={company.documents!.announcements!} />}
-        {company.documents && <DocumentsByYear docs={company.documents} />}
+        <FilingLists docs={company.documents} quarters={company.quarters} />
         <div className="flex gap-4 flex-wrap text-sm">
           <a href={`https://www.nseindia.com/get-quotes/equity?symbol=${encodeURIComponent(symbol)}`} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-ink)] font-semibold hover:underline">
             All NSE filings &amp; announcements <ExternalGlyph />

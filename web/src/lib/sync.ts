@@ -26,6 +26,7 @@ export const SYNCED_KEYS = [
   "rs_pct_tables",
   "rs_row_order",
   "rs_table_view",
+  "rs_others_custom",
   "rs_chart_ui",
   "rs_peer_cols",
   "rs_grid_pins",

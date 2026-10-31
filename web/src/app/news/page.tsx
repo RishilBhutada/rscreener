@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { ReactNode, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import InfoTip from "@/components/InfoTip";
@@ -21,6 +21,54 @@ type Scope = "all" | "mine" | "commod";
 
 const tone = (b: string | null | undefined) =>
   b === "Buy" ? "text-[var(--pos)]" : b === "Sell" ? "text-[var(--neg)]" : "text-[var(--ink2)]";
+
+/** A section as a grid: the stock fixed on the left, any heading sorts (high
+ *  to low, then low to high), a row per item (Step 5). */
+type Col<T> = { key: string; label: string; get?: (r: T) => number | string | null | undefined; cell: (r: T) => ReactNode; left?: boolean };
+function Grid<T>({ rows, cols, first, sortBy }: { rows: T[]; cols: Col<T>[]; first: (r: T) => ReactNode; sortBy?: string }) {
+  const [sort, setSort] = useState<{ key: string; desc: boolean } | null>(sortBy ? { key: sortBy, desc: true } : null);
+  const shown = useMemo(() => {
+    const c = sort && cols.find((x) => x.key === sort.key);
+    if (!c?.get) return rows;
+    return [...rows].sort((a, b) => {
+      const va = c.get!(a), vb = c.get!(b);
+      if (va === null || va === undefined) return 1;
+      if (vb === null || vb === undefined) return -1;
+      const d = typeof va === "number" && typeof vb === "number" ? va - vb : String(va).localeCompare(String(vb));
+      return sort!.desc ? -d : d;
+    });
+  }, [rows, cols, sort]);
+  return (
+    <div className="overflow-x-auto rounded-xl border border-[var(--line)] bg-[var(--card)] [scrollbar-width:none]">
+      <table className="w-full text-[13px] border-collapse tabular-nums">
+        <thead>
+          <tr className="text-[11px] text-[var(--ink3)] border-b border-[var(--line)]">
+            <th scope="col" className="px-2.5 py-2 text-left font-medium sticky left-0 z-10 bg-[var(--card)]">Stock</th>
+            {cols.map((c) => (
+              <th key={c.key} scope="col" aria-sort={sort?.key === c.key ? (sort.desc ? "descending" : "ascending") : undefined}
+                className={`px-2 py-2 font-medium whitespace-nowrap ${c.left ? "text-left" : "text-right"}`}>
+                {c.get ? (
+                  <button type="button" onClick={() => setSort(!sort || sort.key !== c.key ? { key: c.key, desc: true } : sort.desc ? { key: c.key, desc: false } : null)}
+                    className={sort?.key === c.key ? "text-[var(--accent-ink)] font-semibold" : ""}>
+                    {c.label}{sort?.key === c.key && <span aria-hidden="true">{sort.desc ? "\u25BE" : "\u25B4"}</span>}
+                  </button>
+                ) : c.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map((r, i) => (
+            <tr key={i} className="border-b border-[var(--line)] last:border-b-0">
+              <th scope="row" className="px-2.5 py-2 text-left font-semibold sticky left-0 bg-[var(--card)] max-w-[30vw] sm:max-w-none truncate">{first(r)}</th>
+              {cols.map((c) => <td key={c.key} className={`px-2 py-2 whitespace-nowrap ${c.left ? "text-left max-w-[44vw] truncate" : "text-right"}`}>{c.cell(r)}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export default function NewsPage() {
   const [doc, setDoc] = useState<NewsDoc | null>(null);
@@ -71,7 +119,7 @@ export default function NewsPage() {
 
         <div className="-mt-3 mb-3 overflow-x-auto">
           <Segmented label="Section" value={tab}
-            options={[["news", "News"], ["calls", "Broker calls"], ["deals", "Deals"], ["sast", "Stakes"]] as const} onChange={setTab} />
+            options={[["news", "News"], ["calls", `Calls ${calls.length}`], ["deals", `Deals ${deals.length}`], ["sast", `Stakes ${sast.length}`]] as const} onChange={setTab} />
         </div>
         <div className="mb-4">
           <Chips value={scope} options={[["all", "All"], ["mine", "My stocks"], ["commod", "Commodities"]] as [Scope, string][]} onChange={setScope} />
@@ -95,62 +143,39 @@ export default function NewsPage() {
         ))}
 
         {doc && tab === "calls" && (calls.length === 0 ? empty("broker calls") : (
-          <ul className="rounded-xl border border-[var(--line)] bg-[var(--card)] divide-y divide-[var(--line)]">
-            {calls.map((c, i) => (
-              <li key={`${c.url}${c.broker}${c.sym}${i}`} className="px-3 py-2.5">
-                <div className="flex items-baseline gap-2">
-                  <span className="flex-1 min-w-0 text-[14px]">
-                    <b>{c.broker}</b>{" "}
-                    <span className={`font-semibold ${tone(c.bucket)}`}>{c.bucket ?? c.rating ?? "view"}</span>
-                    {c.rating && c.bucket && c.rating.toLowerCase() !== c.bucket.toLowerCase() && <span className="text-[var(--ink3)]"> ({c.rating})</span>}
-                    {" on "}{c.sym ? <Link href={symbolHref(c.sym)} className="text-[var(--accent-ink)]">{name(c.sym)}</Link> : "-"}
-                  </span>
-                  {c.target && <span className="shrink-0 text-[12px] tabular-nums text-[var(--ink2)]">target ₹{inr(c.target)}</span>}
-                </div>
-                <a href={c.url} target="_blank" rel="noopener noreferrer" className="mt-0.5 block text-[12px] text-[var(--ink3)] hover:underline truncate">{since(c.t, now)} · {c.title}</a>
-              </li>
-            ))}
-          </ul>
+          <Grid rows={calls}
+            first={(c) => c.sym ? <Link href={symbolHref(c.sym)} title={name(c.sym)} className="text-[var(--accent-ink)]">{c.sym}</Link> : "—"}
+            cols={[
+              { key: "call", label: "Call", get: (c) => c.bucket ?? c.rating ?? null, cell: (c) => <span className={`font-semibold ${tone(c.bucket)}`}>{c.bucket ?? c.rating ?? "view"}</span>, left: true },
+              { key: "broker", label: "Broker", get: (c) => c.broker, cell: (c) => c.broker, left: true },
+              { key: "target", label: "Target ₹", get: (c) => c.target ?? null, cell: (c) => (c.target ? inr(c.target) : "—") },
+              { key: "when", label: "When", get: (c) => c.t, cell: (c) => <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-[var(--ink3)] underline">{since(c.t, now)}</a> },
+            ]} />
         ))}
 
         {doc && tab === "deals" && (deals.length === 0 ? empty("deals") : (
-          <ul className="rounded-xl border border-[var(--line)] bg-[var(--card)] divide-y divide-[var(--line)]">
-            {deals.slice(0, 300).map((d, i) => (
-              <li key={`${d.d}${d.sym}${d.client}${d.side}${d.qty}${i}`} className="px-3 py-2.5">
-                <div className="flex items-baseline gap-2">
-                  <span className="flex-1 min-w-0 text-[14px] truncate">
-                    {d.sym ? <Link href={symbolHref(d.sym)} className="text-[var(--accent-ink)] font-medium">{d.sym}</Link> : null}
-                    <span className={`ml-2 text-[12px] font-semibold ${d.side === "BUY" ? "text-[var(--pos)]" : "text-[var(--neg)]"}`}>{d.side === "BUY" ? "Bought" : "Sold"}</span>
-                  </span>
-                  <span className="shrink-0 text-[13px] tabular-nums font-semibold">₹{inr(d.cr)} Cr</span>
-                </div>
-                <p className="mt-0.5 text-[12px] text-[var(--ink2)] truncate">{d.client}</p>
-                <p className="text-[11px] text-[var(--ink3)] tabular-nums">{d.d} · {d.kind} · {qtyShort(d.qty)} shares at ₹{inr(d.price)}</p>
-              </li>
-            ))}
-          </ul>
+          <Grid rows={deals.slice(0, 300)}
+            first={(d) => d.sym ? <Link href={symbolHref(d.sym)} className="text-[var(--accent-ink)]">{d.sym}</Link> : "—"}
+            cols={[
+              { key: "side", label: "Side", get: (d) => d.side, cell: (d) => <span className={`font-semibold ${d.side === "BUY" ? "text-[var(--pos)]" : "text-[var(--neg)]"}`}>{d.side === "BUY" ? "Buy" : "Sell"}</span>, left: true },
+              { key: "cr", label: "₹ Cr", get: (d) => d.cr ?? null, cell: (d) => <span className="font-semibold">{inr(d.cr)}</span> },
+              { key: "client", label: "Client", get: (d) => d.client, cell: (d) => <span className="text-[var(--ink2)]">{d.client}</span>, left: true },
+              { key: "qty", label: "Shares", get: (d) => d.qty ?? null, cell: (d) => qtyShort(d.qty) },
+              { key: "price", label: "Price ₹", get: (d) => d.price ?? null, cell: (d) => inr(d.price) },
+              { key: "d", label: "Day", get: (d) => d.d, cell: (d) => <span className="text-[var(--ink3)]">{d.d.slice(8)}/{d.d.slice(5, 7)} · {d.kind}</span> },
+            ]} />
         ))}
 
         {doc && tab === "sast" && (sast.length === 0 ? empty("stake filings") : (
-          <ul className="rounded-xl border border-[var(--line)] bg-[var(--card)] divide-y divide-[var(--line)]">
-            {sast.map((s, i) => (
-              <li key={`${s.sym}${s.acquirer}${s.t}${i}`} className="px-3 py-2.5">
-                <div className="flex items-baseline gap-2">
-                  <span className="flex-1 min-w-0 text-[14px] truncate">
-                    {s.sym ? <Link href={symbolHref(s.sym)} className="text-[var(--accent-ink)] font-medium">{s.sym}</Link> : s.company}
-                    <span className={`ml-2 text-[12px] font-semibold ${s.side === "Sale" ? "text-[var(--neg)]" : "text-[var(--pos)]"}`}>{s.side}</span>
-                    {s.promoter && <span className="ml-1.5 text-[11px] text-[var(--ink3)]">promoter</span>}
-                  </span>
-                  {s.shares !== null && <span className="shrink-0 text-[12px] tabular-nums">{qtyShort(s.shares)} shares</span>}
-                </div>
-                <p className="mt-0.5 text-[12px] text-[var(--ink2)] truncate">{s.acquirer}</p>
-                <p className="text-[11px] text-[var(--ink3)]">
-                  {s.period}{s.after !== null ? ` · holds ${qtyShort(s.after)} after` : ""}
-                  {s.doc && <> · <a href={s.doc} target="_blank" rel="noopener noreferrer" className="underline">filing</a></>}
-                </p>
-              </li>
-            ))}
-          </ul>
+          <Grid rows={sast}
+            first={(x) => x.sym ? <Link href={symbolHref(x.sym)} className="text-[var(--accent-ink)]">{x.sym}</Link> : <span className="text-[var(--ink2)]">{x.company}</span>}
+            cols={[
+              { key: "side", label: "Side", get: (x) => x.side, cell: (x) => <span className={`font-semibold ${x.side === "Sale" ? "text-[var(--neg)]" : "text-[var(--pos)]"}`}>{x.side === "Sale" ? "Sell" : x.side === "Acquisition" ? "Buy" : x.side}</span>, left: true },
+              { key: "by", label: "Filed by", get: (x) => x.acquirer, cell: (x) => <span className="text-[var(--ink2)]">{x.acquirer}{x.promoter ? " · promoter" : ""}</span>, left: true },
+              { key: "shares", label: "Shares", get: (x) => x.shares ?? null, cell: (x) => (x.shares !== null ? qtyShort(x.shares) : "—") },
+              { key: "after", label: "Holds after", get: (x) => x.after ?? null, cell: (x) => (x.after !== null ? qtyShort(x.after) : "—") },
+              { key: "t", label: "Filed", get: (x) => x.t, cell: (x) => x.doc ? <a href={x.doc} target="_blank" rel="noopener noreferrer" className="text-[var(--ink3)] underline">{since(x.t, now)}</a> : since(x.t, now) },
+            ]} />
         ))}
 
         {doc?.fetched && <p className="mt-4 px-1 text-[11px] text-[var(--ink3)]">Last checked {since(doc.fetched, now)}.</p>}
