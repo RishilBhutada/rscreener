@@ -378,7 +378,7 @@ export default function CalendarPage() {
               </p>
             )}
             {s.days.map(([d, list], i) => (
-              <Fragment key={`${s.title}${d}`}>
+              <Fragment key={`${s.title}${d}${list[0]?.upcoming ? "-next" : "-out"}`}>
                 {(i === 0 || s.days[i - 1][0].slice(0, 7) !== d.slice(0, 7)) && s.days[i - 1]?.[0] !== d && (
                   <h3 className="pt-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
                     {new Date(`${d}T12:00:00Z`).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" })}
