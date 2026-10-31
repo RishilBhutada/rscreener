@@ -567,7 +567,7 @@ function ScreensInner() {
                   const cols = [...rowFields.filter((f) => f !== "price" && f !== "ret_1d"), ...extra];
                   const head = (key: string, label: string, left = false) => (
                     <th key={key} scope="col" aria-sort={sortKey === key ? (sortDesc ? "descending" : "ascending") : undefined}
-                      className={`px-2 py-2 font-medium whitespace-nowrap ${left ? "text-left sticky left-0 z-10 bg-[var(--bg)]" : "text-right"}`}>
+                      className={`px-1.5 py-2 font-medium whitespace-nowrap ${left ? "text-left sticky left-0 z-10 bg-[var(--bg)]" : "text-right"}`}>
                       <button type="button" onClick={() => setSort({ key, desc: key === sortKey ? !sortDesc : true })}
                         className={`inline-flex items-center gap-0.5 ${sortKey === key ? "text-[var(--accent-ink)] font-semibold" : ""}`}>
                         {label}{sortKey === key && <span aria-hidden="true">{sortDesc ? "\u25BE" : "\u25B4"}</span>}
@@ -578,13 +578,13 @@ function ScreensInner() {
                   const tint = (c: number | null) => c ? `color-mix(in srgb, var(${c > 0 ? "--pos" : "--neg"}) ${Math.round(8 + 18 * Math.min(Math.abs(c) / 3, 1))}%, transparent)` : undefined;
                   return (
                     <div className="overflow-x-auto -mx-4 px-4 [scrollbar-width:none]">
-                      <table className="w-full text-[13px] border-collapse tabular-nums">
+                      <table className="w-full text-[12.5px] border-collapse tabular-nums">
                         <thead>
                           <tr className="text-[11px] text-[var(--ink3)] border-b border-[var(--line)]">
                             {head(uni === "indices" ? "name" : "symbol", "Name", true)}
                             {head("price", "Price")}
                             {head("ret_1d", "Day")}
-                            {cols.map((f) => head(f, labelOf(f, by)))}
+                            {cols.map((f) => head(f, f === "mcap" ? "MCap" : labelOf(f, by)))}
                           </tr>
                         </thead>
                         <tbody>
@@ -595,18 +595,18 @@ function ScreensInner() {
                             return (
                               <tr key={sym} onClick={() => setSheet({ kind: "row", sym })}
                                 className="border-b border-[var(--line)] cursor-pointer active:bg-[var(--card2)] hover:bg-[var(--card2)]">
-                                <th scope="row" className="px-2 py-2 text-left font-semibold text-[var(--ink)] sticky left-0 bg-[var(--bg)] max-w-[34vw] sm:max-w-none">
+                                <th scope="row" className="px-1.5 py-2 text-left font-semibold text-[var(--ink)] sticky left-0 bg-[var(--bg)] max-w-[27vw] sm:max-w-none">
                                   <button type="button" className="block max-w-full truncate text-left"
                                     title={uni === "companies" ? shortName(String(r.name ?? ""), sym) : String(r.name ?? sym)}>
                                     {uni === "indices" ? String(r.name) : shownSymbol(sym)}
                                   </button>
                                 </th>
-                                <td className="px-2 py-2 text-right text-[var(--ink)] whitespace-nowrap">{money(price)}</td>
-                                <td className="px-2 py-2 text-right whitespace-nowrap rounded-sm" style={{ background: tint(chg) }}>
-                                  <span className={tone(chg)}>{chg === null ? "—" : `${signed(chg)}%`}</span>
+                                <td className="px-1.5 py-2 text-right text-[var(--ink)] whitespace-nowrap">{price !== null && price >= 1000 ? Math.round(price).toLocaleString("en-IN") : money(price)}</td>
+                                <td className="px-1.5 py-2 text-right whitespace-nowrap rounded-sm" style={{ background: tint(chg) }}>
+                                  <span className={tone(chg)}>{chg === null ? "—" : `${chg > 0 ? "+" : chg < 0 ? "−" : ""}${Math.abs(chg).toFixed(1)}%`}</span>
                                 </td>
                                 {cols.map((f) => (
-                                  <td key={f} className="px-2 py-2 text-right text-[var(--ink2)] whitespace-nowrap">{fmtVal(f, r[f], by)}</td>
+                                  <td key={f} className="px-1.5 py-2 text-right text-[var(--ink2)] whitespace-nowrap">{f === "mcap" && typeof r[f] === "number" ? ((r[f] as number) >= 1e5 ? `${((r[f] as number) / 1e5).toFixed(2)}L` : Math.round(r[f] as number).toLocaleString("en-IN")) : fmtVal(f, r[f], by)}</td>
                                 ))}
                               </tr>
                             );
