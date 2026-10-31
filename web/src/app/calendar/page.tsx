@@ -224,17 +224,27 @@ export default function CalendarPage() {
 
   useEffect(() => setShown(PAGE), [when, group, mineOnly, q, day]);
 
-  // The week strip: the next seven days that have something, with how many
-  // each has under the filters in use - so the busy days show before you scroll.
-  const strip = useMemo(() => {
-    const n = new Map<string, number>();
-    for (const e of nextList) n.set(e.date, (n.get(e.date) ?? 0) + 1);
-    return [...n.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(0, 14);
-  }, [nextList]);
-  const stripOn = when === "next" && !searching && strip.length > 0;
-  // One day at a time: the one tapped, else the first day with anything.
-  const pickedDay = stripOn ? (day && strip.some(([d]) => d === day) ? day : strip[0][0]) : null;
-  const nextShown = pickedDay ? nextList.filter((e) => e.date === pickedDay) : nextList;
+  // The date strip: seven days, today in the middle with the three before and
+  // the three after it (owner, 31-Oct-2026). The days before come from the past
+  // year's results and actions, the rest from the coming calendar; a day with
+  // nothing shows 0. The list below holds only the day picked - today when the
+  // page opens.
+  const win = useMemo(() => {
+    if (!today) return [] as string[];
+    const t = new Date(`${today}T00:00:00`);
+    return [-3, -2, -1, 0, 1, 2, 3].map((o) => {
+      const d = new Date(t.getFullYear(), t.getMonth(), t.getDate() + o);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    });
+  }, [today]);
+  const windowEvents = useMemo(() => win.length ? [
+    ...history.filter((e) => e.date >= win[0] && e.date < today).filter(keep),
+    ...nextList.filter((e) => e.date <= win[6]),
+  ] : [], [win, history, nextList, today, group, mineOnly, mine]); // eslint-disable-line react-hooks/exhaustive-deps
+  const strip: [string, number][] = win.map((d) => [d, windowEvents.filter((e) => e.date === d).length]);
+  const stripOn = when === "next" && !searching && win.length === 7;
+  const pickedDay = stripOn ? (day && win.includes(day) ? day : today) : null;
+  const nextShown = pickedDay ? windowEvents.filter((e) => e.date === pickedDay) : nextList;
 
   const sections: [string, CalEvent[], number][] = searching
     ? [["Coming up", nextList, nextList.length], ["Past year", pastList, pastList.length]]
@@ -319,21 +329,21 @@ export default function CalendarPage() {
         )}
 
         {stripOn && (() => {
-          const top = Math.max(...strip.map(([, c]) => c));
+          const top = Math.max(1, ...strip.map(([, c]) => c));
           return (
-            <div role="group" aria-label="Days" className="flex gap-0.5 rounded-xl border border-[var(--line)] bg-[var(--card)] p-1 overflow-x-auto [scrollbar-width:none]">
+            <div role="group" aria-label="Days" className="grid grid-cols-7 gap-0.5 rounded-xl border border-[var(--line)] bg-[var(--card)] p-1">
               {strip.map(([d, c]) => {
                 const on = pickedDay === d;
                 const dt = new Date(`${d}T00:00:00`);
                 return (
                   <button key={d} type="button" aria-pressed={on} onClick={() => setDay(d)}
-                    className={`flex-1 min-w-[44px] shrink-0 flex flex-col items-center rounded-lg py-1.5 ${on ? "bg-[var(--accent-soft)]" : "active:bg-[var(--card2)]"}`}>
+                    className={`min-w-0 flex flex-col items-center rounded-lg py-1.5 ${on ? "bg-[var(--accent-soft)]" : "active:bg-[var(--card2)]"} ${d < today ? "opacity-80" : ""}`}>
                     <span className={`text-[10.5px] ${on ? "text-[var(--accent-ink)] font-semibold" : "text-[var(--ink3)]"}`}>
                       {d === today ? "Today" : dt.toLocaleDateString("en-IN", { weekday: "short" })}
                     </span>
                     <span className={`text-[14px] font-semibold tabular-nums ${on ? "text-[var(--accent-ink)]" : "text-[var(--ink)]"}`}>{dt.getDate()}</span>
                     <span className="h-7 flex items-end mt-0.5" aria-hidden="true">
-                      <span className="w-3.5 rounded-sm" style={{ height: `${Math.max(3, (c / top) * 28)}px`, background: on ? "var(--accent)" : "var(--line2)" }} />
+                      <span className="w-3.5 rounded-sm" style={{ height: `${c ? Math.max(3, (c / top) * 28) : 2}px`, background: on ? "var(--accent)" : "var(--line2)" }} />
                     </span>
                     <span className="text-[10.5px] tabular-nums text-[var(--ink3)]">{c}</span>
                   </button>
@@ -364,7 +374,7 @@ export default function CalendarPage() {
             )}
             {s.total === 0 && (
               <p className="py-6 text-center text-[13px] text-[var(--ink3)]">
-                Nothing{searching ? ` for “${q.trim()}”` : ""}{mineOnly ? " in your stocks" : ""}{group !== "all" ? " of this type" : ""}{(searching ? s.title === "Coming up" : when === "next") ? " coming up" : " in the past year"}
+                Nothing{searching ? ` for “${q.trim()}”` : ""}{mineOnly ? " in your stocks" : ""}{group !== "all" ? " of this type" : ""}{pickedDay && !searching ? " on this day" : (searching ? s.title === "Coming up" : when === "next") ? " coming up" : " in the past year"}
               </p>
             )}
             {s.days.map(([d, list], i) => (
