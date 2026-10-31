@@ -263,6 +263,8 @@ type SeriesDef = {
   kind: "line" | "smooth" | "bars" | "dashed";
   axis: "L" | "R";
   data: XY[];
+  /** set on an overlaid view's series: drawn on that view's own scale */
+  group?: View;
   fmt: FmtKind;
 };
 
@@ -333,6 +335,9 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   coverage?: { quarters: number; from?: string | null; gaps?: string[]; gap_count?: number } | null;
 }) {
   const [view, setView] = useState<View>("price");
+  // Views laid over the one on screen (long-press a tab). Each keeps its own
+  // scale, so a P/E of 20 is not flattened under a price of 2,000.
+  const [overlays, setOverlays] = useState<View[]>([]);
   const [range, setRange] = useState("5Yr");
   const [peWin, setPeWin] = useState("ttm");
   /** What the bars under the ratio line are: earnings per share (with the P/E
@@ -455,7 +460,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   // Sales per share needs both its bars and the Price / Sales line.
   const spsAvail = !!psBand && !!trendQ?.sps?.some((v) => v !== null && v !== undefined);
   const spsOn = perShare === "sps" && spsAvail;
-  const toggle = (k: string) => setOn({ ...on, [k]: !isOn(k) });
+  const defOn = (s: SeriesDef) => isOn(s.key, !(s.group && (s.kind === "bars" || s.kind === "dashed")));
+  const toggle = (s: SeriesDef) => setOn({ ...on, [s.key]: !defOn(s) });
 
   const years = RANGES.find(([r]) => r === range)?.[1] ?? 5;
   const now = Date.now();
@@ -482,6 +488,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     const filt = (src: Pt[]): Pt[] => src.filter((p) => toT(p[0]) >= cutoff);
     const xy = (src: [string, number][]): XY[] => src.map((p) => ({ t: toT(p[0]), v: p[1] }));
 
+    const build = (view: View, defs: SeriesDef[]) => {
     // quarterly metric -> bars aligned to period-end dates, filtered to the range
     // The ratio lines use trailing-twelve-month figures, so the bars beneath them
     // must too - plotting one quarter against a TTM ratio made Sales read 4x
@@ -685,12 +692,15 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       if (m.length > 1) defs.push({ key: "ebitda_m", label: "EBITDA margin %", color: "var(--chart-dma50)", kind: "smooth", axis: "R", data: m, fmt: "pct" });
     }
 
+    };
+    build(view, defs);
+
     // The peer is drawn on the SAME axis as the metric it is compared against,
     // except price: two share prices in rupees have no common scale (₹5,726 beside
     // ₹748 makes the smaller one a flat line), so both are rebased to percent
     // change from the left edge of the visible range, which is the only reading
     // of "which did better" that means anything.
-    if (cmp !== null && cmp !== undefined) {
+    if (cmp !== null && cmp !== undefined && !overlays.length) {
       const peer: CmpData = cmp;
       const rebase = (src: XY[]): XY[] => {
         const base = src.length ? src[0].v : 0;
@@ -728,18 +738,35 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       }
     }
 
+    // Overlays: each view's own series, renamed so their switches stay apart,
+    // the main line in a colour of its own.
+    // A line takes the next colour not yet on the chart; bars keep theirs.
+    const used = new Set(defs.filter((d) => d.kind !== "bars").map((d) => d.color));
+    const nextColour = () => OVERLAY_COLOURS.find((c) => !used.has(c)) ?? OVERLAY_COLOURS[used.size % OVERLAY_COLOURS.length];
+    overlays.forEach((ov) => {
+      if (ov === view || ov === "years") return;
+      const mine: SeriesDef[] = [];
+      build(ov, mine);
+      for (const d of mine) {
+        let color = d.color;
+        if (d.kind !== "bars" && d.kind !== "dashed" && (color === "var(--accent)" || used.has(color))) color = nextColour();
+        if (d.kind !== "bars") used.add(color);
+        defs.push({ ...d, key: `ov_${ov}_${d.key}`, group: ov, color });
+      }
+    });
+
     return defs;
-  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, epsCmp, quarters, cmp, symbol, exchange, years, spsOn]);
+  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, epsCmp, quarters, cmp, symbol, exchange, years, spsOn, overlays]);
 
   // With the quarterly-results overlay on, the per-quarter EPS bars are already
   // on screen. Keeping the summed TTM bars too puts two different quantities in
   // the same visual language, a quarter apart, both called EPS.
-  const visible = model.filter((s) => isOn(s.key));
+  const visible = model.filter(defOn);
   // Years: each calendar year as its own line from 1 January. A chart of its
   // own on a day-of-year axis, inside the same frame and view switch.
   if (view === "years") {
     return (
-      <ChartShell range={range} setRange={setRange} view={view} setView={setView} ui={ui}
+      <ChartShell range={range} setRange={setRange} view={view} setView={setView} overlays={overlays} setOverlays={setOverlays} ui={ui}
         expandHref={symbol ? `/chart?s=${encodeURIComponent(symbol)}` : undefined}
         moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand, ebitda: !!trendQ?.ebitda?.some((v) => v !== null) }} peLabel={spsOn ? "P/S Ratio" : "PE Ratio"}>
         <YearsChart prices={prices} />
@@ -748,7 +775,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   }
   if (!model.length || !model.some((s) => s.data.length > 1)) {
     return (
-      <ChartShell range={range} setRange={setRange} view={view} setView={setView}
+      <ChartShell range={range} setRange={setRange} view={view} setView={setView} overlays={overlays} setOverlays={setOverlays}
         expandHref={symbol ? `/chart?s=${encodeURIComponent(symbol)}` : undefined}
         moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand, ebitda: !!trendQ?.ebitda?.some((v) => v !== null) }} peLabel={spsOn ? "P/S Ratio" : "PE Ratio"}>
         <div className="h-64 flex items-center justify-center text-sm text-[var(--ink3)]">No data yet for this view.</div>
@@ -760,9 +787,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const t1 = Math.max(...visible.flatMap((s) => (s.data.length ? [s.data[s.data.length - 1].t] : [])));
   const x = (t: number) => ML + ((t - t0) / Math.max(1, t1 - t0)) * plotW;
 
-  const axisVals = (axis: "L" | "R") => visible.filter((s) => s.axis === axis).flatMap((s) => s.data.map((d) => d.v));
-  const mkAxis = (axis: "L" | "R") => {
-    const vals = axisVals(axis);
+  const mkAxis = (axis: "L" | "R", pick: (s: SeriesDef) => boolean = (s) => !s.group && s.axis === axis) => {
+    const vals = visible.filter(pick).flatMap((s) => s.data.map((d) => d.v));
     if (!vals.length) return null;
     let lo = Math.min(...vals);
     const hi = Math.max(...vals);
@@ -787,8 +813,16 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     return { ticks, scale };
   };
   const axL = mkAxis("L"), axR = mkAxis("R");
+  // An overlaid view keeps its own two scales (bars, lines), unlabelled; its
+  // figures are read from the pop-up.
+  const ownAx: Record<string, ReturnType<typeof mkAxis>> = {};
+  for (const sd of visible) {
+    const k = `${sd.group}:${sd.axis}`;
+    if (sd.group && !(k in ownAx)) ownAx[k] = mkAxis(sd.axis, (q) => q.group === sd.group && q.axis === sd.axis);
+  }
+  const axisOf = (sd: SeriesDef) => (sd.group ? ownAx[`${sd.group}:${sd.axis}`] ?? null : sd.axis === "L" ? axL : axR);
   const xt = timeTicks(t0, t1);
-  const fmtKindOf = (axis: "L" | "R") => visible.find((s) => s.axis === axis)?.fmt ?? "plain";
+  const fmtKindOf = (axis: "L" | "R") => visible.find((s) => !s.group && s.axis === axis)?.fmt ?? "plain";
 
   const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
     const rect = svgRef.current?.getBoundingClientRect();
@@ -810,7 +844,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   }
   const caIsOn = (k: string) => caOn[k] ?? false;
 
-  const primary = visible.find((s) => s.kind !== "bars" && s.kind !== "dashed") ?? visible[0];
+  const primary = visible.find((s) => !s.group && s.kind !== "bars" && s.kind !== "dashed") ?? visible.find((s) => !s.group) ?? visible[0];
   const activeBand: ChartBand =
     view === "pe" ? (spsOn ? psBand ?? null : peBand ?? null) : view === "pb" ? pbBand ?? null
     : view === "ps" ? psBand ?? null : view === "ev" ? evBand ?? null : null;
@@ -859,7 +893,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       onChange={(e) => {
         const v = e.target.value;
         if (v === "__any__") { setPickAny(true); setSheet(false); return; }
-        setPickAny(false); setAnyQ(""); setCmpSym(v || null); setHover(null);
+        setPickAny(false); setAnyQ(""); setCmpSym(v || null); setHover(null); if (v) setOverlays([]);
       }}
       className={`shrink-0 rounded-full border px-3 py-1.5 sm:py-1 font-medium max-w-[38vw] sm:max-w-none ${cmpSym
         ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]" : "bg-transparent text-[var(--ink2)] border-[var(--line)]"}`}>
@@ -940,7 +974,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
               return hits.map((c) => (
                 <button
                   key={c.symbol}
-                  onClick={() => { setCmpSym(c.symbol); setPickAny(false); setAnyQ(""); setHover(null); }}
+                  onClick={() => { setCmpSym(c.symbol); setOverlays([]); setPickAny(false); setAnyQ(""); setHover(null); }}
                   className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-[var(--card)] flex items-baseline justify-between gap-3"
                 >
                   <span className="text-sm text-[var(--ink)] truncate">{c.name || c.symbol}</span>
@@ -956,6 +990,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     expandHref: symbol ? `/chart?s=${encodeURIComponent(symbol)}` : undefined,
     avail: { pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand, ebitda: !!trendQ?.ebitda?.some((v) => v !== null) },
     peLabel: spsOn ? "P/S Ratio" : "PE Ratio", onViewChange: () => setHover(null),
+    overlays, setOverlays: (v: View[]) => { setOverlays(v); setCmpSym(null); setHover(null); },
   };
   const plotAndLegend = (
     <>
@@ -1054,7 +1089,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
           ))}
 
           {visible.filter((s) => s.kind === "bars").map((s) => {
-            const ax = s.axis === "L" ? axL : axR;
+            const ax = axisOf(s);
             if (!ax) return null;
             const bw = barW(s);
             // Bars grow from ZERO, not from whatever the axis happens to start at.
@@ -1135,7 +1170,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
           })}
 
           {visible.filter((s) => s.kind !== "bars").map((s) => {
-            const ax = s.axis === "L" ? axL : axR;
+            const ax = axisOf(s);
             if (!ax || s.data.length < 2) return null;
             const pts = s.data.map((d) => ({ x: x(d.t), y: ax.scale(d.v) }));
             if (s.kind === "smooth") {
@@ -1154,7 +1189,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             <g>
               <line x1={x(hoverPt.t)} x2={x(hoverPt.t)} y1={MT} y2={MT + plotH} stroke="var(--chart-axis)" strokeWidth="1" strokeDasharray="2 3" />
               {(() => {
-                const ax = primary.axis === "L" ? axL : axR;
+                const ax = axisOf(primary);
                 return ax ? <circle cx={x(hoverPt.t)} cy={ax.scale(hoverPt.v)} r="3.5" fill={primary.color} stroke="var(--card)" strokeWidth="1.5" /> : null;
               })()}
             </g>
@@ -1202,17 +1237,40 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         )}
       </div>
 
-      <div className="flex items-center justify-center gap-4 flex-wrap mt-2">
-        {model.map((s) => (
-          <button key={s.key} onClick={() => toggle(s.key)} className="flex items-center gap-1.5 text-sm text-[var(--ink2)]">
+      {(() => {
+        const item = (s: SeriesDef) => (
+          <button key={s.key} onClick={() => toggle(s)} className="flex items-center gap-1.5 text-sm text-[var(--ink2)]">
             <span className="inline-flex items-center justify-center w-4 h-4 rounded"
-              style={{ background: isOn(s.key) ? s.color : "transparent", border: `1.5px solid ${s.color}` }}>
-              {isOn(s.key) && <svg viewBox="0 0 10 10" className="w-2.5 h-2.5"><path d="M1.5 5.5 L4 8 L8.5 2.5" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" /></svg>}
+              style={{ background: defOn(s) ? s.color : "transparent", border: `1.5px solid ${s.color}` }}>
+              {defOn(s) && <svg viewBox="0 0 10 10" className="w-2.5 h-2.5"><path d="M1.5 5.5 L4 8 L8.5 2.5" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" /></svg>}
             </span>
             {s.label}
           </button>
-        ))}
-      </div>
+        );
+        const groups = ([null, ...overlays] as (View | null)[])
+          .map((g) => [g, model.filter((s) => (s.group ?? null) === g)] as const)
+          .filter(([, list]) => list.length);
+        if (groups.length < 2) return <div className="flex items-center justify-center gap-4 flex-wrap mt-2">{model.map(item)}</div>;
+        const nameOf = (v: View) => (v === "pe" && spsOn ? "P/S Ratio" : VIEW_NAME[v]);
+        return (
+          <div className="mt-2 space-y-2">
+            {groups.map(([g, list]) => (
+              <div key={g ?? "main"} className="flex items-center gap-x-4 gap-y-1 flex-wrap">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)] w-full flex items-center">
+                  {nameOf(g ?? view)}{g ? " \u00b7 own scale" : ""}
+                  {g && (
+                    <button onClick={() => { setOverlays(overlays.filter((o) => o !== g)); setHover(null); }}
+                      aria-label={`Remove the ${nameOf(g)} overlay`} className="ml-auto -my-1 inline-flex items-center justify-center w-7 h-7 rounded-lg text-[var(--ink3)] active:bg-[var(--card2)]">
+                      <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                    </button>
+                  )}
+                </span>
+                {list.map(item)}
+              </div>
+            ))}
+          </div>
+        );
+      })()}
     </>
   );
 
@@ -1303,7 +1361,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
               return hits.map((c) => (
                 <button
                   key={c.symbol}
-                  onClick={() => { setCmpSym(c.symbol); setPickAny(false); setAnyQ(""); setHover(null); }}
+                  onClick={() => { setCmpSym(c.symbol); setOverlays([]); setPickAny(false); setAnyQ(""); setHover(null); }}
                   className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-[var(--card)] flex items-baseline justify-between gap-3"
                 >
                   <span className="text-sm text-[var(--ink)] truncate">{c.name || c.symbol}</span>
@@ -1455,14 +1513,23 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   );
 }
 
+const VIEW_NAME: Record<View, string> = {
+  price: "Price", years: "Years", pe: "PE Ratio", sales: "Sales & Margin", ebitda: "EBITDA",
+  ev: "EV / EBITDA", pb: "Price to Book", ps: "Market Cap / Sales",
+};
+// Never green or red: those read as good and bad.
+const OVERLAY_COLOURS = ["var(--chart-alt)", "#d946ef", "#14b8a6", "#a16207", "var(--chart-line2)", "var(--chart-dma200)", "var(--chart-dma50)"];
+
 const MORE_VIEWS: [View, string][] = [
   ["sales", "Sales & Margin"], ["ebitda", "EBITDA"], ["ev", "EV / EBITDA"], ["pb", "Price to Book"], ["ps", "Market Cap / Sales"],
 ];
 
 function ChartShell({
   range, setRange, view, setView, moreOpen, setMoreOpen, avail, onViewChange, expandHref, peLabel = "PE Ratio", children,
-  ui = "classic", onOptions, optionsCount = 0, footer,
+  ui = "classic", onOptions, optionsCount = 0, footer, overlays = [], setOverlays,
 }: {
+  /** views laid over this one, and how to change them (long-press a tab) */
+  overlays?: View[]; setOverlays?: (v: View[]) => void;
   /** The ratio tab's name: it reads P/S Ratio while sales per share is shown. */
   peLabel?: string;
   /** Control layout (Settings > Chart controls): a = options sheet, b = chip
@@ -1477,7 +1544,43 @@ function ChartShell({
   onViewChange?: () => void;
   children: React.ReactNode;
 }) {
-  const pick = (v: View) => { setView(v); setMoreOpen(false); onViewChange?.(); };
+  const pick = (v: View) => { setView(v); if (overlays.length) setOverlays?.([]); setMoreOpen(false); onViewChange?.(); };
+  // Tap a tab: switch to it. Hold it (or right-click): offer to lay it over the
+  // chart on screen.
+  const [held, setHeld] = useState<View | null>(null);
+  const timer = useRef<number | null>(null);
+  const firedAt = useRef(0), downAt = useRef(0);
+  const stop = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } };
+  const hold = (v: View) => { firedAt.current = Date.now(); stop(); setHeld(v); setMoreOpen(false); };
+  // One set of listeners on each row of tabs; the tab pressed is found from its data-view.
+  const viewOf = (e: React.SyntheticEvent) => (e.target as HTMLElement).closest<HTMLElement>("[data-view]")?.dataset.view as View | undefined;
+  const tabDown = (e: React.PointerEvent) => {
+    const v = viewOf(e);
+    stop(); downAt.current = Date.now();
+    if (v) timer.current = window.setTimeout(() => hold(v), 480);
+  };
+  const tabMenu = (e: React.MouseEvent) => { const v = viewOf(e); if (v) { e.preventDefault(); hold(v); } };
+  const tabClick = (e: React.MouseEvent) => {
+    const v = viewOf(e);
+    if (!v) return;
+    if (firedAt.current >= downAt.current) return; // the click that ends a hold
+    setHeld(null); pick(v);
+  };
+  const press = (v: View) => ({ "data-view": v });
+  const mark = (v: View) => overlays.includes(v) ? <span className="ml-0.5 text-[var(--accent)]" aria-label="overlaid">+</span> : null;
+  const nm = (v: View) => (v === "pe" ? peLabel : VIEW_NAME[v]);
+  const heldBar = held && (
+    <div className="mb-2 flex items-center gap-2 flex-wrap rounded-lg border border-[var(--line2)] bg-[var(--card2)] px-2.5 py-1.5 text-xs">
+      {held === view ? <span className="text-[var(--ink2)]">{nm(held)} is the chart on screen.</span>
+        : held === "years" || view === "years" ? <span className="text-[var(--ink2)]">Years has its own day-of-year axis and cannot be combined.</span>
+        : overlays.includes(held)
+          ? <button onClick={() => { setOverlays?.(overlays.filter((o) => o !== held)); setHeld(null); }}
+              className="rounded-md bg-[var(--card)] border border-[var(--line)] px-2.5 py-1 font-semibold text-[var(--ink)]">Remove {nm(held)} overlay</button>
+          : <button onClick={() => { setOverlays?.([...overlays, held]); setHeld(null); }}
+              className="rounded-md bg-[var(--accent)] px-2.5 py-1 font-semibold text-white">Overlay {nm(held)} on {nm(view)}</button>}
+      <button onClick={() => setHeld(null)} className="ml-auto px-2 py-1 text-[var(--ink3)]">Cancel</button>
+    </div>
+  );
   const moreItems = MORE_VIEWS.filter(([v]) => avail[v as keyof typeof avail]);
   const activeMore = moreItems.find(([v]) => v === view);
   const btn = (active: boolean) =>
@@ -1487,11 +1590,11 @@ function ChartShell({
     const tab = (active: boolean) =>
       `shrink-0 px-1 pb-2 pt-1 text-[13px] font-semibold border-b-2 whitespace-nowrap ${active ? "border-[var(--accent)] text-[var(--ink)]" : "border-transparent text-[var(--ink3)]"}`;
     const tabs = (
-      <div className="flex items-end gap-4 min-w-0 overflow-x-auto [scrollbar-width:none]">
-        <button onClick={() => pick("price")} className={tab(view === "price")}>Price</button>
-        <button onClick={() => pick("years")} className={tab(view === "years")}>Years</button>
-        {avail.pe && <button onClick={() => pick("pe")} className={tab(view === "pe")}>{peLabel}</button>}
-        {moreItems.map(([v, label]) => <button key={v} onClick={() => pick(v)} className={tab(view === v)}>{label}</button>)}
+      <div className="flex items-end gap-4 min-w-0 overflow-x-auto [scrollbar-width:none] select-none [-webkit-touch-callout:none]" onPointerDown={tabDown} onPointerUp={stop} onPointerLeave={stop} onPointerCancel={stop} onContextMenu={tabMenu} onClick={tabClick}>
+        <button {...press("price")} className={tab(view === "price")}>Price{mark("price")}</button>
+        <button {...press("years")} className={tab(view === "years")}>Years</button>
+        {avail.pe && <button {...press("pe")} className={tab(view === "pe")}>{peLabel}{mark("pe")}</button>}
+        {moreItems.map(([v, label]) => <button key={v} {...press(v)} className={tab(view === v)}>{label}{mark(v)}</button>)}
       </div>
     );
     const iconBtn = "shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-lg text-[var(--ink2)] hover:bg-[var(--card2)] relative";
@@ -1527,6 +1630,7 @@ function ChartShell({
           {tabs}
           <div className="flex items-center gap-0.5 pb-1">{ui === "b" && view !== "years" && rangePill}{view !== "years" && opts}{full}</div>
         </div>
+        {heldBar}
         {ui === "a" && view !== "years" && <div className="mb-2">{rangesSeg}</div>}
         {children}
         {ui === "c" && view !== "years" && <div className="mt-3">{rangesSeg}</div>}
@@ -1543,10 +1647,10 @@ function ChartShell({
             <button key={r} onClick={() => setRange(r)} className={btn(range === r)}>{r}</button>
           ))}
         </div>
-        <div className="flex gap-1 text-xs flex-wrap items-center">
-          <button onClick={() => pick("price")} className={btn(view === "price")}>Price</button>
-          <button onClick={() => pick("years")} className={btn(view === "years")}>Years</button>
-          {avail.pe && <button onClick={() => pick("pe")} className={btn(view === "pe")}>{peLabel}</button>}
+        <div className="flex gap-1 text-xs flex-wrap items-center select-none [-webkit-touch-callout:none]" onPointerDown={tabDown} onPointerUp={stop} onPointerLeave={stop} onPointerCancel={stop} onContextMenu={tabMenu} onClick={tabClick}>
+          <button {...press("price")} className={btn(view === "price")}>Price{mark("price")}</button>
+          <button {...press("years")} className={btn(view === "years")}>Years</button>
+          {avail.pe && <button {...press("pe")} className={btn(view === "pe")}>{peLabel}{mark("pe")}</button>}
           {moreItems.length > 0 && (
             <div className="relative">
               <button onClick={() => setMoreOpen(!moreOpen)} className={btn(!!activeMore)}>
@@ -1556,9 +1660,9 @@ function ChartShell({
               {moreOpen && (
                 <div className="absolute right-0 mt-1 z-20 min-w-44 bg-[var(--card)] border border-[var(--line)] rounded-xl shadow-xl overflow-hidden">
                   {moreItems.map(([v, label]) => (
-                    <button key={v} onClick={() => pick(v)}
+                    <button key={v} {...press(v)}
                       className={`block w-full text-left px-3 py-2 ${view === v ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] font-semibold" : "text-[var(--ink2)] hover:bg-[var(--card2)]"}`}>
-                      {label}
+                      {label}{mark(v)}
                     </button>
                   ))}
                 </div>
@@ -1583,6 +1687,7 @@ function ChartShell({
           )}
         </div>
       </div>
+      {heldBar}
       {children}
     </section>
   );
