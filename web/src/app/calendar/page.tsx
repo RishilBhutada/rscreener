@@ -450,9 +450,12 @@ export default function CalendarPage() {
           </button>
         )}
         {next && (
-          <p className="text-[11px] text-[var(--ink3)]">
-            {next.updated ? `Updated ${new Date(next.updated).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" })} IST, re-checked every 3 minutes while open · ` : ""}
-            NSE event calendar read {next.generated_at ?? "—"}{past ? ` · past year ${dayLabel(past.from, true)} to ${dayLabel(past.to, true)}, prices to ${past.prices_to ? dayLabel(past.prices_to, true) : "—"}` : ""}
+          <p className="text-[11px] text-[var(--ink3)] flex items-center gap-1">
+            {next.updated ? `Updated ${new Date(next.updated).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" })}` : "Updated —"}
+            <InfoTip title="Data">
+              <p>Re-checked every 3 minutes while the page is open.</p>
+              <p>NSE event calendar read {next.generated_at ?? "—"}.{past ? ` Past year ${dayLabel(past.from, true)} to ${dayLabel(past.to, true)}, prices to ${past.prices_to ? dayLabel(past.prices_to, true) : "—"}.` : ""}</p>
+            </InfoTip>
           </p>
         )}
       </main>

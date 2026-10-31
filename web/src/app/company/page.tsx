@@ -509,7 +509,7 @@ function SegmentsTable({ segs, symbol }: { segs: { quarterly?: Segments; annual?
         {seg(what, [["rev", "Revenue"], ["ebit", "EBIT"]], setWhat as (k: never) => void, "Segment figure")}
       </div>
       <StatementTable title="Segments" kind="segments" symbol={symbol}
-        subtitle={what === "rev" ? "Revenue by segment, ₹ Crores, before inter-segment sales" : "Profit before interest and tax by segment, ₹ Crores"}
+        subtitle={what === "rev" ? "₹ Cr · before inter-segment sales" : "₹ Cr · profit before interest and tax"}
         stmt={{ periods: sg.periods, items: sg.items.map((it) => ({ label: it.name, values: what === "rev" ? it.rev : it.ebit })) }} />
     </div>
   );
@@ -525,7 +525,10 @@ function InsiderTrades({ list }: { list: [string, string, string, string, number
   const day = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
   return (
     <div className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-2">
-      <h3 className="text-[13px] font-semibold text-[var(--ink)]">Insider trades</h3>
+      <h3 className="text-[13px] font-semibold text-[var(--ink)]">
+        Insider trades
+        <InfoTip title="Insider trades" className="ml-1"><p>From NSE&apos;s insider-trading disclosures; its feed lists the latest twenty at most and can be incomplete.</p></InfoTip>
+      </h3>
       <ul className="divide-y divide-[var(--line)]">
         {shown.map((t, i) => (
           <li key={i} className="py-1.5 flex items-baseline justify-between gap-3 text-[13px]">
@@ -543,7 +546,6 @@ function InsiderTrades({ list }: { list: [string, string, string, string, number
         ))}
       </ul>
       {list.length > 5 && <button type="button" onClick={() => setAll(!all)} className="text-[13px] font-semibold text-[var(--accent-ink)]">{all ? "Fewer" : `All ${list.length}`}</button>}
-      <p className="text-[11px] text-[var(--ink3)]">From NSE&apos;s insider-trading disclosures; its feed lists the latest twenty at most and can be incomplete.</p>
     </div>
   );
 }
@@ -709,7 +711,7 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
           <h2 className="text-base font-semibold text-[var(--ink)]">{title}{info}</h2>
           <p className="text-xs text-[var(--ink3)] mt-0.5">
             {draft ? "Move rows with the arrows, then Done"
-              : `${subtitle ?? "Figures in ₹ Crores"}${!trend && showPct ? " · in brackets, change from the period before" : ""}`}
+              : `${subtitle ?? "₹ Cr"}`}
             {/* The coming quarter is a column in the grid; in the trend view it is said here. */}
             {!draft && trend && coming && ` · ${periodLabel(coming)} results ${due ? `due ${declaredLabel(due)}` : "date not out"}`}
           </p>
@@ -2344,9 +2346,9 @@ function CompanyView() {
   // "Consolidated" is not a safe default: say which one this company files, and
   // say nothing rather than guess when the basis was never recorded.
   const figuresCaption =
-    company?.basis === "standalone" ? "Standalone figures in ₹ Crores"
-    : company?.basis === "consolidated" ? "Consolidated figures in ₹ Crores"
-    : "Figures in ₹ Crores";
+    company?.basis === "standalone" ? "Standalone · ₹ Cr"
+    : company?.basis === "consolidated" ? "Consolidated · ₹ Cr"
+    : "₹ Cr";
 
   const exportCompanyXlsx = () => {
     if (!company) return;
@@ -2393,7 +2395,7 @@ function CompanyView() {
   const sa = hasSa && basisView === "standalone";
   const quarterly = withEbitda((sa && company.statements.quarterly_results_sa) || company.statements.quarterly_results || (company.trend?.quarterly ? trendToStmt(company.trend.quarterly) : null));
   const pnl = withEbitda((sa && company.statements.annual_pnl_sa) || company.statements.annual_pnl || (company.trend?.annual ? trendToStmt(company.trend.annual) : null));
-  const tableCaption = sa ? "Standalone figures in ₹ Crores" : figuresCaption;
+  const tableCaption = sa ? "Standalone · ₹ Cr" : figuresCaption;
   const basisSwitch = hasSa ? (
     <div className="flex justify-end">
       <div className="inline-flex gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs" role="radiogroup" aria-label="Figures basis">

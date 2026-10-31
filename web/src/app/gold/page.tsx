@@ -357,8 +357,8 @@ export default function GoldPage() {
                 {ev.now.c !== undefined && <Stat label="Nowcast, core m/m" value={pct(ev.now.c)} />}
               </div>
               <p className="text-[11px] text-[var(--ink3)] mt-1">
-                The Cleveland Fed&apos;s model for {new Date(`${ev.now.m}-15T00:00:00Z`).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" })},
-                as of {istDay(`${ev.now.d}T12:00:00Z`)}. A model&apos;s estimate, not the market&apos;s consensus forecast.
+                Cleveland Fed model · {new Date(`${ev.now.m}-15T00:00:00Z`).toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" })}
+                <InfoTip title="Cleveland Fed model" className="ml-1"><p>As of {istDay(`${ev.now.d}T12:00:00Z`)}. A model&apos;s estimate, not the market&apos;s consensus forecast.</p></InfoTip>
               </p>
             </div>
           )}

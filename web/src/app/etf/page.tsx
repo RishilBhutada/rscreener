@@ -229,7 +229,7 @@ function EtfView() {
         </div>
         {pctRankText(doc.prem_pct_1y) && (
           <p className="px-3 pb-3 text-sm text-[var(--ink2)]">
-            Today&apos;s premium: {pctRankText(doc.prem_pct_1y)?.toLowerCase()}
+            <span className="text-[var(--ink3)]">Premium vs 1Y</span> {pctRankText(doc.prem_pct_1y)}
           </p>
         )}
       </Card>

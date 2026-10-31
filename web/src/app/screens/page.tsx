@@ -659,8 +659,10 @@ function ScreensInner() {
             ) : (
               savedState.length === 0 ? (
                 <div className="py-14 text-center">
-                  <p className="text-[15px] text-[var(--ink2)] mb-1">No saved screens</p>
-                  <p className="text-[13px] text-[var(--ink3)]">Build one, then Save this screen below. Each night&apos;s new entries and exits show here.</p>
+                  <p className="text-[15px] text-[var(--ink2)] mb-1">
+                    No saved screens yet
+                    <InfoTip title="Saved screens" className="ml-1"><p>Build one, then Save this screen below. Each night&apos;s new entries and exits show here.</p></InfoTip>
+                  </p>
                 </div>
               ) : (
                 <ul className="divide-y divide-[var(--line)]">

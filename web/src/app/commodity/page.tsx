@@ -119,7 +119,7 @@ function Expiries({ doc, pick, onPick }: { doc: CommodityDoc; pick: string; onPi
         <tr className="text-[11px] text-[var(--ink3)]">
           <th className="w-[22%] pl-3 pr-1 py-1.5 text-left font-medium">Expiry</th>
           <th className="w-[24%] px-1 py-1.5 text-right font-medium">Price ₹</th>
-          <th className="px-1 py-1.5 text-right font-medium">vs nearest</th>
+          <th className="px-1 py-1.5 text-right font-medium">Vs nearest</th>
           {hasWorld && <th className="px-1 py-1.5 text-right font-medium">vs World</th>}
           {hasSpot && <th className="px-1 py-1.5 text-right font-medium">vs Spot</th>}
           {hasOI && <th className="pl-1 pr-3 py-1.5 text-right font-medium">OI</th>}
