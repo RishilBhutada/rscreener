@@ -191,6 +191,27 @@ function CoverageNote({ cov, bandFrom }: { cov?: Coverage | null; bandFrom?: str
 }
 
 
+/** EBITDA as companies and brokers quote it: operating profit plus other
+ *  income (= profit before tax + interest + depreciation, without one-off
+ *  exceptional items). "Operating Profit" above it leaves other income out.
+ *  Added after OPM %, with its margin on sales folded under it. */
+function withEbitda(stmt: Stmt | null): Stmt | null {
+  if (!stmt) return stmt;
+  const find = (...ls: string[]) => stmt.items.find((it) => ls.includes(it.label) && !it.parent);
+  const op = find("Operating Profit"), oi = find("Other Income"), rev = find("Revenue", "Sales");
+  if (!op || !oi || stmt.items.some((it) => it.label === "EBITDA")) return stmt;
+  const eb = op.values.map((v, i) => (v === null || v === undefined ? null : v + (oi.values[i] ?? 0)));
+  const margin = eb.map((v, i) => {
+    const r = rev?.values[i];
+    return v === null || !r ? null : Math.round((v / r) * 10000) / 100;
+  });
+  const at = stmt.items.findIndex((it) => it.label === "OPM %");
+  const pos = at >= 0 ? at + 1 : stmt.items.indexOf(op) + 1;
+  const items = [...stmt.items];
+  items.splice(pos, 0, { label: "EBITDA", values: eb }, { label: "EBITDA margin %", values: margin, parent: "EBITDA" });
+  return { ...stmt, items };
+}
+
 function trendToStmt(t: Trend): Stmt {
   const margin = t.periods.map((_, i) => {
     const r = t.revenue[i], p = t.pat[i];
@@ -2433,8 +2454,8 @@ function CompanyView() {
   // Consolidated / Standalone (the switch shows only where both are filed).
   const hasSa = !!(company.statements.quarterly_results_sa || company.statements.annual_pnl_sa);
   const sa = hasSa && basisView === "standalone";
-  const quarterly = (sa && company.statements.quarterly_results_sa) || company.statements.quarterly_results || (company.trend?.quarterly ? trendToStmt(company.trend.quarterly) : null);
-  const pnl = (sa && company.statements.annual_pnl_sa) || company.statements.annual_pnl || (company.trend?.annual ? trendToStmt(company.trend.annual) : null);
+  const quarterly = withEbitda((sa && company.statements.quarterly_results_sa) || company.statements.quarterly_results || (company.trend?.quarterly ? trendToStmt(company.trend.quarterly) : null));
+  const pnl = withEbitda((sa && company.statements.annual_pnl_sa) || company.statements.annual_pnl || (company.trend?.annual ? trendToStmt(company.trend.annual) : null));
   const tableCaption = sa ? "Standalone figures in ₹ Crores" : figuresCaption;
   const basisSwitch = hasSa ? (
     <div className="flex justify-end">
