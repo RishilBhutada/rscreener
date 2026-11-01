@@ -40,6 +40,7 @@ DATA_JSON = ROOT / "web" / "public" / "data.json"
 COMPANIES = ROOT / "web" / "public" / "companies"
 HISTORY = ROOT / "pipeline" / "scorecard_history.json"
 OUT = ROOT / "web" / "public" / "scorecard.json"
+CHECKS_OUT = ROOT / "web" / "public" / "checks.json"
 
 # A metric is only worth scoring if a reader would notice it missing. These are
 # the fields the screener and the company page actually put on screen.
@@ -144,6 +145,20 @@ def completeness(con: sqlite3.Connection, rows: list[dict]) -> dict:
     }
 
 
+# Every failed check, per company: symbol -> [[check, period end, detail]].
+# Written to web/public/checks.json so a company page can say which of its own
+# figures disagree, instead of only the universe-wide percentage.
+FAILS: dict[str, list] = {}
+
+
+def _cr(v: float) -> str:
+    return f"{v / 1e7:,.0f} Cr" if abs(v) >= 1e7 else f"{v / 1e7:,.2f} Cr"
+
+
+def _fail(sym: str, check: str, period: str, detail: str) -> None:
+    FAILS.setdefault(sym, []).append([check, period, detail])
+
+
 def correctness(con: sqlite3.Connection, rows: list[dict]) -> dict:
     """Agreement between things produced independently of each other.
 
@@ -176,6 +191,10 @@ def correctness(con: sqlite3.Connection, rows: list[dict]) -> dict:
     # the company made money. 13 opposite-sign pairs exist in the overlap and 2
     # of them were being counted as corroboration.
     agree = sum(1 for k in both if 0.8 <= (other[k] / filed[k]) <= 1.25)
+    for k in both:
+        if not 0.8 <= (other[k] / filed[k]) <= 1.25:
+            _fail(k[0], "Profit: filing vs data provider", k[1],
+                  f"filing {_cr(filed[k])}, provider {_cr(other[k])}; the page shows the filing")
     checks["Filed profit vs the data provider"] = {
         "measured": len(both), "agree": agree, "pct": pct(agree, len(both)),
         "what": "the same company-year from the NSE filing and from the market-data provider, within 25%",
@@ -205,6 +224,10 @@ def correctness(con: sqlite3.Connection, rows: list[dict]) -> dict:
     }
     rboth = list(filed_rev.keys() & prov_rev.keys())
     ragree = sum(1 for k in rboth if 0.8 <= abs(prov_rev[k] / filed_rev[k]) <= 1.25)
+    for k in rboth:
+        if not 0.8 <= abs(prov_rev[k] / filed_rev[k]) <= 1.25:
+            _fail(k[0], "Revenue: filing vs data provider", k[1],
+                  f"filing {_cr(filed_rev[k])}, provider {_cr(prov_rev[k])}; the page shows the filing")
     checks["Filed revenue vs the data provider"] = {
         "measured": len(rboth), "agree": ragree, "pct": pct(ragree, len(rboth)),
         "what": "the same company-year's revenue from the NSE filing and from the provider, within 25%",
@@ -214,6 +237,7 @@ def correctness(con: sqlite3.Connection, rows: list[dict]) -> dict:
     #    that catches a decimal in the wrong place.
     from statistics import median
     seq: dict[str, list] = {}
+    seq_pe: dict[str, list] = {}
     for s, p, v in con.execute(
         "SELECT symbol, period_end, MAX(CASE WHEN item='pat' THEN value END) "
         "FROM results_history WHERE period_type='annual' AND item='pat' "
@@ -221,6 +245,7 @@ def correctness(con: sqlite3.Connection, rows: list[dict]) -> dict:
     ):
         if v:
             seq.setdefault(s, []).append(abs(v))
+            seq_pe.setdefault(s, []).append((p, v))
     scale_n = scale_ok = 0
     for s, vals in seq.items():
         if len(vals) < 3:
@@ -238,6 +263,10 @@ def correctness(con: sqlite3.Connection, rows: list[dict]) -> dict:
             # parse error is not.
             if 0.05 <= v / med <= 20:
                 scale_ok += 1
+        for pe_, raw in seq_pe[s]:
+            if not 0.05 <= abs(raw) / med <= 20:
+                _fail(s, "Profit far from its own history", pe_,
+                      f"{_cr(raw)} against a usual {_cr(med)} - possibly a misread unit")
     checks["Filed figures against their own history"] = {
         "measured": scale_n, "agree": scale_ok, "pct": pct(scale_ok, scale_n),
         "what": "each filed year within a sane multiple of that company's own median - catches a misread unit",
@@ -283,7 +312,7 @@ def correctness(con: sqlite3.Connection, rows: list[dict]) -> dict:
     ):
         bs.setdefault((s, pe), {})[item] = float(v)
     bal_n = bal_ok = 0
-    for r in bs.values():
+    for (sym_, pe_), r in bs.items():
         ta = r.get("Total Assets")
         tl = r.get("Total Liabilities Net Minority Interest")
         eq = r.get("Total Equity Gross Minority Interest")
@@ -292,6 +321,9 @@ def correctness(con: sqlite3.Connection, rows: list[dict]) -> dict:
         bal_n += 1
         if abs((tl + eq) - ta) / abs(ta) <= 0.02:
             bal_ok += 1
+        else:
+            _fail(sym_, "Balance sheet does not balance", pe_,
+                  f"assets {_cr(ta)}, liabilities plus equity {_cr(tl + eq)}")
     if bal_n:
         checks["The balance sheet balances"] = {
             "measured": bal_n, "agree": bal_ok, "pct": pct(bal_ok, bal_n),
@@ -330,6 +362,9 @@ def correctness(con: sqlite3.Connection, rows: list[dict]) -> dict:
         q_n += 1
         if abs(sum(vals) - annual) / abs(annual) <= 0.05:
             q_ok += 1
+        else:
+            _fail(key[0], "Four quarters vs the filed year", key[1],
+                  f"revenue: year {_cr(annual)}, its quarters add to {_cr(sum(vals))}")
     if q_n:
         checks["Four filed quarters against the filed year"] = {
             "measured": q_n, "agree": q_ok, "pct": pct(q_ok, q_n),
@@ -526,6 +561,11 @@ def main() -> None:
         HISTORY.write_text(json.dumps(hist[-200:], indent=1), encoding="utf-8")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
+    # Newest first within each company; the page lists them behind an "i".
+    CHECKS_OUT.write_text(json.dumps({
+        "generated_at": stamp,
+        "fails": {k: sorted(v, key=lambda f: f[1], reverse=True) for k, v in sorted(FAILS.items())},
+    }, separators=(",", ":")), encoding="utf-8")
     OUT.write_text(json.dumps({
         "generated_at": stamp, "overall": overall, "parts": parts,
         "history": (hist or [record])[-60:],

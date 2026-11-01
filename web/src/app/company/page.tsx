@@ -161,6 +161,37 @@ function monthYear(iso?: string | null): string {
  *  quarters, so a single hole pushes the line forward a year - which is
  *  completely invisible unless the page says so.
  */
+/** The nightly checks this company's own figures failed (P8, 1-Nov-2026):
+ *  two sources that disagree, quarters that do not add up to their year, a
+ *  year far from the company's own history. Read from checks.json, written by
+ *  pipeline/scorecard.py; nothing shows when every check passed. */
+let checksCache: Promise<Record<string, [string, string, string][]>> | null = null;
+function DataChecks({ symbol }: { symbol: string }) {
+  const [fails, setFails] = useState<[string, string, string][] | null>(null);
+  useEffect(() => {
+    checksCache ??= fetch(`${BASE}/checks.json`).then((r) => (r.ok ? r.json() : { fails: {} })).then((d) => d.fails ?? {}).catch(() => ({}));
+    let live = true;
+    checksCache.then((all) => { if (live) setFails(all[symbol] ?? []); });
+    return () => { live = false; };
+  }, [symbol]);
+  if (!fails?.length) return null;
+  return (
+    <p className="mt-1 text-[11px] text-[var(--ink3)]">
+      {fails.length} figure{fails.length === 1 ? "" : "s"} failed a data check
+      <InfoTip title="Data checks" className="ml-1">
+        <p>Every night each company&apos;s figures are checked against a second source or an identity. These failed:</p>
+        <ul className="space-y-1.5">
+          {fails.slice(0, 15).map(([check, period, detail], i) => (
+            <li key={i}><strong>{monthYear(period)} · {check}</strong><br />{detail}</li>
+          ))}
+        </ul>
+        {fails.length > 15 && <p>and {fails.length - 15} more.</p>}
+        <p>Two figures that should agree do not. Often the company restated a figure later or merged a business; sometimes it is a reading error on our side. Compare with the filing before relying on it.</p>
+      </InfoTip>
+    </p>
+  );
+}
+
 function CoverageNote({ cov, bandFrom }: { cov?: Coverage | null; bandFrom?: string | null }) {
   if (!cov || !cov.from) return null;
   const gaps = cov.gaps ?? [];
@@ -2624,6 +2655,7 @@ function CompanyView() {
             {company.exchange !== "BSE" && (
               <CoverageNote cov={company.coverage} bandFrom={company.pe_band?.series?.[0]?.[0] ?? null} />
             )}
+            <DataChecks symbol={symbol} />
           </>
         ) : null}
       {/* OUTSIDE the chart block, deliberately. This explanation used to sit

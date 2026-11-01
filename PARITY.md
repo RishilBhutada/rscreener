@@ -88,8 +88,9 @@ was added and the rotations went universe-wide.)*
       quarterly old-format XBRLs are placeholders). BSE guessed endpoints 404-ish;
       NEXT: discover real BSE API paths via browser network inspection on
       bseindia.com's results page, then port the fetcher
-- [ ] QA validators: pipeline consistency checks (price×EPS≈..., series continuity)
-      flagging anomalies to a report — the data-reliability mechanism
+- [x] QA validators: scorecard.py checks every night (two sources, identities,
+      quarters vs year, own history); since 1-Nov-2026 each failure is listed per
+      company (web/public/checks.json) and shown on the company page
 - [ ] APK polish: pull-to-refresh, back-button handling (phone-app parity)
 - [ ] 10-yr balance sheet / cash flow depth
 - [ ] Weekly auto-ingest of newly filed quarters (--newer-than mode)
