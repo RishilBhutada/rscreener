@@ -96,7 +96,8 @@ was added and the rotations went universe-wide.)*
 - [ ] Weekly auto-ingest of newly filed quarters (--newer-than mode)
 
 ## After parity: "make it better" (owner's phase 2 — parked)
-- Portfolio overlap with screens ("which holdings fail my quality screen?")
+- [x] Portfolio overlap with screens - SHIPPED 1-Nov-2026: Portfolio > Screens tab
+      sorts holdings into pass / do not pass / missing a figure for each saved screen
 - CAS (CDSL monthly statement) importer
 - [x] Screen backtesting against the as-filed history we already store - SHIPPED
       1-Nov-2026 as /backtest (30 June snapshots from 2008, point-in-time, today's

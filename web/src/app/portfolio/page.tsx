@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
+import HoldingsScreens from "@/components/HoldingsScreens";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { LiteRow, loadIndex, symbolHref } from "@/lib/index-data";
 import { shortName } from "@/lib/names";
@@ -21,7 +22,7 @@ const SORT_KEY = "rs_pf_sort";
 const SORTS: [SortKey, string][] = [
   ["value", "Current value"], ["pnlpct", "P&L %"], ["pnl", "P&L ₹"], ["day", "Day change"], ["az", "A–Z"],
 ];
-type Tab = "holdings" | "allocation";
+type Tab = "holdings" | "allocation" | "screens";
 type Sheet =
   | { kind: "holding"; sym: string }
   | { kind: "add" }
@@ -280,7 +281,7 @@ export default function PortfolioPage() {
 
             {/* ── holdings | allocation ── */}
             <div className="flex items-center border-b border-[var(--line)] mb-1" role="tablist">
-              {([["holdings", `Holdings (${lines.length})`], ["allocation", "Allocation"]] as [Tab, string][]).map(([k, label]) => (
+              {([["holdings", `Holdings (${lines.length})`], ["allocation", "Allocation"], ["screens", "Screens"]] as [Tab, string][]).map(([k, label]) => (
                 <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
                   className={`px-3 pt-1 pb-2 -mb-px border-b-2 text-[14px] ${
                     tab === k ? "border-[var(--accent)] text-[var(--accent-ink)] font-semibold" : "border-transparent text-[var(--ink2)]"}`}>
@@ -318,6 +319,10 @@ export default function PortfolioPage() {
                   </li>
                 ))}
               </ul>
+            )}
+
+            {tab === "screens" && (
+              <HoldingsScreens symbols={lines.map((l) => l.symbol)} nameOf={(s) => lines.find((l) => l.symbol === s)?.name ?? s} />
             )}
 
             {tab === "allocation" && (
