@@ -15,6 +15,7 @@ import { loadIndex } from "@/lib/index-data";
 import { levelsOf, SENS, type Levels, type Sens } from "@/lib/levels";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { useBackClose } from "@/lib/backclose";
+import { readPick, writePick } from "@/lib/chartpick";
 import {
   workingFor, growth, growthText, PE_WINDOWS, CA_LABEL, CA_ORDER, Q_LABEL,
   type ChartBand, type ChartTrendQ, type Quarter, type CorpAction, type Growth, type Working,
@@ -52,11 +53,14 @@ type Company = {
   coverage?: { quarters: number; from?: string | null; gaps?: string[]; gap_count?: number } | null;
 };
 
-type View = "price" | "pe" | "sales" | "ev" | "pb" | "ps";
+type View = "price" | "pe" | "sales" | "ebitda" | "ev" | "pb" | "ps";
 const VIEWS: [View, string][] = [
-  ["price", "Price"], ["pe", "PE"], ["sales", "Sales & margin"],
+  ["price", "Price"], ["pe", "PE"], ["sales", "Sales & margin"], ["ebitda", "EBITDA"],
   ["ev", "EV / EBITDA"], ["pb", "Price / Book"], ["ps", "MCap / Sales"],
 ];
+const VIEW_LABEL = Object.fromEntries(VIEWS) as Record<View, string>;
+/** Lines that start switched off: the margin under EBITDA, as on the company chart. */
+const DEF_OFF = new Set(["ebitda:ebitda_m", "ov:ebitda:ebitda_m"]);
 type Interval = "d" | "w" | "m";
 type Range = "1M" | "3M" | "6M" | "YTD" | "1Y" | "2Y" | "3Y" | "5Y" | "10Y" | "MAX";
 type Kind = "candles" | "hollow" | "bars" | "heikin" | "line" | "area";
@@ -105,6 +109,7 @@ const LAYERS: Record<Exclude<View, "price">, [string, string][]> = {
   pb: [["line", "Price / Book"], ["median", "Median P/B"], ["bars", "Book value"]],
   ps: [["line", "Market cap / Sales"], ["median", "Median MCap / Sales"], ["bars", "Sales (TTM)"]],
   sales: [["sales", "Quarter sales"], ["gpm", "GPM %"], ["opm", "OPM %"], ["npm", "NPM %"]],
+  ebitda: [["eb_price", "Price"], ["eb_ttm", "EBITDA, last 4 quarters"], ["ebitda", "Quarter EBITDA"], ["eb_eps", "Quarter EPS"], ["ebitda_m", "EBITDA margin %"]],
 };
 
 /* ── Arithmetic ─────────────────────────────────────────────────────────── */
@@ -310,7 +315,9 @@ class EventLines implements ISeriesPrimitive<Time> {
  *  drawn by hand over a hidden copy of the series, which still sets the axis
  *  and answers the crosshair. The chart spaces its data points evenly, so a day
  *  that falls between two points is placed in proportion between them. */
-type PBar = { from: number; to: number; v: number; color: string; label?: string; labelColor?: string };
+/** `pair` and `row`: twin bars (EBITDA and EPS sharing a quarter) - the
+ *  labels of one quarter stand stacked over the taller of its two bars. */
+type PBar = { from: number; to: number; v: number; color: string; label?: string; labelColor?: string; outline?: boolean; pair?: number; row?: number };
 
 class PeriodBars implements ISeriesPrimitive<Time> {
   private chart: SeriesAttachedParameter<Time>["chart"] | null = null;
@@ -319,9 +326,11 @@ class PeriodBars implements ISeriesPrimitive<Time> {
   private readonly bars: PBar[];
   private readonly days: number[];
   private readonly font: string;
+  /** Labels drawn by a PairLabels layer instead, over both series. */
+  private readonly paired: boolean;
 
-  constructor(bars: PBar[], days: number[], font: string) {
-    this.bars = bars; this.days = days; this.font = font;
+  constructor(bars: PBar[], days: number[], font: string, paired = false) {
+    this.bars = bars; this.days = days; this.font = font; this.paired = paired;
     this.view = {
       zOrder: () => "normal",
       renderer: () => ({ draw: (target) => target.useMediaCoordinateSpace(({ context, mediaSize }) => this.draw(context, mediaSize.width)) }),
@@ -363,9 +372,19 @@ class PeriodBars implements ISeriesPrimitive<Time> {
     for (const r of rects) {
       // A pixel's gap where one quarter meets the next.
       const left = Math.round(r.x0) + 1, right = Math.round(r.x1);
-      ctx.fillStyle = r.b.color;
-      ctx.fillRect(left, Math.min(r.y, y0), Math.max(1, right - left), Math.max(1, Math.abs(y0 - r.y)));
+      const w = Math.max(1, right - left), h = Math.max(1, Math.abs(y0 - r.y)), top = Math.min(r.y, y0);
+      if (r.b.outline) {
+        ctx.fillStyle = alpha(r.b.color, 0.35);
+        ctx.fillRect(left, top, w, h);
+        ctx.strokeStyle = r.b.color;
+        ctx.lineWidth = 1.2;
+        ctx.strokeRect(left + 0.6, top + 0.6, Math.max(0, w - 1.2), Math.max(0, h - 1.2));
+      } else {
+        ctx.fillStyle = r.b.color;
+        ctx.fillRect(left, top, w, h);
+      }
     }
+    if (this.paired) return;
     // Growth labels all or none, as on the company chart: only when every
     // block on screen has room for one, so a thinned row never reads as
     // missing data.
@@ -382,6 +401,63 @@ class PeriodBars implements ISeriesPrimitive<Time> {
       }
       ctx.restore();
     }
+  }
+}
+
+/** Growth labels for twin bars: per quarter, EBITDA's change with EPS's above
+ *  it, both over the taller bar. All or none, as everywhere: drawn only when
+ *  every quarter on screen is wider than the widest label. */
+type PairLabel = { from: number; to: number; tops: { v: number; series: 0 | 1 }[]; rows: { text: string; color: string }[] };
+class PairLabels implements ISeriesPrimitive<Time> {
+  private chart: SeriesAttachedParameter<Time>["chart"] | null = null;
+  private readonly view: IPrimitivePaneView;
+  constructor(private readonly items: PairLabel[], private readonly days: number[], private readonly font: string,
+    private readonly scales: [ISeriesApi<SeriesType>, ISeriesApi<SeriesType> | null]) {
+    this.view = {
+      zOrder: () => "top",
+      renderer: () => ({ draw: (target) => target.useMediaCoordinateSpace(({ context, mediaSize }) => this.draw(context, mediaSize.width)) }),
+    };
+  }
+  attached(param: SeriesAttachedParameter<Time>) { this.chart = param.chart; }
+  detached() { this.chart = null; }
+  paneViews() { return [this.view]; }
+  private xAt(day: number): number | null {
+    const ts = this.chart!.timeScale(), d = this.days;
+    if (!d.length) return null;
+    const i = day < d[0] ? 0 : atOrBefore(d, day);
+    const xi = ts.timeToCoordinate(toTime(d[i]));
+    if (xi === null || i + 1 >= d.length) return xi;
+    const xj = ts.timeToCoordinate(toTime(d[i + 1]));
+    return xj === null ? xi : xi + ((day - d[i]) / (d[i + 1] - d[i])) * (xj - xi);
+  }
+  private draw(ctx: Ctx, width: number) {
+    if (!this.chart) return;
+    ctx.save();
+    ctx.font = `600 10px ${this.font}`;
+    const placed: { x: number; y: number; rows: PairLabel["rows"]; w: number }[] = [];
+    let widest = 0;
+    for (const it of this.items) {
+      const x0 = this.xAt(it.from), x1 = this.xAt(it.to);
+      if (x0 === null || x1 === null || x1 < 0 || x0 > width) continue;
+      let top = Infinity;
+      for (const t of it.tops) {
+        const s = this.scales[t.series];
+        if (!s) continue;
+        const y = s.priceToCoordinate(Math.max(0, t.v)), z = s.priceToCoordinate(0);
+        if (y !== null) top = Math.min(top, y, z ?? y);
+      }
+      if (!Number.isFinite(top)) continue;
+      for (const r of it.rows) widest = Math.max(widest, ctx.measureText(r.text).width);
+      placed.push({ x: (x0 + x1) / 2, y: top, rows: it.rows, w: x1 - x0 });
+    }
+    if (placed.length && placed.every((p) => p.w >= widest + 4)) {
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      for (const p of placed) {
+        p.rows.forEach((r, k) => { ctx.fillStyle = r.color; ctx.fillText(r.text, p.x, p.y - 3 - k * 12); });
+      }
+    }
+    ctx.restore();
   }
 }
 
@@ -709,8 +785,15 @@ export default function FullChart({ symbol }: { symbol: string }) {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [index, setIndex] = useState<{ symbol: string; name: string; mcap: number }[]>([]);
-  const [view, setView] = useState<View>("price");
-  const [range, setRange] = useState<Range>("1Y");
+  // What the reader picked on this company's chart - here or on the company
+  // page - opens as it was left (lib/chartpick.ts).
+  const [pick0] = useState(() => readPick(symbol));
+  const [view, setView] = useState<View>(() => (VIEWS.some(([v]) => v === pick0?.view) ? pick0!.view as View : "price"));
+  const [range, setRange] = useState<Range>(() => (RANGES.includes(pick0?.range as Range) ? pick0!.range as Range : "1Y"));
+  // Views laid over the one on screen (hold a view's name), each on its own scale.
+  const [overlays, setOverlays] = useState<View[]>(() => (pick0?.overlays ?? []).filter((v) => VIEWS.some(([x]) => x === v)) as View[]);
+  const [held, setHeld] = useState<View | null>(null);
+  const viewTouched = useRef(false);
   const [interval, setIv] = useState<Interval>("d");
   const [prefs, setPrefs] = useState<Prefs>({ kind: "candles", inds: ["vol", "dma50", "dma200"], log: false, lv: LV_DEFAULT });
   // The levels on screen, for the legend's one-line summary.
@@ -722,24 +805,36 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [full, setFull] = useState(false);
   const [canFull, setCanFull] = useState(false);
   // The company chart's own switches, same defaults.
-  const [peWin, setPeWin] = useState("ttm");
+  const [peWin, setPeWin] = useState(() => pick0?.win ?? "ttm");
   /** EPS under the P/E line, or sales per share under the Price / Sales line -
    *  the company chart's switch (StockChart.tsx); the line follows the bars. */
-  const [perShare, setPerShare] = useState<"eps" | "sps">("eps");
+  const [perShare, setPerShare] = useState<"eps" | "sps">(() => pick0?.per ?? "eps");
   // Events are on by default in the full view - the owner chose to see them.
   const [showDates, setShowDates] = useState(true);
-  const [showChg, setShowChg] = useState(true);
-  const [epsCmp, setEpsCmp] = useState<"yoy" | "prev">("yoy");
+  const [showChg, setShowChg] = useState(() => pick0?.chg ?? true);
+  const [epsCmp, setEpsCmp] = useState<"yoy" | "prev">(() => pick0?.cmp ?? "yoy");
   const [showCA, setShowCA] = useState(true);
   const [evPop, setEvPop] = useState<{ title: string; items: { text: string; sub?: string; color: string }[] } | null>(null);
   const [caOn, setCaOn] = useState<Record<string, boolean>>({ dividend: true, bonus: true, split: true, rights: true, buyback: true, other: true });
-  const [hidden, setHidden] = useState<Record<string, boolean>>({});
+  // Kept in the saved picks' words ("pe:line", "ov:ebitda:eb_ttm"); lines the
+  // full chart does not draw (the company chart's averages) ride along so
+  // they come back as they were.
+  const [hidden, setHidden] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(Object.entries(pick0?.vis ?? {}).map(([k, on]) => [k, !on])));
   const [cmps, setCmps] = useState<Cmp[]>([]);
   const [cmpErr, setCmpErr] = useState<string | null>(null);
   const [cmpQ, setCmpQ] = useState("");
   const [vis, setVis] = useState<{ from: number; to: number } | null>(null);
 
   useEffect(() => { setPrefs(loadPrefs()); }, []);
+  // Every change is written back, so the company chart opens as this was left.
+  useEffect(() => {
+    if (!symbol) return;
+    const vis = Object.fromEntries(Object.entries(hidden).map(([k, h]) => [k, !h]));
+    // The company chart's Years view has no twin here; left untouched it stays Years there.
+    const v = view === "price" && pick0?.view === "years" && !viewTouched.current ? "years" : view;
+    writePick(symbol, { view: v, range, overlays, vis, win: peWin, cmp: epsCmp, per: perShare, chg: showChg });
+  }, [symbol, view, range, overlays, hidden, peWin, epsCmp, perShare, showChg, pick0]);
   const savePrefs = (p: Prefs) => {
     setPrefs(p);
     try { localStorage.setItem(PREF_KEY, JSON.stringify(p)); } catch { /* private mode */ }
@@ -785,6 +880,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
     if (cmps.some((c) => c.sym === sym)) { setCmps(cmps.filter((c) => c.sym !== sym)); setCmpErr(null); return; }
     if (cmps.length >= MAX_CMP) { setCmpErr(`Up to ${MAX_CMP} at once - take one off first`); return; }
     setCmpErr(null);
+    setOverlays([]);
     Promise.all([
       fetch(`${BASE}/charts/${encodeURIComponent(sym)}.json`).then((r) => (r.ok ? r.json() : null)),
       sym.startsWith("IDX-") ? Promise.resolve(null)
@@ -812,6 +908,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const spsOn = view === "pe" && perShare === "sps" && spsAvail;
   const avail: Record<View, boolean> = {
     price: true, pe: !!company?.pe_band, sales: !!tq?.periods?.length,
+    ebitda: !!tq?.ebitda?.some((v) => v !== null && v !== undefined),
     ev: !!company?.ev_band, pb: !!company?.pb_band, ps: !!company?.ps_band,
   };
 
@@ -829,6 +926,9 @@ export default function FullChart({ symbol }: { symbol: string }) {
   };
   const pickView = (v: View) => {
     setView(v);
+    viewTouched.current = true;
+    // A tap on a view switches to it alone; holding one lays it over.
+    if (overlays.length) setOverlays([]);
     kept.current = null;
     // Valuation series are monthly and start years back; a daily window of a
     // monthly line is three points. Open them on five years, as the company
@@ -837,7 +937,26 @@ export default function FullChart({ symbol }: { symbol: string }) {
   };
 
 
-  const isHidden = (k: string) => !!hidden[`${view}:${k}`];
+  const hid = (key: string) => hidden[key] ?? DEF_OFF.has(key);
+  const isHidden = (k: string) => hid(`${view}:${k}`);
+
+  // Hold a view's name (or right-click it) to lay it over the chart on screen;
+  // tap to switch. The company chart's gesture, the same way.
+  const holdTimer = useRef<number | null>(null);
+  const firedAt = useRef(0), downAt = useRef(0);
+  const stopHold = () => { if (holdTimer.current) { clearTimeout(holdTimer.current); holdTimer.current = null; } };
+  const viewOf = (e: React.SyntheticEvent) => (e.target as HTMLElement).closest<HTMLElement>("[data-view]")?.dataset.view as View | undefined;
+  const tabDown = (e: React.PointerEvent) => {
+    const v = viewOf(e);
+    stopHold(); downAt.current = Date.now();
+    if (v) holdTimer.current = window.setTimeout(() => { firedAt.current = Date.now(); holdTimer.current = null; setHeld(v); }, 480);
+  };
+  const tabMenu = (e: React.MouseEvent) => { const v = viewOf(e); if (v) { e.preventDefault(); stopHold(); firedAt.current = Date.now(); setHeld(v); } };
+  const tabClick = (e: React.MouseEvent) => {
+    const v = viewOf(e);
+    if (!v || firedAt.current >= downAt.current) return; // the click that ends a hold
+    setHeld(null); pickView(v);
+  };
 
   /* Build the chart. Rebuilt whole on any change; the window you were looking
      at is carried across so switching a layer does not lose your zoom. */
@@ -1083,6 +1202,110 @@ export default function FullChart({ symbol }: { symbol: string }) {
         if (!isHidden("npm") && n[i] != null) items.push({ label: "NPM", value: `${(n[i] as number).toFixed(1)}%`, color: p.npm });
         return { date: `Quarter ended ${dateOf(qd[i], "month")}`, items };
       };
+    } else if (view === "ebitda") {
+      // The company chart's EBITDA view (owner's pick B, 1-Nov-2026): price and
+      // EBITDA over the last four quarters on top, each quarter's EBITDA and
+      // EPS as bars in its fiscal-quarter colour underneath, side by side when
+      // both are on, each on its own scale, the change over each quarter.
+      if (!tq?.ebitda) { chart.remove(); chartRef.current = null; return; }
+      keyWin = "ebitda";
+      const qd = tq.periods.map(dayOf);
+      const eb = tq.ebitda.map((v, i) => (v === null || v === undefined ? null : v + (tq.other_income?.[i] ?? 0)));
+      const rows = file.w?.length ? file.w : file.d?.length ? file.d : file.m ?? [];
+      if (!rows.length) { chart.remove(); chartRef.current = null; return; }
+      const pdays = rows.map((r) => r[0]);
+      const pr = chart.addSeries(LineSeries, {
+        color: p.accent, lineWidth: 2, priceFormat: fmt(axis), priceLineVisible: false, lastValueVisible: true, visible: !isHidden("eb_price"),
+      });
+      pr.setData(rows.map((r) => ({ time: toTime(r[0]), value: r[4] })));
+      const ttm4 = qd.map((_, i) => {
+        if (i < 3) return null;
+        const w = eb.slice(i - 3, i + 1);
+        return w.every((x) => x !== null && x !== undefined) ? (w as number[]).reduce((a, b) => a + b, 0) : null;
+      });
+      const own = (id: string, color: string, vals: (number | null)[], f: (x: number) => string, on: boolean, curved = false) => {
+        const sr = chart.addSeries(LineSeries, {
+          color, lineWidth: 2, priceScaleId: id, lineType: curved ? LineType.Curved : LineType.Simple, priceFormat: fmt(f),
+          priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, visible: on,
+        });
+        sr.setData(pts(qd, vals));
+        chart.priceScale(id).applyOptions({ visible: false, scaleMargins: { top: 0.12, bottom: 0.12 } });
+      };
+      own("eb_ttm", p.alt, ttm4, crore, !isHidden("eb_ttm"));
+      const marg = qd.map((_, i) => { const v = eb[i], r = tq.revenue[i]; return v === null || !r ? null : Math.round((v / r) * 1000) / 10; });
+      own("eb_m", p.dma50, marg, (x) => `${x.toFixed(1)}%`, !isHidden("ebitda_m"), true);
+      // Each quarter's own figure, its fiscal quarter, and its change on the
+      // same quarter a year earlier or the one before, found by date.
+      const ym = (iso: string) => Number(iso.slice(0, 4)) * 12 + Number(iso.slice(5, 7));
+      const qOf = (end: string) => {
+        const mo = Number(end.slice(5, 7));
+        return company?.quarters?.find((x) => x.end === end)?.q ?? ({ 6: 1, 9: 2, 12: 3, 3: 4 } as Record<number, number>)[mo] ?? Math.floor((mo - 1) / 3) + 1;
+      };
+      const back = epsCmp === "yoy" ? 12 : 3;
+      const qbars = (arr: (number | null)[]) => {
+        const at = new Map<number, number>();
+        const out: (Bar & { i: number })[] = [];
+        tq.periods.forEach((end, i) => {
+          const v = arr[i];
+          if (v === null || v === undefined) return;
+          at.set(ym(end), v);
+          out.push({ day: qd[i], v, q: qOf(end), chg: growth(v, at.get(ym(end) - back)), i });
+        });
+        return out;
+      };
+      const ebB = qbars(eb), epB = qbars(tq.eps);
+      const showEb = !isHidden("ebitda") && ebB.length > 0, showEp = !isHidden("eb_eps") && epB.length > 0;
+      const twin = showEb && showEp;
+      const allDays = [...new Set([...pdays, ...qd])].sort((a, b) => a - b);
+      const spanOf = (b: Bar) => { const k = qd.indexOf(b.day); return k > 0 && b.day - qd[k - 1] < 120 ? qd[k - 1] : b.day - 91; };
+      const barSeries = (list: (Bar & { i: number })[], id: string, half: 0 | 1 | null, f: (x: number) => string) => {
+        const bs = chart.addSeries(HistogramSeries, { priceScaleId: id, priceLineVisible: false, lastValueVisible: false, priceFormat: fmt(f) }, 1);
+        bs.setData(list.map((b) => ({ time: toTime(b.day), value: b.v, color: "rgba(0, 0, 0, 0)" })));
+        chart.priceScale(id, 1).applyOptions({ scaleMargins: { top: twin ? 0.3 : 0.18, bottom: 0 }, ...(id === "right" ? {} : { visible: false }) });
+        bs.attachPrimitive(new PeriodBars(list.map((b) => {
+          const from = spanOf(b), mid = (from + b.day) / 2;
+          return {
+            from: half === 1 ? mid : from, to: half === 0 ? mid : b.day, v: b.v,
+            color: alpha(b.q ? p.q[b.q] ?? p.vol : p.vol, b.v < 0 ? 0.55 : 0.85), outline: half === 1,
+            label: !twin && showChg && b.chg && b.chg.kind !== "none" ? growthText(b.chg) : undefined,
+            labelColor: growthCol(b.chg, p),
+          };
+        }), allDays, p.font, twin));
+        return bs;
+      };
+      const ebS = showEb ? barSeries(ebB, "right", twin ? 0 : null, (x) => Math.round(x).toLocaleString("en-IN")) : null;
+      const epS = showEp ? barSeries(epB, ebS ? "eb_eps" : "right", twin ? 1 : null, ratio) : null;
+      if (twin && showChg && ebS && epS) {
+        const byDay = new Map(epB.map((b) => [b.day, b]));
+        ebS.attachPrimitive(new PairLabels(ebB.map((b) => {
+          const e = byDay.get(b.day);
+          const rows: { text: string; color: string }[] = [];
+          rows.push({ text: b.chg && b.chg.kind !== "none" ? growthText(b.chg) : "", color: growthCol(b.chg, p) });
+          if (e) rows.push({ text: e.chg && e.chg.kind !== "none" ? growthText(e.chg) : "", color: growthCol(e.chg, p) });
+          return { from: spanOf(b), to: b.day, tops: [{ v: b.v, series: 0 }, ...(e ? [{ v: e.v, series: 1 as const }] : [])], rows };
+        }), allDays, p.font, [ebS, epS]));
+      }
+      if (showEb || showEp) {
+        chart.panes()[0]?.setStretchFactor(3);
+        chart.panes()[1]?.setStretchFactor(1.6);
+      }
+      anchor = pr; anchorDays = pdays;
+      legendAt = (day) => {
+        const i = day === null ? rows.length - 1 : atOrBefore(pdays, day);
+        const d = pdays[i];
+        const items: LItem[] = [];
+        if (!isHidden("eb_price")) items.push({ label: "Price", value: `₹${price(rows[i][4])}`, color: p.accent });
+        const j = qd[0] <= d ? atOrBefore(qd, d) : -1;
+        if (j >= 0) {
+          const g = (c?: Growth) => (c && c.kind !== "none" ? ` ${growthText(c)}` : "");
+          if (!isHidden("eb_ttm") && ttm4[j] !== null) items.push({ label: "EBITDA (4Q)", value: crore(ttm4[j] as number), color: p.alt });
+          const be = ebB.find((b) => b.i === j), bp = epB.find((b) => b.i === j);
+          if (showEb && be) items.push({ label: "Q EBITDA", value: crore(be.v) + g(be.chg), color: growthCol(be.chg, p) });
+          if (showEp && bp) items.push({ label: "Q EPS", value: `₹${price(bp.v)}${g(bp.chg)}`, color: growthCol(bp.chg, p) });
+          if (!isHidden("ebitda_m") && marg[j] !== null) items.push({ label: "Margin", value: `${(marg[j] as number).toFixed(1)}%`, color: p.dma50 });
+        }
+        return { date: dateOf(d), tag: j >= 0 ? `Quarter to ${dateOf(qd[j], "month")}` : undefined, items };
+      };
     } else {
       // A valuation band: the ratio, its five-year median, and the figure it
       // is a multiple of in its own pane underneath - the company chart's
@@ -1092,7 +1315,9 @@ export default function FullChart({ symbol }: { symbol: string }) {
       keyWin = `${view}:${peWin}:${spsOn ? "sps" : "eps"}`;
       let series = band0.series;
       let median = band0.median_5y;
-      if (view === "pe" && !spsOn && peWin !== "ttm" && band0.alt?.[peWin]) {
+      // Latest quarter x4 - for earnings, and for sales since 1-Nov-2026.
+      const q1w = view === "pe" && peWin === "q1" && !!band0.alt?.q1;
+      if (view === "pe" && peWin !== "ttm" && band0.alt?.[peWin]) {
         const alt = band0.alt[peWin];
         series = band0.series.map((q, i) => [q[0], alt[i]] as [string, number | null])
           .filter((q): q is [string, number] => q[1] !== null && q[1] !== undefined);
@@ -1140,7 +1365,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
           }
         };
         if (view === "pe") {
-          const nQ = !spsOn && peWin === "q1" ? 1 : 4, mult = !spsOn && peWin === "q1" ? 4 : 1;
+          const nQ = q1w ? 1 : 4, mult = q1w ? 4 : 1;
           const src = spsOn ? tq.sps ?? [] : tq.eps;
           for (let i = nQ - 1; i < periods.length; i++) {
             const w = src.slice(i - nQ + 1, i + 1);
@@ -1155,7 +1380,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
           // changes when you zoom.
           const back = epsCmp === "yoy" ? 4 : 1;
           bars.forEach((b, i) => { b.chg = i >= back ? growth(b.v, bars[i - back].v) : { kind: "none" }; });
-          barLabel = spsOn ? "SPS (4Q)" : peWin === "ttm" ? "EPS (4Q)" : "EPS (1Q×4)";
+          barLabel = spsOn ? (q1w ? "SPS (1Q×4)" : "SPS (4Q)") : q1w ? "EPS (1Q×4)" : "EPS (4Q)";
         } else if (view === "ev") { ttm(tq.ebitda); barLabel = "EBITDA (TTM)"; barFmt = crore; }
         else if (view === "ps") { ttm(tq.revenue); barLabel = "Sales (TTM)"; barFmt = crore; }
         else {
@@ -1192,7 +1417,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
       legendAt = (day) => {
         const i = day === null ? bd.length - 1 : atOrBefore(bd, day);
         const items: LItem[] = [];
-        if (!isHidden("line")) items.push({ label: spsOn ? "Price/Sales" : names[view] + (view === "pe" && peWin !== "ttm" ? " (1Q×4)" : ""), value: ratio(bv[i]), color: p.accent });
+        if (!isHidden("line")) items.push({ label: (spsOn ? "Price/Sales" : names[view]) + (q1w ? " (1Q×4)" : ""), value: ratio(bv[i]), color: p.accent });
         if (!isHidden("median") && median !== null && median !== undefined) items.push({ label: "Median", value: ratio(median) });
         if (bars.length && !isHidden("bars")) {
           const j = atOrBefore(barDays, bd[i]);
@@ -1207,9 +1432,75 @@ export default function FullChart({ symbol }: { symbol: string }) {
         }
         // The breakdown behind the ratio, on the trailing basis it was filed on.
         // A 1Q×4 figure has no such breakdown, so none is offered for it.
-        const idx0 = view === "pe" && !spsOn && peWin !== "ttm" ? -1 : band0.series.findIndex((q) => dayOf(q[0]) === bd[i]);
-        const working = idx0 >= 0 ? workingFor(spsOn ? "ps" : view, band0, idx0, company?.quarters) : null;
+        const idx0 = band0.series.findIndex((q) => dayOf(q[0]) === bd[i]);
+        const working = idx0 >= 0 ? workingFor(spsOn ? "ps" : view, band0, idx0, company?.quarters, q1w ? peWin : "ttm") : null;
         return { date: dateOf(bd[i], "month"), items, working };
+      };
+    }
+
+    // Overlays: another view's lines over this one, each on a scale of its own
+    // (unlabelled; the legend carries the figures). A comparison and overlays
+    // exclude each other, as on the company chart.
+    const ovLines: { label: string; days: number[]; vals: (number | null)[]; f: (x: number) => string; color: string }[] = [];
+    if (anchor && !cmps.length) {
+      const usedCol = new Set<string>(view === "price" ? [p.dma50, p.dma200] : view === "sales" ? [p.gpm, p.opm, p.npm] : view === "ebitda" ? [p.alt, p.dma50] : []);
+      const palette2 = [p.alt, "#d946ef", "#14b8a6", "#a16207", p.dma200, p.dma50].filter((c) => !usedCol.has(c));
+      let ci = 0;
+      const bandOf = (v: View) => ({ pe: company?.pe_band, ev: company?.ev_band, pb: company?.pb_band, ps: company?.ps_band } as Record<string, ChartBand | undefined>)[v];
+      for (const ov of overlays) {
+        if (ov === view) continue;
+        const lines: { k: string; label: string; days: number[]; vals: (number | null)[]; f: (x: number) => string; scale: string; curved?: boolean }[] = [];
+        if (ov === "price") {
+          const rs = file.w?.length ? file.w : file.d?.length ? file.d : file.m ?? [];
+          lines.push({ k: "price", label: "Price", days: rs.map((r) => r[0]), vals: rs.map((r) => r[4]), f: (x) => `₹${price(x)}`, scale: "p" });
+        } else if (ov === "sales" || ov === "ebitda") {
+          if (tq) {
+            const qd = tq.periods.map(dayOf);
+            if (ov === "sales") {
+              for (const [k, label] of [["gpm", "GPM"], ["opm", "OPM"], ["npm", "NPM"]] as const) {
+                lines.push({ k, label, days: qd, vals: tq[k] ?? [], f: (x) => `${x.toFixed(1)}%`, scale: "pct", curved: true });
+              }
+            } else if (tq.ebitda) {
+              const eb = tq.ebitda.map((v, i) => (v === null || v === undefined ? null : v + (tq.other_income?.[i] ?? 0)));
+              const t4 = qd.map((_, i) => {
+                const w = i >= 3 ? eb.slice(i - 3, i + 1) : [];
+                return w.length === 4 && w.every((x) => x !== null && x !== undefined) ? (w as number[]).reduce((a, b) => a + b, 0) : null;
+              });
+              lines.push({ k: "eb_ttm", label: "EBITDA (4Q)", days: qd, vals: t4, f: crore, scale: "t" });
+              lines.push({ k: "ebitda_m", label: "EBITDA margin", days: qd, vals: eb.map((v, i) => (v === null || !tq.revenue[i] ? null : (v / (tq.revenue[i] as number)) * 100)), f: (x) => `${x.toFixed(1)}%`, scale: "m", curved: true });
+            }
+          }
+        } else {
+          const b = bandOf(ov);
+          if (b) lines.push({ k: "line", label: VIEW_LABEL[ov], days: b.series.map((q) => dayOf(q[0])), vals: b.series.map((q) => q[1]), f: ratio, scale: "r" });
+        }
+        for (const ln of lines) {
+          if (hid(`ov:${ov}:${ln.k}`)) continue;
+          const color = palette2[ci++ % palette2.length];
+          const id = `ov_${ov}_${ln.scale}`;
+          const sr = chart.addSeries(LineSeries, {
+            color, lineWidth: 2, priceScaleId: id, lineType: ln.curved ? LineType.Curved : LineType.Simple, priceFormat: fmt(ln.f),
+            priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+          });
+          sr.setData(pts(ln.days, ln.vals));
+          chart.priceScale(id).applyOptions({ visible: false, scaleMargins: { top: 0.12, bottom: 0.14 } });
+          ovLines.push({ label: ln.label, days: ln.days, vals: ln.vals, f: ln.f, color });
+        }
+      }
+    }
+    if (ovLines.length) {
+      const base = legendAt;
+      legendAt = (day) => {
+        const d = base(day);
+        if (!d) return d;
+        const at = day ?? anchorDays[anchorDays.length - 1];
+        const extra: LItem[] = [];
+        for (const o of ovLines) {
+          if (!o.days.length || o.days[0] > at) continue;
+          const x = o.vals[atOrBefore(o.days, at)];
+          if (x !== null && x !== undefined) extra.push({ label: o.label, value: o.f(x), color: o.color });
+        }
+        return { ...d, items: [...d.items, ...extra] };
       };
     }
 
@@ -1379,7 +1670,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
     };
     // `range` is applied below without a rebuild.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, company, view, interval, prefs, peWin, showDates, showChg, epsCmp, showCA, caOn, hidden, cmps, themeKey, symbol, etfDoc, spsOn]);
+  }, [file, company, view, interval, prefs, peWin, showDates, showChg, epsCmp, showCA, caOn, hidden, cmps, themeKey, symbol, etfDoc, spsOn, overlays]);
 
   const applyRange = () => {
     const chart = chartRef.current, sp = spanRef.current;
@@ -1422,7 +1713,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
   // Ratio lines start where four consecutive filed quarters first exist, often
   // years after the price. Said, so a short line is not read as a young company.
   const ratioNote = (() => {
-    if (view === "price" || view === "sales") return null;
+    if (view === "price" || view === "sales" || view === "ebitda") return null;
     const band = view === "pe" ? company?.pe_band : view === "ev" ? company?.ev_band : view === "pb" ? company?.pb_band : company?.ps_band;
     const start = band?.series?.[0]?.[0];
     const priceStart = file?.m?.[0]?.[0];
@@ -1532,9 +1823,12 @@ export default function FullChart({ symbol }: { symbol: string }) {
       </header>
 
       {/* What the chart shows: price, or one of the valuation views. */}
-      <nav className="shrink-0 flex items-center gap-0.5 overflow-x-auto px-2 py-1 border-b border-[var(--line)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <nav className="shrink-0 flex items-center gap-0.5 overflow-x-auto px-2 py-1 border-b border-[var(--line)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [-webkit-touch-callout:none]"
+        onPointerDown={tabDown} onPointerUp={stopHold} onPointerLeave={stopHold} onPointerCancel={stopHold} onContextMenu={tabMenu} onClick={tabClick}>
         {VIEWS.filter(([v]) => avail[v]).map(([v, label]) => (
-          <button key={v} onClick={() => pickView(v)} className={`${pill(view === v)} whitespace-nowrap`}>{label}</button>
+          <button key={v} data-view={v} className={`${pill(view === v)} whitespace-nowrap`}>
+            {label}{overlays.includes(v) && <span className="ml-0.5 text-[var(--accent)]" aria-label="overlaid">+</span>}
+          </button>
         ))}
         {cmps.length > 0 && (
           <span className="ml-auto shrink-0 inline-flex items-center gap-1 pl-2 text-xs text-[var(--ink3)] whitespace-nowrap">
@@ -1552,6 +1846,18 @@ export default function FullChart({ symbol }: { symbol: string }) {
           </span>
         )}
       </nav>
+
+      {held && (
+        <div className="shrink-0 flex items-center gap-2 flex-wrap px-3 py-1.5 border-b border-[var(--line)] bg-[var(--card2)] text-xs">
+          {held === view ? <span className="text-[var(--ink2)]">{VIEW_LABEL[held]} is the chart on screen.</span>
+            : overlays.includes(held)
+              ? <button onClick={() => { setOverlays(overlays.filter((o) => o !== held)); setHeld(null); }}
+                  className="rounded-md bg-[var(--card)] border border-[var(--line)] px-2.5 py-1 font-semibold text-[var(--ink)]">Remove {VIEW_LABEL[held]} overlay</button>
+              : <button onClick={() => { setOverlays([...overlays, held]); setCmps([]); setHeld(null); }}
+                  className="rounded-md bg-[var(--accent)] px-2.5 py-1 font-semibold text-white">Overlay {VIEW_LABEL[held]} on {VIEW_LABEL[view]}</button>}
+          <button onClick={() => setHeld(null)} className="ml-auto px-2 py-1 text-[var(--ink3)]">Cancel</button>
+        </div>
+      )}
 
       <div className="relative flex-1 min-h-0">
         <div ref={boxRef} className="absolute inset-0" />
@@ -1659,7 +1965,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
           ) : view === "pe" && (spsAvail || company?.pe_band?.alt?.q1) ? (
             <>
               {spsAvail && <Seg value={perShare} options={[["eps", "EPS"], ["sps", "SPS"]]} onChange={(v) => { kept.current = null; setPerShare(v as "eps" | "sps"); }} />}
-              {!spsOn && company?.pe_band?.alt?.q1 && (
+              {(spsOn ? company?.ps_band?.alt?.q1 : company?.pe_band?.alt?.q1) && (
                 <Seg value={peWin} options={PE_WINDOWS.map(([k, label]) => [k, label] as [string, string])} onChange={(v) => { kept.current = null; setPeWin(v); }} />
               )}
             </>
@@ -1764,9 +2070,31 @@ export default function FullChart({ symbol }: { symbol: string }) {
                   </>
                 )}
 
-                {view === "pe" && (
+                {overlays.filter((o) => o !== view).map((ov) => {
+                  const ks: [string, string][] = ov === "price" ? [["price", "Price"]] : ov === "sales" ? [["gpm", "GPM %"], ["opm", "OPM %"], ["npm", "NPM %"]]
+                    : ov === "ebitda" ? [["eb_ttm", "EBITDA, last 4 quarters"], ["ebitda_m", "EBITDA margin %"]] : [["line", VIEW_LABEL[ov]]];
+                  return (
+                    <div key={ov}>
+                      <Head>
+                        <span className="flex items-center">
+                          {VIEW_LABEL[ov]} · own scale
+                          <button onClick={() => setOverlays(overlays.filter((o) => o !== ov))} aria-label={`Remove the ${VIEW_LABEL[ov]} overlay`}
+                            className="ml-2 w-7 h-7 -my-1 rounded-lg inline-flex items-center justify-center text-[var(--ink3)] active:bg-[var(--card2)]">
+                            <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                          </button>
+                        </span>
+                      </Head>
+                      {ks.map(([k, label]) => {
+                        const hk = `ov:${ov}:${k}`;
+                        return <Toggle key={k} on={!hid(hk)} label={label} onClick={() => setHidden({ ...hidden, [hk]: !hid(hk) })} />;
+                      })}
+                    </div>
+                  );
+                })}
+
+                {(view === "pe" || view === "ebitda") && (
                   <>
-                    <Head>Earnings</Head>
+                    <Head>{view === "pe" ? "Earnings" : "Quarters"}</Head>
                     {/* The EPS blocks are always in their quarter's colour. */}
                     <div className="px-3 pb-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--ink3)]">
                       {[1, 2, 3, 4].map((n) => (
@@ -1779,7 +2107,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
                     {showChg && (
                       <div className="px-3 pb-2">
                         <Seg value={epsCmp}
-                          options={peWin === "ttm" ? [["yoy", "Year before"], ["prev", "Quarter before"]] : [["yoy", "Year ago"], ["prev", "Previous"]]}
+                          options={view === "pe" && peWin === "ttm" ? [["yoy", "Year before"], ["prev", "Quarter before"]] : [["yoy", "Year ago"], ["prev", "Previous"]]}
                           onChange={setEpsCmp} />
                       </div>
                     )}

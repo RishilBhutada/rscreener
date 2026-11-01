@@ -7,6 +7,7 @@ import { useBackClose } from "@/lib/backclose";
 import { ChartUi, loadChartUi } from "@/lib/chartui";
 import YearsChart from "@/components/YearsChart";
 import { loadIndex } from "@/lib/index-data";
+import { canonKey, companyKey, rangeToCompany, rangeToFull, readPick, writePick } from "@/lib/chartpick";
 import Link from "next/link";
 
 type Pt = [string, number] | [string, number, number | null];
@@ -370,18 +371,21 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
    *  backfill ran and left the page contradicting the coverage panel below it. */
   coverage?: { quarters: number; from?: string | null; gaps?: string[]; gap_count?: number } | null;
 }) {
-  const [view, setView] = useState<View>("price");
+  // What was picked on this company's chart, here or in the full chart, for
+  // this browser session (lib/chartpick.ts): it opens as it was left.
+  const [pick0] = useState(() => readPick(symbol));
+  const [view, setView] = useState<View>(() => (pick0?.view && pick0.view in VIEW_NAME ? pick0.view as View : "price"));
   // Views laid over the one on screen (long-press a tab). Each keeps its own
   // scale, so a P/E of 20 is not flattened under a price of 2,000.
-  const [overlays, setOverlays] = useState<View[]>([]);
-  const [range, setRange] = useState("5Yr");
-  const [peWin, setPeWin] = useState("ttm");
+  const [overlays, setOverlays] = useState<View[]>(() => (pick0?.overlays ?? []).filter((v) => v in VIEW_NAME && v !== "years") as View[]);
+  const [range, setRange] = useState(() => rangeToCompany(pick0?.range) ?? "5Yr");
+  const [peWin, setPeWin] = useState(() => pick0?.win ?? "ttm");
   /** What the bars under the ratio line are: earnings per share (with the P/E
    *  line) or sales per share (with the Price / Sales line). Price over sales
    *  per share IS market cap over sales, so the line has to change with the
    *  bars - a P/E line over sales bars would be a ratio built from figures the
    *  chart is not showing. */
-  const [perShare, setPerShare] = useState<"eps" | "sps">("eps");
+  const [perShare, setPerShare] = useState<"eps" | "sps">(() => pick0?.per ?? "eps");
   // How the controls above the chart are laid out - Settings > Company page >
   // Chart controls (owner, 27-Oct-2026: "build all" of the three candidates,
   // plus the layout before them as Classic). Sheet is the default.
@@ -400,8 +404,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   // Growth printed above each earnings bar. Year-on-year by default because a
   // December quarter compared with the September before it mostly measures the
   // calendar, not the business.
-  const [epsCmp, setEpsCmp] = useState<"yoy" | "prev">("yoy");
-  const [showChg, setShowChg] = useState(true);
+  const [epsCmp, setEpsCmp] = useState<"yoy" | "prev">(() => pick0?.cmp ?? "yoy");
+  const [showChg, setShowChg] = useState(() => pick0?.chg ?? true);
   // Peers answer "is this expensive for its industry". Comparing against anything
   // listed answers a different and equally fair question - "of the two I was
   // choosing between, did I pick the better one" - and those two need not be
@@ -430,7 +434,23 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       .catch(() => { if (live) { setCmp(null); setCmpErr(`No data for ${cmpSym}`); } });
     return () => { live = false; };
   }, [cmpSym]);
-  const [on, setOn] = useState<Record<string, boolean>>({});
+  const [on, setOn] = useState<Record<string, boolean>>(() => {
+    const out: Record<string, boolean> = {};
+    for (const [c, b] of Object.entries(pick0?.vis ?? {})) { const k = companyKey(c); if (k) out[k] = b; }
+    return out;
+  });
+  // Written back on every change, for the full chart to open as this is left.
+  // Lines only the full chart knows ride along untouched.
+  useEffect(() => {
+    if (!symbol) return;
+    const prev = readPick(symbol);
+    const vis: Record<string, boolean> = { ...(prev?.vis ?? {}) };
+    for (const [k, b] of Object.entries(on)) { const c = canonKey(k); if (c) vis[c] = b; }
+    // The full chart has finer ranges (2Y, YTD); one set there that maps to
+    // the range shown here is kept, not rounded.
+    const r = prev?.range && rangeToCompany(prev.range) === range ? prev.range : rangeToFull(range);
+    writePick(symbol, { view, range: r, overlays, vis, win: peWin, cmp: epsCmp, per: perShare, chg: showChg });
+  }, [symbol, view, range, overlays, on, peWin, epsCmp, perShare, showChg]);
   const [moreOpen, setMoreOpen] = useState(false);
   useBackClose(moreOpen, () => setMoreOpen(false));
   const [hover, setHover] = useState<{ t: number; px: number; py: number } | null>(null);
