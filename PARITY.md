@@ -91,7 +91,8 @@ was added and the rotations went universe-wide.)*
 - [x] QA validators: scorecard.py checks every night (two sources, identities,
       quarters vs year, own history); since 1-Nov-2026 each failure is listed per
       company (web/public/checks.json) and shown on the company page
-- [ ] APK polish: pull-to-refresh, back-button handling (phone-app parity)
+- [x] APK polish: back button (MainActivity steps back through pages) and
+      pull-to-refresh (1-Nov-2026, every page, fresh load past the WebView cache)
 - [ ] 10-yr balance sheet / cash flow depth
 - [ ] Weekly auto-ingest of newly filed quarters (--newer-than mode)
 

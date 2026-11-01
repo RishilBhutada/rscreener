@@ -15,6 +15,7 @@ import { previousPage, recordNavigation } from "@/lib/navdepth";
 import { useBackClose } from "@/lib/backclose";
 import { buildIndex, search, didYouMean, type SearchIndex, type SearchRow } from "@/lib/search";
 import AccountButton from "@/components/AccountButton";
+import PullToRefresh from "@/components/PullToRefresh";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -600,6 +601,7 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
         <div className="shrink-0 ml-auto flex items-center gap-2">
           <RefreshButton />
           <Settings />
+          <PullToRefresh />
         </div>
       </div>
 
