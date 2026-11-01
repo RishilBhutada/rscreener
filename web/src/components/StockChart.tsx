@@ -27,11 +27,24 @@ export type ChartBand = {
 /** How a ratio was arrived at, in the units it was arrived in. */
 export type Working = { label: string; value: string; note?: string }[];
 
-export function workingFor(view: View, band: ChartBand, idx: number, qs?: Quarter[] | null): Working | null {
+export function workingFor(view: View, band: ChartBand, idx: number, qs?: Quarter[] | null, win = "ttm"): Working | null {
   const p = band?.parts?.[idx];
   if (!p) return null;
   const n = (v: unknown, d = 2) =>
     typeof v === "number" ? v.toLocaleString("en-IN", { maximumFractionDigits: d }) : "—";
+  // The latest-quarter-x4 line: the same numerator over the newest quarter x4,
+  // which is the numerator divided by the line's own value.
+  const alt = win !== "ttm" ? band?.alt?.[win]?.[idx] : undefined;
+  if (alt && typeof p[0] === "number") {
+    if (view === "pe") return [
+      { label: "Price", value: `₹ ${n(p[0])}` },
+      { label: "÷ EPS (latest quarter x4)", value: `₹ ${n(p[0] / alt)}` },
+    ];
+    if (view === "ps") return [
+      { label: "Market cap", value: `₹ ${n(p[0], 0)} Cr` },
+      { label: "÷ Sales (latest quarter x4)", value: `₹ ${n(p[0] / alt, 0)} Cr` },
+    ];
+  }
   if (view === "pe") {
     const out: Working = [
       { label: "Price", value: `₹ ${n(p[0])}` },
@@ -276,6 +289,18 @@ type SeriesDef = {
   data: XY[];
   /** set on an overlaid view's series: drawn on that view's own scale */
   group?: View;
+  /** a scale of its own, unlabelled, while another series holds the labelled
+   *  axis on that side (the EBITDA view's 4-quarter line beside the price, its
+   *  EPS bars beside the EBITDA bars); with nothing else there it takes it */
+  scale?: string;
+  /** whether the series is on when the view opens (default on) */
+  dflt?: boolean;
+  /** two bar series sharing each quarter while both are on: L the left half,
+   *  R the right half, drawn outlined */
+  twin?: "L" | "R";
+  /** the band of the plot its scale spans, top to bottom as fractions -
+   *  the EBITDA view keeps its lines above and its bars below */
+  zone?: [number, number];
   fmt: FmtKind;
 };
 
@@ -471,7 +496,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   // Sales per share needs both its bars and the Price / Sales line.
   const spsAvail = !!psBand && !!trendQ?.sps?.some((v) => v !== null && v !== undefined);
   const spsOn = perShare === "sps" && spsAvail;
-  const defOn = (s: SeriesDef) => isOn(s.key, !(s.group && (s.kind === "bars" || s.kind === "dashed")));
+  const defOn = (s: SeriesDef) => isOn(s.key, s.group ? !(s.kind === "bars" || s.kind === "dashed") : s.dflt ?? true);
   const toggle = (s: SeriesDef) => setOn({ ...on, [s.key]: !defOn(s) });
 
   const years = RANGES.find(([r]) => r === range)?.[1] ?? 5;
@@ -523,6 +548,43 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             .map((p, i) => ({ t: toT(p), v: arr[i] }))
             .filter((r): r is XY => r.v !== null && r.v !== undefined && r.t >= cutoff)
         : [];
+
+    // The price line on its finest series that covers the window.
+    const priceLine = (): XY[] => {
+      const covers = (src: Pt[]) => src.length > 30 && toT(src[0][0]) <= cutoff + 40 * 86400000;
+      const src = covers(daily) && years <= 1 ? daily : covers(weekly) ? weekly : monthly;
+      const pts: XY[] = filt(src).map((p) => ({ t: toT(p[0]), v: p[1] }));
+      if (livePrice !== null && pts.length) pts.push({ t: now, v: livePrice });
+      return pts;
+    };
+    // One bar per quarter, drawn across the quarter it covers in that fiscal
+    // quarter's colour - the EPS bars' language - with its change on the same
+    // quarter a year earlier or the quarter before, found by date so a missing
+    // quarter is never compared with the wrong one. Worked out on the whole
+    // series, then trimmed to the window.
+    const spanBars = (arr?: (number | null)[]): XY[] => {
+      if (!trendQ || !arr) return [];
+      const ym = (end: string) => Number(end.slice(0, 4)) * 12 + Number(end.slice(5, 7));
+      const val = new Map<number, number>();
+      const out: XY[] = [];
+      const back = epsCmp === "yoy" ? 12 : 3;
+      trendQ.periods.forEach((end, i) => {
+        const v = arr[i];
+        if (v === null || v === undefined) return;
+        val.set(ym(end), v);
+        const qi = quarters?.find((x) => x.end === end);
+        const m = Number(end.slice(5, 7));
+        const q = qi?.q ?? ({ 6: 1, 9: 2, 12: 3, 3: 4 } as Record<number, number>)[m] ?? Math.floor((m - 1) / 3) + 1;
+        out.push({
+          t: toT(end), v, q,
+          from: qi ? toT(qi.start) : toT(end) - 90 * 86400000,
+          to: toT(end) + 86400000,
+          announced: qi?.announced ?? null,
+          chg: growth(v, val.get(ym(end) - back)),
+        });
+      });
+      return out.filter((b) => b.t >= cutoff);
+    };
 
     // a valuation-band view: ratio line + dashed median + underlying metric bars
     const bandView = (
@@ -581,8 +643,10 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       // share is drawn the same way, on the trailing four quarters only - the
       // only basis the Price / Sales line has.
       const sales = spsOn;
-      const nQ = !sales && peWin === "q1" ? 1 : 4;
-      const mult = !sales && peWin === "q1" ? 4 : 1;
+      // Latest quarter x4 for earnings AND, since 1-Nov-2026, for sales.
+      const q1w = peWin === "q1" && !!(sales ? psBand : peBand)?.alt?.q1;
+      const nQ = q1w ? 1 : 4;
+      const mult = q1w ? 4 : 1;
       const src = sales ? trendQ?.sps ?? [] : trendQ?.eps ?? [];
       const allEpsBars: XY[] = [];
       if (trendQ) {
@@ -654,21 +718,24 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       });
       const epsBars = allEpsBars.filter((b) => b.t >= cutoff);
       const win = PE_WINDOWS.find(([k]) => k === peWin);
-      const suffix = peWin === "ttm" ? "" : ` (${win?.[1]})`;
+      const suffix = q1w ? ` (${win?.[1]})` : "";
       // swap in the selected window's values; they align index-for-index
-      let band = peBand ?? null;
-      if (band && peWin !== "ttm" && band.alt?.[peWin]) {
-        const vals = band.alt[peWin];
-        band = {
-          ...band,
-          series: band.series
+      const swapAlt = (b0: ChartBand | undefined): ChartBand => {
+        const b = b0 ?? null;
+        if (!b || !q1w || !b.alt?.[peWin]) return b;
+        const vals = b.alt[peWin];
+        return {
+          ...b,
+          series: b.series
             .map((p, i) => [p[0], vals[i]] as [string, number | null])
             .filter((p): p is [string, number] => p[1] !== null && p[1] !== undefined),
-          median_5y: band.alt_median_5y?.[peWin] ?? band.median_5y,
+          median_5y: b.alt_median_5y?.[peWin] ?? b.median_5y,
         };
-      }
+      };
+      const band = swapAlt(peBand);
       if (sales) {
-        bandView(psBand, "Price / Sales", "Median Price to Sales", "plain", epsBars, "SPS (4 quarters added up)", "rupee");
+        bandView(swapAlt(psBand), `Price / Sales${suffix}`, "Median Price to Sales", "plain", epsBars,
+          q1w ? "SPS (latest quarter x4)" : "SPS (4 quarters added up)", "rupee");
       } else {
         bandView(band, `PE${suffix}`, "Median PE", "plain", epsBars,
           peWin === "ttm" ? "EPS (4 quarters added up)" : "EPS (latest quarter x4)", "plain");
@@ -690,17 +757,29 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       if (npm.length > 1) defs.push({ key: "npm", label: "NPM %", color: "var(--chart-pos)", kind: "smooth", axis: "R", data: npm, fmt: "pct" });
     }
 
-    // EBITDA each quarter - operating profit plus other income, so it agrees
-    // with the EBITDA row of the results table - and its margin on sales.
+    // EBITDA beside the price - the owner's pick B, 1-Nov-2026. EBITDA is
+    // operating profit plus other income, so it agrees with the EBITDA row of
+    // the results table. The line is EBITDA over the last four quarters: that
+    // is what moves with a share price, where single quarters zigzag with the
+    // season. Underneath, each quarter's EBITDA and EPS as bars in its fiscal
+    // quarter's colour with the change on top; either can be switched off, and
+    // with both on they share each quarter (EBITDA left, EPS right), each on a
+    // scale of its own.
     if (view === "ebitda" && trendQ?.ebitda) {
       const eb = trendQ.ebitda.map((v, i) => (v === null || v === undefined ? null : v + (trendQ.other_income?.[i] ?? 0)));
-      const bars = qBars(eb);
-      if (bars.length) defs.push({ key: "ebitda", label: "Quarter EBITDA", color: "var(--chart-bar)", kind: "bars", axis: "L", data: bars, fmt: "cr" });
+      const pp = priceLine();
+      if (pp.length > 1) defs.push({ key: "eb_price", label: `Price on ${exchange === "BSE" ? "BSE" : "NSE"}`, color: "var(--accent)", kind: "line", axis: "R", zone: [0, 0.56], data: pp, fmt: "rupee" });
+      const t4 = ttmBars(eb);
+      if (t4.length > 1) defs.push({ key: "eb_ttm", label: "EBITDA, last 4 quarters", color: "var(--chart-alt)", kind: "line", axis: "R", scale: "eb_ttm", zone: [0, 0.56], data: t4, fmt: "cr" });
+      const bars = spanBars(eb);
+      if (bars.length) defs.push({ key: "ebitda", label: "Quarter EBITDA", color: "var(--chart-bar)", kind: "bars", axis: "L", twin: "L", zone: [0.44, 1], data: bars, fmt: "cr" });
+      const eq = spanBars(trendQ.eps);
+      if (eq.length) defs.push({ key: "eb_eps", label: "Quarter EPS", color: "var(--chart-bar)", kind: "bars", axis: "L", scale: "eb_eps", twin: "R", zone: [0.44, 1], data: eq, fmt: "plain" });
       const m = qBars(eb.map((v, i) => {
         const r = trendQ.revenue[i];
         return v === null || !r ? null : Math.round((v / r) * 1000) / 10;
       }));
-      if (m.length > 1) defs.push({ key: "ebitda_m", label: "EBITDA margin %", color: "var(--chart-dma50)", kind: "smooth", axis: "R", data: m, fmt: "pct" });
+      if (m.length > 1) defs.push({ key: "ebitda_m", label: "EBITDA margin %", color: "var(--chart-dma50)", kind: "smooth", axis: "R", scale: "eb_m", dflt: false, zone: [0, 0.56], data: m, fmt: "pct" });
     }
 
     };
@@ -759,6 +838,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       const mine: SeriesDef[] = [];
       build(ov, mine);
       for (const d of mine) {
+        if (d.key === "eb_price") continue;
         let color = d.color;
         if (d.kind !== "bars" && d.kind !== "dashed" && (color === "var(--accent)" || used.has(color))) color = nextColour();
         if (d.kind !== "bars") used.add(color);
@@ -798,7 +878,15 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const t1 = Math.max(...visible.flatMap((s) => (s.data.length ? [s.data[s.data.length - 1].t] : [])));
   const x = (t: number) => ML + ((t - t0) / Math.max(1, t1 - t0)) * plotW;
 
-  const mkAxis = (axis: "L" | "R", pick: (s: SeriesDef) => boolean = (s) => !s.group && s.axis === axis) => {
+  // A series with a scale of its own takes the labelled axis only when no
+  // ordinary series is on that side; otherwise it is drawn on its own scale.
+  const ownScaled = new Set<string>();
+  for (const side of ["L", "R"] as const) {
+    const onSide = visible.filter((sd) => !sd.group && sd.axis === side);
+    const lead = onSide.find((sd) => !sd.scale) ?? onSide[0];
+    for (const sd of onSide) if (sd.scale && sd !== lead) ownScaled.add(sd.key);
+  }
+  const mkAxis = (axis: "L" | "R", pick: (s: SeriesDef) => boolean = (s) => !s.group && !ownScaled.has(s.key) && s.axis === axis) => {
     const vals = visible.filter(pick).flatMap((s) => s.data.map((d) => d.v));
     if (!vals.length) return null;
     let lo = Math.min(...vals);
@@ -820,20 +908,24 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     const pad = (hi - lo) * 0.06 || Math.abs(hi) * 0.06 || 1;
     const ticks = niceTicks(lo, hi + pad, 5);
     const dLo = Math.min(lo, ticks[0] ?? lo), dHi = Math.max(hi + pad, ticks[ticks.length - 1] ?? hi);
-    const scale = (v: number) => MT + (1 - (v - dLo) / Math.max(1e-9, dHi - dLo)) * plotH;
+    const [zt, zb] = visible.find(pick)?.zone ?? [0, 1];
+    const scale = (v: number) => MT + (zt + (1 - (v - dLo) / Math.max(1e-9, dHi - dLo)) * (zb - zt)) * plotH;
     return { ticks, scale };
   };
   const axL = mkAxis("L"), axR = mkAxis("R");
   // An overlaid view keeps its own two scales (bars, lines), unlabelled; its
   // figures are read from the pop-up.
   const ownAx: Record<string, ReturnType<typeof mkAxis>> = {};
+  // An overlay's scale is shared by that view's series on one side, so its
+  // own scale-of-its-own series (the EBITDA view's) are kept apart within it.
+  const ownKey = (sd: SeriesDef) => sd.group ? `${sd.group}:${sd.scale ?? sd.axis}` : ownScaled.has(sd.key) ? `own:${sd.scale}` : null;
   for (const sd of visible) {
-    const k = `${sd.group}:${sd.axis}`;
-    if (sd.group && !(k in ownAx)) ownAx[k] = mkAxis(sd.axis, (q) => q.group === sd.group && q.axis === sd.axis);
+    const k = ownKey(sd);
+    if (k && !(k in ownAx)) ownAx[k] = mkAxis(sd.axis, (q) => ownKey(q) === k);
   }
-  const axisOf = (sd: SeriesDef) => (sd.group ? ownAx[`${sd.group}:${sd.axis}`] ?? null : sd.axis === "L" ? axL : axR);
+  const axisOf = (sd: SeriesDef) => { const k = ownKey(sd); return k ? ownAx[k] ?? null : sd.axis === "L" ? axL : axR; };
   const xt = timeTicks(t0, t1);
-  const fmtKindOf = (axis: "L" | "R") => visible.find((s) => !s.group && s.axis === axis)?.fmt ?? "plain";
+  const fmtKindOf = (axis: "L" | "R") => visible.find((s) => !s.group && !ownScaled.has(s.key) && s.axis === axis)?.fmt ?? "plain";
 
   const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
     const rect = svgRef.current?.getBoundingClientRect();
@@ -861,6 +953,21 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     : view === "ps" ? psBand ?? null : view === "ev" ? evBand ?? null : null;
   const hoverPt = hover && primary ? nearest(primary.data, hover.t) : null;
   const barW = (s: SeriesDef) => Math.max(1.5, Math.min(26, (plotW / Math.max(1, s.data.length)) * 0.62));
+  const twins = visible.filter((s) => s.kind === "bars" && s.twin && !s.group);
+  const twinOn = twins.length === 2;
+  // Per quarter, the top of the taller twin bar: both its labels stand over it.
+  const twinTop = new Map<number, number>();
+  if (twinOn) {
+    for (const s of twins) {
+      const ax = axisOf(s);
+      if (!ax) continue;
+      const y0 = Math.min(...ax.ticks, 0) < 0 || ax.ticks[0] <= 0 ? ax.scale(0) : MT + plotH;
+      for (const d of s.data) {
+        const top = Math.min(ax.scale(d.v), y0);
+        twinTop.set(d.t, Math.min(twinTop.get(d.t) ?? Infinity, top));
+      }
+    }
+  }
   const boxW = svgRef.current?.getBoundingClientRect().width ?? 600;
 
   // ── control pieces shared by the candidate layouts ──
@@ -884,9 +991,11 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const setGrowth = (g: "off" | "yoy" | "prev") => { if (g === "off") setShowChg(false); else { setShowChg(true); setEpsCmp(g); } };
   const isPe = view === "pe";
   const pBars = isPe && spsAvail ? seg(perShare, [["eps", "EPS"], ["sps", "SPS"]] as const, setPerShare) : null;
-  const pWin = isPe && !spsOn && peBand?.alt ? seg(peWin as "ttm" | "q1", [["ttm", "TTM"], ["q1", "1Q×4"]] as const, (k) => setPeWin(k)) : null;
-  const pGrowth = isPe && (quarters?.length ?? 0) > 0
-    ? seg(growthVal, [["off", "No growth"], ["yoy", peWin === "ttm" ? "vs year before" : "vs year ago"], ["prev", "vs quarter before"]] as const, setGrowth) : null;
+  const isEb = view === "ebitda";
+  const winBand = spsOn ? psBand : peBand;
+  const pWin = isPe && winBand?.alt?.q1 ? seg(peWin as "ttm" | "q1", [["ttm", "TTM"], ["q1", "1Q×4"]] as const, (k) => setPeWin(k)) : null;
+  const pGrowth = (isPe && (quarters?.length ?? 0) > 0) || (isEb && !!trendQ)
+    ? seg(growthVal, [["off", "No growth"], ["yoy", isPe && peWin === "ttm" ? "vs year before" : "vs year ago"], ["prev", "vs quarter before"]] as const, setGrowth) : null;
   const pDates = (quarters?.length ?? 0) > 0 ? chip(showDates, "Result dates", () => setShowDates(!showDates)) : null;
   const pCA = (actions?.length ?? 0) > 0 ? chip(showCA, "Corporate actions", () => setShowCA(!showCA)) : null;
   const pCAKinds = showCA && CA_ORDER.some((k) => caCount[k]) ? (
@@ -915,7 +1024,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       <option value="__any__">Any company...</option>
     </select>
   );
-  const qLegend = isPe ? (
+  const qLegend = isPe || isEb ? (
     <div className="flex items-center justify-center gap-3 flex-wrap text-[11px] text-[var(--ink3)] mt-1">
       {[1, 2, 3, 4].map((n) => (
         <span key={n} className="inline-flex items-center gap-1"><i className="inline-block w-2 h-2 rounded-full" style={{ background: Q_COLOUR[n] }} />{Q_LABEL[n].slice(0, 2)}</span>
@@ -929,13 +1038,13 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     </div>
   );
   // What is switched on beyond the defaults - growth labels are on by default.
-  const activeCount = [spsOn, showDates, showCA, !!cmpSym, isPe && !spsOn && peWin !== "ttm"].filter(Boolean).length;
+  const activeCount = [spsOn, showDates, showCA, !!cmpSym, isPe && peWin !== "ttm"].filter(Boolean).length;
   const label = (t: string) => <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">{t}</span>;
   const optionsSheet = sheet && (
     <InfoDialog title="Chart options" onClose={() => setSheet(false)}>
       <div className="flex flex-col gap-4 text-xs">
         {pBars && <div className="flex flex-col items-start gap-1.5">{label("Bars")}{pBars}</div>}
-        {pWin && <div className="flex flex-col items-start gap-1.5">{label("Earnings")}{pWin}</div>}
+        {pWin && <div className="flex flex-col items-start gap-1.5">{label(spsOn ? "Sales" : "Earnings")}{pWin}</div>}
         {pGrowth && <div className="flex flex-col items-start gap-1.5">{label("Growth on bars")}{pGrowth}</div>}
         <div className="flex flex-col items-start gap-1.5">{label("Show on chart")}
           <div className="flex gap-1.5 flex-wrap">{pDates}{pCA}</div>{pCAKinds}</div>
@@ -1011,7 +1120,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         // companies hold 20 quarters or fewer because the full-depth pass runs at a
         // bounded rate, so silence here would have the reader inferring something
         // about the business from a gap in our own coverage.
-        if (view === "price" || !primary?.data?.length) return null;
+        if (view === "price" || view === "ebitda" || !primary?.data?.length) return null;
         const priceStart = (prices.monthly?.[0] ?? prices.weekly?.[0])?.[0];
         if (!priceStart) return null;
         const gapYears = (primary.data[0].t - toT(priceStart)) / (365.25 * 86400000);
@@ -1102,6 +1211,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
           {visible.filter((s) => s.kind === "bars").map((s) => {
             const ax = axisOf(s);
             if (!ax) return null;
+            // Twin bars: both of a pair on, each takes half its quarter.
+            const twin = s.twin && twinOn ? s.twin : null;
             const bw = barW(s);
             // Bars grow from ZERO, not from whatever the axis happens to start at.
             // Measuring from `ticks[0]` meant that when the axis floor sat above
@@ -1131,6 +1242,16 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             const stagger = chgFont === 0 && widest > 0
               && widest * 7.5 * 0.58 + 2 <= narrowest * 2;
             if (stagger) chgFont = 7.5;
+            // Twin bars: the two labels of a quarter stand one above the
+            // other over the taller bar, EBITDA's below EPS's; when even a
+            // quarter's width is too narrow for one, alternate quarters move
+            // up a further two lines, as a single series staggers.
+            let twinRows = 0;
+            if (twin && widest > 0) {
+              chgFont = [9.5, 8.5, 7.5].find((f) => widest * f * 0.58 + 2 <= narrowest) ?? 0;
+              twinRows = chgFont ? 2 : widest * 7.5 * 0.58 + 2 <= narrowest * 2 ? 4 : 0;
+              if (!chgFont && twinRows) chgFont = 7.5;
+            }
             return (
               <g key={s.key}>
                 {s.data.map((d, i) => {
@@ -1140,27 +1261,40 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                   // meet edge to edge because one quarter ends the day before the
                   // next begins. Otherwise it stays a plain centred bar.
                   const spanned = d.from !== undefined && d.to !== undefined;
-                  const bx = spanned ? x(d.from!) : x(d.t) - bw / 2;
-                  const bwid = spanned ? Math.max(1, x(d.to!) - x(d.from!)) : bw;
+                  let bx = spanned ? x(d.from!) : x(d.t) - bw / 2;
+                  let bwid = spanned ? Math.max(1, x(d.to!) - x(d.from!)) : bw;
+                  const fullX = bx, fullW = bwid;
+                  if (twin) {
+                    const half = bwid / 2;
+                    bwid = Math.max(1, half - 0.6);
+                    if (twin === "R") bx += half + 0.6;
+                  }
                   // EPS bars always in their fiscal quarter's colour.
                   const fill = d.q ? (Q_COLOUR[d.q] ?? s.color) : s.color;
                   const loss = d.v < 0;
                   const chgTxt = d.chg ? growthText(d.chg) : "";
-                  const labelFits = showChg && chgTxt !== "" && chgFont > 0;
-                  const lx = bx + bwid / 2;
+                  const labelFits = showChg && chgTxt !== "" && chgFont > 0 && (!twin || twinRows > 0);
+                  let lx = bx + bwid / 2;
                   // Above the top for a profit bar, below the bottom for a loss
                   // bar - always on the outside, so it never sits on the fill.
                   const lift = stagger && i % 2 === 1 ? 9 : 0;
-                  const ly = loss ? Math.max(yv, y0) + 11 + lift : Math.min(yv, y0) - 4 - lift;
+                  let ly = loss ? Math.max(yv, y0) + 11 + lift : Math.min(yv, y0) - 4 - lift;
+                  if (twin) {
+                    const top = Math.min(twinTop.get(d.t) ?? Math.min(yv, y0), Math.min(yv, y0));
+                    const row = (twin === "R" ? 1 : 0) + (twinRows === 4 && i % 2 === 1 ? 2 : 0);
+                    lx = fullX + fullW / 2;
+                    ly = top - 4 - row * (chgFont + 1.5);
+                  }
                   return (
                     <g key={i}>
                       <rect x={bx} y={Math.min(yv, y0)} width={bwid}
                         height={Math.max(1, Math.abs(y0 - yv))}
-                        rx={!spanned && bw > 6 ? 2 : 0} fill={fill} opacity={loss ? 0.55 : 0.78}>
-                        <title>{`${spanned ? `${Q_LABEL[d.q ?? 0] ?? ""} · ` : ""}${s.label} ₹${d.v.toFixed(2)}${loss ? " (loss)" : ""}${
+                        rx={!spanned && bw > 6 ? 2 : 0} fill={fill} opacity={loss ? 0.55 : 0.78}
+                        fillOpacity={twin === "R" ? 0.45 : undefined} stroke={twin === "R" ? fill : undefined} strokeWidth={twin === "R" ? 1.2 : undefined}>
+                        <title>{`${spanned ? `${Q_LABEL[d.q ?? 0] ?? ""} · ` : ""}${s.label} ${s.fmt === "cr" ? `₹${fmtVal(d.v, "plain")} Cr` : `₹${d.v.toFixed(2)}`}${loss ? " (loss)" : ""}${
                           d.chg && d.chg.kind !== "none"
                             ? ` · ${growthText(d.chg, false)} ${
-                                peWin === "ttm"
+                                view === "pe" && peWin === "ttm"
                                   ? (epsCmp === "yoy" ? "vs the twelve months before these"
                                                       : "vs the twelve months ending a quarter earlier")
                                   : (epsCmp === "yoy" ? "vs the same quarter a year earlier"
@@ -1190,7 +1324,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             return (
               <polyline key={s.key}
                 points={pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")}
-                fill="none" stroke={s.color} strokeWidth={s.key === "price" || s.key.endsWith("_line") ? 1.9 : 1.4}
+                fill="none" stroke={s.color} strokeWidth={s.key === "price" || s.key === "eb_price" || s.key.endsWith("_line") ? 1.9 : s.key === "eb_ttm" ? 2.2 : 1.4}
                 strokeDasharray={s.kind === "dashed" ? "6 5" : undefined}
                 strokeLinejoin="round" strokeLinecap="round" />
             );
@@ -1229,7 +1363,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             {(() => {
               if (!hoverPt || !activeBand?.parts || (dragging && boxW < 520)) return null;
               const idx = activeBand.series.findIndex((r) => toT(r[0]) === hoverPt.t);
-              const w = idx >= 0 ? workingFor(view === "pe" && spsOn ? "ps" : view, activeBand, idx, quarters) : null;
+              const w = idx >= 0 ? workingFor(view === "pe" && spsOn ? "ps" : view, activeBand, idx, quarters, view === "pe" ? peWin : "ttm") : null;
               if (!w) return null;
               return (
                 <div className="mt-1.5 pt-1.5 border-t border-[var(--line)] space-y-0.5">
@@ -1426,7 +1560,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
           >
             {showDates && <CheckGlyph className="mr-1" />}Result dates
           </button>
-          {view === "pe" && (
+          {(view === "pe" || view === "ebitda") && (
             <div className="flex items-center gap-1 flex-wrap">
               <button
                 onClick={() => setShowChg(!showChg)}
@@ -1445,7 +1579,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                       whichever window is showing - a bar means a quarter in one
                       and twelve months in the other, so one wording cannot serve
                       both without misleading in one of them. */}
-                  {(peWin === "ttm"
+                  {(view === "pe" && peWin === "ttm"
                     ? ([["yoy", "Year before", "Compare these twelve months with the TWELVE MONTHS BEFORE THEM. The two periods share no quarter, so it is a full year measured against a full year."],
                         ["prev", "Quarter before", "Compare these twelve months with the twelve months ending one quarter earlier. They share three of their four quarters, so the figure moves by one quarter's news spread across a whole year of earnings - smoother, and smaller, than the same news in the 1Q x4 view."]] as const)
                     : ([["yoy", "Year ago", "Compare each quarter with the SAME quarter a year earlier. Quarterly earnings are seasonal, so this is the comparison filings and analysts use."],
@@ -1480,10 +1614,10 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
               ))}
             </div>
           )}
-          {view === "pe" && !spsOn && peBand?.alt && (
+          {view === "pe" && winBand?.alt && (
             <div className="flex items-center gap-1 flex-wrap">
-              <span className="text-[var(--ink3)] mr-0.5">Earnings</span>
-              {PE_WINDOWS.filter(([k]) => k === "ttm" || peBand.alt?.[k]).map(([k, label, tip]) => (
+              <span className="text-[var(--ink3)] mr-0.5">{spsOn ? "Sales" : "Earnings"}</span>
+              {PE_WINDOWS.filter(([k]) => k === "ttm" || winBand.alt?.[k]).map(([k, label, tip]) => (
                 <button
                   key={k}
                   onClick={() => { setPeWin(k); setHover(null); }}
@@ -1499,7 +1633,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
               ))}
             </div>
           )}
-          {view === "pe" && (
+          {(view === "pe" || view === "ebitda") && (
             <div className="flex items-center gap-2.5 flex-wrap text-[var(--ink3)]">
               {[1, 2, 3, 4].map((n) => (
                 <span key={n} className="inline-flex items-center gap-1">

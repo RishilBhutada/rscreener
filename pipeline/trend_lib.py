@@ -1408,6 +1408,9 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
         # They react to an earnings turn far sooner than TTM, at the cost of
         # carrying that quarter's seasonality and one-offs undiluted.
         pe_alt: dict[str, list] = {"q1": []}   # 2Q and 3Q dropped - see PE_WINDOWS
+        # The same latest-quarter-x4 window for Price / Sales (owner, 1-Nov-2026),
+        # aligned by index with ps_s: market cap over the newest quarter's sales x4.
+        ps_alt: dict[str, list] = {"q1": []}
         fi = 0  # pointer into `flows` (both it and the price series are date-sorted)
         avail = announced.get(sym, {})
         for date, close in zip(g["date"], g["close"]):
@@ -1445,6 +1448,8 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                 if ttm_rev and ttm_rev > 0:
                     ps_s.append([date, round(mcap_cr / ttm_rev, 2)])
                     ps_p.append([round(mcap_cr, 1), round(ttm_rev, 1)])
+                    q_rev = recent[-1][2]
+                    ps_alt["q1"].append(round(mcap_cr / (q_rev * 4.0), 2) if (q_rev and q_rev > 0) else None)
                 if ttm_eb and ttm_eb > 0:
                     ndv = next((v for d, v in reversed(nd)
                                 if d <= date and (datetime.strptime(date, "%Y-%m-%d")
@@ -1466,19 +1471,21 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                 if len(parts) == len(ser):
                     b["parts"] = parts
                 bands[key] = b
-        if "pe" in bands and pe_s:
-            cutoff = f"{int(pe_s[-1][0][:4]) - 5}{pe_s[-1][0][4:]}"
+        for bkey, ser, alts, rnd in (("pe", pe_s, pe_alt, 1), ("ps", ps_s, ps_alt, 2)):
+            if bkey not in bands or not ser:
+                continue
+            cutoff = f"{int(ser[-1][0][:4]) - 5}{ser[-1][0][4:]}"
             alt, med = {}, {}
-            for key, vals in pe_alt.items():
-                if not any(v is not None for v in vals):
+            for key, vals in alts.items():
+                if len(vals) != len(ser) or not any(v is not None for v in vals):
                     continue
                 alt[key] = vals
-                last5 = [v for (d, _), v in zip(pe_s, vals) if v is not None and d >= cutoff]
+                last5 = [v for (d, _), v in zip(ser, vals) if v is not None and d >= cutoff]
                 if last5:
-                    med[key] = round(_median(last5), 1)
+                    med[key] = round(_median(last5), rnd)
             if alt:
-                bands["pe"]["alt"] = alt
-                bands["pe"]["alt_median_5y"] = med
+                bands[bkey]["alt"] = alt
+                bands[bkey]["alt_median_5y"] = med
         if bands:
             out[sym] = bands
     return out
