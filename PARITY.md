@@ -98,4 +98,6 @@ was added and the rotations went universe-wide.)*
 ## After parity: "make it better" (owner's phase 2 — parked)
 - Portfolio overlap with screens ("which holdings fail my quality screen?")
 - CAS (CDSL monthly statement) importer
-- Screen backtesting against the as-filed history we already store
+- [x] Screen backtesting against the as-filed history we already store - SHIPPED
+      1-Nov-2026 as /backtest (30 June snapshots from 2008, point-in-time, today's
+      listed companies only - survivorship stated on the page)

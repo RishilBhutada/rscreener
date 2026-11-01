@@ -596,6 +596,13 @@ jobs:
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: python alerts/screen_alerts.py
+      - name: Build the yearly snapshots the screener's history test runs on
+        # web/public/backtest/: each 30 June since 2008, every company's
+        # screener fields as known that day, and the next year's return (P10).
+        # Reads the company files exported above. Never allowed to stop a
+        # publish; the page says so when the files are missing.
+        continue-on-error: true
+        run: python pipeline/export_backtest.py
       - name: Score the data and record the score
         # Runs every night, after the export and before the guards, so the score
         # describes what is about to be published. Appending to a history file

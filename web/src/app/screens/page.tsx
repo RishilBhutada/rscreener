@@ -695,6 +695,10 @@ function ScreensInner() {
             <button type="button" onClick={() => setSheet({ kind: "more" })}
               className="rs-press flex-1 min-h-[42px] rounded-xl border border-[var(--line)] text-[13.5px] font-medium text-[var(--ink2)]">Link, CSV, formula</button>
           </div>
+          {uni === "companies" && (
+            <a href={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/backtest?q=${encodeURIComponent(query)}`}
+              className="rs-press flex items-center justify-center min-h-[42px] rounded-xl border border-[var(--line)] text-[13.5px] font-medium text-[var(--ink2)]">Test this screen on history</a>
+          )}
         </InfoDialog>
       )}
 

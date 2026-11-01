@@ -25,3 +25,5 @@ web/public/inst/
 data/news.db
 # company icons, written by export_company_json.py from the logos table
 web/public/logos/
+web/public/backtest/
+web/public/checks.json
