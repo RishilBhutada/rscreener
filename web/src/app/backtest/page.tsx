@@ -18,10 +18,15 @@ const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 type Index = { generated_at: string; fields: string[]; dates: string[]; counts: Record<string, number>; nifty: Record<string, number> };
 type YearResult = {
   year: string; universe: number; passed: number; unknown: number;
+  /** Too few companies had the figures this screen needs for the year to mean
+   *  anything: not a year of "nothing qualified" but a year that cannot be judged. */
+  untestable: boolean;
   screenAvg: number | null; screenMed: number | null; allAvg: number | null; allMed: number | null; nifty: number | null;
   picks: [string, number | null][];
 };
 
+/** A year counts only when at least this many companies could be judged. */
+const MIN_JUDGED = 100;
 const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 const med = (xs: number[]) => {
   if (!xs.length) return null;
@@ -67,8 +72,11 @@ function BacktestInner() {
   const result = useMemo((): { rows: YearResult[]; error?: string } => {
     if (!index || !years) return { rows: [] };
     let run: (row: Row) => boolean | null;
+    let used: string[] = [];
     try {
-      run = compile(q, readRatios(), index.fields).run;
+      const c = compile(q, readRatios(), index.fields);
+      run = c.run;
+      used = c.fields;
     } catch (e) {
       const msg = e instanceof QueryError ? e.message : String(e);
       return { rows: [], error: msg };
@@ -79,12 +87,13 @@ function BacktestInner() {
       const y = dt.slice(0, 4);
       const list = years[y] ?? [];
       const pass: number[] = [], every: number[] = [], picks: [string, number | null][] = [];
-      let passed = 0, unknown = 0;
+      let passed = 0, unknown = 0, complete = 0;
       for (const r of list) {
         const fwd = r[F.length + 1] as number | null;
         if (fwd !== null) every.push(fwd);
         const row: Row = { symbol: r[0] as string };
         F.forEach((f, i) => { row[f] = r[i + 1] as number | null; });
+        if (used.every((f) => row[f] !== null && row[f] !== undefined)) complete++;
         const ok = run(row);
         if (ok === null) { unknown++; continue; }
         if (!ok) continue;
@@ -93,8 +102,12 @@ function BacktestInner() {
         if (fwd !== null) pass.push(fwd);
       }
       picks.sort((a, b) => (b[1] ?? -1e9) - (a[1] ?? -1e9));
+      // Judged on companies holding EVERY field the screen uses: "P/E < 15 and
+      // ROE > 15" is false for any P/E of 15 or more whatever ROE is, so a year
+      // with no ROE at all would otherwise pass as tested.
       rows.push({
         year: y, universe: list.length, passed, unknown,
+        untestable: complete < MIN_JUDGED,
         screenAvg: avg(pass), screenMed: med(pass), allAvg: avg(every), allMed: med(every),
         nifty: index.nifty[y] ?? null, picks,
       });
@@ -103,17 +116,22 @@ function BacktestInner() {
   }, [q, index, years]);
 
   const rows = result.rows;
-  const tested = rows.filter((r) => r.passed > 0);
+  // Only years the screen could be judged in, for all three columns alike, so
+  // the comparison stays like for like.
+  const usable = rows.filter((r) => !r.untestable);
+  const skipped = rows.length - usable.length;
+  const tested = usable.filter((r) => r.passed > 0);
   const total = {
-    screen: compound(rows.map((r) => r.screenAvg)),
-    all: compound(rows.map((r) => r.allAvg)),
-    nifty: compound(rows.map((r) => r.nifty)),
+    screen: compound(usable.map((r) => r.screenAvg)),
+    all: compound(usable.map((r) => r.allAvg)),
+    nifty: compound(usable.map((r) => r.nifty)),
   };
   // The middle company each year, compounded: what a typical pick did, which
   // a handful of tiny companies that multiplied cannot move.
-  const typical = { screen: compound(rows.map((r) => r.screenMed)), all: compound(rows.map((r) => r.allMed)) };
-  const beat = tested.filter((r) => r.screenAvg !== null && r.allAvg !== null && r.screenAvg > r.allAvg).length;
-  const nYears = rows.length;
+  const typical = { screen: compound(usable.map((r) => r.screenMed)), all: compound(usable.map((r) => r.allMed)) };
+  const beatMed = tested.filter((r) => r.screenMed !== null && r.allMed !== null && r.screenMed > r.allMed).length;
+  const beatNifty = tested.filter((r) => r.screenAvg !== null && r.nifty !== null && r.screenAvg > r.nifty).length;
+  const nYears = usable.length;
   const cagr = (v: number) => (nYears ? (Math.pow(v / 100, 1 / nYears) - 1) * 100 : null);
   const history = new Set(index?.fields ?? []);
   const label = (k: string) => FIELD_CATALOG.find((f) => f.key === k)?.label ?? k;
@@ -174,8 +192,10 @@ function BacktestInner() {
               ))}
             </section>
             <p className="text-[12px] text-[var(--ink2)]">
-              ₹100 from {rows[0].year} to {Number(rows[rows.length - 1].year) + 1}. The screen beat all companies in {beat} of {tested.length} years it picked anything
-              {tested.length < rows.length ? `; ${rows.length - tested.length} years with no pick sat in cash` : ""}.
+              ₹100 over the {nYears} years the screen could be tested.
+              {" "}Its median pick beat the median company in {beatMed} of {tested.length} years it picked anything, and its average beat the Nifty 50 in {beatNifty}.
+              {tested.length < usable.length ? ` ${usable.length - tested.length} years with no pick sat in cash.` : ""}
+              {skipped > 0 ? ` ${skipped} year${skipped === 1 ? "" : "s"} left out: too few companies had the figures this screen needs.` : ""}
             </p>
 
             <div className="overflow-x-auto rounded-xl border border-[var(--line)] bg-[var(--card)]">
@@ -196,8 +216,14 @@ function BacktestInner() {
                       <tr onClick={() => setOpen(open === r.year ? null : r.year)}
                         className="border-b border-[var(--line)] last:border-0 cursor-pointer active:bg-[var(--card2)]">
                         <td className="px-2 py-1.5">Jun {r.year}</td>
-                        <td className="px-1.5 py-1.5 text-right">{r.passed}<span className="text-[var(--ink3)]">/{r.universe}</span></td>
-                        <td className={`px-1.5 py-1.5 text-right font-semibold ${tone(r.screenAvg)}`}>{fmt(r.screenAvg)}</td>
+                        {r.untestable ? (
+                          <td colSpan={2} className="px-1.5 py-1.5 text-right text-[11px] text-[var(--ink3)]">Too few figures</td>
+                        ) : (
+                          <>
+                            <td className="px-1.5 py-1.5 text-right">{r.passed}<span className="text-[var(--ink3)]">/{r.universe}</span></td>
+                            <td className={`px-1.5 py-1.5 text-right font-semibold ${tone(r.screenAvg)}`}>{fmt(r.screenAvg)}</td>
+                          </>
+                        )}
                         <td className={`px-1.5 py-1.5 text-right ${tone(r.allAvg)}`}>{fmt(r.allAvg)}</td>
                         <td className={`px-1.5 py-1.5 text-right ${tone(r.nifty)}`}>{fmt(r.nifty)}</td>
                         <td className={`px-2 py-1.5 text-right ${tone(r.screenMed)}`}>{fmt(r.screenMed)}</td>
@@ -215,7 +241,7 @@ function BacktestInner() {
                                 {r.picks.length > 60 && <span className="text-[var(--ink3)]">and {r.picks.length - 60} more</span>}
                               </div>
                             ) : <p className="text-[12px] text-[var(--ink3)]">Nothing passed this year.</p>}
-                            {r.unknown > 0 && <p className="mt-1 text-[11px] text-[var(--ink3)]">{r.unknown} companies lacked a figure the screen needs and were left out.</p>}
+                            {(r.unknown > 0 || r.untestable) && <p className="mt-1 text-[11px] text-[var(--ink3)]">{r.untestable ? `Fewer than ${MIN_JUDGED} companies had every figure this screen uses, so this year is not counted.` : `${r.unknown} of ${r.universe} companies lacked a figure the screen needs and were left out.`}</p>}
                           </td>
                         </tr>
                       )}
@@ -228,7 +254,8 @@ function BacktestInner() {
               Screen and All: average one-year return, equal amounts in each company. Tap a year for its companies.
               <InfoTip title="Average and median">
                 <p>The average is what equal amounts in every passing company would have returned. A few small companies that multiplied can lift it a long way, so the median, the middle company, is shown beside it.</p>
-                <p>&quot;All companies&quot; holds thousands of very small companies, and only the ones still listed today: its average is lifted twice over and is not a fair yardstick. The Nifty 50 and the medians are steadier comparisons.</p>
+                <p>&quot;All companies&quot; holds thousands of very small companies, and only the ones still listed today: its average is lifted twice over and is not a fair yardstick. So the summary compares medians with medians, and the screen&apos;s average with the Nifty 50.</p>
+                <p>A year where fewer than {MIN_JUDGED} companies had every figure the screen uses is shown as &quot;Too few figures&quot; and left out of all three totals. Book value, and so P/B and ROE, is missing for most companies from 2018 to 2022, when filings carried no balance sheet.</p>
               </InfoTip>
             </p>
           </>
