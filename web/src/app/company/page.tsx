@@ -243,6 +243,45 @@ function withEbitda(stmt: Stmt | null): Stmt | null {
   return { ...stmt, items };
 }
 
+/** The trailing twelve months for the annual table's TTM column (P11,
+ *  1-Nov-2026): the four newest filed quarters, when they are consecutive and
+ *  newer than the last filed year. Amounts are added up; a percentage is
+ *  recomputed from its parts (OPM % from operating profit over revenue, Tax %
+ *  weighted by profit before tax, cost shares weighted by revenue) - adding four
+ *  percentages would be meaningless. A row it cannot work out stays blank. */
+function ttmOf(annual: Stmt | null, quarterly: Stmt | null): { asOf: string; values: Record<string, number | null> } | null {
+  if (!annual || !quarterly) return null;
+  const qp = quarterly.periods, n = qp.length;
+  if (n < 4 || !annual.periods.length || qp[n - 1] <= annual.periods[annual.periods.length - 1]) return null;
+  if ((new Date(qp[n - 1]).getTime() - new Date(qp[n - 4]).getTime()) / 86400000 > 300) return null;
+  const q = (label: string, parent?: string) => quarterly.items.find((it) => it.label === label && (it.parent ?? undefined) === parent);
+  const last4 = (label: string, parent?: string) => {
+    const v = q(label, parent)?.values.slice(n - 4);
+    return v && v.length === 4 && v.every((x) => x !== null && x !== undefined) ? (v as number[]) : null;
+  };
+  const sum = (label: string) => { const v = last4(label); return v ? v.reduce((a, b) => a + b, 0) : null; };
+  const rev = sum("Revenue") ?? sum("Sales");
+  const revs = last4("Revenue") ?? last4("Sales");
+  const weighted = (pcts: number[] | null, w: number[] | null) => {
+    if (!pcts || !w) return null;
+    const tot = w.reduce((a, b) => a + b, 0);
+    return tot ? Math.round((pcts.reduce((a, p, i) => a + p * w[i], 0) / tot) * 100) / 100 : null;
+  };
+  const values: Record<string, number | null> = {};
+  for (const it of annual.items) {
+    const key = it.parent ? `${it.parent}/${it.label}` : it.label;
+    let v: number | null = null;
+    if (it.label === "OPM %") { const op = sum("Operating Profit"); v = op !== null && rev ? Math.round((op / rev) * 10000) / 100 : null; }
+    else if (it.label === "EBITDA margin %") { const e = sum("EBITDA"); v = e !== null && rev ? Math.round((e / rev) * 10000) / 100 : null; }
+    else if (it.label === "Tax %") v = weighted(last4("Tax %"), last4("Profit before tax"));
+    else if (it.parent && it.label.endsWith("%")) v = weighted(last4(it.label, it.parent), revs);
+    else if (it.label.includes("%")) v = null;
+    else if (!it.parent) { const x = last4(it.label); v = x ? Math.round(x.reduce((a, b) => a + b, 0) * 100) / 100 : null; }
+    values[key] = v;
+  }
+  return { asOf: qp[n - 1], values };
+}
+
 function trendToStmt(t: Trend): Stmt {
   const margin = t.periods.map((_, i) => {
     const r = t.revenue[i], p = t.pat[i];
@@ -692,8 +731,10 @@ function heatTint(cur: number | null | undefined, prev: number | null | undefine
   return `color-mix(in srgb, var(${ch > 0 ? "--pos" : "--neg"}) ${Math.round(6 + 20 * mag)}%, transparent)`;
 }
 
-function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, pdfs, info }: {
+function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, pdfs, info, ttm }: {
   title: string; stmt: Stmt; subtitle?: string; boldRows?: string[];
+  /** The annual table's trailing-twelve-month column, shown last in the grid. */
+  ttm?: { asOf: string; values: Record<string, number | null> } | null;
   /** The results PDF for each period, aligned with stmt.periods ("Raw PDF" row). */
   pdfs?: (string | null)[];
   /** Adds the coming quarter as a blank last column - the quarterly table only. */
@@ -867,6 +908,12 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
                   </th>
                 );
               })}
+              {ttm && (
+                <th className="px-3 py-2 text-right font-medium whitespace-nowrap">
+                  TTM
+                  <span className="block font-normal text-[11px] text-[var(--ink3)]">(to {periodLabel(ttm.asOf)})</span>
+                </th>
+              )}
               {coming && (
                 <th className="px-3 py-2 text-right font-medium whitespace-nowrap text-[var(--accent-ink)]">
                   {periodLabel(coming)}
@@ -918,6 +965,14 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
                       </td>
                     );
                   })}
+                  {ttm && (() => {
+                    const v = ttm.values[child ? `${it.parent}/${it.label}` : it.label] ?? null;
+                    return (
+                      <td className={`px-3 py-2 sm:py-1.5 text-right whitespace-nowrap tabular-nums border-l border-[var(--line)] ${bold ? "font-semibold" : ""} ${typeof v === "number" && v < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
+                        {fmtNum(v, decOf(it.label))}
+                      </td>
+                    );
+                  })()}
                   {coming && <td className="px-3 py-2 sm:py-1.5 bg-[color-mix(in_srgb,var(--accent)_6%,transparent)]" />}
                 </tr>
               );
@@ -931,6 +986,7 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
                       aria-label={`Results PDF, ${periodLabel(stmt.periods[from + i])}`} className="inline-flex text-[var(--accent-ink)]"><ExternalGlyph size={14} /></a> : null}
                   </td>
                 ))}
+                {ttm && <td />}
                 {coming && <td />}
               </tr>
             )}
@@ -2738,7 +2794,7 @@ function CompanyView() {
       {pnl && (
         <div id="profit-loss" className="scroll-mt-32 space-y-6">
           {basisSwitch}
-          <StatementTable title="Profit & loss" stmt={pnl} subtitle={tableCaption} boldRows={["Net Profit", "Net profit"]} kind="pnl" symbol={symbol} />
+          <StatementTable title="Profit & loss" stmt={pnl} subtitle={tableCaption} boldRows={["Net Profit", "Net profit"]} kind="pnl" symbol={symbol} ttm={ttmOf(pnl, quarterly)} />
           <CompoundedGrowth trend={company.trend} prices={company.prices} />
         </div>
       )}

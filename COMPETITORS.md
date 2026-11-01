@@ -214,7 +214,7 @@ Verified - 3M INDIA reads Standalone, Reliance and ITC read Consolidated.
       peers. We have the peer rows already; this is arithmetic on them.
 - [ ] **Quarterly variation columns** - profit and sales growth against the same
       quarter a year earlier, in the peer table. We hold the quarters.
-- [ ] **A TTM column** on the P&L. We already compute trailing twelve months for
+- [x] **A TTM column** on the P&L (shipped 1-Nov-2026: Grid view, last column). We already compute trailing twelve months for
       the valuation bands; the P&L does not show it.
 - [ ] **Standalone/consolidated TOGGLE**, not just the label now fixed above.
       Needs both bases stored; today the fetcher keeps one.
