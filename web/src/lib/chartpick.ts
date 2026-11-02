@@ -1,7 +1,10 @@
-/** What the reader picked on a company's chart - the view, range, overlays,
- *  lines switched on or off, earnings window and growth comparison - kept for
- *  the browser session, per company, so the company chart and the full chart
- *  open as the other was left (owner, 1-Nov-2026: both ways).
+/** What the reader picked on a chart - the view, range, overlays, lines
+ *  switched on or off, earnings window and growth comparison. Kept on this
+ *  device and shared by every company (owner, 2-Nov-2026: "remember the
+ *  settings when switched from one company's chart to another"), so the
+ *  company chart and the full chart each open as the last one was left.
+ *  A company that lacks the saved view shows Price, and the saved choice is
+ *  kept for the next company that has it.
  *
  *  Stored in the full chart's words: ranges as its buttons ("5Y"), lines as
  *  "<view>:<layer>" (pe:line, pe:median, pe:bars, sales:opm, ebitda:eb_ttm)
@@ -20,19 +23,18 @@ export type ChartPick = {
   chg: boolean;
 };
 
-const key = (sym: string) => `rs_chart_pick:${sym.toUpperCase()}`;
+const KEY = "rs_chart_pick";
 
-export function readPick(sym?: string | null): Partial<ChartPick> | null {
-  if (!sym || typeof window === "undefined") return null;
+export function readPick(): Partial<ChartPick> | null {
+  if (typeof window === "undefined") return null;
   try {
-    const raw = sessionStorage.getItem(key(sym));
+    const raw = localStorage.getItem(KEY);
     return raw ? (JSON.parse(raw) as Partial<ChartPick>) : null;
   } catch { return null; }
 }
 
-export function writePick(sym: string | null | undefined, pick: ChartPick) {
-  if (!sym) return;
-  try { sessionStorage.setItem(key(sym), JSON.stringify(pick)); } catch { /* private mode */ }
+export function writePick(pick: ChartPick) {
+  try { localStorage.setItem(KEY, JSON.stringify(pick)); } catch { /* private mode */ }
 }
 
 /* ── ranges ──────────────────────────────────────────────────────────────── */

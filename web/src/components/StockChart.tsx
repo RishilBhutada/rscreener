@@ -299,6 +299,8 @@ type SeriesDef = {
   /** two bar series sharing each quarter while both are on: L the left half,
    *  R the right half, drawn outlined */
   twin?: "L" | "R";
+  /** drawn outlined rather than filled - EPS beside EBITDA, alone or not */
+  outline?: boolean;
   /** the band of the plot its scale spans, top to bottom as fractions -
    *  the EBITDA view keeps its lines above and its bars below */
   zone?: [number, number];
@@ -373,8 +375,12 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
 }) {
   // What was picked on this company's chart, here or in the full chart, for
   // this browser session (lib/chartpick.ts): it opens as it was left.
-  const [pick0] = useState(() => readPick(symbol));
-  const [view, setView] = useState<View>(() => (pick0?.view && pick0.view in VIEW_NAME ? pick0.view as View : "price"));
+  const [pick0] = useState(() => readPick());
+  const [viewSel, setView] = useState<View>(() => (pick0?.view && pick0.view in VIEW_NAME ? pick0.view as View : "price"));
+  // A company without the chosen view (no EBITDA filed, say) shows Price; the
+  // choice itself is kept for the next company that has it.
+  const availNow: Record<string, boolean> = { pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand, ebitda: !!trendQ?.ebitda?.some((v) => v !== null) };
+  const view: View = viewSel === "price" || viewSel === "years" || availNow[viewSel] ? viewSel : "price";
   // Views laid over the one on screen (long-press a tab). Each keeps its own
   // scale, so a P/E of 20 is not flattened under a price of 2,000.
   const [overlays, setOverlays] = useState<View[]>(() => (pick0?.overlays ?? []).filter((v) => v in VIEW_NAME && v !== "years") as View[]);
@@ -439,18 +445,20 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     for (const [c, b] of Object.entries(pick0?.vis ?? {})) { const k = companyKey(c); if (k) out[k] = b; }
     return out;
   });
-  // Written back on every change, for the full chart to open as this is left.
+  // Written back on every change the reader makes (not on opening, so a
+  // company that fell back to Price does not overwrite the saved view).
   // Lines only the full chart knows ride along untouched.
+  const firstWrite = useRef(true);
   useEffect(() => {
-    if (!symbol) return;
-    const prev = readPick(symbol);
+    if (firstWrite.current) { firstWrite.current = false; return; }
+    const prev = readPick();
     const vis: Record<string, boolean> = { ...(prev?.vis ?? {}) };
     for (const [k, b] of Object.entries(on)) { const c = canonKey(k); if (c) vis[c] = b; }
     // The full chart has finer ranges (2Y, YTD); one set there that maps to
     // the range shown here is kept, not rounded.
     const r = prev?.range && rangeToCompany(prev.range) === range ? prev.range : rangeToFull(range);
-    writePick(symbol, { view, range: r, overlays, vis, win: peWin, cmp: epsCmp, per: perShare, chg: showChg });
-  }, [symbol, view, range, overlays, on, peWin, epsCmp, perShare, showChg]);
+    writePick({ view: viewSel, range: r, overlays, vis, win: peWin, cmp: epsCmp, per: perShare, chg: showChg });
+  }, [viewSel, range, overlays, on, peWin, epsCmp, perShare, showChg]);
   const [moreOpen, setMoreOpen] = useState(false);
   useBackClose(moreOpen, () => setMoreOpen(false));
   const [hover, setHover] = useState<{ t: number; px: number; py: number } | null>(null);
@@ -799,7 +807,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       const bars = spanBars(eb);
       if (bars.length) defs.push({ key: "ebitda", label: "Quarter EBITDA", color: "var(--chart-bar)", kind: "bars", axis: "L", twin: "L", zone: [0.44, 1], data: bars, fmt: "cr" });
       const eq = spanBars(trendQ.eps);
-      if (eq.length) defs.push({ key: "eb_eps", label: "Quarter EPS", color: "var(--chart-bar)", kind: "bars", axis: "L", scale: "eb_eps", twin: "R", zone: [0.44, 1], data: eq, fmt: "plain" });
+      if (eq.length) defs.push({ key: "eb_eps", label: "Quarter EPS", color: "var(--chart-bar)", kind: "bars", axis: "L", scale: "eb_eps", twin: "R", outline: true, zone: [0.44, 1], data: eq, fmt: "plain" });
       const m = qBars(eb.map((v, i) => {
         const r = trendQ.revenue[i];
         return v === null || !r ? null : Math.round((v / r) * 1000) / 10;
@@ -858,8 +866,12 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     // A line takes the next colour not yet on the chart; bars keep theirs.
     const used = new Set(defs.filter((d) => d.kind !== "bars").map((d) => d.color));
     const nextColour = () => OVERLAY_COLOURS.find((c) => !used.has(c)) ?? OVERLAY_COLOURS[used.size % OVERLAY_COLOURS.length];
+    // A price line already on screen (the EBITDA view draws one) makes a
+    // Price overlay a second copy - and its averages would sit on a scale of
+    // their own, out of line with it - so it is left out.
+    const hasPrice = defs.some((d) => d.key === "price" || d.key === "eb_price");
     overlays.forEach((ov) => {
-      if (ov === view || ov === "years") return;
+      if (ov === view || ov === "years" || (ov === "price" && hasPrice)) return;
       const mine: SeriesDef[] = [];
       build(ov, mine);
       for (const d of mine) {
@@ -1315,7 +1327,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                       <rect x={bx} y={Math.min(yv, y0)} width={bwid}
                         height={Math.max(1, Math.abs(y0 - yv))}
                         rx={!spanned && bw > 6 ? 2 : 0} fill={fill} opacity={loss ? 0.55 : 0.78}
-                        fillOpacity={twin === "R" ? 0.45 : undefined} stroke={twin === "R" ? fill : undefined} strokeWidth={twin === "R" ? 1.2 : undefined}>
+                        fillOpacity={s.outline ? 0.4 : undefined} stroke={s.outline ? fill : undefined} strokeWidth={s.outline ? 1.4 : undefined}>
                         <title>{`${spanned ? `${Q_LABEL[d.q ?? 0] ?? ""} · ` : ""}${s.label} ${s.fmt === "cr" ? `₹${fmtVal(d.v, "plain")} Cr` : `₹${d.v.toFixed(2)}`}${loss ? " (loss)" : ""}${
                           d.chg && d.chg.kind !== "none"
                             ? ` · ${growthText(d.chg, false)} ${
@@ -1411,7 +1423,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         const item = (s: SeriesDef) => (
           <button key={s.key} onClick={() => toggle(s)} className="flex items-center gap-1.5 text-sm text-[var(--ink2)]">
             <span className="inline-flex items-center justify-center w-4 h-4 rounded"
-              style={{ background: defOn(s) ? s.color : "transparent", border: `1.5px solid ${s.color}` }}>
+              style={{ background: !defOn(s) ? "transparent" : s.outline ? `repeating-linear-gradient(45deg, ${s.color} 0 2px, transparent 2px 4px)` : s.color, border: `1.5px solid ${s.color}` }}>
               {defOn(s) && <svg viewBox="0 0 10 10" className="w-2.5 h-2.5"><path d="M1.5 5.5 L4 8 L8.5 2.5" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" /></svg>}
             </span>
             {s.label}
@@ -1742,6 +1754,7 @@ function ChartShell({
   const heldBar = held && (
     <div className="mb-2 flex items-center gap-2 flex-wrap rounded-lg border border-[var(--line2)] bg-[var(--card2)] px-2.5 py-1.5 text-xs">
       {held === view ? <span className="text-[var(--ink2)]">{nm(held)} is the chart on screen.</span>
+        : held === "price" && view === "ebitda" ? <span className="text-[var(--ink2)]">The price is already on this chart.</span>
         : held === "years" || view === "years" ? <span className="text-[var(--ink2)]">Years has its own day-of-year axis and cannot be combined.</span>
         : overlays.includes(held)
           ? <button onClick={() => { setOverlays?.(overlays.filter((o) => o !== held)); setHeld(null); }}

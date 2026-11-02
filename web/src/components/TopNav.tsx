@@ -488,8 +488,19 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
 
   const go = (sym: string) => {
     setQ("");
+    setWaiting(false);
     (document.activeElement as HTMLElement | null)?.blur();
     router.push(symbolHref(sym));
+  };
+  // Enter pressed before the company list has arrived is held, not dropped:
+  // the best match opens the moment the list is in.
+  const [waiting, setWaiting] = useState(false);
+  const enterWhenReady = (typed: string) => {
+    setWaiting(true);
+    void ensureData().then(() => {
+      const hit = indexCache ? search(indexCache, typed.trim(), 1).hits[0] : undefined;
+      if (hit) go(hit.symbol); else setWaiting(false);
+    });
   };
 
   return (
@@ -518,12 +529,19 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
               if (e.key === "ArrowDown") { e.preventDefault(); setHi(Math.min(hi + 1, matches.length - 1)); }
               else if (e.key === "ArrowUp") { e.preventDefault(); setHi(Math.max(hi - 1, 0)); }
               else if (e.key === "Enter" && matches[hi]) go(matches[hi].symbol);
+              else if (e.key === "Enter" && !idx && ql.trim()) enterWhenReady(ql);
               else if (e.key === "Escape") (e.target as HTMLElement).blur();
             }}
             placeholder="Search a company, index, ETF or commodity"
             aria-label="Search a company, index, ETF or commodity"
             className="w-full text-sm bg-[var(--card2)] border border-[var(--line)] rounded-full px-4 py-2.5 sm:py-1.5 focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:bg-[var(--card)]"
           />
+          {waiting && !idx && (
+            <p role="status" className="absolute z-40 mt-1.5 w-full bg-[var(--card)] border border-[var(--line)] rounded-xl shadow-xl px-4 py-2.5 text-sm text-[var(--ink2)] flex items-center gap-2">
+              <span aria-hidden="true" className="w-3.5 h-3.5 shrink-0 rounded-full border-2 border-[var(--line2)] border-t-[var(--accent)] animate-spin" />
+              Loading the company list&hellip; opens as soon as it is in
+            </p>
+          )}
           {(matches.length > 0 || suggestion || (ql.trim().length >= 2 && idx)) && (
             <div className="absolute z-40 mt-1.5 w-full bg-[var(--card)] border border-[var(--line)] rounded-xl shadow-xl overflow-hidden hidden group-focus-within:block">
               {matches.map((m, i) => (

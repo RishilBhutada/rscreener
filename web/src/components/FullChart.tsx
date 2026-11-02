@@ -787,8 +787,8 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [index, setIndex] = useState<{ symbol: string; name: string; mcap: number }[]>([]);
   // What the reader picked on this company's chart - here or on the company
   // page - opens as it was left (lib/chartpick.ts).
-  const [pick0] = useState(() => readPick(symbol));
-  const [view, setView] = useState<View>(() => (VIEWS.some(([v]) => v === pick0?.view) ? pick0!.view as View : "price"));
+  const [pick0] = useState(() => readPick());
+  const [viewSel, setView] = useState<View>(() => (VIEWS.some(([v]) => v === pick0?.view) ? pick0!.view as View : "price"));
   const [range, setRange] = useState<Range>(() => (RANGES.includes(pick0?.range as Range) ? pick0!.range as Range : "1Y"));
   // Views laid over the one on screen (hold a view's name), each on its own scale.
   const [overlays, setOverlays] = useState<View[]>(() => (pick0?.overlays ?? []).filter((v) => VIEWS.some(([x]) => x === v)) as View[]);
@@ -827,14 +827,16 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [vis, setVis] = useState<{ from: number; to: number } | null>(null);
 
   useEffect(() => { setPrefs(loadPrefs()); }, []);
-  // Every change is written back, so the company chart opens as this was left.
+  // Every change the reader makes is written back (not the opening state), so
+  // the next chart - this company's or another's - opens as this was left.
+  const firstWrite = useRef(true);
   useEffect(() => {
-    if (!symbol) return;
+    if (firstWrite.current) { firstWrite.current = false; return; }
     const vis = Object.fromEntries(Object.entries(hidden).map(([k, h]) => [k, !h]));
     // The company chart's Years view has no twin here; left untouched it stays Years there.
-    const v = view === "price" && pick0?.view === "years" && !viewTouched.current ? "years" : view;
-    writePick(symbol, { view: v, range, overlays, vis, win: peWin, cmp: epsCmp, per: perShare, chg: showChg });
-  }, [symbol, view, range, overlays, hidden, peWin, epsCmp, perShare, showChg, pick0]);
+    const v = viewSel === "price" && pick0?.view === "years" && !viewTouched.current ? "years" : viewSel;
+    writePick({ view: v, range, overlays, vis, win: peWin, cmp: epsCmp, per: perShare, chg: showChg });
+  }, [viewSel, range, overlays, hidden, peWin, epsCmp, perShare, showChg, pick0]);
   const savePrefs = (p: Prefs) => {
     setPrefs(p);
     try { localStorage.setItem(PREF_KEY, JSON.stringify(p)); } catch { /* private mode */ }
@@ -905,12 +907,14 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const exch = file?.exch ?? (company?.exchange === "BSE" ? "BSE" : "NSE");
   const tq = company?.trend?.quarterly ?? null;
   const spsAvail = !!company?.ps_band && !!tq?.sps?.some((v) => v !== null && v !== undefined);
-  const spsOn = view === "pe" && perShare === "sps" && spsAvail;
   const avail: Record<View, boolean> = {
     price: true, pe: !!company?.pe_band, sales: !!tq?.periods?.length,
     ebitda: !!tq?.ebitda?.some((v) => v !== null && v !== undefined),
     ev: !!company?.ev_band, pb: !!company?.pb_band, ps: !!company?.ps_band,
   };
+  // The saved view where this chart has it (an ETF or index has Price only).
+  const view: View = viewSel === "price" || avail[viewSel] ? viewSel : "price";
+  const spsOn = view === "pe" && perShare === "sps" && spsAvail;
 
   const rangeDays = (r: Range, last: number) => {
     if (r !== "YTD") return RANGE_DAYS[r];
@@ -1258,7 +1262,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
       const twin = showEb && showEp;
       const allDays = [...new Set([...pdays, ...qd])].sort((a, b) => a - b);
       const spanOf = (b: Bar) => { const k = qd.indexOf(b.day); return k > 0 && b.day - qd[k - 1] < 120 ? qd[k - 1] : b.day - 91; };
-      const barSeries = (list: (Bar & { i: number })[], id: string, half: 0 | 1 | null, f: (x: number) => string) => {
+      const barSeries = (list: (Bar & { i: number })[], id: string, half: 0 | 1 | null, f: (x: number) => string, outline = false) => {
         const bs = chart.addSeries(HistogramSeries, { priceScaleId: id, priceLineVisible: false, lastValueVisible: false, priceFormat: fmt(f) }, 1);
         bs.setData(list.map((b) => ({ time: toTime(b.day), value: b.v, color: "rgba(0, 0, 0, 0)" })));
         chart.priceScale(id, 1).applyOptions({ scaleMargins: { top: twin ? 0.3 : 0.18, bottom: 0 }, ...(id === "right" ? {} : { visible: false }) });
@@ -1266,7 +1270,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
           const from = spanOf(b), mid = (from + b.day) / 2;
           return {
             from: half === 1 ? mid : from, to: half === 0 ? mid : b.day, v: b.v,
-            color: alpha(b.q ? p.q[b.q] ?? p.vol : p.vol, b.v < 0 ? 0.55 : 0.85), outline: half === 1,
+            color: alpha(b.q ? p.q[b.q] ?? p.vol : p.vol, b.v < 0 ? 0.55 : 0.85), outline,
             label: !twin && showChg && b.chg && b.chg.kind !== "none" ? growthText(b.chg) : undefined,
             labelColor: growthCol(b.chg, p),
           };
@@ -1274,7 +1278,8 @@ export default function FullChart({ symbol }: { symbol: string }) {
         return bs;
       };
       const ebS = showEb ? barSeries(ebB, "right", twin ? 0 : null, (x) => Math.round(x).toLocaleString("en-IN")) : null;
-      const epS = showEp ? barSeries(epB, ebS ? "eb_eps" : "right", twin ? 1 : null, ratio) : null;
+      // EPS is always outlined, EBITDA always solid - alone or side by side.
+      const epS = showEp ? barSeries(epB, ebS ? "eb_eps" : "right", twin ? 1 : null, ratio, true) : null;
       if (twin && showChg && ebS && epS) {
         const byDay = new Map(epB.map((b) => [b.day, b]));
         ebS.attachPrimitive(new PairLabels(ebB.map((b) => {
@@ -1448,7 +1453,8 @@ export default function FullChart({ symbol }: { symbol: string }) {
       let ci = 0;
       const bandOf = (v: View) => ({ pe: company?.pe_band, ev: company?.ev_band, pb: company?.pb_band, ps: company?.ps_band } as Record<string, ChartBand | undefined>)[v];
       for (const ov of overlays) {
-        if (ov === view) continue;
+        // The EBITDA view already draws the price; a Price overlay would be a second copy.
+        if (ov === view || (ov === "price" && view === "ebitda")) continue;
         const lines: { k: string; label: string; days: number[]; vals: (number | null)[]; f: (x: number) => string; scale: string; curved?: boolean }[] = [];
         if (ov === "price") {
           const rs = file.w?.length ? file.w : file.d?.length ? file.d : file.m ?? [];
@@ -1850,6 +1856,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
       {held && (
         <div className="shrink-0 flex items-center gap-2 flex-wrap px-3 py-1.5 border-b border-[var(--line)] bg-[var(--card2)] text-xs">
           {held === view ? <span className="text-[var(--ink2)]">{VIEW_LABEL[held]} is the chart on screen.</span>
+            : held === "price" && view === "ebitda" ? <span className="text-[var(--ink2)]">The price is already on this chart.</span>
             : overlays.includes(held)
               ? <button onClick={() => { setOverlays(overlays.filter((o) => o !== held)); setHeld(null); }}
                   className="rounded-md bg-[var(--card)] border border-[var(--line)] px-2.5 py-1 font-semibold text-[var(--ink)]">Remove {VIEW_LABEL[held]} overlay</button>
@@ -2070,7 +2077,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
                   </>
                 )}
 
-                {overlays.filter((o) => o !== view).map((ov) => {
+                {overlays.filter((o) => o !== view && !(o === "price" && view === "ebitda")).map((ov) => {
                   const ks: [string, string][] = ov === "price" ? [["price", "Price"]] : ov === "sales" ? [["gpm", "GPM %"], ["opm", "OPM %"], ["npm", "NPM %"]]
                     : ov === "ebitda" ? [["eb_ttm", "EBITDA, last 4 quarters"], ["ebitda_m", "EBITDA margin %"]] : [["line", VIEW_LABEL[ov]]];
                   return (

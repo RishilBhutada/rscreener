@@ -3,6 +3,8 @@
 import { ChevronGlyph, ExternalGlyph } from "@/components/Glyphs";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import OpeningPill from "@/components/OpeningPill";
+import { loadIndex as loadSearchIndex } from "@/lib/index-data";
 import Link from "next/link";
 import { saveFile } from "@/lib/download";
 import { buildXlsx, Cell, XLSX_MIME } from "@/lib/xlsx";
@@ -2008,6 +2010,10 @@ function CompanyView() {
   const params = useSearchParams();
   const symbol = (params.get("s") ?? "").toUpperCase();
   const [company, setCompany] = useState<Company | null>(null);
+  // The symbol whose file is in `company`. While it differs from the one asked
+  // for, the new file is on its way: the old page fades behind "Opening ...".
+  const [shownSym, setShownSym] = useState("");
+  const [openName, setOpenName] = useState<{ sym: string; name: string } | null>(null);
   const [peers, setPeers] = useState<Row[]>([]);
   const [cohort, setCohort] = useState<Cohort | null>(null);
   const [fullRow, setFullRow] = useState<Row | null>(null);
@@ -2363,10 +2369,26 @@ function CompanyView() {
     if (!symbol) return;
     // Past the HTTP cache on the load a refresh produced - a fresh shell around
     // yesterday's company file is the staleness this button exists to end.
+    // Two companies opened in quick succession: only the one asked for LAST may
+    // land. Without this a slower first file could arrive second and replace it.
+    let live = true;
+    loadSearchIndex()
+      .then((d) => { if (live) setOpenName({ sym: symbol, name: d.rows.find((r) => r.symbol === symbol)?.name || symbol }); })
+      .catch(() => {});
     fetch(`${BASE}/companies/${symbol}.json`, isRefreshLoad() ? { cache: "reload" } : undefined)
       .then((r) => { if (!r.ok) throw new Error(`no data for ${symbol}`); return r.json(); })
-      .then(setCompany)
+      .then((d) => {
+        if (!live) return;
+        setError("");
+        setCompany(d);
+        setShownSym((prev) => {
+          // Switched from one company to another: start the new one at its top.
+          if (prev && prev !== symbol) window.scrollTo(0, 0);
+          return symbol;
+        });
+      })
       .catch((e) => {
+        if (!live) return;
         // An ETF's old company link - bookmarked, or shared before ETFs left the
         // company table on 27-Sep-2026. It has a page of its own now.
         const fail = () => setError(String(e.message ?? e));
@@ -2374,6 +2396,7 @@ function CompanyView() {
           .then((r) => (r.ok ? window.location.replace(`${BASE}/etf/?s=${encodeURIComponent(symbol)}`) : fail()))
           .catch(fail);
       });
+    return () => { live = false; };
   }, [symbol]);
 
   useEffect(() => {
@@ -2470,7 +2493,9 @@ function CompanyView() {
 
   if (!symbol) return <p className="text-[var(--ink3)] p-6">No company selected. <Link className="text-[var(--accent-ink)] underline" href="/">Back to screener</Link></p>;
   if (error) return <p className="text-[var(--neg)] p-6">{error} — <Link className="text-[var(--accent-ink)] underline" href="/">Back to screener</Link></p>;
-  if (!company) return <CompanySkeleton />;
+  const opening = shownSym !== symbol;
+  const pill = opening ? <OpeningPill name={openName?.sym === symbol ? openName.name : symbol} /> : null;
+  if (!company) return <>{pill}<CompanySkeleton /></>;
 
   const s = company.snapshot;
   const price = num(fullRow, "price") ?? num(s, "price");
@@ -2515,7 +2540,8 @@ function CompanyView() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className={`space-y-6 transition-opacity duration-200 ${opening ? "opacity-35 pointer-events-none select-none" : ""}`} aria-busy={opening || undefined}>
+      {pill}
       {/* Name, then the ticker and where it sits on one quiet line; the
           export is an icon beside the star, not a button above the price. */}
       <div className="flex items-start gap-2">

@@ -160,6 +160,15 @@ export default function Home() {
   const has52 = watchRows.some((r) => r.at52 != null);
 
   const go = (sym: string) => router.push(symbolHref(sym));
+  // Enter pressed before the company list has arrived is held, not dropped:
+  // the best match opens the moment the list is in.
+  const [waiting, setWaiting] = useState(false);
+  const enterWhenReady = (typed: string) => {
+    setWaiting(true);
+    loadIndex()
+      .then((d) => { const hit = search(buildIndex(d.rows), typed.trim(), 1).hits[0]; if (hit) go(hit.symbol); else setWaiting(false); })
+      .catch(() => setWaiting(false));
+  };
   const nameOf = (sym: string) => {
     const hit = rows.find((r) => r.symbol === sym);
     return hit ? shortName(hit.name, sym) : sym;
@@ -228,6 +237,7 @@ export default function Home() {
               if (e.key === "ArrowDown") { e.preventDefault(); setHi(Math.min(hi + 1, matches.length - 1)); }
               else if (e.key === "ArrowUp") { e.preventDefault(); setHi(Math.max(hi - 1, 0)); }
               else if (e.key === "Enter" && matches[hi]) go(matches[hi].symbol);
+              else if (e.key === "Enter" && !index && q.trim()) enterWhenReady(q);
               else if (e.key === "Escape") setQ("");
             }}
             // Short enough to fit a 375px phone whole; the full sentence was cut
@@ -239,6 +249,12 @@ export default function Home() {
                        text-[var(--ink)] placeholder:text-[var(--ink3)]
                        focus:outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent-soft)]"
           />
+          {waiting && !index && (
+            <p role="status" className="absolute left-0 right-0 top-full mt-1 bg-[var(--card)] border border-[var(--line2)] rounded-xl shadow-lg z-20 px-4 py-2.5 text-sm text-[var(--ink2)] flex items-center gap-2">
+              <span aria-hidden="true" className="w-3.5 h-3.5 shrink-0 rounded-full border-2 border-[var(--line2)] border-t-[var(--accent)] animate-spin" />
+              Loading the company list&hellip; opens as soon as it is in
+            </p>
+          )}
           {/* A typo names its own fix: "relaince" offers Reliance Industries. */}
           {matches.length === 0 && suggestion && (
             <div className="absolute left-0 right-0 top-full mt-1 bg-[var(--card)] border border-[var(--line2)] rounded-xl shadow-lg z-20 px-4 py-2.5 text-sm">
