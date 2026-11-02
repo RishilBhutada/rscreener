@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { prefetchCompany } from "@/lib/prefetch";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
@@ -101,6 +102,14 @@ export default function Home() {
   // multi-word queries died here too.
   const index = useMemo<SearchIndex | null>(() => (rows.length ? buildIndex(rows) : null), [rows]);
   const { hits: matches } = index ? search(index, q, 10) : { hits: [] as SearchRow[] };
+  // S2: the top match downloads in the background while you type, so Enter opens it at once.
+  const topMatch = matches[0]?.symbol;
+  useEffect(() => {
+    if (!topMatch) return;
+    const t = window.setTimeout(() => prefetchCompany(topMatch), 250);
+    return () => window.clearTimeout(t);
+  }, [topMatch]);
+
   const suggestion = index && q.trim().length >= 2 && matches.length === 0 ? didYouMean(index, q) : null;
 
   // The user's own companies, joined to the prices already in memory. No extra

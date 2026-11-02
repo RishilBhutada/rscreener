@@ -7,6 +7,7 @@ import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { LiteRow, loadIndex, symbolHref } from "@/lib/index-data";
 import { shortName } from "@/lib/names";
 import { buildIndex, search } from "@/lib/search";
+import { prefetchMany, rememberList } from "@/lib/prefetch";
 import { loadPortfolio } from "@/lib/portfolio";
 import {
   WatchState, createList, deleteList, loadLists, moveSymbol, removeFrom,
@@ -117,6 +118,13 @@ export default function WatchlistsPage() {
       return ((av as number) - (bv as number)) * sort.d;
     });
   }, [active, bySymbol, sort, editing, dragOrder]);
+  // The list's order, for previous / next on a company page (M1), and its
+  // first companies fetched in the background (S2).
+  useEffect(() => {
+    if (!shown.length) return;
+    rememberList(active?.name ?? "Watchlist", shown);
+    prefetchMany(shown);
+  }, [shown, active?.name]);
 
   // Search: the matcher the top bar uses - companies, indices, ETFs, MCX and
   // NCDEX alike; "ncdex", "mcx" or "index" lists everything on that market.

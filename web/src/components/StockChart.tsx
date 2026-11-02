@@ -9,6 +9,7 @@ import YearsChart from "@/components/YearsChart";
 import { loadIndex } from "@/lib/index-data";
 import { canonKey, companyKey, rangeToCompany, rangeToFull, readPick, writePick, type ChartPick } from "@/lib/chartpick";
 import ChartPresets from "@/components/ChartPresets";
+import Hint from "@/components/Hint";
 import Link from "next/link";
 
 type Pt = [string, number] | [string, number, number | null];
@@ -915,7 +916,12 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     for (const [k, b] of Object.entries(on)) { const c = canonKey(k); if (c) vis[c] = b; }
     return { view: viewSel, range: rangeToFull(range), overlays, vis, win: peWin, cmp: epsCmp, per: perShare, chg: showChg };
   })();
-  const presetRow = <ChartPresets current={presetPick} apply={applyPick} sameRange={(a, b) => rangeToCompany(a) === rangeToCompany(b)} />;
+  const presetRow = (
+    <>
+      <Hint id="chart_hold">Hold a chart tab to lay it over this one. Hold a preset to update, rename or delete it.</Hint>
+      <ChartPresets current={presetPick} apply={applyPick} sameRange={(a, b) => rangeToCompany(a) === rangeToCompany(b)} />
+    </>
+  );
   // Years: each calendar year as its own line from 1 January. A chart of its
   // own on a day-of-year axis, inside the same frame and view switch.
   if (view === "years") {
@@ -1353,7 +1359,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                     <g key={i}>
                       <rect x={bx} y={Math.min(yv, y0)} width={bwid}
                         height={Math.max(1, Math.abs(y0 - yv))}
-                        rx={!spanned && bw > 6 ? 2 : 0} fill={fill} opacity={loss ? 0.55 : 0.78}
+                        rx={Math.min(2.5, bwid / 4)} fill={fill} opacity={loss ? 0.55 : 0.78}
                         fillOpacity={s.outline ? 0.4 : undefined} stroke={s.outline ? fill : undefined} strokeWidth={s.outline ? 1.4 : undefined}>
                         <title>{`${spanned ? `${Q_LABEL[d.q ?? 0] ?? ""} · ` : ""}${s.label} ${s.fmt === "cr" ? `₹${fmtVal(d.v, "plain")} Cr` : `₹${d.v.toFixed(2)}`}${loss ? " (loss)" : ""}${
                           d.chg && d.chg.kind !== "none"
@@ -1382,6 +1388,25 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             const ax = axisOf(s);
             if (!ax || s.data.length < 2) return null;
             const pts = s.data.map((d) => ({ x: x(d.t), y: ax.scale(d.v) }));
+            // A soft fill under the price line, fading to nothing at the foot
+            // of its band (G1). Not under a % comparison, where 0 is mid-chart.
+            if ((s.key === "price" || s.key === "eb_price") && s.fmt === "rupee" && pts.length > 1) {
+              const foot = MT + plotH * (s.zone?.[1] ?? 1);
+              const line = pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" L");
+              return (
+                <g key={s.key}>
+                  <defs>
+                    <linearGradient id={`rsfill-${s.key}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0" stopColor={s.color} stopOpacity="0.22" />
+                      <stop offset="1" stopColor={s.color} stopOpacity="0" />
+                    </linearGradient>
+                  </defs>
+                  <path d={`M${pts[0].x.toFixed(1)},${foot} L${line} L${pts[pts.length - 1].x.toFixed(1)},${foot} Z`} fill={`url(#rsfill-${s.key})`} />
+                  <polyline points={pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")}
+                    fill="none" stroke={s.color} strokeWidth={1.9} strokeLinejoin="round" strokeLinecap="round" />
+                </g>
+              );
+            }
             if (s.kind === "smooth") {
               return <path key={s.key} d={smoothPath(pts)} fill="none" stroke={s.color} strokeWidth="2" strokeLinecap="round" />;
             }
@@ -1847,7 +1872,7 @@ function ChartShell({
       </select>
     );
     return (
-      <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4">
+      <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4 shadow-[0_1px_3px_rgba(0,0,0,0.10)]">
         {top}
         <div className="flex items-center justify-between gap-2 border-b border-[var(--line)] mb-2">
           {tabs}

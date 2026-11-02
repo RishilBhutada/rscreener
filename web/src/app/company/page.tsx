@@ -4,6 +4,7 @@ import { ChevronGlyph, ExternalGlyph } from "@/components/Glyphs";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import OpeningPill from "@/components/OpeningPill";
+import { listAround, prefetchCompany } from "@/lib/prefetch";
 import { loadIndex as loadSearchIndex } from "@/lib/index-data";
 import Link from "next/link";
 import { saveFile } from "@/lib/download";
@@ -2494,6 +2495,9 @@ function CompanyView() {
   if (!symbol) return <p className="text-[var(--ink3)] p-6">No company selected. <Link className="text-[var(--accent-ink)] underline" href="/">Back to screener</Link></p>;
   if (error) return <p className="text-[var(--neg)] p-6">{error} — <Link className="text-[var(--accent-ink)] underline" href="/">Back to screener</Link></p>;
   const opening = shownSym !== symbol;
+  // Opened from a watchlist or screen results: step to the previous or next
+  // company in it (M1).
+  const around = typeof window === "undefined" ? null : listAround(symbol);
   const pill = opening ? <OpeningPill name={openName?.sym === symbol ? openName.name : symbol} /> : null;
   if (!company) return <>{pill}<CompanySkeleton /></>;
 
@@ -2542,6 +2546,19 @@ function CompanyView() {
   return (
     <div className={`space-y-6 transition-opacity duration-200 ${opening ? "opacity-35 pointer-events-none select-none" : ""}`} aria-busy={opening || undefined}>
       {pill}
+      {around && (around.prev || around.next) && (
+        <nav aria-label={`Companies in ${around.name}`} className="flex items-center gap-2 text-[12.5px]">
+          {around.prev ? (
+            <Link href={`/company?s=${encodeURIComponent(around.prev)}`} onPointerEnter={() => prefetchCompany(around.prev)}
+              className="rs-press inline-flex items-center gap-1 rounded-full border border-[var(--line2)] px-3 py-1.5 text-[var(--ink2)]">&lsaquo; {around.prev}</Link>
+          ) : <span />}
+          <span className="flex-1 text-center text-[var(--ink3)] truncate">{around.at} of {around.of} in {around.name}</span>
+          {around.next ? (
+            <Link href={`/company?s=${encodeURIComponent(around.next)}`} onPointerEnter={() => prefetchCompany(around.next)}
+              className="rs-press inline-flex items-center gap-1 rounded-full border border-[var(--line2)] px-3 py-1.5 text-[var(--ink2)]">{around.next} &rsaquo;</Link>
+          ) : <span />}
+        </nav>
+      )}
       {/* Name, then the ticker and where it sits on one quiet line; the
           export is an icon beside the star, not a button above the price. */}
       <div className="flex items-start gap-2">

@@ -336,6 +336,9 @@ html { background: var(--bg); }
  * each page change without a line of JavaScript. */
 main { animation: rs-page-in 0.22s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
 .rs-fade { animation: rs-fade-in 0.18s ease-out both; }
+/* A company tab's sections fade in as the tab opens: a section going from
+ * display:none to shown starts its animation again (M1). */
+.rs-stack > * { animation: rs-fade-in 0.18s ease-out both; }
 .rs-sheet { animation: rs-sheet-in 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
 @media (min-width: 640px) { .rs-sheet { animation-name: rs-pop-in; animation-duration: 0.18s; } }
 

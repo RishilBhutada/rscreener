@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
+import { prefetchCompany } from "@/lib/prefetch";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Settings from "@/components/Settings";
@@ -485,6 +486,14 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
     ? search(idx, ql, 12)
     : { hits: [] as SearchRow[], total: 0 };
   const suggestion = idx && ql.length >= 2 && matches.length === 0 ? didYouMean(idx, ql) : null;
+  // S2: the top match downloads in the background while you type, so Enter opens it at once.
+  const topMatch = matches[0]?.symbol;
+  useEffect(() => {
+    if (!topMatch) return;
+    const t = window.setTimeout(() => prefetchCompany(topMatch), 250);
+    return () => window.clearTimeout(t);
+  }, [topMatch]);
+
 
   const go = (sym: string) => {
     setQ("");

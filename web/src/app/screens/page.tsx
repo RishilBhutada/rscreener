@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
+import { prefetchMany, rememberList } from "@/lib/prefetch";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { saveFile } from "@/lib/download";
@@ -255,6 +256,14 @@ function ScreensInner() {
       return ((av as number) - (bv as number)) * (sortDesc ? -1 : 1);
     });
   }, [result, sortKey, sortDesc, lib]);
+  // Previous / next on a company page steps through these results (M1); the
+  // first few download in the background (S2).
+  useEffect(() => {
+    if (!sorted.length) return;
+    const syms = sorted.map((r) => String(r.symbol));
+    rememberList("screen results", syms);
+    prefetchMany(syms, 8);
+  }, [sorted]);
 
   // The figures each result row shows: the ones being filtered on.
   const rowFields = useMemo(() => {
