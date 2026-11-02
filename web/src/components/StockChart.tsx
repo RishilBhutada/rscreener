@@ -805,16 +805,22 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       const eb = trendQ.ebitda.map((v, i) => (v === null || v === undefined ? null : v + (trendQ.other_income?.[i] ?? 0)));
       const pp = priceLine();
       if (pp.length > 1) defs.push({ key: "eb_price", label: `Price on ${exchange === "BSE" ? "BSE" : "NSE"}`, color: "var(--accent)", kind: "line", axis: "R", zone: [0, 0.56], data: pp, fmt: "rupee" });
-      const t4 = ttmBars(eb);
-      if (t4.length > 1) defs.push({ key: "eb_ttm", label: "EBITDA, last 4 quarters", color: "var(--chart-alt)", kind: "line", axis: "R", scale: "eb_ttm", zone: [0, 0.56], data: t4, fmt: "cr" });
+      // The lines' points stand over the MIDDLE of each quarter's bar (owner,
+      // 2-Nov-2026), not on its right edge, so a point reads as that bar's.
       const bars = spanBars(eb);
+      const midOf = (t: number) => {
+        const b = bars.find((x) => x.t === t);
+        return b && b.from !== undefined && b.to !== undefined ? (b.from + b.to) / 2 : t - 45 * 86400000;
+      };
+      const t4 = ttmBars(eb).map((d) => ({ ...d, t: midOf(d.t) }));
+      if (t4.length > 1) defs.push({ key: "eb_ttm", label: "EBITDA, last 4 quarters", color: "var(--chart-alt)", kind: "line", axis: "R", scale: "eb_ttm", zone: [0, 0.56], data: t4, fmt: "cr" });
       if (bars.length) defs.push({ key: "ebitda", label: "Quarter EBITDA", color: "var(--chart-bar)", kind: "bars", axis: "L", twin: "L", zone: [0.44, 1], data: bars, fmt: "cr" });
       const eq = spanBars(trendQ.eps);
       if (eq.length) defs.push({ key: "eb_eps", label: "Quarter EPS", color: "var(--chart-bar)", kind: "bars", axis: "L", scale: "eb_eps", twin: "R", outline: true, zone: [0.44, 1], data: eq, fmt: "plain" });
       const m = qBars(eb.map((v, i) => {
         const r = trendQ.revenue[i];
         return v === null || !r ? null : Math.round((v / r) * 1000) / 10;
-      }));
+      })).map((d) => ({ ...d, t: midOf(d.t) }));
       if (m.length > 1) defs.push({ key: "ebitda_m", label: "EBITDA margin %", color: "var(--chart-dma50)", kind: "smooth", axis: "R", scale: "eb_m", dflt: false, zone: [0, 0.56], data: m, fmt: "pct" });
     }
 

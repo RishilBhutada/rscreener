@@ -191,6 +191,19 @@ function heikinAshi(rows: Row[]): Row[] {
 const dayOf = (iso: string) => Math.floor(Date.parse(`${iso.slice(0, 10)}T00:00:00Z`) / 1000 / DAY);
 const toTime = (day: number) => (day * DAY) as UTCTimestamp;
 
+/** Each quarter's middle - halfway between the quarter end before it and its
+ *  own - moved onto the nearest day the chart already holds, so a quarterly
+ *  line's points stand over the middle of its bars (owner, 2-Nov-2026) without
+ *  adding slots to the time axis, which would space the price unevenly. */
+function quarterMids(qd: number[], onto: number[]): number[] {
+  return qd.map((d, k) => {
+    const mid = k > 0 && d - qd[k - 1] < 120 ? (qd[k - 1] + d) / 2 : d - 45;
+    if (!onto.length || mid < onto[0] - 7 || mid > onto[onto.length - 1] + 7) return Math.round(mid);
+    const i = atOrBefore(onto, mid), j = Math.min(onto.length - 1, i + 1);
+    return Math.abs(onto[j] - mid) < Math.abs(onto[i] - mid) ? onto[j] : onto[i];
+  });
+}
+
 /** Index of the last time at or before `day`; 0 when every time is later. */
 function atOrBefore(times: number[], day: number): number {
   let lo = 0, hi = times.length - 1, best = 0;
@@ -1250,7 +1263,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
           color, lineWidth: 2, priceScaleId: id, lineType: curved ? LineType.Curved : LineType.Simple, priceFormat: fmt(f),
           priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, visible: on,
         });
-        sr.setData(pts(qd, vals));
+        sr.setData(pts(quarterMids(qd, pdays), vals));
         chart.priceScale(id).applyOptions({ visible: false, scaleMargins: { top: 0.12, bottom: 0.12 } });
       };
       own("eb_ttm", p.alt, ttm4, crore, !isHidden("eb_ttm"));
@@ -1490,8 +1503,9 @@ export default function FullChart({ symbol }: { symbol: string }) {
                 const w = i >= 3 ? eb.slice(i - 3, i + 1) : [];
                 return w.length === 4 && w.every((x) => x !== null && x !== undefined) ? (w as number[]).reduce((a, b) => a + b, 0) : null;
               });
-              lines.push({ k: "eb_ttm", label: "EBITDA (4Q)", days: qd, vals: t4, f: crore, scale: "t" });
-              lines.push({ k: "ebitda_m", label: "EBITDA margin", days: qd, vals: eb.map((v, i) => (v === null || !tq.revenue[i] ? null : (v / (tq.revenue[i] as number)) * 100)), f: (x) => `${x.toFixed(1)}%`, scale: "m", curved: true });
+              const mids = quarterMids(qd, anchorDays);
+              lines.push({ k: "eb_ttm", label: "EBITDA (4Q)", days: mids, vals: t4, f: crore, scale: "t" });
+              lines.push({ k: "ebitda_m", label: "EBITDA margin", days: mids, vals: eb.map((v, i) => (v === null || !tq.revenue[i] ? null : (v / (tq.revenue[i] as number)) * 100)), f: (x) => `${x.toFixed(1)}%`, scale: "m", curved: true });
             }
           }
         } else {
