@@ -31,6 +31,7 @@ export const SYNCED_KEYS = [
   "rs_peer_cols",
   "rs_grid_pins",
   "rs_price_alerts",
+  "rs_chart_presets",
 ] as const;
 
 type Profile = Record<string, unknown>;

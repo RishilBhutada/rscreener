@@ -7,7 +7,8 @@ import { useBackClose } from "@/lib/backclose";
 import { ChartUi, loadChartUi } from "@/lib/chartui";
 import YearsChart from "@/components/YearsChart";
 import { loadIndex } from "@/lib/index-data";
-import { canonKey, companyKey, rangeToCompany, rangeToFull, readPick, writePick } from "@/lib/chartpick";
+import { canonKey, companyKey, rangeToCompany, rangeToFull, readPick, writePick, type ChartPick } from "@/lib/chartpick";
+import ChartPresets from "@/components/ChartPresets";
 import Link from "next/link";
 
 type Pt = [string, number] | [string, number, number | null];
@@ -452,7 +453,9 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   useEffect(() => {
     if (firstWrite.current) { firstWrite.current = false; return; }
     const prev = readPick();
-    const vis: Record<string, boolean> = { ...(prev?.vis ?? {}) };
+    // The lines exactly as this chart has them - a preset replaces them all,
+    // so nothing from an earlier set-up may linger in what is saved.
+    const vis: Record<string, boolean> = {};
     for (const [k, b] of Object.entries(on)) { const c = canonKey(k); if (c) vis[c] = b; }
     // The full chart has finer ranges (2Y, YTD); one set there that maps to
     // the range shown here is kept, not rounded.
@@ -890,11 +893,28 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   // on screen. Keeping the summed TTM bars too puts two different quantities in
   // the same visual language, a quarter apart, both called EPS.
   const visible = model.filter(defOn);
+  // A preset sets everything a saved pick holds, replacing the lines outright.
+  const applyPick = (p: ChartPick) => {
+    if (p.view in VIEW_NAME) setView(p.view as View);
+    setRange(rangeToCompany(p.range) ?? "5Yr");
+    setOverlays(p.overlays.filter((v) => v in VIEW_NAME && v !== "years") as View[]);
+    const o: Record<string, boolean> = {};
+    for (const [c, b] of Object.entries(p.vis)) { const k = companyKey(c); if (k) o[k] = b; }
+    setOn(o);
+    setPeWin(p.win); setEpsCmp(p.cmp); setPerShare(p.per); setShowChg(p.chg);
+    setCmpSym(null); setHover(null);
+  };
+  const presetPick: ChartPick = (() => {
+    const vis: Record<string, boolean> = {};
+    for (const [k, b] of Object.entries(on)) { const c = canonKey(k); if (c) vis[c] = b; }
+    return { view: viewSel, range: rangeToFull(range), overlays, vis, win: peWin, cmp: epsCmp, per: perShare, chg: showChg };
+  })();
+  const presetRow = <ChartPresets current={presetPick} apply={applyPick} sameRange={(a, b) => rangeToCompany(a) === rangeToCompany(b)} />;
   // Years: each calendar year as its own line from 1 January. A chart of its
   // own on a day-of-year axis, inside the same frame and view switch.
   if (view === "years") {
     return (
-      <ChartShell range={range} setRange={setRange} view={view} setView={setView} overlays={overlays} setOverlays={setOverlays} ui={ui}
+      <ChartShell top={presetRow} range={range} setRange={setRange} view={view} setView={setView} overlays={overlays} setOverlays={setOverlays} ui={ui}
         expandHref={symbol ? `/chart?s=${encodeURIComponent(symbol)}` : undefined}
         moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand, ebitda: !!trendQ?.ebitda?.some((v) => v !== null) }} peLabel={spsOn ? "P/S Ratio" : "PE Ratio"}>
         <YearsChart prices={prices} />
@@ -903,7 +923,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   }
   if (!model.length || !model.some((s) => s.data.length > 1)) {
     return (
-      <ChartShell range={range} setRange={setRange} view={view} setView={setView} overlays={overlays} setOverlays={setOverlays}
+      <ChartShell top={presetRow} range={range} setRange={setRange} view={view} setView={setView} overlays={overlays} setOverlays={setOverlays}
         expandHref={symbol ? `/chart?s=${encodeURIComponent(symbol)}` : undefined}
         moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand, ebitda: !!trendQ?.ebitda?.some((v) => v !== null) }} peLabel={spsOn ? "P/S Ratio" : "PE Ratio"}>
         <div className="h-64 flex items-center justify-center text-sm text-[var(--ink3)]">No data yet for this view.</div>
@@ -1143,6 +1163,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         </div>
     ) : null;
   const shellProps = {
+    top: presetRow,
     range, setRange, view, setView, moreOpen, setMoreOpen,
     expandHref: symbol ? `/chart?s=${encodeURIComponent(symbol)}` : undefined,
     avail: { pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand, ebitda: !!trendQ?.ebitda?.some((v) => v !== null) },
@@ -1708,8 +1729,10 @@ const MORE_VIEWS: [View, string][] = [
 
 function ChartShell({
   range, setRange, view, setView, moreOpen, setMoreOpen, avail, onViewChange, expandHref, peLabel = "PE Ratio", children,
-  ui = "classic", onOptions, optionsCount = 0, footer, overlays = [], setOverlays,
+  ui = "classic", onOptions, optionsCount = 0, footer, overlays = [], setOverlays, top,
 }: {
+  /** drawn above the tabs - the chart presets row */
+  top?: React.ReactNode;
   /** views laid over this one, and how to change them (long-press a tab) */
   overlays?: View[]; setOverlays?: (v: View[]) => void;
   /** The ratio tab's name: it reads P/S Ratio while sales per share is shown. */
@@ -1730,6 +1753,16 @@ function ChartShell({
   // Tap a tab: switch to it. Hold it (or right-click): offer to lay it over the
   // chart on screen.
   const [held, setHeld] = useState<View | null>(null);
+  // The tab row scrolls sideways on a phone; keep the chosen tab in sight -
+  // a preset can pick one that sits past the edge.
+  const tabRow = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const row = tabRow.current;
+    const el = row?.querySelector<HTMLElement>(`[data-view="${view}"]`);
+    if (!row || !el) return;
+    const l = el.offsetLeft - row.offsetLeft, r = l + el.offsetWidth;
+    if (l < row.scrollLeft || r > row.scrollLeft + row.clientWidth) row.scrollLeft = Math.max(0, l - 24);
+  }, [view]);
   const timer = useRef<number | null>(null);
   const firedAt = useRef(0), downAt = useRef(0);
   const stop = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } };
@@ -1773,7 +1806,7 @@ function ChartShell({
     const tab = (active: boolean) =>
       `shrink-0 px-1 pb-2 pt-1 text-[13px] font-semibold border-b-2 whitespace-nowrap ${active ? "border-[var(--accent)] text-[var(--ink)]" : "border-transparent text-[var(--ink3)]"}`;
     const tabs = (
-      <div className="flex items-end gap-4 min-w-0 overflow-x-auto [scrollbar-width:none] select-none [-webkit-touch-callout:none]" onPointerDown={tabDown} onPointerUp={stop} onPointerLeave={stop} onPointerCancel={stop} onContextMenu={tabMenu} onClick={tabClick}>
+      <div ref={tabRow} className="flex items-end gap-4 min-w-0 overflow-x-auto [scrollbar-width:none] select-none [-webkit-touch-callout:none]" onPointerDown={tabDown} onPointerUp={stop} onPointerLeave={stop} onPointerCancel={stop} onContextMenu={tabMenu} onClick={tabClick}>
         <button {...press("price")} className={tab(view === "price")}>Price{mark("price")}</button>
         <button {...press("years")} className={tab(view === "years")}>Years</button>
         {avail.pe && <button {...press("pe")} className={tab(view === "pe")}>{peLabel}{mark("pe")}</button>}
@@ -1809,6 +1842,7 @@ function ChartShell({
     );
     return (
       <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4">
+        {top}
         <div className="flex items-center justify-between gap-2 border-b border-[var(--line)] mb-2">
           {tabs}
           <div className="flex items-center gap-0.5 pb-1">{ui === "b" && view !== "years" && rangePill}{view !== "years" && opts}{full}</div>
@@ -1824,6 +1858,7 @@ function ChartShell({
 
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4">
+      {top}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:flex-wrap mb-2">
         <div className="flex gap-1 text-xs flex-nowrap overflow-x-auto sm:flex-wrap -mx-1 px-1 [scrollbar-width:none]">
           {view !== "years" && RANGES.map(([r]) => (
