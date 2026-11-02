@@ -15,7 +15,8 @@ import { loadIndex } from "@/lib/index-data";
 import { levelsOf, SENS, type Levels, type Sens } from "@/lib/levels";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { useBackClose } from "@/lib/backclose";
-import { readPick, writePick } from "@/lib/chartpick";
+import { readPick, writePick, type ChartPick } from "@/lib/chartpick";
+import ChartPresets from "@/components/ChartPresets";
 import {
   workingFor, growth, growthText, PE_WINDOWS, CA_LABEL, CA_ORDER, Q_LABEL,
   type ChartBand, type ChartTrendQ, type Quarter, type CorpAction, type Growth, type Working,
@@ -942,6 +943,23 @@ export default function FullChart({ symbol }: { symbol: string }) {
 
 
   const hid = (key: string) => hidden[key] ?? DEF_OFF.has(key);
+
+  // The company chart's preset chips, here too (owner, 2-Nov-2026): the same
+  // presets, applied to this chart's own switches.
+  const presetPick: ChartPick = {
+    view: viewSel, range, overlays, vis: Object.fromEntries(Object.entries(hidden).map(([k, h]) => [k, !h])),
+    win: peWin, cmp: epsCmp, per: perShare, chg: showChg,
+  };
+  const applyPreset = (p: ChartPick) => {
+    setView(VIEWS.some(([v]) => v === p.view) ? p.view as View : "price");
+    viewTouched.current = true;
+    setRange(RANGES.includes(p.range as Range) ? p.range as Range : "5Y");
+    setOverlays(p.overlays.filter((v) => VIEWS.some(([x]) => x === v)) as View[]);
+    setHidden(Object.fromEntries(Object.entries(p.vis).map(([k, on]) => [k, !on])));
+    setPeWin(p.win); setEpsCmp(p.cmp); setPerShare(p.per); setShowChg(p.chg);
+    setCmps([]); setHeld(null);
+    kept.current = null;
+  };
   const isHidden = (k: string) => hid(`${view}:${k}`);
 
   // Hold a view's name (or right-click it) to lay it over the chart on screen;
@@ -1852,6 +1870,13 @@ export default function FullChart({ symbol }: { symbol: string }) {
           </span>
         )}
       </nav>
+
+      {/* Only where there are views to set: an ETF or index has Price alone. */}
+      {company && (
+        <div className="shrink-0 border-b border-[var(--line)]">
+          <ChartPresets current={presetPick} apply={applyPreset} sameRange={(a, b) => a === b} className="px-2 py-1.5" />
+        </div>
+      )}
 
       {held && (
         <div className="shrink-0 flex items-center gap-2 flex-wrap px-3 py-1.5 border-b border-[var(--line)] bg-[var(--card2)] text-xs">

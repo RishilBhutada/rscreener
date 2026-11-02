@@ -10,10 +10,12 @@ import { describe, loadPresets, samePick, savePresets, type ChartPreset } from "
  *  right-click): update it to the chart on screen, rename or delete it.
  *  "+ Save" names the chart on screen. The chip of the set-up on screen is
  *  lit; changing anything unlights it. */
-export default function ChartPresets({ current, apply, sameRange }: {
+export default function ChartPresets({ current, apply, sameRange, className = "-mx-1 px-1 pb-2 mb-1" }: {
   current: ChartPick;
   apply: (p: ChartPick) => void;
   sameRange: (a: string, b: string) => boolean;
+  /** spacing around the row - the full chart sets its own */
+  className?: string;
 }) {
   const [list, setList] = useState<ChartPreset[]>(() => (typeof window === "undefined" ? [] : loadPresets()));
   const [dialog, setDialog] = useState<null | { mode: "save" } | { mode: "manage"; i: number; renaming: boolean }>(null);
@@ -58,7 +60,7 @@ export default function ChartPresets({ current, apply, sameRange }: {
 
   return (
     <>
-      <div className="flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 pb-2 mb-1 [scrollbar-width:none] select-none [-webkit-touch-callout:none]"
+      <div className={`flex items-center gap-1.5 overflow-x-auto [scrollbar-width:none] select-none [-webkit-touch-callout:none] ${className}`}
         onPointerDown={down} onPointerUp={stop} onPointerLeave={stop} onPointerCancel={stop} onContextMenu={menu} onClick={click}>
         {list.map((p, i) => {
           const lit = samePick(current, p.pick, sameRange);
