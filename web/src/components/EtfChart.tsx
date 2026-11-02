@@ -149,7 +149,7 @@ export default function EtfChart({ rows, indexLabel }: { rows: EtfRow[]; indexLa
           {indexLabel && <span className="text-[var(--ink3)]"><i className="inline-block w-2.5 mr-1 align-middle border-t border-dashed border-[var(--chart-dma200)]" />{indexLabel}</span>}
         </div>
       </div>
-      <div ref={boxRef} className="h-[380px] sm:h-[440px]" />
+      <div ref={boxRef} className="h-[380px] sm:h-[440px] land:!h-[230px]" />
       <div role="radiogroup" aria-label="Range" className="flex items-center gap-1 px-2 py-2 border-t border-[var(--line)]">
         {RANGES.map(([r]) => (
           <button key={r} role="radio" aria-checked={range === r} onClick={() => setRange(r)}

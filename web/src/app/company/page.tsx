@@ -2607,7 +2607,7 @@ function CompanyView() {
         <>
           <div ref={tabAnchor} aria-hidden="true" />
           <div role="tablist" aria-label="Company sections"
-            className="sticky top-0 sm:top-14 z-20 -mx-4 px-4 !mt-3 bg-[var(--card)] border-b border-[var(--line)] flex justify-between sm:justify-start gap-3 sm:gap-7 overflow-x-auto [scrollbar-width:none] text-[13px] sm:text-[14px]">
+            className="sticky top-0 sm:top-14 land:!top-0 z-20 -mx-4 px-4 !mt-3 bg-[var(--card)] border-b border-[var(--line)] flex justify-between sm:justify-start gap-3 sm:gap-7 overflow-x-auto [scrollbar-width:none] text-[13px] sm:text-[14px]">
             {TABS.filter((t) => tabHas[t.key]).map((t) => (
               <button key={t.key} type="button" role="tab" aria-selected={activeTab === t.key} onClick={() => pickTab(t.key)}
                 className={`shrink-0 whitespace-nowrap pt-2.5 pb-2 border-b-2 ${activeTab === t.key
@@ -2623,7 +2623,7 @@ function CompanyView() {
           <style>{`${TABS.filter((t) => t.key !== activeTab).flatMap((t) => t.sections).map((id) => `.rs-stack > #${id}`).join(",")}{display:none}`}</style>
         </>
       ) : (
-      <nav ref={sectionNav} className="sticky top-0 sm:top-14 z-20 -mx-4 px-4 bg-[var(--card)] border-y border-[var(--line)] flex gap-1 overflow-x-auto text-sm font-medium py-2 sm:py-1.5 [scrollbar-width:none]">
+      <nav ref={sectionNav} className="sticky top-0 sm:top-14 land:!top-0 z-20 -mx-4 px-4 bg-[var(--card)] border-y border-[var(--line)] flex gap-1 overflow-x-auto text-sm font-medium py-2 sm:py-1.5 [scrollbar-width:none]">
         {/* Built from what this company ACTUALLY has. Five of these sections are
             conditionally rendered - quarters, P&L, balance sheet, cash flow and
             shareholding all depend on data that may not exist - while the nav

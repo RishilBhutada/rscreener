@@ -287,7 +287,7 @@ function RefreshButton() {
       {ready && !dismissed && (
         <div role="status"
           className="rs-sheet fixed inset-x-0 mx-auto w-fit max-w-[calc(100vw-2rem)] z-50
-                     bottom-6 touch:bottom-[calc(76px+env(safe-area-inset-bottom))]
+                     bottom-6 touch:bottom-[calc(76px+env(safe-area-inset-bottom))] land:!bottom-4
                      flex items-center gap-3 rounded-full border border-[var(--line2)] bg-[var(--card)]
                      shadow-[0_10px_30px_rgba(0,0,0,0.35)] pl-4 pr-1.5 py-1.5">
           <span className="text-[13px] font-medium text-[var(--ink)] whitespace-nowrap">New version ready</span>
@@ -493,7 +493,7 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
   };
 
   return (
-    <header className="bg-[var(--card)] border-b border-[var(--line)] sm:sticky sm:top-0 z-30">
+    <header className="bg-[var(--card)] border-b border-[var(--line)] sm:sticky sm:top-0 land:!static z-30">
       <div className="max-w-6xl mx-auto px-4 h-auto sm:h-14 py-2.5 sm:py-0 flex flex-wrap items-center gap-x-3 gap-y-2 sm:gap-4">
         {/* Suspense around this one control, not the whole header. Reading the
             query string opts a component out of static prerendering, and the
@@ -631,8 +631,11 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
       {/* A fixed bar at the BOTTOM, thumb-height and always reachable: the four
           hubs. Full width with a solid colour, which iPadOS 26 Safari needs to
           keep its glass blur off the edge. */}
-      <nav className="hidden touch:block fixed bottom-0 inset-x-0 z-40 border-t border-[var(--line)] bg-[var(--card)] pb-[env(safe-area-inset-bottom)]">
-        <div className="grid grid-cols-4 max-w-xl mx-auto">
+      {/* On a phone held sideways the same four hubs stand in a rail down the
+          left edge (see "land" in globals.css). */}
+      <nav className="hidden touch:block fixed bottom-0 inset-x-0 z-40 border-t border-[var(--line)] bg-[var(--card)] pb-[env(safe-area-inset-bottom)]
+                      land:!top-0 land:!right-auto land:!w-16 land:box-content land:!border-t-0 land:border-r land:!pb-0 land:pl-[env(safe-area-inset-left)]">
+        <div className="grid grid-cols-4 max-w-xl mx-auto land:!grid-cols-1 land:h-full land:content-center land:gap-2">
         {HUBS.map((h) => {
           const on = hub === h.key;
           return (

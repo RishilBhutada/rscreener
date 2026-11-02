@@ -121,7 +121,7 @@ export default function IndexChart({ symbol }: { symbol: string }) {
         {shown && <span className="text-[var(--ink3)]">{dateOf(shown.day)}{base ? ` · since ${dateOf(base.day)}` : ""}</span>}
       </div>
       {series.length > 1
-        ? <div ref={boxRef} className="h-[240px] sm:h-[300px]" />
+        ? <div ref={boxRef} className="h-[240px] sm:h-[300px] land:!h-[220px]" />
         : <div className="h-[240px] rs-skel" aria-busy="true" aria-label="Loading" />}
       <div role="radiogroup" aria-label="Range" className="flex items-center gap-1 px-2 py-2">
         {RANGES.map(([r]) => (

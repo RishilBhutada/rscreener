@@ -499,15 +499,20 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     el.style.visibility = "visible";
   });
   const [isMobile, setIsMobile] = useState(false);
+  // A phone on its side: wide and short, so the chart is drawn wide and short
+  // enough to sit on screen whole with its tabs (see "land" in globals.css).
+  const [isLand, setIsLand] = useState(false);
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 640px)");
-    const sync = () => setIsMobile(mq.matches);
+    const lq = window.matchMedia("(pointer: coarse) and (orientation: landscape) and (max-height: 520px)");
+    const sync = () => { setIsLand(lq.matches); setIsMobile(mq.matches && !lq.matches); };
     sync();
     mq.addEventListener("change", sync);
-    return () => mq.removeEventListener("change", sync);
+    lq.addEventListener("change", sync);
+    return () => { mq.removeEventListener("change", sync); lq.removeEventListener("change", sync); };
   }, []);
 
-  const W = isMobile ? 470 : 920, H = isMobile ? 420 : 470;
+  const W = isMobile ? 470 : isLand ? 720 : 920, H = isMobile ? 420 : isLand ? 250 : 470;
   const ML = isMobile ? 60 : 62, MR = isMobile ? 60 : 62, MT = 12, MB = isMobile ? 32 : 30;
   const plotW = W - ML - MR, plotH = H - MT - MB;
   const FS = isMobile ? 19 : 12;

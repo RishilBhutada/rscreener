@@ -11,6 +11,16 @@
   }
 }
 
+/* "land" = a phone on its side: a touch screen, wider than tall, and short.
+   Height is what landscape lacks, so the four hubs move from the bottom bar
+   to a rail down the left edge, the top bar scrolls away with the page, and
+   charts are sized to the height (owner's pick, 2-Nov-2026). */
+@custom-variant land {
+  @media (pointer: coarse) and (orientation: landscape) and (max-height: 520px) {
+    @slot;
+  }
+}
+
 @theme inline {
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
@@ -177,6 +187,11 @@ input, textarea, select, button {
    top); mouse desktops keep their original spacing. */
 @media (max-width: 639px), (pointer: coarse) {
   main { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+}
+/* On its side the bar is a rail on the left: room beside it, none below. */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 520px) {
+  body { padding-left: calc(64px + env(safe-area-inset-left)); }
+  main { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
 }
 
 /* Safari 26 tints its bars from the page and falls back to white when the root

@@ -165,7 +165,7 @@ export default function CommodityChart({ bars, worldLabel, cmpTab = "vs World" }
           </div>
         )}
       </div>
-      <div ref={boxRef} className="h-[360px] sm:h-[420px]" />
+      <div ref={boxRef} className="h-[360px] sm:h-[420px] land:!h-[230px]" />
       <div className="flex items-center gap-1 px-2 py-2 border-t border-[var(--line)]">
         <div role="radiogroup" aria-label="Range" className="flex items-center gap-1">
           {RANGES.map(([r]) => (

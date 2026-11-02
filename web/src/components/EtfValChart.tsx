@@ -113,7 +113,7 @@ export default function EtfValChart({ file }: { file: string }) {
         {now ? <>{dateOf(now.day)} · {label} <b className="text-[var(--ink)]">{fmt(now.v)}</b></> : " "}
         {med !== null && <span className="text-[var(--ink3)]"> · median {fmt(med)}</span>}
       </p>
-      <div ref={boxRef} className="h-[260px]" />
+      <div ref={boxRef} className="h-[260px] land:!h-[210px]" />
       <div role="radiogroup" aria-label="Range" className="flex items-center gap-1 px-2 py-2 border-t border-[var(--line)]">
         {RANGES.map(([r]) => (
           <button key={r} role="radio" aria-checked={range === r} onClick={() => setRange(r)}
