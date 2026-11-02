@@ -326,7 +326,26 @@ html { background: var(--bg); }
  * loading placeholder, and all of it switches off for a phone set to reduce
  * motion. Transform and opacity only, so it runs on the compositor.
  * ───────────────────────────────────────────────────────────────────────── */
+/* One set of timings and curves for the whole app (2-Nov-2026 pass): quick
+ * for a press, a beat longer for things that arrive, and one curve that
+ * starts fast and settles - what native apps use for anything entering. */
+:root {
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-std: cubic-bezier(0.2, 0, 0, 1);
+  --t-fast: 120ms;
+  --t-base: 220ms;
+  --t-slow: 340ms;
+}
 @keyframes rs-page-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes rs-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes rs-in-right { from { opacity: 0; transform: translateX(22px); } to { opacity: 1; transform: none; } }
+@keyframes rs-in-left { from { opacity: 0; transform: translateX(-22px); } to { opacity: 1; transform: none; } }
+@keyframes rs-sheet-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(24px); } }
+@keyframes rs-pop-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(0.97); } }
+@keyframes rs-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes rs-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes rs-draw { to { stroke-dashoffset: 0; } }
+@keyframes rs-pulse { from { opacity: 0.55; transform: scale(1); } to { opacity: 0; transform: scale(3.2); } }
 @keyframes rs-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes rs-sheet-in { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: none; } }
 @keyframes rs-pop-in { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: none; } }
@@ -334,13 +353,37 @@ html { background: var(--bg); }
 
 /* Every page has one <main>, and it remounts on navigation - so this plays on
  * each page change without a line of JavaScript. */
-main { animation: rs-page-in 0.22s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+main { animation: rs-page-in var(--t-base) var(--ease-out) both; }
+/* A page whose blocks arrive one after another fades as a whole instead, so
+ * the two movements do not stack. */
+main:has(.rs-stagger) { animation-name: rs-fade-in; }
+.rs-stagger > * { animation: rs-rise var(--t-slow) var(--ease-out) both; }
+.rs-stagger > :nth-child(2) { animation-delay: 40ms; }
+.rs-stagger > :nth-child(3) { animation-delay: 80ms; }
+.rs-stagger > :nth-child(4) { animation-delay: 120ms; }
+.rs-stagger > :nth-child(5) { animation-delay: 160ms; }
+.rs-stagger > :nth-child(n+6) { animation-delay: 200ms; }
 .rs-fade { animation: rs-fade-in 0.18s ease-out both; }
-/* A company tab's sections fade in as the tab opens: a section going from
- * display:none to shown starts its animation again (M1). */
-.rs-stack > * { animation: rs-fade-in 0.18s ease-out both; }
-.rs-sheet { animation: rs-sheet-in 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
-@media (min-width: 640px) { .rs-sheet { animation-name: rs-pop-in; animation-duration: 0.18s; } }
+/* A company tab's sections arrive as the tab opens - from the right when the
+ * tab is to the right of the last one, from the left otherwise. A section
+ * going from display:none to shown starts its animation again. */
+.rs-stack > * { animation: rs-fade-in var(--t-base) var(--ease-out) both; }
+.rs-stack[data-dir="1"] > * { animation-name: rs-in-right; }
+.rs-stack[data-dir="-1"] > * { animation-name: rs-in-left; }
+.rs-sheet { animation: rs-sheet-in 0.3s var(--ease-out) both; }
+@media (min-width: 640px) { .rs-sheet { animation-name: rs-pop-in; animation-duration: 0.2s; } }
+/* Leaving: a sheet drops away and its shade lifts, instead of vanishing. */
+.rs-closing .rs-sheet { animation: rs-sheet-out 0.18s var(--ease-std) both; }
+@media (min-width: 640px) { .rs-closing .rs-sheet { animation-name: rs-pop-out; } }
+.rs-closing .rs-fade { animation: rs-fade-out 0.18s var(--ease-std) both; }
+/* The line under the open tab slides to the next one. */
+.rs-tab-bar { transition: transform var(--t-slow) var(--ease-out), width var(--t-slow) var(--ease-out), opacity var(--t-fast); }
+/* Charts: lines draw themselves in, bars grow from the base, the newest
+ * price breathes. All replayed only when the view or range changes. */
+.rs-draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: rs-draw 0.8s var(--ease-out) forwards; }
+.rs-grow { transform-box: fill-box; animation: rs-grow 0.5s var(--ease-out) both; }
+.rs-pulse { transform-box: fill-box; transform-origin: center; animation: rs-pulse 2.4s ease-out infinite; }
+.rs-chart-in { animation: rs-fade-in 0.5s var(--ease-out) both; }
 
 /* A grey block that shimmers where content is about to be. Better than
  * "Loading..." because it holds the layout still: the page does not jump

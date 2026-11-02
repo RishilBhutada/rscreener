@@ -70,16 +70,28 @@ export default function InfoTip({
  *  portal so no scroll container or chart canvas can clip it. */
 export function InfoDialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   const closeRef = useRef<HTMLButtonElement>(null);
+  // Closing plays the sheet's exit (drops away, shade lifts) before it goes.
+  // The back button closes at once - the page is already moving.
+  const [closing, setClosing] = useState(false);
+  const shut = () => {
+    if (closing) return;
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (still) { onClose(); return; }
+    setClosing(true);
+    window.setTimeout(() => close.current(), 170);
+  };
   // Held in a ref so the set-up below runs once per opening. A parent that
   // re-renders on every finger movement - the chart - passes a new function
   // each time, and re-running this would steal focus back on every frame.
   const close = useRef(onClose);
   close.current = onClose;
   useBackClose(true, onClose);
+  const shutRef = useRef(shut);
+  useEffect(() => { shutRef.current = shut; });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close.current();
+      if (e.key === "Escape") shutRef.current();
     };
     document.addEventListener("keydown", onKey);
     // The page behind must not scroll under the popup; on a phone that is the
@@ -95,8 +107,8 @@ export function InfoDialog({ title, onClose, children }: { title: string; onClos
 
   if (typeof document === "undefined") return null;
   return createPortal(
-    <div className="fixed inset-0 z-[120] flex items-end justify-center p-3 sm:items-center sm:p-6">
-      <div className="rs-fade absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
+    <div className={`fixed inset-0 z-[120] flex items-end justify-center p-3 sm:items-center sm:p-6 ${closing ? "rs-closing pointer-events-none" : ""}`}>
+      <div className="rs-fade absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={shut} aria-hidden="true" />
       <div
         role="dialog"
         aria-modal="true"
@@ -105,7 +117,7 @@ export function InfoDialog({ title, onClose, children }: { title: string; onClos
       >
         <div className="flex items-start justify-between gap-3">
           <h3 className="text-sm font-semibold text-[var(--ink)]">{title}</h3>
-          <button ref={closeRef} type="button" onClick={onClose} aria-label="Close"
+          <button ref={closeRef} type="button" onClick={shut} aria-label="Close"
             className="shrink-0 p-1 -m-1 text-[var(--ink3)] hover:text-[var(--ink)]">
             <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true">
               <path d="M6 6l12 12M18 6L6 18" />

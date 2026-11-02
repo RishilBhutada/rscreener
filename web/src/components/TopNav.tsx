@@ -675,8 +675,8 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
             >
               {/* The current hub sits in a pill, not just a change of colour -
                   a tint alone is the one signal a glance in daylight misses. */}
-              <span className={`flex items-center justify-center w-14 h-7 rounded-full transition-colors duration-200 ${
-                on ? "bg-[var(--accent-soft)]" : ""}`}>
+              <span className={`flex items-center justify-center w-14 h-7 rounded-full transition-[background-color,transform] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+                on ? "bg-[var(--accent-soft)] scale-105" : "scale-100"}`}>
                 <NavIcon d={h.icon} />
               </span>
               {h.label}

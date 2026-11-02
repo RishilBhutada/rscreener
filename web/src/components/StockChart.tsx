@@ -1,7 +1,8 @@
 "use client";
 
 import { CheckGlyph, ChevronGlyph } from "@/components/Glyphs";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import TabIndicator from "@/components/TabIndicator";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { useBackClose } from "@/lib/backclose";
 import { ChartUi, loadChartUi } from "@/lib/chartui";
@@ -510,6 +511,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     el.style.top = `${top}px`;
     el.style.visibility = "visible";
   });
+  const gid = `g${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const [isMobile, setIsMobile] = useState(false);
   // A phone on its side: wide and short, so the chart is drawn wide and short
   // enough to sit on screen whole with its tabs (see "land" in globals.css).
@@ -1237,7 +1239,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
 
           {axR && axR.ticks.map((v) => (
             <g key={`r${v}`}>
-              <line x1={ML} x2={W - MR} y1={axR.scale(v)} y2={axR.scale(v)} stroke="var(--chart-grid)" strokeWidth="1" />
+              <line x1={ML} x2={W - MR} y1={axR.scale(v)} y2={axR.scale(v)} stroke="var(--chart-grid)" strokeWidth="1" strokeDasharray="3 5" />
               <text x={W - MR + 8} y={axR.scale(v) + 4} fontSize={FS} fill="var(--chart-axis)">{axisVal(v, fmtKindOf("R"), isMobile)}</text>
             </g>
           ))}
@@ -1278,9 +1280,24 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             ) : null
           ))}
 
+          {/* Each fiscal quarter's colour, full at the top and softer at the
+              base, so a bar reads as a solid object rather than a flat block. */}
+          <defs>
+            {[1, 2, 3, 4].map((n) => (
+              <linearGradient key={n} id={`${gid}q${n}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stopColor={Q_COLOUR[n]} stopOpacity="1" />
+                <stop offset="1" stopColor={Q_COLOUR[n]} stopOpacity="0.6" />
+              </linearGradient>
+            ))}
+          </defs>
+          {/* Keyed on what is drawn: switching view or range draws it in again;
+              moving a finger over it does not. */}
+          <g key={`${view}|${range}|${peWin}|${spsOn ? 1 : 0}|${overlays.join(",")}`}>
           {visible.filter((s) => s.kind === "bars").map((s) => {
             const ax = axisOf(s);
             if (!ax) return null;
+            // Grow-in only where it stays quick: not over years of daily volume.
+            const grow = s.data.length <= 160;
             // Twin bars: both of a pair on, each takes half its quarter.
             const twin = s.twin && twinOn ? s.twin : null;
             const bw = barW(s);
@@ -1340,7 +1357,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                     if (twin === "R") bx += half + 0.6;
                   }
                   // EPS bars always in their fiscal quarter's colour.
-                  const fill = d.q ? (Q_COLOUR[d.q] ?? s.color) : s.color;
+                  const qcol = d.q ? (Q_COLOUR[d.q] ?? s.color) : s.color;
+                  const fill = d.q && !s.outline ? `url(#${gid}q${d.q})` : qcol;
                   const loss = d.v < 0;
                   const chgTxt = d.chg ? growthText(d.chg) : "";
                   const labelFits = showChg && chgTxt !== "" && chgFont > 0 && (!twin || twinRows > 0);
@@ -1359,8 +1377,10 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                     <g key={i}>
                       <rect x={bx} y={Math.min(yv, y0)} width={bwid}
                         height={Math.max(1, Math.abs(y0 - yv))}
-                        rx={Math.min(2.5, bwid / 4)} fill={fill} opacity={loss ? 0.55 : 0.78}
-                        fillOpacity={s.outline ? 0.4 : undefined} stroke={s.outline ? fill : undefined} strokeWidth={s.outline ? 1.4 : undefined}>
+                        rx={Math.min(2.5, bwid / 4)} fill={fill} opacity={loss ? 0.55 : d.q ? 0.92 : 0.78}
+                        fillOpacity={s.outline ? 0.4 : undefined} stroke={s.outline ? qcol : undefined} strokeWidth={s.outline ? 1.4 : undefined}
+                        className={grow ? "rs-grow" : undefined}
+                        style={grow ? { transformOrigin: loss ? "top" : "bottom", animationDelay: `${Math.min(i * 14, 320)}ms` } : undefined}>
                         <title>{`${spanned ? `${Q_LABEL[d.q ?? 0] ?? ""} · ` : ""}${s.label} ${s.fmt === "cr" ? `₹${fmtVal(d.v, "plain")} Cr` : `₹${d.v.toFixed(2)}`}${loss ? " (loss)" : ""}${
                           d.chg && d.chg.kind !== "none"
                             ? ` · ${growthText(d.chg, false)} ${
@@ -1401,37 +1421,66 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                       <stop offset="1" stopColor={s.color} stopOpacity="0" />
                     </linearGradient>
                   </defs>
-                  <path d={`M${pts[0].x.toFixed(1)},${foot} L${line} L${pts[pts.length - 1].x.toFixed(1)},${foot} Z`} fill={`url(#rsfill-${s.key})`} />
-                  <polyline points={pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")}
-                    fill="none" stroke={s.color} strokeWidth={1.9} strokeLinejoin="round" strokeLinecap="round" />
+                  <path d={`M${pts[0].x.toFixed(1)},${foot} L${line} L${pts[pts.length - 1].x.toFixed(1)},${foot} Z`} fill={`url(#rsfill-${s.key})`} className="rs-chart-in" style={{ animationDelay: "250ms" }} />
+                  <polyline points={pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")} pathLength={1} className="rs-draw"
+                    fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
                 </g>
               );
             }
             if (s.kind === "smooth") {
-              return <path key={s.key} d={smoothPath(pts)} fill="none" stroke={s.color} strokeWidth="2" strokeLinecap="round" />;
+              return <path key={s.key} d={smoothPath(pts)} pathLength={1} className="rs-draw" fill="none" stroke={s.color} strokeWidth="2" strokeLinecap="round" />;
             }
             return (
               <polyline key={s.key}
                 points={pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")}
                 fill="none" stroke={s.color} strokeWidth={s.key === "price" || s.key === "eb_price" || s.key.endsWith("_line") ? 1.9 : s.key === "eb_ttm" ? 2.2 : 1.4}
                 strokeDasharray={s.kind === "dashed" ? "6 5" : undefined}
+                pathLength={s.kind === "dashed" ? undefined : 1} className={s.kind === "dashed" ? "rs-chart-in" : "rs-draw"}
                 strokeLinejoin="round" strokeLinecap="round" />
             );
           })}
+
+          </g>
+
+          {/* The newest price: a dot that breathes at the end of the line and
+              its value in a tag on the axis, as a trading screen shows it. */}
+          {(() => {
+            const s = visible.find((v) => (v.key === "price" || v.key === "eb_price") && v.fmt === "rupee" && !v.group);
+            const ax = s ? axisOf(s) : null;
+            if (!s || !ax || s.data.length < 2) return null;
+            const p = s.data[s.data.length - 1];
+            const cx = x(p.t), cy = ax.scale(p.v);
+            const th = FS + 8;
+            return (
+              <g className="rs-chart-in" style={{ animationDelay: "500ms" }}>
+                <circle cx={cx} cy={cy} r="3.5" fill={s.color} className="rs-pulse" />
+                <circle cx={cx} cy={cy} r="3.5" fill={s.color} stroke="var(--card)" strokeWidth="1.5" />
+                <rect x={W - MR + 3} y={cy - th / 2} width={MR - 5} height={th} rx={th / 2.6} fill={s.color} />
+                <text x={W - MR + 3 + (MR - 5) / 2} y={cy + FS * 0.36} textAnchor="middle" fontSize={FS} fontWeight="600" fill="#fff">
+                  {axisVal(p.v, "rupee", isMobile)}
+                </text>
+              </g>
+            );
+          })()}
 
           {hover && hoverPt && primary && (
             <g>
               <line x1={x(hoverPt.t)} x2={x(hoverPt.t)} y1={MT} y2={MT + plotH} stroke="var(--chart-axis)" strokeWidth="1" strokeDasharray="2 3" />
               {(() => {
                 const ax = axisOf(primary);
-                return ax ? <circle cx={x(hoverPt.t)} cy={ax.scale(hoverPt.v)} r="3.5" fill={primary.color} stroke="var(--card)" strokeWidth="1.5" /> : null;
+                return ax ? (
+                  <>
+                    <circle cx={x(hoverPt.t)} cy={ax.scale(hoverPt.v)} r="9" fill={primary.color} opacity="0.18" />
+                    <circle cx={x(hoverPt.t)} cy={ax.scale(hoverPt.v)} r="4" fill={primary.color} stroke="var(--card)" strokeWidth="1.8" />
+                  </>
+                ) : null;
               })()}
             </g>
           )}
         </svg>
 
         {hover && hoverPt && (
-          <div ref={tipRef} className="absolute pointer-events-none bg-[var(--card)] border border-[var(--line2)] rounded-lg shadow-lg px-3 py-2 text-xs space-y-0.5 z-10"
+          <div ref={tipRef} className="absolute pointer-events-none border border-[var(--line2)] rounded-xl px-3 py-2 text-xs space-y-0.5 z-10 backdrop-blur-md bg-[color-mix(in_srgb,var(--card)_86%,transparent)] shadow-[0_12px_32px_rgba(0,0,0,0.28)]"
             style={{ left: 0, top: 0, visibility: "hidden", maxWidth: Math.max(160, boxW - 8) }}>
             <p className="font-semibold text-[var(--ink)]">
               {new Date(hoverPt.t).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
@@ -1812,7 +1861,7 @@ function ChartShell({
     if (firedAt.current >= downAt.current) return; // the click that ends a hold
     setHeld(null); pick(v);
   };
-  const press = (v: View) => ({ "data-view": v });
+  const press = (v: View) => ({ "data-view": v, "data-active": v === view ? "true" : undefined });
   const mark = (v: View) => overlays.includes(v) ? <span className="ml-0.5 text-[var(--accent)]" aria-label="overlaid">+</span> : null;
   const nm = (v: View) => (v === "pe" ? peLabel : VIEW_NAME[v]);
   const heldBar = held && (
@@ -1835,13 +1884,14 @@ function ChartShell({
 
   if (ui !== "classic") {
     const tab = (active: boolean) =>
-      `shrink-0 px-1 pb-2 pt-1 text-[13px] font-semibold border-b-2 whitespace-nowrap ${active ? "border-[var(--accent)] text-[var(--ink)]" : "border-transparent text-[var(--ink3)]"}`;
+      `shrink-0 px-1 pb-2 pt-1 text-[13px] font-semibold border-b-2 border-transparent whitespace-nowrap transition-colors ${active ? "text-[var(--ink)]" : "text-[var(--ink3)]"}`;
     const tabs = (
-      <div ref={tabRow} className="flex items-end gap-4 min-w-0 overflow-x-auto [scrollbar-width:none] select-none [-webkit-touch-callout:none]" onPointerDown={tabDown} onPointerUp={stop} onPointerLeave={stop} onPointerCancel={stop} onContextMenu={tabMenu} onClick={tabClick}>
+      <div ref={tabRow} className="relative flex items-end gap-4 min-w-0 overflow-x-auto [scrollbar-width:none] select-none [-webkit-touch-callout:none]" onPointerDown={tabDown} onPointerUp={stop} onPointerLeave={stop} onPointerCancel={stop} onContextMenu={tabMenu} onClick={tabClick}>
         <button {...press("price")} className={tab(view === "price")}>Price{mark("price")}</button>
         <button {...press("years")} className={tab(view === "years")}>Years</button>
         {avail.pe && <button {...press("pe")} className={tab(view === "pe")}>{peLabel}{mark("pe")}</button>}
         {moreItems.map(([v, label]) => <button key={v} {...press(v)} className={tab(view === v)}>{label}{mark(v)}</button>)}
+        <TabIndicator rowRef={tabRow} />
       </div>
     );
     const iconBtn = "shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-lg text-[var(--ink2)] hover:bg-[var(--card2)] relative";

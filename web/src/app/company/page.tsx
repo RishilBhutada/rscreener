@@ -4,6 +4,7 @@ import { ChevronGlyph, ExternalGlyph } from "@/components/Glyphs";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import OpeningPill from "@/components/OpeningPill";
+import TabIndicator from "@/components/TabIndicator";
 import { listAround, prefetchCompany } from "@/lib/prefetch";
 import { loadIndex as loadSearchIndex } from "@/lib/index-data";
 import Link from "next/link";
@@ -2046,6 +2047,9 @@ function CompanyView() {
   // Which tab is open. A link to a tab (#results) or to a section inside one
   // (#quarters) opens that tab, then scrolls to the section once it is shown.
   const [tab, setTab] = useState<TabKey>("overview");
+  // Which way the last tab change went, so its sections slide in from that side.
+  const [tabDir, setTabDir] = useState<0 | 1 | -1>(0);
+  const tabRowRef = useRef<HTMLDivElement>(null);
   const tabAnchor = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const fromHash = () => {
@@ -2060,6 +2064,8 @@ function CompanyView() {
     return () => window.removeEventListener("hashchange", fromHash);
   }, [company]);
   const pickTab = (k: TabKey) => {
+    const from = TABS.findIndex((t) => t.key === tab), to = TABS.findIndex((t) => t.key === k);
+    if (to !== from) setTabDir(to > from ? 1 : -1);
     setTab(k);
     try { window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#${k}`); } catch { /* the tab still opens */ }
     // Opening a tab while scrolled down shows it from its top, under the bar.
@@ -2544,7 +2550,7 @@ function CompanyView() {
   };
 
   return (
-    <div className={`space-y-6 transition-opacity duration-200 ${opening ? "opacity-35 pointer-events-none select-none" : ""}`} aria-busy={opening || undefined}>
+    <div className={`rs-stagger space-y-6 transition-opacity duration-200 ${opening ? "opacity-35 pointer-events-none select-none" : ""}`} aria-busy={opening || undefined}>
       {pill}
       {around && (around.prev || around.next) && (
         <nav aria-label={`Companies in ${around.name}`} className="flex items-center gap-2 text-[12.5px]">
@@ -2649,17 +2655,19 @@ function CompanyView() {
       {tabbed ? (
         <>
           <div ref={tabAnchor} aria-hidden="true" />
-          <div role="tablist" aria-label="Company sections"
+          <div ref={tabRowRef} role="tablist" aria-label="Company sections"
             className="sticky top-0 sm:top-14 land:!top-0 z-20 -mx-4 px-4 !mt-3 bg-[var(--card)] border-b border-[var(--line)] flex justify-between sm:justify-start gap-3 sm:gap-7 overflow-x-auto [scrollbar-width:none] text-[13px] sm:text-[14px]">
             {TABS.filter((t) => tabHas[t.key]).map((t) => (
               <button key={t.key} type="button" role="tab" aria-selected={activeTab === t.key} onClick={() => pickTab(t.key)}
-                className={`shrink-0 whitespace-nowrap pt-2.5 pb-2 border-b-2 ${activeTab === t.key
-                  ? "border-[var(--accent)] text-[var(--ink)] font-semibold"
-                  : "border-transparent text-[var(--ink3)] hover:text-[var(--ink2)]"}`}>
+                data-active={activeTab === t.key ? "true" : undefined}
+                className={`shrink-0 whitespace-nowrap pt-2.5 pb-2 border-b-2 border-transparent transition-colors ${activeTab === t.key
+                  ? "text-[var(--ink)] font-semibold"
+                  : "text-[var(--ink3)] hover:text-[var(--ink2)]"}`}>
                 {t.label}
                 {badge[t.key] && <span className="ml-0.5 text-[10px] font-normal text-[var(--ink3)]">{badge[t.key]}</span>}
               </button>
             ))}
+            <TabIndicator rowRef={tabRowRef} />
           </div>
           {/* Sections outside the open tab are hidden, not unmounted, so each
               keeps its state (a table's switches, an open row) across tabs. */}
@@ -2732,7 +2740,7 @@ function CompanyView() {
         <style>{sectionOrder.map((id, i) => `.rs-pager > #${id},.rs-stack > #${id}{order:${i}}`).join("")}</style>
       )}
 
-      <div ref={pager} className={mode === "swipe" ? "rs-pager" : "rs-stack"}>
+      <div ref={pager} className={mode === "swipe" ? "rs-pager" : "rs-stack"} data-dir={mode === "swipe" || !tabDir ? undefined : tabDir}>
 
       {/* Notices sit INSIDE a section. A bare child of the pager has no id, so
           a saved section order gave it CSS order 0 and it jumped to the top,

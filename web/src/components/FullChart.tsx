@@ -1249,8 +1249,10 @@ export default function FullChart({ symbol }: { symbol: string }) {
       const rows = file.w?.length ? file.w : file.d?.length ? file.d : file.m ?? [];
       if (!rows.length) { chart.remove(); chartRef.current = null; return; }
       const pdays = rows.map((r) => r[0]);
-      const pr = chart.addSeries(LineSeries, {
-        color: p.accent, lineWidth: 2, priceFormat: fmt(axis), priceLineVisible: false, lastValueVisible: true, visible: !isHidden("eb_price"),
+      // The company chart's look: a soft fill fading down under the line.
+      const pr = chart.addSeries(AreaSeries, {
+        lineColor: p.accent, topColor: alpha(p.accent, 0.24), bottomColor: alpha(p.accent, 0), lineWidth: 2,
+        priceFormat: fmt(axis), priceLineVisible: false, lastValueVisible: true, visible: !isHidden("eb_price"),
       });
       pr.setData(rows.map((r) => ({ time: toTime(r[0]), value: r[4] })));
       const ttm4 = qd.map((_, i) => {
@@ -1362,8 +1364,9 @@ export default function FullChart({ symbol }: { symbol: string }) {
       const bd = series.map((q) => dayOf(q[0]));
       const bv = series.map((q) => q[1]);
       const rf = fmt(ratio);
-      const main = chart.addSeries(LineSeries, {
-        color: p.accent, lineWidth: 2, priceFormat: rf, lastValueVisible: true, priceLineVisible: false,
+      const main = chart.addSeries(AreaSeries, {
+        lineColor: p.accent, topColor: alpha(p.accent, 0.2), bottomColor: alpha(p.accent, 0), lineWidth: 2,
+        priceFormat: rf, lastValueVisible: true, priceLineVisible: false,
         visible: !isHidden("line"),
       });
       main.setData(bd.map((d, i) => ({ time: toTime(d), value: bv[i] })));
