@@ -741,7 +741,7 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
   ttm?: { asOf: string; values: Record<string, number | null> } | null;
   /** The results PDF for each period, aligned with stmt.periods ("Raw PDF" row). */
   pdfs?: (string | null)[];
-  /** Adds the coming quarter as a blank last column - the quarterly table only. */
+  /** The coming quarter, named in the grid's top-left corner - the quarterly table only. */
   next?: NextResults;
   /** Which table this is, for its "%" switch and row order; and whose page. */
   kind: TableKind; symbol: string;
@@ -760,7 +760,9 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
   const [asking, setAsking] = useState(false);
   const total = stmt.periods.length;
   const from = all ? 0 : Math.max(0, total - RECENT_PERIODS);
-  const periods = stmt.periods.slice(from);
+  // Newest first (owner, 3-Nov-2026): the latest period is the first column,
+  // older ones follow to the right, and the grid scrolls on into history.
+  const cols = Array.from({ length: total - from }, (_, k) => total - 1 - k);
   const coming = next !== undefined && total ? quarterAfter(stmt.periods[total - 1]) : null;
   // The meeting's date belongs on that column only if it is that quarter's.
   const due = coming && next && quarterBefore(next.date) === coming ? next.date : null;
@@ -788,7 +790,7 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
           <p className="text-xs text-[var(--ink3)] mt-0.5">
             {draft ? "Move rows with the arrows, then Done"
               : `${subtitle ?? "₹ Cr"}`}
-            {/* The coming quarter is a column in the grid; in the trend view it is said here. */}
+            {/* The coming quarter sits in the grid's corner; in the trend view it is said here. */}
             {!draft && trend && coming && ` · ${periodLabel(coming)} results ${due ? `due ${declaredLabel(due)}` : "date not out"}`}
           </p>
         </div>
@@ -835,10 +837,9 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
               )}
         </div>
       )}
-      {/* Opens on the NEWEST period. These tables carry up to twenty years of
-          columns oldest-first, so the page landed on 2005 and the reader had to
-          drag sideways every time to reach the year he was actually asking
-          about. The pinned label column stays put either way. */}
+      {/* Opens on the NEWEST period, which is the first column: newest on the
+          left, older to the right, scrolling on into history. The pinned label
+          column stays put either way. */}
       {trend && !draft ? (() => {
         const last = total - 1;
         const cols = quarterlyCols ? "grid-cols-[minmax(84px,1fr)_48px_minmax(52px,auto)_46px_46px]" : "grid-cols-[minmax(84px,1fr)_48px_minmax(52px,auto)_56px]";
@@ -898,32 +899,35 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
           </div>
         );
       })() : (
-      <div key={from} className="overflow-x-auto" ref={(el) => { if (el) el.scrollLeft = el.scrollWidth; }}>
+      <div key={from} className="overflow-x-auto">
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="text-xs text-[var(--ink3)] border-y border-[var(--line)]">
-              <th className="px-3 py-2 text-left font-medium sticky left-0 bg-[var(--card)]"> </th>
-              {periods.map((p, i) => {
-                const dec = declaredLabel(stmt.declared?.[from + i]);
-                return (
-                  <th key={p} className="px-3 py-2 text-right font-medium whitespace-nowrap">
-                    {periodLabel(p)}
-                    {dec && <span className="block font-normal text-[11px] text-[var(--ink3)]">({dec})</span>}
-                  </th>
-                );
-              })}
+              {/* The corner above the row names carries the coming quarter -
+                  no blank column of its own. */}
+              <th className="px-3 py-2 text-left font-medium sticky left-0 bg-[var(--card)] align-bottom">
+                {coming ? (
+                  <span className="block whitespace-nowrap text-[var(--accent-ink)] font-semibold">
+                    Next: {periodLabel(coming)}
+                    <span className="block font-normal text-[11px] text-[var(--ink3)]">{due ? `due ${declaredLabel(due)}` : "date not out"}</span>
+                  </span>
+                ) : " "}
+              </th>
               {ttm && (
-                <th className="px-3 py-2 text-right font-medium whitespace-nowrap">
+                <th className="px-3 py-2 text-right font-medium whitespace-nowrap border-r border-[var(--line)]">
                   TTM
                   <span className="block font-normal text-[11px] text-[var(--ink3)]">(to {periodLabel(ttm.asOf)})</span>
                 </th>
               )}
-              {coming && (
-                <th className="px-3 py-2 text-right font-medium whitespace-nowrap text-[var(--accent-ink)]">
-                  {periodLabel(coming)}
-                  <span className="block font-normal text-[11px]">({due ? `due ${declaredLabel(due)}` : "date not out"})</span>
-                </th>
-              )}
+              {cols.map((at) => {
+                const dec = declaredLabel(stmt.declared?.[at]);
+                return (
+                  <th key={stmt.periods[at]} className="px-3 py-2 text-right font-medium whitespace-nowrap">
+                    {periodLabel(stmt.periods[at])}
+                    {dec && <span className="block font-normal text-[11px] text-[var(--ink3)]">({dec})</span>}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -951,14 +955,22 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
                       </button>
                     ) : it.label}
                   </td>
-                  {it.values.slice(from).map((v, i) => {
-                    // Against the period before - the one off-screen to the
-                    // left too, so the first visible column still has one.
-                    const at = from + i, points = it.label.includes("%");
+                  {ttm && (() => {
+                    const v = ttm.values[child ? `${it.parent}/${it.label}` : it.label] ?? null;
+                    return (
+                      <td className={`px-3 py-2 sm:py-1.5 text-right whitespace-nowrap tabular-nums border-r border-[var(--line)] ${bold ? "font-semibold" : ""} ${typeof v === "number" && v < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
+                        {fmtNum(v, decOf(it.label))}
+                      </td>
+                    );
+                  })()}
+                  {cols.map((at) => {
+                    // Against the period before it - the column to its right,
+                    // or the one past the last shown, so every column has one.
+                    const v = it.values[at] ?? null, points = it.label.includes("%");
                     const prev = at > 0 ? it.values[at - 1] : null;
                     const ch = showPct ? change(v, prev, points) : null;
                     return (
-                      <td key={i} style={{ background: heatTint(v, prev, points) }}
+                      <td key={at} style={{ background: heatTint(v, prev, points) }}
                         className={`px-3 py-2 sm:py-1.5 text-right whitespace-nowrap tabular-nums ${bold ? "font-semibold" : ""} ${typeof v === "number" && v < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
                         {fmtNum(v, decOf(it.label))}
                         {ch !== null && (
@@ -969,29 +981,22 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
                       </td>
                     );
                   })}
-                  {ttm && (() => {
-                    const v = ttm.values[child ? `${it.parent}/${it.label}` : it.label] ?? null;
-                    return (
-                      <td className={`px-3 py-2 sm:py-1.5 text-right whitespace-nowrap tabular-nums border-l border-[var(--line)] ${bold ? "font-semibold" : ""} ${typeof v === "number" && v < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
-                        {fmtNum(v, decOf(it.label))}
-                      </td>
-                    );
-                  })()}
-                  {coming && <td className="px-3 py-2 sm:py-1.5 bg-[color-mix(in_srgb,var(--accent)_6%,transparent)]" />}
                 </tr>
               );
             })}
             {pdfs && !draft && pdfs.slice(from).some(Boolean) && (
               <tr className="border-b border-[var(--line)]">
                 <td className="px-3 py-2 sm:py-1.5 sticky left-0 bg-[var(--card)] text-[var(--ink2)]">Raw PDF</td>
-                {pdfs.slice(from).map((u, i) => (
-                  <td key={i} className="px-3 py-2 sm:py-1.5 text-right">
-                    {u ? <a href={u.includes("://") ? u : `https://nsearchives.nseindia.com/corporate/${u}`} target="_blank" rel="noopener noreferrer"
-                      aria-label={`Results PDF, ${periodLabel(stmt.periods[from + i])}`} className="inline-flex text-[var(--accent-ink)]"><ExternalGlyph size={14} /></a> : null}
-                  </td>
-                ))}
                 {ttm && <td />}
-                {coming && <td />}
+                {cols.map((at) => {
+                  const u = pdfs[at];
+                  return (
+                    <td key={at} className="px-3 py-2 sm:py-1.5 text-right">
+                      {u ? <a href={u.includes("://") ? u : `https://nsearchives.nseindia.com/corporate/${u}`} target="_blank" rel="noopener noreferrer"
+                        aria-label={`Results PDF, ${periodLabel(stmt.periods[at])}`} className="inline-flex text-[var(--accent-ink)]"><ExternalGlyph size={14} /></a> : null}
+                    </td>
+                  );
+                })}
               </tr>
             )}
           </tbody>
