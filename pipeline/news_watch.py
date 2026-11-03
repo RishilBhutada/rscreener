@@ -92,11 +92,13 @@ def main() -> None:
         # A starred company's quarterly business update, pushed within twenty
         # minutes (alerts/update_alerts.py; it never repeats one).
         # ...and price alerts set with the bell on a company page
-        # (alerts/price_alerts.py; market hours only).
-        for script in ("update_alerts.py", "price_alerts.py"):
+        # (alerts/price_alerts.py; market hours only), and every other
+        # announcement from a watched company (alerts/check_announcements.py,
+        # which the hourly alerts.yml alone ran - and GitHub dropped most of).
+        for script in ("update_alerts.py", "price_alerts.py", "check_announcements.py"):
             u = subprocess.run([sys.executable, str(ROOT / "alerts" / script)], capture_output=True, text=True)
             print("   " + " | ".join(line for line in ((u.stdout or "") + (u.stderr or "")).splitlines()
-                                  if line.startswith(("updates:", "price alerts:", "account list:"))))
+                                  if line.startswith(("updates:", "price alerts:", "account list:", "announcements:"))))
         m = re.search(r"NEW_ROWS=(\d+)", out)
         if m and int(m.group(1)) > 0:
             pending = True

@@ -17,7 +17,6 @@ Read-only toward markets: it tells, it never trades.
 Usage:  python alerts/price_alerts.py     (NTFY_TOPIC unset = print only)
 """
 import json
-import os
 import re
 import sys
 from datetime import datetime, timedelta, timezone
@@ -27,9 +26,9 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from account_list import account_profile  # noqa: E402
+from ntfy_lib import post, sent_tags  # noqa: E402
 
 IST = timezone(timedelta(hours=5, minutes=30))
-TOPIC = os.environ.get("NTFY_TOPIC", "")
 FILE = Path(__file__).with_name("price_alerts.txt")
 SITE = "https://rishilbhutada.github.io/rscreener"
 CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}?range=1d&interval=5m"
@@ -59,22 +58,6 @@ def rules() -> list[tuple[str, str, float]]:
     return sorted(set(out))
 
 
-def sent_keys() -> set[str]:
-    if not TOPIC:
-        return set()
-    try:
-        r = requests.get(f"https://ntfy.sh/{TOPIC}/json", params={"poll": "1", "since": "24h"}, timeout=30)
-    except requests.RequestException:
-        return set()
-    keys = set()
-    for line in r.text.splitlines():
-        try:
-            keys.update(t for t in json.loads(line).get("tags") or [] if t.startswith("rs-px-"))
-        except ValueError:
-            continue
-    return keys
-
-
 def price(sym: str) -> tuple[float, datetime] | None:
     for suffix in (".NS", ".BO"):
         try:
@@ -97,7 +80,10 @@ def main() -> None:
     if not rs:
         print("price alerts: no rules")
         return
-    sent, fired = sent_keys(), 0
+    sent, fired = sent_tags("rs-px-"), 0
+    if sent is None:
+        print("price alerts: ntfy topic unreadable - nothing sent, next run")
+        return
     quotes: dict[str, tuple[float, datetime] | None] = {}
     for sym, op, level in rs:
         if sym not in quotes:
@@ -106,6 +92,8 @@ def main() -> None:
         if not q:
             continue
         px, at = q
+        if at.date() != now.date():
+            continue        # yesterday's close (before the first trade, or a holiday) is not a crossing today
         if not ((op == ">" and px >= level) or (op == "<" and px <= level)):
             continue
         key = f"rs-px-{re.sub(r'[^A-Za-z0-9]', '', sym)}-{'up' if op == '>' else 'dn'}-{level:g}-{now:%Y%m%d}".replace(".", "p")
@@ -113,12 +101,8 @@ def main() -> None:
             continue
         title = f"{sym} {'above' if op == '>' else 'below'} Rs {level:,.2f}"
         body = f"Rs {px:,.2f} at {at:%H:%M} IST (Yahoo's quote, about 15 minutes behind NSE)."
-        if not TOPIC:
-            print(f"(no NTFY_TOPIC) would push: {title} | {body}")
-        else:
-            requests.post(f"https://ntfy.sh/{TOPIC}", data=body.encode("utf-8"), timeout=15, headers={
-                "Title": title.encode("utf-8"), "Tags": f"bell,{key}", "Click": f"{SITE}/company/?s={sym}"})
-        fired += 1
+        if post(title, body, tags=f"bell,{key}", click=f"{SITE}/company/?s={sym}"):
+            fired += 1
     print(f"price alerts: {len(rs)} rules, {fired} pushed")
 
 
