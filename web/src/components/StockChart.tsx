@@ -573,6 +573,10 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       const out: XY[] = [];
       for (let i = 3; i < trendQ.periods.length; i++) {
         const w = arr.slice(i - 3, i + 1);
+        // Four CONSECUTIVE quarters: across a missing quarter the window spans
+        // five or more and is not a trailing twelve months (as the pipeline
+        // checks for the ratio lines, trend_lib.ratio_bands).
+        if ((toT(trendQ.periods[i]) - toT(trendQ.periods[i - 3])) / 86400000 > 300) continue;
         if (w.length === 4 && w.every((v) => v !== null && v !== undefined)) {
           const t = toT(trendQ.periods[i]);
           if (t >= cutoff) out.push({ t, v: (w as number[]).reduce((a, b) => a + b, 0) });
@@ -1844,21 +1848,23 @@ function ChartShell({
     if (l < row.scrollLeft || r > row.scrollLeft + row.clientWidth) row.scrollLeft = Math.max(0, l - 24);
   }, [view]);
   const timer = useRef<number | null>(null);
-  const firedAt = useRef(0), downAt = useRef(0);
+  // Set when a finger HOLD fires, so the click its release makes is not also
+  // taken as a tap. Keyboard Enter/Space never sets it, so it always works.
+  const swallow = useRef(false);
   const stop = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } };
-  const hold = (v: View) => { firedAt.current = Date.now(); stop(); setHeld(v); setMoreOpen(false); };
+  const hold = (v: View) => { stop(); setHeld(v); setMoreOpen(false); };
   // One set of listeners on each row of tabs; the tab pressed is found from its data-view.
   const viewOf = (e: React.SyntheticEvent) => (e.target as HTMLElement).closest<HTMLElement>("[data-view]")?.dataset.view as View | undefined;
   const tabDown = (e: React.PointerEvent) => {
     const v = viewOf(e);
-    stop(); downAt.current = Date.now();
-    if (v) timer.current = window.setTimeout(() => hold(v), 480);
+    stop(); swallow.current = false;
+    if (v) timer.current = window.setTimeout(() => { swallow.current = true; hold(v); }, 480);
   };
   const tabMenu = (e: React.MouseEvent) => { const v = viewOf(e); if (v) { e.preventDefault(); hold(v); } };
   const tabClick = (e: React.MouseEvent) => {
     const v = viewOf(e);
     if (!v) return;
-    if (firedAt.current >= downAt.current) return; // the click that ends a hold
+    if (swallow.current) { swallow.current = false; return; } // the click that ends a hold
     setHeld(null); pick(v);
   };
   const press = (v: View) => ({ "data-view": v, "data-active": v === view ? "true" : undefined });

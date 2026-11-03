@@ -15,7 +15,9 @@ import { FIELD_CATALOG } from "@/lib/fields";
  *  happened, not a forecast and not a recommendation. */
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
-type Index = { generated_at: string; fields: string[]; dates: string[]; counts: Record<string, number>; nifty: Record<string, number> };
+type Index = { generated_at: string; fields: string[]; dates: string[]; counts: Record<string, number>; nifty: Record<string, number>;
+  /** symbol -> sector, so a screen's sector filter applies here too */
+  sectors?: Record<string, string> };
 type YearResult = {
   year: string; universe: number; passed: number; unknown: number;
   /** Too few companies had the figures this screen needs for the year to mean
@@ -50,6 +52,9 @@ function BacktestInner() {
   const params = useSearchParams();
   const router = useRouter();
   const q = params.get("q") ?? "pe < 20 and roe > 15";
+  // The screen's sector filter, as the screener passes it (?sec=A,B).
+  const secParam = params.get("sec") ?? "";
+  const secs = useMemo(() => secParam.split(",").filter(Boolean), [secParam]);
   const [index, setIndex] = useState<Index | null>(null);
   const [years, setYears] = useState<Record<string, (string | number | null)[][]> | null>(null);
   const [err, setErr] = useState("");
@@ -94,6 +99,8 @@ function BacktestInner() {
         const row: Row = { symbol: r[0] as string };
         F.forEach((f, i) => { row[f] = r[i + 1] as number | null; });
         if (used.every((f) => row[f] !== null && row[f] !== undefined)) complete++;
+        // Outside the screen's sectors: not a pick, as on the screener.
+        if (secs.length && index.sectors && !secs.includes(index.sectors[r[0] as string] ?? "")) continue;
         const ok = run(row);
         if (ok === null) { unknown++; continue; }
         if (!ok) continue;
@@ -113,7 +120,7 @@ function BacktestInner() {
       });
     }
     return { rows };
-  }, [q, index, years]);
+  }, [q, index, years, secs]);
 
   const rows = result.rows;
   // Only years the screen could be judged in, for all three columns alike, so
@@ -153,7 +160,7 @@ function BacktestInner() {
         <form key={q} onSubmit={(e) => {
           e.preventDefault();
           const v = String(new FormData(e.currentTarget).get("q") ?? "").trim();
-          router.replace(`/backtest?q=${encodeURIComponent(v)}`);
+          router.replace(`/backtest?q=${encodeURIComponent(v)}${secParam ? `&sec=${encodeURIComponent(secParam)}` : ""}`);
         }}
           className="flex gap-2">
           <input name="q" defaultValue={q} aria-label="Screen"
@@ -167,8 +174,13 @@ function BacktestInner() {
               <p>{[...history].map((k) => `${label(k)} (${k})`).join(", ")}.</p>
             </InfoTip>
           )}
-          <Link href={`/screens?q=${encodeURIComponent(q)}`} className="ml-auto underline">Open in Screener</Link>
+          <Link href={`/screens?q=${encodeURIComponent(q)}${secParam ? `&sec=${encodeURIComponent(secParam)}` : ""}`} className="ml-auto underline">Open in Screener</Link>
         </p>
+        {secs.length > 0 && (
+          <p className="text-[12px] text-[var(--ink2)]">
+            Only {secs.join(", ")}{index && !index.sectors ? " - not applied: this history was built before sectors were added; it applies after the next nightly run" : ""}
+          </p>
+        )}
 
         {err && <p className="text-sm text-[var(--neg)]">{err}</p>}
         {result.error && (

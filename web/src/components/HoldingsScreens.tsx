@@ -24,10 +24,18 @@ export default function HoldingsScreens({ symbols, nameOf }: { symbols: string[]
   const [rows, setRows] = useState<Row[] | null>(null);
   const [screens] = useState<SavedScreen[]>(() => (typeof window === "undefined" ? [] : loadSaved()));
   const [open, setOpen] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
-    dataCache ??= fetch(`${BASE}/data.json`).then((r) => r.json()).then((d) => d.rows as Row[]);
+    dataCache ??= fetch(`${BASE}/data.json`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d) => d.rows as Row[]);
     let live = true;
-    dataCache.then((r) => { if (live) setRows(r); }).catch(() => { if (live) setRows([]); });
+    dataCache.then((r) => { if (live) setRows(r); }).catch(() => {
+      // Not kept: the next visit tries again rather than showing "none pass"
+      // from a download that never arrived.
+      dataCache = null;
+      if (live) setFailed(true);
+    });
     return () => { live = false; };
   }, []);
 
@@ -60,6 +68,7 @@ export default function HoldingsScreens({ symbols, nameOf }: { symbols: string[]
       </div>
     );
   }
+  if (failed) return <p className="py-6 text-sm text-[var(--ink3)]">Could not load today&apos;s figures. Pull down from the top to try again.</p>;
   if (!rows) return <p className="py-6 text-sm text-[var(--ink3)]">Checking holdings...</p>;
 
   const list = (title: string, syms: string[]) => syms.length ? (

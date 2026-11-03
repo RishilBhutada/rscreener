@@ -32,6 +32,7 @@ export const SYNCED_KEYS = [
   "rs_grid_pins",
   "rs_price_alerts",
   "rs_chart_presets",
+  "rs_chart_presets_at",
 ] as const;
 
 type Profile = Record<string, unknown>;
@@ -88,6 +89,18 @@ function merge(local: Profile, remote: Profile): Profile {
     // matched by id and their symbols unioned instead.
     if (k === "rscreener_watchlists") {
       out[k] = mergeStates(l as WatchState, r as WatchState);
+      continue;
+    }
+    // Chart presets are edited as a whole - renamed, updated, deleted - so a
+    // union would bring deleted ones back and keep both names of a renamed
+    // one. The list saved last, on whichever device, wins outright.
+    if (k === "rs_chart_presets") {
+      const la = Number(local.rs_chart_presets_at ?? 0), ra = Number(remote.rs_chart_presets_at ?? 0);
+      out[k] = ra > la ? r : l;
+      continue;
+    }
+    if (k === "rs_chart_presets_at") {
+      out[k] = Math.max(Number(l ?? 0), Number(r ?? 0));
       continue;
     }
     if (Array.isArray(l) && Array.isArray(r)) {

@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 import OpeningPill from "@/components/OpeningPill";
 import TabIndicator from "@/components/TabIndicator";
 import { listAround, prefetchCompany } from "@/lib/prefetch";
-import { loadIndex as loadSearchIndex } from "@/lib/index-data";
+import { loadIndex as loadSearchIndex, symbolHref } from "@/lib/index-data";
 import Link from "next/link";
 import { saveFile } from "@/lib/download";
 import { buildXlsx, Cell, XLSX_MIME } from "@/lib/xlsx";
@@ -172,12 +172,19 @@ function monthYear(iso?: string | null): string {
 let checksCache: Promise<Record<string, [string, string, string][]>> | null = null;
 function DataChecks({ symbol }: { symbol: string }) {
   const [fails, setFails] = useState<[string, string, string][] | null>(null);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
-    checksCache ??= fetch(`${BASE}/checks.json`).then((r) => (r.ok ? r.json() : { fails: {} })).then((d) => d.fails ?? {}).catch(() => ({}));
+    // A file that did not arrive is not "every check passed": it is not kept,
+    // and the page says the checks could not be read.
+    checksCache ??= fetch(`${BASE}/checks.json`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d) => d.fails ?? {});
     let live = true;
-    checksCache.then((all) => { if (live) setFails(all[symbol] ?? []); });
+    checksCache.then((all) => { if (live) setFails(all[symbol] ?? []); })
+      .catch(() => { checksCache = null; if (live) setFailed(true); });
     return () => { live = false; };
   }, [symbol]);
+  if (failed) return <p className="mt-1 text-[11px] text-[var(--ink3)]">Data checks could not be loaded.</p>;
   if (!fails?.length) return null;
   return (
     <p className="mt-1 text-[11px] text-[var(--ink3)]">
@@ -280,7 +287,7 @@ function ttmOf(annual: Stmt | null, quarterly: Stmt | null): { asOf: string; val
     else if (it.label === "Tax %") v = weighted(last4("Tax %"), last4("Profit before tax"));
     else if (it.parent && it.label.endsWith("%")) v = weighted(last4(it.label, it.parent), revs);
     else if (it.label.includes("%")) v = null;
-    else if (!it.parent) { const x = last4(it.label); v = x ? Math.round(x.reduce((a, b) => a + b, 0) * 100) / 100 : null; }
+    else { const x = last4(it.label, it.parent); v = x ? Math.round(x.reduce((a, b) => a + b, 0) * 100) / 100 : null; }
     values[key] = v;
   }
   return { asOf: qp[n - 1], values };
@@ -2522,6 +2529,14 @@ function CompanyView() {
   const sa = hasSa && basisView === "standalone";
   const quarterly = withEbitda((sa && company.statements.quarterly_results_sa) || company.statements.quarterly_results || (company.trend?.quarterly ? trendToStmt(company.trend.quarterly) : null));
   const pnl = withEbitda((sa && company.statements.annual_pnl_sa) || company.statements.annual_pnl || (company.trend?.annual ? trendToStmt(company.trend.annual) : null));
+  // The TTM column adds four quarters onto a year's table, so both must be the
+  // same basis from the same source: standalone years with consolidated
+  // quarters (a company filing standalone yearly only) would be a figure for
+  // two different businesses in one row.
+  const srcOf = (saStmt: Stmt | null | undefined, conStmt: Stmt | null | undefined, tr: unknown) =>
+    sa && saStmt ? "sa" : conStmt ? "con" : tr ? "trend" : null;
+  const sameBasis = srcOf(company.statements.quarterly_results_sa, company.statements.quarterly_results, company.trend?.quarterly)
+    === srcOf(company.statements.annual_pnl_sa, company.statements.annual_pnl, company.trend?.annual);
   const tableCaption = sa ? "Standalone · ₹ Cr" : figuresCaption;
   const basisSwitch = hasSa ? (
     <div className="flex justify-end">
@@ -2560,12 +2575,12 @@ function CompanyView() {
       {around && (around.prev || around.next) && (
         <nav aria-label={`Companies in ${around.name}`} className="flex items-center gap-2 text-[12.5px]">
           {around.prev ? (
-            <Link href={`/company?s=${encodeURIComponent(around.prev)}`} onPointerEnter={() => prefetchCompany(around.prev)}
+            <Link href={symbolHref(around.prev)} onPointerEnter={() => { if (symbolHref(around.prev!).startsWith("/company")) prefetchCompany(around.prev); }}
               className="rs-press inline-flex items-center gap-1 rounded-full border border-[var(--line2)] px-3 py-1.5 text-[var(--ink2)]">&lsaquo; {around.prev}</Link>
           ) : <span />}
           <span className="flex-1 text-center text-[var(--ink3)] truncate">{around.at} of {around.of} in {around.name}</span>
           {around.next ? (
-            <Link href={`/company?s=${encodeURIComponent(around.next)}`} onPointerEnter={() => prefetchCompany(around.next)}
+            <Link href={symbolHref(around.next)} onPointerEnter={() => { if (symbolHref(around.next!).startsWith("/company")) prefetchCompany(around.next); }}
               className="rs-press inline-flex items-center gap-1 rounded-full border border-[var(--line2)] px-3 py-1.5 text-[var(--ink2)]">{around.next} &rsaquo;</Link>
           ) : <span />}
         </nav>
@@ -2850,7 +2865,7 @@ function CompanyView() {
       {pnl && (
         <div id="profit-loss" className="scroll-mt-32 space-y-6">
           {basisSwitch}
-          <StatementTable title="Profit & loss" stmt={pnl} subtitle={tableCaption} boldRows={["Net Profit", "Net profit"]} kind="pnl" symbol={symbol} ttm={ttmOf(pnl, quarterly)} />
+          <StatementTable title="Profit & loss" stmt={pnl} subtitle={tableCaption} boldRows={["Net Profit", "Net profit"]} kind="pnl" symbol={symbol} ttm={sameBasis ? ttmOf(pnl, quarterly) : null} />
           <CompoundedGrowth trend={company.trend} prices={company.prices} />
         </div>
       )}

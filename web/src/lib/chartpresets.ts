@@ -23,12 +23,26 @@ export function loadPresets(): ChartPreset[] {
     const raw = localStorage.getItem(KEY);
     if (raw === null) return READY_MADE;
     const list = JSON.parse(raw);
-    return Array.isArray(list) ? list.filter((p) => p && typeof p.name === "string" && p.pick) : READY_MADE;
+    if (!Array.isArray(list)) return READY_MADE;
+    // One preset per name: a list merged from two devices before the
+    // last-saved rule (lib/sync.ts) could hold a name twice.
+    const seen = new Set<string>();
+    return list.filter((p) => {
+      if (!p || typeof p.name !== "string" || !p.pick) return false;
+      const n = p.name.trim().toLowerCase();
+      if (seen.has(n)) return false;
+      seen.add(n);
+      return true;
+    });
   } catch { return READY_MADE; }
 }
 
 export function savePresets(list: ChartPreset[]) {
-  try { localStorage.setItem(KEY, JSON.stringify(list)); } catch { /* private mode */ }
+  try {
+    // When it was saved, so syncing devices keeps the newest list (lib/sync.ts).
+    localStorage.setItem(`${KEY}_at`, String(Date.now()));
+    localStorage.setItem(KEY, JSON.stringify(list));
+  } catch { /* private mode */ }
 }
 
 /** Lines that start switched off, so a line stored "off" and one never

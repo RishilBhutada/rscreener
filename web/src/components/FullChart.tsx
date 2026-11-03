@@ -204,6 +204,10 @@ function quarterMids(qd: number[], onto: number[]): number[] {
   });
 }
 
+/** Whether quarters i-3..i are consecutive (span at most ~300 days): a four-
+ *  quarter sum across a missing quarter is not a trailing twelve months. */
+const fourInRow = (days: number[], i: number) => i >= 3 && days[i] - days[i - 3] <= 300;
+
 /** Index of the last time at or before `day`; 0 when every time is later. */
 function atOrBefore(times: number[], day: number): number {
   let lo = 0, hi = times.length - 1, best = 0;
@@ -978,18 +982,21 @@ export default function FullChart({ symbol }: { symbol: string }) {
   // Hold a view's name (or right-click it) to lay it over the chart on screen;
   // tap to switch. The company chart's gesture, the same way.
   const holdTimer = useRef<number | null>(null);
-  const firedAt = useRef(0), downAt = useRef(0);
+  // Set when a finger HOLD fires, so the click its release makes is not also
+  // taken as a tap. Keyboard Enter/Space never sets it, so it always works.
+  const swallow = useRef(false);
   const stopHold = () => { if (holdTimer.current) { clearTimeout(holdTimer.current); holdTimer.current = null; } };
   const viewOf = (e: React.SyntheticEvent) => (e.target as HTMLElement).closest<HTMLElement>("[data-view]")?.dataset.view as View | undefined;
   const tabDown = (e: React.PointerEvent) => {
     const v = viewOf(e);
-    stopHold(); downAt.current = Date.now();
-    if (v) holdTimer.current = window.setTimeout(() => { firedAt.current = Date.now(); holdTimer.current = null; setHeld(v); }, 480);
+    stopHold(); swallow.current = false;
+    if (v) holdTimer.current = window.setTimeout(() => { swallow.current = true; holdTimer.current = null; setHeld(v); }, 480);
   };
-  const tabMenu = (e: React.MouseEvent) => { const v = viewOf(e); if (v) { e.preventDefault(); stopHold(); firedAt.current = Date.now(); setHeld(v); } };
+  const tabMenu = (e: React.MouseEvent) => { const v = viewOf(e); if (v) { e.preventDefault(); stopHold(); setHeld(v); } };
   const tabClick = (e: React.MouseEvent) => {
     const v = viewOf(e);
-    if (!v || firedAt.current >= downAt.current) return; // the click that ends a hold
+    if (swallow.current) { swallow.current = false; return; } // the click that ends a hold
+    if (!v) return;
     setHeld(null); pickView(v);
   };
 
@@ -1256,7 +1263,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
       });
       pr.setData(rows.map((r) => ({ time: toTime(r[0]), value: r[4] })));
       const ttm4 = qd.map((_, i) => {
-        if (i < 3) return null;
+        if (!fourInRow(qd, i)) return null;
         const w = eb.slice(i - 3, i + 1);
         return w.every((x) => x !== null && x !== undefined) ? (w as number[]).reduce((a, b) => a + b, 0) : null;
       });
@@ -1399,6 +1406,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
         const ttm = (arr?: (number | null)[]) => {
           if (!arr) return;
           for (let i = 3; i < periods.length; i++) {
+            if (!fourInRow(periods.map(dayOf), i)) continue;
             const w = arr.slice(i - 3, i + 1);
             if (w.every((x) => x !== null && x !== undefined)) bars.push({ day: dayOf(periods[i]), v: (w as number[]).reduce((a, b) => a + b, 0) });
           }
@@ -1503,7 +1511,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
             } else if (tq.ebitda) {
               const eb = tq.ebitda.map((v, i) => (v === null || v === undefined ? null : v + (tq.other_income?.[i] ?? 0)));
               const t4 = qd.map((_, i) => {
-                const w = i >= 3 ? eb.slice(i - 3, i + 1) : [];
+                const w = fourInRow(qd, i) ? eb.slice(i - 3, i + 1) : [];
                 return w.length === 4 && w.every((x) => x !== null && x !== undefined) ? (w as number[]).reduce((a, b) => a + b, 0) : null;
               });
               const mids = quarterMids(qd, anchorDays);
