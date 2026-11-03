@@ -64,7 +64,7 @@ def _stitched(con: sqlite3.Connection) -> dict:
     if _table_exists(con, "results_history"):
         placeholders = ",".join("?" * len(NSE_ITEMS))
         xb = pd.read_sql(
-            f"SELECT symbol, period_type, period_end, item, value FROM results_history WHERE item IN ({placeholders})",
+            f"SELECT symbol, basis, period_type, period_end, item, value FROM results_history WHERE item IN ({placeholders})",
             con, params=NSE_ITEMS,
         )
         xb["source"] = "nse"
@@ -90,6 +90,8 @@ def _stitched(con: sqlite3.Connection) -> dict:
                 slot[r["item"]] = r["value"]
                 if src == "nse":
                     slot["_source"] = "nse"
+                    # consolidated / standalone, so a TTM or YoY never mixes the two
+                    slot["_basis"] = r["basis"]
         out[(symbol, ptype)] = _drop_offscale_yf(periods)
     return out
 
@@ -603,28 +605,28 @@ THIRD_WITNESS_ITEMS = (
 )
 
 
-def _fy_quarter_sums(con: sqlite3.Connection, symbol: str, item: str = "pat") -> dict[str, float]:
-    """{fiscal-year-end: that year's four filed quarterly values, added up}.
+def _fy_quarter_sums(con: sqlite3.Connection, symbol: str, item: str, fy_end: str) -> float | None:
+    """The four filed quarterly values of the year ending `fy_end`, added up.
 
     Complete years only: three quarters and a gap would understate the year and
-    then wrongly accuse the annual filing of being too large. Built once per
-    item for the whole table and cached, because it is asked for inside a loop
-    over every company.
+    then wrongly accuse the annual filing of being too large. The year is the
+    four quarters ending on the annual filing's own date, so a December or
+    September year-end is summed over its own quarters, not April-March. One
+    value per quarter, so a duplicated filing row cannot make a fifth. Built
+    once per item for the whole table and cached, because it is asked for
+    inside a loop over every company.
     """
     if item not in _QSUM_CACHE:
-        by: dict[tuple, list] = {}
+        by: dict[str, dict[str, float]] = {}
         for s, pe, v in con.execute(
             "SELECT symbol, period_end, value FROM results_history "
             "WHERE period_type='quarterly' AND item=? AND value IS NOT NULL", (item,)
         ):
-            y, m = int(pe[:4]), int(pe[5:7])
-            by.setdefault((s, f"{y + 1 if m >= 4 else y}-03-31"), []).append(float(v))
-        sums: dict[str, dict[str, float]] = {}
-        for (s, fy_end), vals in by.items():
-            if len(vals) == 4:
-                sums.setdefault(s, {})[fy_end] = sum(vals)
-        _QSUM_CACHE[item] = sums
-    return _QSUM_CACHE[item].get(symbol, {})
+            by.setdefault(s, {})[pe] = float(v)
+        _QSUM_CACHE[item] = by
+    qs = _QSUM_CACHE[item].get(symbol, {})
+    vals = [qs.get(fy_end if k == 0 else _months_back(fy_end, k)) for k in (0, 3, 6, 9)]
+    return sum(vals) if all(v is not None for v in vals) else None
 
 
 def cross_source_outliers(con: sqlite3.Connection) -> dict[tuple[str, str], dict]:
@@ -733,7 +735,7 @@ def cross_source_outliers(con: sqlite3.Connection) -> dict[tuple[str, str], dict
                 continue
             if 1 / THIRD_WITNESS_LIMIT <= abs(sv / fv) <= THIRD_WITNESS_LIMIT:
                 continue                            # the two already agree
-            qs = _fy_quarter_sums(con, key[0], ours).get(key[1])
+            qs = _fy_quarter_sums(con, key[0], ours, key[1])
             if not qs:
                 continue                            # no complete year of quarters to ask
             backs_provider = 1 / THIRD_WITNESS_LIMIT <= abs(qs / sv) <= THIRD_WITNESS_LIMIT
@@ -922,7 +924,12 @@ def years_from_quarters(comps: dict, splits: dict | None = None) -> None:
         filed_q = {p: q for p, q in qs.items() if q.get("_source") == "nse"}
         if len(filed_q) < 4:
             continue
-        ends = set(years) | {p for p in filed_q if p[5:7] == "03"}
+        # The company's own year-end month, from its newest filed year: ABB and
+        # Castrol close in December, Siemens in September. Assuming March put a
+        # made-up April-March year between every pair of real ones.
+        filed_years = sorted(p for p, s in years.items() if s.get("_source") == "nse")
+        fy_month = filed_years[-1][5:7] if filed_years else "03"
+        ends = set(years) | {p for p in filed_q if p[5:7] == fy_month}
         for fy in sorted(ends):
             slot = years.get(fy)
             if slot and slot.get("_source") == "nse":
@@ -930,7 +937,10 @@ def years_from_quarters(comps: dict, splits: dict | None = None) -> None:
             four = [filed_q.get(fy if k == 0 else _months_back(fy, k)) for k in (0, 3, 6, 9)]
             if any(q is None for q in four):
                 continue
-            new = {"_source": "nse-4q"}
+            bases = {q.get("_basis") for q in four}
+            if len(bases) > 1:
+                continue        # standalone and consolidated quarters do not add up to a year
+            new = {"_source": "nse-4q", "_basis": bases.pop()}
             ev = (splits or {}).get(sym)
             qends = [fy if k == 0 else _months_back(fy, k) for k in (0, 3, 6, 9)]
             for item in FLOW_ITEMS:
@@ -1111,6 +1121,9 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None,
             "gpm": [pct(gp[i], rev[i]) for i in range(len(ordered))],
             "npm": [pct(pat[i], rev[i]) for i in range(len(ordered))],
             "source": [periods[p]["_source"] for p in ordered],
+            # consolidated / standalone per period (None where not filed), so a
+            # sum or comparison across a change of basis can be refused
+            "basis": [periods[p].get("_basis") for p in ordered],
         }
         if any(v is not None for v in trend["revenue"]):
             out.setdefault(symbol, {})[ptype] = trend
@@ -1148,20 +1161,28 @@ def splits_trustworthy(con: sqlite3.Connection, shares: dict) -> set[str]:
     """
     out = set()
     sp = split_factors(con)
+    suspect = implausible_quarters(con)
     rows = con.execute(
         "SELECT symbol, period_end, "
         "MAX(CASE WHEN item='pat' THEN value END), MAX(CASE WHEN item='eps' THEN value END) "
         "FROM results_history WHERE period_type='quarterly' GROUP BY symbol, period_end "
         "ORDER BY symbol, period_end"
     ).fetchall()
-    seen: set[str] = set()
+    # Judged on the median of the four OLDEST sound quarters, not the single
+    # oldest one: that is the filing most likely to be a parse error. And in
+    # both directions - a duplicated or wrong split event makes `recorded` too
+    # large, which used to pass and over-divide every older EPS.
+    early: dict[str, list] = {}
     for sym, pe, pat, eps in rows:
-        if sym in seen or not pat or not eps or not shares.get(sym):
+        if len(early.get(sym, [])) >= 4 or not pat or not eps or not shares.get(sym):
             continue
-        seen.add(sym)
-        implied = shares[sym] / (pat / eps)
+        if pe in suspect.get(sym, set()) or pat / eps <= 0:
+            continue
         recorded = adj_factor(sp.get(sym), pe)
-        if recorded and implied / recorded <= 3.0:
+        if recorded:
+            early.setdefault(sym, []).append(shares[sym] / (pat / eps) / recorded)
+    for sym, ratios in early.items():
+        if 1 / 3.0 <= median(ratios) <= 3.0:
             out.add(sym)
     return out
 
@@ -1228,7 +1249,7 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
     splits = split_factors(con)
     known = splits_trustworthy(con, shares)
     q = pd.read_sql(
-        "SELECT symbol, period_end, item, value FROM results_history "
+        "SELECT symbol, basis, period_end, item, value FROM results_history "
         "WHERE period_type='quarterly' AND item IN "
         "('eps','pat','revenue','total_expenses','finance_cost','depreciation','equity','share_capital','op_profit_direct') "
         "ORDER BY period_end",
@@ -1260,7 +1281,9 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
     for sym, g in q.groupby("symbol"):
         by_pe: dict[str, dict] = {}
         for _, r in g.iterrows():
-            by_pe.setdefault(r["period_end"], {})[r["item"]] = r["value"]
+            slot_ = by_pe.setdefault(r["period_end"], {})
+            slot_[r["item"]] = r["value"]
+            slot_["_basis"] = r["basis"]
         ev = splits.get(sym)
         sh_now = shares.get(sym)   # yardstick for effective_shares sanity
         # Quarterly verdicts are always whole-filing: pass two is annual-only,
@@ -1296,7 +1319,8 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                     eps = pat_v / sh_now
             flows.append((pe, eps, (rev / 1e7 if rev is not None else None),
                           (ebitda / 1e7 if ebitda is not None else None),
-                          effective_shares(s.get("pat"), s.get("eps"), adj_factor(ev, pe), sh_now)))
+                          effective_shares(s.get("pat"), s.get("eps"), adj_factor(ev, pe), sh_now),
+                          s.get("_basis")))
         # Net worth comes from filed_net_worth(), which reads the ANNUAL rows too -
         # Reg-33 only requires net worth once a year, so collecting it here inside
         # the quarterly loop is what starved the Price/Book line.
@@ -1308,8 +1332,11 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
         # multiplied the PE by ~70x.
         yrows = yq_by_sym.get(sym, {})
         nse_eps = {p: e for p, e, *_ in flows if e is not None}
-        agree = True
-        for p in set(yrows) & set(nse_eps):
+        # Judged on the NEWEST quarter both sources carry, and with no such
+        # quarter there is nothing to vouch for the second source: it is not
+        # spliced. Passing by default is how a dollar EPS could get in.
+        agree = False
+        for p in sorted(set(yrows) & set(nse_eps), reverse=True):
             yv_ = yrows[p].get("Basic EPS")
             if yv_ and pd.notna(yv_) and nse_eps[p]:
                 ratio = (yv_ / adj_factor(splits.get(sym), p)) / nse_eps[p]
@@ -1328,7 +1355,7 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                 eps_y /= adj_factor(splits.get(sym), pe)
                 flows.append((pe, eps_y, (rev_y / 1e7 if rev_y is not None else None),
                               (eb_y / 1e7 if eb_y is not None else None),
-                              effective_shares(yv("Net Income"), eps_y, 1.0, sh_now)))
+                              effective_shares(yv("Net Income"), eps_y, 1.0, sh_now), None))
         flow_by_sym[sym] = flows
         if eqs:
             equity_by_sym[sym] = eqs
@@ -1427,6 +1454,10 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                     - datetime.strptime(recent[0][0], "%Y-%m-%d")
                 ).days
                 if span > 300:  # 3 gaps of ~92 days each; more means a hole
+                    recent = []
+                # ...and on ONE basis: consolidated and standalone quarters
+                # describe different sets of companies and do not add up.
+                elif len({f[5] for f in recent if f[5]}) > 1:
                     recent = []
             # point-in-time share count; falls back to today's only when a
             # filing didn't give us PAT and EPS together

@@ -339,7 +339,13 @@ def freshen_prices(con, df):
         d, close = hit
         old = px.iat[i]
         dates.append(d)
-        if not old or not close:
+        if not close:
+            continue
+        if old is None or old != old or not old:
+            # No snapshot price (new listing, empty quote): the close stands on
+            # its own. Market cap stays unknown - there is no share count to scale.
+            px.iat[i] = close
+            moved += 1
             continue
         if abs(close - old) / old > 0.002:          # ignore rounding-level drift
             r = close / old
@@ -786,16 +792,23 @@ def main() -> None:
     # tables already show. Trailing twelve months where four quarters are on
     # file, the latest full year otherwise. The source's own figure is kept only
     # where nothing has been filed.
+    # A trailing twelve months is four CONSECUTIVE quarters on ONE basis (the
+    # same tests the P/E band applies); the annual fallback only a recent year.
+    today = datetime.now(timezone.utc).date()
+
     def filed_ttm(sym: str, field: str) -> float | None:
         t = trends.get(sym) or {}
         q = t.get("quarterly") or {}
+        per = (q.get("periods") or [])[-4:]
         vals = [v for v in (q.get(field) or [])[-4:] if v is not None]
-        if len(vals) == 4:
+        bases = {b for b in (q.get("basis") or [])[-4:] if b}
+        if (len(vals) == 4 and len(per) == 4 and len(bases) <= 1
+                and (datetime.fromisoformat(per[-1]) - datetime.fromisoformat(per[0])).days <= 300):
             return sum(vals)
         a = t.get("annual") or {}
-        for v in reversed(a.get(field) or []):
+        for p, v in reversed(list(zip(a.get("periods") or [], a.get(field) or []))):
             if v is not None:
-                return v
+                return v if (today - datetime.fromisoformat(p).date()).days <= 456 else None
         return None
 
     rebuilt_ps = rebuilt_ev = 0

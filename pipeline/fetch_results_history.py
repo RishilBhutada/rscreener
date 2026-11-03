@@ -565,9 +565,18 @@ def main() -> None:
         try:
             filings = []
             if args.only_missing:
-                stored = {r[0] for r in con.execute(
-                    "SELECT DISTINCT period_end FROM results_history WHERE symbol=? AND period_type='quarterly'", (sym,))}
-                filings = [f for f in integrated_filings(s, sym) if iso(f["toDate"]) not in stored]
+                stored, stored_cons = set(), set()
+                for pe_, b_ in con.execute(
+                        "SELECT DISTINCT period_end, basis FROM results_history "
+                        "WHERE symbol=? AND period_type='quarterly'", (sym,)):
+                    stored.add(pe_)
+                    if b_ == "consolidated":
+                        stored_cons.add(pe_)
+                # A standalone quarter stored first is replaced as soon as the
+                # consolidated filing appears, rather than a week later.
+                filings = [f for f in integrated_filings(s, sym)
+                           if iso(f["toDate"]) not in stored
+                           or (f.get("_cons") and iso(f["toDate"]) not in stored_cons)]
                 dated = [(sym, iso(f["toDate"]), d) for f in filings if (d := _day(f.get("_ann")))]
                 if dated:
                     db_retry(lambda: con.execute(
