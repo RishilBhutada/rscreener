@@ -52,6 +52,9 @@ NSE_CM = "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_{ymd
 BSE_CM = "https://www.bseindia.com/download/BhavCopy/Equity/BhavCopy_BSE_CM_0_0_0_{ymd}_F_0000.CSV"
 NSE_IDX = "https://nsearchives.nseindia.com/content/indices/ind_close_all_{dmy}.csv"
 MATCH = 0.015
+# How long after its ex-date a demerger whose exchange file could not be read
+# is asked for again.
+RETRY_DAYS = 30
 # A symbol trades in one of these at a time; EQ first. Everything else in the
 # file is a bond, a warrant, a rights entitlement or a different instrument
 # that happens to share the ticker.
@@ -119,19 +122,27 @@ def extend(label: str, last: dict[str, tuple[str, float]], files: list[tuple[str
         new = [(d, f[fkey]) for d, f in files if d > day and fkey in f]
         if not new:
             continue
-        prev = num(new[0][1].get("PrvsClsgPric"))
-        if not prev or abs(prev / close - 1) > MATCH:
-            held += 1
-            if len(mismatched) < 8:
-                mismatched.append(f"{sym} stored {close} vs exchange's previous {prev}")
-            continue
-        for d, x in new:
+        # EVERY session is checked against the close written before it, not
+        # only the first: a split or bonus on the third new session moves that
+        # day's previous close to the new basis, and appending it unadjusted
+        # onto the provider's adjusted history drew a fake crash (review
+        # 4-Nov-2026). The first mismatch stops this symbol; the provider's
+        # next full history carries it from there.
+        for i, (d, x) in enumerate(new):
+            prev = num(x.get("PrvsClsgPric"))
+            if not prev or abs(prev / close - 1) > MATCH:
+                held += 1
+                if len(mismatched) < 8:
+                    mismatched.append(f"{sym} {d}: stored {close} vs exchange's previous {prev}")
+                break
             c = num(x.get("ClsPric"))
-            if c:
-                write(sym, d, num(x.get("OpnPric")) or c, num(x.get("HghPric")) or c,
-                      num(x.get("LwPric")) or c, c, float(x.get("TtlTradgVol") or 0))
-                added += 1
-    print(f"{label}: {added} sessions added; {held} symbols held back (previous close did not match - a split in the gap, or a different listing)")
+            if not c:
+                break
+            write(sym, d, num(x.get("OpnPric")) or c, num(x.get("HghPric")) or c,
+                  num(x.get("LwPric")) or c, c, float(x.get("TtlTradgVol") or 0))
+            close = c
+            added += 1
+    print(f"{label}: {added} sessions added; {held} symbols stopped where the previous close did not match - a split in the gap, or a different listing")
     for m in mismatched:
         print(f"  held: {m}")
 
@@ -146,11 +157,20 @@ def demerger_factors(con: sqlite3.Connection, nse: requests.Session, bse: reques
         source TEXT, applied INTEGER, note TEXT, PRIMARY KEY (symbol, ex_date))""")
     if not con.execute("SELECT 1 FROM sqlite_master WHERE name='corporate_actions'").fetchone():
         return
+    # Only ex-dates already past: NSE lists a demerger ahead of time, and a
+    # future ex-date has no exchange file yet. A lookup that found no file is
+    # tried again every run for RETRY_DAYS after its ex-date - it used to be
+    # stored as a failure and never asked again, so one network blip, or an
+    # early listing, left a demerger unadjusted for good (review 4-Nov-2026).
+    today = datetime.now(IST).date().isoformat()
+    cutoff = (datetime.now(IST).date() - timedelta(days=RETRY_DAYS)).isoformat()
     todo = con.execute("""
         SELECT DISTINCT a.symbol, a.ex_date FROM corporate_actions a
         WHERE (lower(a.subject) LIKE '%demerg%' OR lower(coalesce(a.detail,'')) LIKE '%demerg%')
-          AND NOT EXISTS (SELECT 1 FROM price_adjust p WHERE p.symbol=a.symbol AND p.ex_date=a.ex_date)
-        ORDER BY a.ex_date""").fetchall()
+          AND a.ex_date < ?
+          AND NOT EXISTS (SELECT 1 FROM price_adjust p WHERE p.symbol=a.symbol AND p.ex_date=a.ex_date
+                          AND (p.factor IS NOT NULL OR p.ex_date < ?))
+        ORDER BY a.ex_date""", (today, cutoff)).fetchall()
     if not todo:
         return
     code = {s: str(c) for s, c in con.execute("SELECT SYMBOL, BSE_CODE FROM universe WHERE BSE_CODE IS NOT NULL")}
