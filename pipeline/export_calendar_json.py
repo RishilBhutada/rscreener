@@ -50,6 +50,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import business_updates
+import ipo_lib
 import seasons_lib
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -125,11 +126,6 @@ def dividend_amount(text: str | None) -> float | None:
     if len(amounts) == 1 or re.search(r"\bincl(?:uding|usive|\.)?\b", t, re.I):
         return amounts[0]
     return round(sum(amounts), 4)
-
-
-def price(text: str | None) -> float | None:
-    m = re.search(r"\d+(?:\.\d+)?", (text or "").replace(",", ""))
-    return float(m.group()) if m else None
 
 
 def ca_kind(subject: str) -> str:
@@ -328,6 +324,7 @@ def main() -> None:
 
     # ── IPO listings ──
     if has("ipos"):
+        gains = ipo_lib.listing_gains(con)
         for sym, company, listing, issue, seg in con.execute(
                 "SELECT symbol, company, listing_date, issue_price, security_type FROM ipos"
                 " WHERE listing_date >= ? AND listing_date < ?", (lo, today)):
@@ -335,13 +332,17 @@ def main() -> None:
                 continue
             names.setdefault(sym, company)
             e = {"d": listing, "k": "ipo", "s": sym, "seg": IPO_SEGMENT[seg]}
-            if (ip := price(issue)) and ip < 1e6:
-                e["ip"] = ip
-                first = closes.on_or_after(sym, listing)
-                if first and gap(listing, first[0]) <= 5:
-                    e["lc"] = round(first[1], 2)
-                    if (g := pct(first[1], ip)) is not None:
-                        e["lg"] = g
+            # The IPO page's own figures (ipo_lib): the issue price checked
+            # against its band, a reused symbol refused, the listing close put
+            # back on the listing day's share basis. This read NSE's raw issue
+            # price and the split-adjusted close, so the two pages could
+            # disagree on the same IPO (review 4-Nov-2026).
+            g = gains.get(sym)
+            if g and g["listing_date"] == listing:
+                e["ip"] = g["issue_price"]
+                if g["listing_gain_pct"] is not None:
+                    e["lc"] = g["listing_close"]
+                    e["lg"] = round(g["listing_gain_pct"], 1)
             past.append(e)
 
     # ── other board meetings (results meetings are covered above) ──
