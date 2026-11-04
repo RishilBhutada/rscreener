@@ -113,6 +113,9 @@ jobs:
         run: |
           mkdir -p data site web/public/companies web/public/charts
           gh release download data-db --pattern rscreener.db.gz --dir data
+          # Kept as downloaded: the save step moves only the tables whose rows
+          # for this company the refetch changed from this copy.
+          cp data/rscreener.db.gz "$RUNNER_TEMP/refetch-base.db.gz"
           gunzip -f data/rscreener.db.gz
           RUN=$(python pipeline/live_site.py)
           echo "run=$RUN" >> "$GITHUB_OUTPUT"
@@ -188,7 +191,9 @@ jobs:
           mkdir -p newest
           gh release download data-db --pattern rscreener.db.gz --dir newest --clobber
           gunzip -f newest/rscreener.db.gz
-          python pipeline/merge_company_rows.py --from data/rscreener.db --into newest/rscreener.db --symbol "$SYM"
+          gunzip -c "$RUNNER_TEMP/refetch-base.db.gz" > newest/base.db
+          python pipeline/merge_company_rows.py --from data/rscreener.db --base newest/base.db --into newest/rscreener.db --symbol "$SYM"
+          rm -f newest/base.db
           SIZE=$(stat -c%s newest/rscreener.db 2>/dev/null || echo 0)
           if [ "$SIZE" -lt 100000000 ]; then
             echo "database is only $SIZE bytes - refusing to overwrite the stored copy"; exit 0
