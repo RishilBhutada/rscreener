@@ -20,6 +20,7 @@ from statistics import median
 import pandas as pd
 
 import price_adjust
+from filing_checks import unit_outliers
 
 # yfinance income-statement item -> our field name
 YF_INCOME_MAP = {
@@ -321,9 +322,50 @@ def implausible_quarters(con: sqlite3.Connection) -> dict[str, set]:
         if bad:
             out.setdefault(sym, set()).update(bad)
     for sym, seq in rev_seq.items():
-        bad = _spikes(seq, REVENUE_SPIKE)
+        bad = _spikes(seq, REVENUE_SPIKE) | unit_outliers(seq)
         if bad:
             out.setdefault(sym, set()).update(bad)
+    # A quarter whose revenue is the whole year's (filing_checks, review
+    # 4-Nov-2026: Heritage Foods' Mar-2015 quarter holds FY2015).
+    for sym, pes in year_equals_quarter(con).items():
+        out.setdefault(sym, set()).update(pes)
+    return out
+
+
+def year_equals_quarter(con: sqlite3.Connection) -> dict[str, set]:
+    """{symbol: {period_end}} where the annual revenue filed for a year is
+    exactly the revenue filed for that year's last quarter - one of the two
+    is the other's figure (an annual filing read from its quarter column, or
+    a quarter holding the year). Which one cannot be told, so both go: 15
+    company-years in the 4-Nov-2026 database."""
+    if not _table_exists(con, "results_history"):
+        return {}
+    out: dict[str, set] = {}
+    for sym, pe in con.execute(
+        "SELECT a.symbol, a.period_end FROM results_history a JOIN results_history q "
+        "ON q.symbol=a.symbol AND q.period_end=a.period_end AND q.item='revenue' AND q.period_type='quarterly' "
+        "WHERE a.period_type='annual' AND a.item='revenue' AND a.value > 0 "
+        "AND ABS(q.value / a.value - 1) < 0.001"
+    ):
+        out.setdefault(sym, set()).add(pe)
+    return out
+
+
+def annual_unit_outliers(con: sqlite3.Connection) -> dict[str, set]:
+    """{symbol: {year end}} for annual filings whose revenue is a units
+    mistake against the company's own other years (filing_checks), plus
+    years whose figure is their own last quarter's."""
+    if not _table_exists(con, "results_history"):
+        return {}
+    seqs: dict[str, list] = {}
+    for sym, pe, v in con.execute(
+        "SELECT symbol, period_end, MAX(value) FROM results_history "
+        "WHERE period_type='annual' AND item='revenue' GROUP BY symbol, period_end ORDER BY symbol, period_end"
+    ):
+        seqs.setdefault(sym, []).append((pe, v))
+    out = {sym: bad for sym, seq in seqs.items() if (bad := unit_outliers(seq))}
+    for sym, pes in year_equals_quarter(con).items():
+        out.setdefault(sym, set()).update(pes)
     return out
 
 
@@ -344,6 +386,9 @@ def filed_net_worth(con: sqlite3.Connection) -> dict[str, list]:
         "WHERE item IN ('equity','share_capital') ORDER BY period_end",
         con,
     )
+    # The same filings the trends drop for a misread unit: their net worth is
+    # read off the same sheet, in the same wrong unit.
+    bad_nw = annual_unit_outliers(con)
     out: dict[str, list] = {}
     for sym, g in df.groupby("symbol"):
         by_period: dict[str, dict] = {}
@@ -351,8 +396,9 @@ def filed_net_worth(con: sqlite3.Connection) -> dict[str, list]:
             if pd.notna(r["value"]):
                 by_period.setdefault(r["period_end"], {})[r["item"]] = float(r["value"])
         ref = share_capital_ref(by_period)
+        skip_nw = bad_nw.get(sym, set())
         vals = [(p, nw) for p in sorted(by_period)
-                if (nw := net_worth(by_period[p], ref)) is not None]
+                if p not in skip_nw and (nw := net_worth(by_period[p], ref)) is not None]
         vals = _drop_scale_outliers(vals)
         if vals:
             out[sym] = vals
@@ -1032,10 +1078,18 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None,
     # thousand times their true size and nothing in the pipeline could see it.
     cross = cross_source_outliers(con)
     condemned: set[tuple[str, str]] = set()     # (symbol, year end) dropped as a whole
+    # Years whose filing is a units mistake (filing_checks): dropped like a
+    # condemned year - CONCOR's FY2015 at Rs 61.5 Cr was on its chart.
+    bad_years = annual_unit_outliers(con)
     for (sym_, ptype_), periods_ in comps.items():
         if ptype_ == "quarterly":
             for bad_ in suspect.get(sym_, set()):
                 periods_.pop(bad_, None)   # same rule as the charts: drop, do not draw
+        else:
+            for bad_ in bad_years.get(sym_, set()):
+                if periods_.get(bad_, {}).get("_source") == "nse":
+                    periods_.pop(bad_, None)
+                    condemned.add((sym_, bad_))
         # None means the filing is condemned entire; a set means only those
         # lines are, and the rest of that year is sound and stays.
         for bad_, items_ in cross.get((sym_, ptype_), {}).items():

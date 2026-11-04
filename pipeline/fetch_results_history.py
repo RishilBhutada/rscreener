@@ -27,6 +27,7 @@ import requests
 
 import budget
 import nse_session
+from filing_checks import unit_outliers
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
@@ -150,7 +151,9 @@ _EPS_BASIC = re.compile(r"^basic$")
 # values that are per-share rupees, never scaled by the sheet's unit
 _UNSCALED = {"eps", "eps_before"}
 _AUX = ("revenue_bank", "revenue_net", "pat_old", "eps_before", "reserves")
-_UNITS = [("crore", 1e7), ("million", 1e6), ("lakh", 1e5)]
+# "Rs in Lacs" and "Rs in thousands" were not recognised and left the sheet
+# read as plain rupees (review 4-Nov-2026).
+_UNITS = [("crore", 1e7), ("million", 1e6), ("lakh", 1e5), ("lac", 1e5), ("thousand", 1e3)]
 
 
 def _num(s: str) -> float | None:
@@ -253,6 +256,7 @@ def parse_xbrl(xml_bytes: bytes, period_type: str) -> dict[str, float]:
     filing the full-year numbers live in FourD; quarterly numbers in OneD."""
     root = ET.fromstring(xml_bytes)
     by_ctx: dict[str, dict[str, float]] = {}
+    span = _context_days(root)
     for el in root.iter():
         cref = el.get("contextRef")
         if not cref or el.text is None or not el.text.strip():
@@ -267,9 +271,24 @@ def parse_xbrl(xml_bytes: bytes, period_type: str) -> dict[str, float]:
             continue
         by_ctx.setdefault(cref, {})[name] = val
 
+    # The column must cover the period it is stored as. An annual filing fell
+    # back to the QUARTER column when it had no year-to-date one, and stored
+    # one quarter as the whole year (review 4-Nov-2026: 15 years in the
+    # database equal their own March quarter). Where the file states its
+    # contexts' dates they decide; nothing is stored rather than the wrong span.
+    def fits(ctx: str, lo: int, hi: int) -> bool:
+        d = span.get(ctx)
+        return d is None or lo <= d <= hi
     if period_type == "annual":
-        facts = dict(by_ctx.get("FourD") or by_ctx.get("OneD") or {})
+        if by_ctx.get("FourD") and fits("FourD", 330, 400):
+            facts = dict(by_ctx["FourD"])
+        elif by_ctx.get("OneD") and span.get("OneD") is not None and fits("OneD", 330, 400):
+            facts = dict(by_ctx["OneD"])      # a file whose first column IS the year
+        else:
+            return {}
     else:
+        if not fits("OneD", 80, 100):
+            return {}
         facts = dict(by_ctx.get("OneD") or {})
     facts.update(by_ctx.get("OneI", {}))  # instants (equity, share capital)
 
@@ -281,6 +300,22 @@ def parse_xbrl(xml_bytes: bytes, period_type: str) -> dict[str, float]:
     for aux in ("revenue_bank", "pat_old"):
         facts.pop(aux, None)
     return facts
+
+
+def _context_days(root) -> dict[str, int]:
+    """{context id: days it spans} for the duration contexts a file declares."""
+    out: dict[str, int] = {}
+    for ctx in root.iter():
+        if ctx.tag.split("}")[-1] != "context" or not ctx.get("id"):
+            continue
+        dates = {el.tag.split("}")[-1]: (el.text or "").strip() for el in ctx.iter()}
+        try:
+            a = datetime.strptime(dates["startDate"][:10], "%Y-%m-%d")
+            b = datetime.strptime(dates["endDate"][:10], "%Y-%m-%d")
+        except (KeyError, ValueError):
+            continue
+        out[ctx.get("id")] = (b - a).days
+    return out
 
 
 def parse_segments(xml_bytes: bytes, period_type: str) -> dict[str, dict[str, float]]:
@@ -321,6 +356,19 @@ def parse_segments(xml_bytes: bytes, period_type: str) -> dict[str, dict[str, fl
         if n in rev or n in ebit:
             out[name] = {k: v for k, v in (("rev", rev.get(n)), ("ebit", ebit.get(n))) if v is not None}
     return out if len(out) >= 2 else {}
+
+
+def units_wrong(con, store: str, sym: str, ptype: str, period_end: str, revenue: float | None) -> bool:
+    """Whether a filing's revenue is a units mistake against the company's
+    stored periods on both sides of it (filing_checks.unit_outliers)."""
+    if not revenue:
+        return False
+    seq = [(p, v) for p, v in con.execute(
+        f"SELECT period_end, MAX(value) FROM {store} WHERE symbol=? AND period_type=? AND item='revenue' "
+        "AND period_end<>? GROUP BY period_end", (sym, ptype, period_end))]
+    seq.append((period_end, revenue))
+    seq.sort()
+    return period_end in unit_outliers(seq)
 
 
 def get_retry(session, url: str, tries: int = 4, timeout: int = 25):
@@ -560,7 +608,7 @@ def main() -> None:
             print(f"time budget of {args.max_minutes:g} min reached - stopping after {i-1} "
                   f"of {len(symbols)} symbols; the rest come up on a later run", flush=True)
             break
-        n_periods = skipped = 0
+        n_periods = skipped = refused = 0
         err = None
         try:
             filings = []
@@ -623,6 +671,12 @@ def main() -> None:
                     continue
                 basis = "consolidated" if f.get("consolidated") == "Consolidated" else "standalone"
                 ps, pe = iso(f["fromDate"]), iso(f["toDate"])
+                if units_wrong(con, store, sym, f["_ptype"], pe, facts.get("revenue")):
+                    # A units mistake against the company's own periods either
+                    # side (filing_checks): not stored, and the stored figure,
+                    # if any, kept (review 4-Nov-2026).
+                    refused += 1
+                    continue
                 rows_in = [(sym, basis, f["_ptype"], ps, pe, k, v) for k, v in facts.items()]
                 if args.standalone and basis != "standalone":
                     skipped += 1
@@ -646,7 +700,8 @@ def main() -> None:
                     (sym, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), None, n_periods),
                 ))
             db_retry(con.commit)
-            print(f"[{i}/{len(symbols)}] {sym}: {n_periods} periods parsed, {skipped} skipped")
+            print(f"[{i}/{len(symbols)}] {sym}: {n_periods} periods parsed, {skipped} skipped"
+                  + (f", {refused} refused as a units mistake" if refused else ""))
         except Exception as e:  # noqa: BLE001
             err = str(e)[:200]
             # logging the failure must never itself end the run - one bad symbol
