@@ -49,7 +49,9 @@ concurrency:
   # Publishing is idempotent and the newest code should always win, so
   # publish-only runs get their own group. The two can overlap safely: they
   # hold separate runner filesystems, and Pages serialises deployments through
-  # the github-pages environment.
+  # the github-pages environment. Both store the database, so the save step
+  # takes in whatever another run stored meanwhile (pipeline/merge_newest.sh)
+  # instead of overwriting it.
   #
   # "Publish new results" (results.yml) shares the publish group, and nothing
   # in it is cancelled any more - a newer run waits for the running one. That
@@ -86,6 +88,11 @@ jobs:
         run: |
           mkdir -p data
           if gh release download data-db --pattern rscreener.db.gz --dir data; then
+            # Kept as downloaded: before saving, pipeline/merge_newest.sh
+            # compares it with the stored copy to see whether another run
+            # (Publish new results, a refetch, a publish-only run) stored
+            # work meanwhile, and takes that work in rather than overwriting it.
+            cp data/rscreener.db.gz "$RUNNER_TEMP/rscreener-base.db.gz"
             gunzip -f data/rscreener.db.gz
             echo "DB restored from release"
           else
@@ -371,11 +378,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download data-db --pattern news.db.gz --dir data --clobber && gunzip -f data/news.db.gz \
+          # The news watcher stores news.db too, until 23:59 IST - inside this
+          # run. The copy as downloaded is kept so that, before storing, the
+          # watcher's new rows are taken in rather than overwritten.
+          rm -f "$RUNNER_TEMP/news-base.db.gz"
+          gh release download data-db --pattern news.db.gz --dir data --clobber \
+            && cp data/news.db.gz "$RUNNER_TEMP/news-base.db.gz" && gunzip -f data/news.db.gz \
             || echo "no news database stored yet - starting one"
           DD=7; [ -f data/news.db ] || DD=365
           bash pipeline/guarded_fetch.sh python pipeline/fetch_news.py --names-from data/rscreener.db --deal-days $DD
           if [ -f data/news.db ]; then
+            bash pipeline/merge_newest.sh news.db.gz data/news.db "$RUNNER_TEMP/news-base.db.gz"
             gzip -c data/news.db > news.db.gz && gh release upload data-db news.db.gz --clobber || echo "::warning::news.db not stored"
           fi
       - name: Find what each company does (Wikipedia articles, rotating)
@@ -517,6 +530,13 @@ jobs:
           if [ "$SIZE" -lt 100000000 ]; then
             echo "database is only $SIZE bytes - refusing to overwrite the stored copy"; exit 0
           fi
+          # Another run may have stored the database while this one fetched:
+          # "Publish new results" (its new quarters and its alert record), a
+          # refetch, or a publish-only run - each in a different concurrency
+          # group, so they can overlap this one. Uploading this copy as it is
+          # would throw their work away; take it in first. Seconds when nothing
+          # changed (one download and a compare), minutes when something did.
+          bash pipeline/merge_newest.sh rscreener.db.gz data/rscreener.db "$RUNNER_TEMP/rscreener-base.db.gz"
           gzip -c data/rscreener.db > rscreener.db.gz
           # Retried. This is a single ~200 MB upload to one API, and a transient
           # failure here loses BOTH the night's fetching and - because the next
