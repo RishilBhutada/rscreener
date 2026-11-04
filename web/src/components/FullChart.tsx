@@ -14,6 +14,7 @@ import {
 import { loadIndex } from "@/lib/index-data";
 import { levelsOf, SENS, type Levels, type Sens } from "@/lib/levels";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
+import { useBackClose } from "@/lib/backclose";
 import {
   workingFor, growth, growthText, PE_WINDOWS, CA_LABEL, CA_ORDER, Q_LABEL,
   type ChartBand, type ChartTrendQ, type Quarter, type CorpAction, type Growth, type Working,
@@ -715,6 +716,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
   // The levels on screen, for the legend's one-line summary.
   const [lvl, setLvl] = useState<Levels | null>(null);
   const [sheet, setSheet] = useState<null | "type" | "layers" | "cmp">(null);
+  useBackClose(sheet !== null, () => setSheet(null));
   const [legend, setLegend] = useState<LegendData | null>(null);
   const [themeKey, setThemeKey] = useState(0);
   const [full, setFull] = useState(false);

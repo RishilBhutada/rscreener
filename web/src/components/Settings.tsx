@@ -8,6 +8,11 @@ import { DESTINATIONS, BAR_SLOTS } from "@/lib/destinations";
 import { applyOrder, clearOrder, loadOrder, move, saveOrder, OrderKind } from "@/lib/order";
 import { reloadBypassingCache } from "@/lib/reload";
 import { clearOrders, customOrders } from "@/lib/tableprefs";
+import { backupText, restoreText } from "@/lib/sync";
+import { allWatched } from "@/lib/watchlists";
+import {
+  addPassword, authMessage, firebaseConfigured, hasPassword, inApp, sendPasswordReset, signInWithEmail, signInWithGoogle, signOutOfGoogle, useAuth,
+} from "@/lib/firebase";
 import { Glyph, Group, PageTitle, Row, Segmented } from "@/components/ListUI";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -66,6 +71,9 @@ const ICON = {
   order: "M9 6.5h11M9 12h11M9 17.5h11M4 6.5h1.5M4 12h1.5M4 17.5h1.5",
   bar: "M7.5 3h9A1.5 1.5 0 0 1 18 4.5v15a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19.5v-15A1.5 1.5 0 0 1 7.5 3zM6 16.5h12",
   status: "M3 12.5h4l2.5-6 5 11 2.5-5H21",
+  copy: "M9 9h11v11H9zM5 15V4h11",
+  user: "M12 12a4 4 0 1 0 0-8a4 4 0 0 0 0 8zM4 20a8 8 0 0 1 16 0",
+  bell: "M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0",
   update: "M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5V9H15",
   version: "M12 3.5a8.5 8.5 0 1 0 0 17a8.5 8.5 0 0 0 0-17zM12 11v5.5M12 7.8v.01",
   change: "M3.5 12h5M15.5 12h5M12 8.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 0 0 0-7z",
@@ -199,6 +207,9 @@ export function SettingsScreen() {
       />
     );
   }
+  if (p === "data") return <DataScreen />;
+  if (p === "alerts") return <AlertsScreen />;
+  if (p === "account") return <AccountScreen />;
   if (p === "sections") {
     return (
       <ReorderScreen
@@ -341,6 +352,11 @@ function MainScreen() {
 
       <Group title="Data">
         <Row icon={<Glyph d={ICON.status} />} title="Data status" sub="How fresh each source is" href="/status" chevron />
+        {firebaseConfigured && (
+          <Row icon={<Glyph d={ICON.user} />} title="Account" sub="Your lists, portfolio and notes on every device" href="/settings?p=account" chevron />
+        )}
+        <Row icon={<Glyph d={ICON.copy} />} title="Move my data" sub="Lists, portfolio and notes to another phone or a reinstalled app" href="/settings?p=data" chevron />
+        <Row icon={<Glyph d={ICON.bell} />} title="Phone alerts" sub="Results and announcements of the stocks you choose" href="/settings?p=alerts" chevron />
         <Row
           icon={<Glyph d={ICON.update} />}
           title="Check for updates"
@@ -385,6 +401,231 @@ function MainScreen() {
  *  and considerably worse when it does not: on a touch screen it fights the
  *  scroll of the page it sits in, and it is unreachable by keyboard. The row
  *  that just moved flashes once, so the eye can follow it. */
+/** Moving this device's data without an account: a backup as text, copied to
+ *  the clipboard, pasted on the other side. Text rather than a file, because
+ *  the old Android app could not save files at all - this has to work there. */
+function DataScreen() {
+  const [text, setText] = useState("");
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const copy = async () => {
+    const backup = backupText();
+    try {
+      await navigator.clipboard.writeText(backup);
+      setMsg({ ok: true, text: "Copied. On the other phone, or in the new app, open this screen, paste it below and tap Restore." });
+    } catch {
+      setText(backup);
+      setMsg({ ok: false, text: "Copying was blocked here. The backup is in the box below: select all of it and copy it." });
+    }
+  };
+  const restore = () => {
+    try {
+      const n = restoreText(text);
+      setMsg({ ok: true, text: `Restored ${n} kind${n === 1 ? "" : "s"} of data, added to what was here. Reloading…` });
+      setTimeout(() => window.location.reload(), 900);
+    } catch {
+      setMsg({ ok: false, text: "That is not an Rscreener backup. Copy it again on the other device." });
+    }
+  };
+  const button = "w-full min-h-[50px] rounded-2xl text-[15px] font-semibold";
+  return (
+    <div>
+      <PageTitle>Move my data</PageTitle>
+      <p className="-mt-4 mb-5 px-1 text-sm text-[var(--ink3)]">
+        Your watchlists, portfolio, notes, saved screens, own ratios and look are kept on this device only.
+        Reinstalling the app or changing phones starts empty - copy a backup first, then paste it on the other side.
+        Restoring adds to what is there; it deletes nothing.
+      </p>
+      <button type="button" onClick={copy} className={`${button} bg-[var(--accent-fill)] text-[var(--accent-fill-ink)]`}>Copy my data</button>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} spellCheck={false}
+        placeholder="Paste a backup here to restore it"
+        aria-label="Backup text"
+        className="mt-5 w-full rounded-2xl border border-[var(--line2)] bg-[var(--card)] p-3 text-[13px] font-mono text-[var(--ink)]
+                   placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)]" />
+      <button type="button" onClick={restore} disabled={!text.trim()}
+        className={`${button} mt-3 border border-[var(--line)] bg-[var(--card)] text-[var(--accent-ink)] disabled:opacity-40`}>Restore</button>
+      {msg && <p role="status" className={`mt-4 px-1 text-sm ${msg.ok ? "text-[var(--pos)]" : "text-[var(--neg)]"}`}>{msg.text}</p>}
+    </div>
+  );
+}
+
+/** Signing in, so the lists follow you. Email and password everywhere;
+ *  Google in browsers only (the Android app's built-in browser is refused by
+ *  Google's sign-in page). Syncing itself is AccountButton's, in the top bar,
+ *  which notices the sign-in on every page. */
+function AccountScreen() {
+  const { ready, user, hint } = useAuth();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [linked, setLinked] = useState(false);
+  const app = typeof window !== "undefined" && inApp();
+  // Still checking after 8 s: almost always no connection - say so.
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (ready) return;
+    const t = setTimeout(() => setSlow(true), 8000);
+    return () => clearTimeout(t);
+  }, [ready]);
+  const run = async (f: () => Promise<unknown>, ok: string) => {
+    setBusy(true); setMsg(null);
+    try { await f(); setMsg({ ok: true, text: ok }); } catch (e) { setMsg({ ok: false, text: authMessage(e) }); } finally { setBusy(false); }
+  };
+  // The buttons are never greyed out - a dead-looking button reads as broken
+  // (owner, 12-Oct-2026). A missing field is said instead.
+  const missing = () => {
+    if (email.trim() && password) return false;
+    setMsg({ ok: false, text: !email.trim() ? "Enter your email first." : "Enter a password (6 or more characters)." });
+    return true;
+  };
+  const field = "w-full rounded-2xl border border-[var(--line2)] bg-[var(--card)] px-4 py-3 text-base text-[var(--ink)] placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)]";
+  const button = "w-full min-h-[50px] rounded-2xl text-[15px] font-semibold disabled:opacity-40";
+  if (!firebaseConfigured) {
+    return (
+      <div>
+        <PageTitle>Account</PageTitle>
+        <p className="-mt-4 px-1 text-sm text-[var(--ink3)]">Sign-in is not set up for this site yet. Until it is, use Move my data to carry your lists between devices.</p>
+      </div>
+    );
+  }
+  // Firebase has not answered yet: show the account this device was signed
+  // in with, not the sign-in form - the form is what made the app look signed
+  // out on every start (owner, 13-Oct-2026).
+  if (!user && !ready && hint) {
+    return (
+      <div>
+        <PageTitle>Account</PageTitle>
+        <p className="-mt-4 mb-5 px-1 text-sm text-[var(--ink3)]">
+          Signed in as <span className="text-[var(--ink)] font-medium">{hint.email ?? hint.name}</span>.{" "}
+          {slow ? "Still checking your account - this needs a connection, and finishes when you are back online." : "Checking your account..."}
+        </p>
+      </div>
+    );
+  }
+  if (user) {
+    return (
+      <div>
+        <PageTitle>Account</PageTitle>
+        <p className="-mt-4 mb-5 px-1 text-sm text-[var(--ink3)]">
+          Signed in as <span className="text-[var(--ink)] font-medium">{user.email ?? user.displayName}</span>. Your watchlists, portfolio, notes, saved screens, own ratios and look are kept in your account and follow you to every device you sign in on.
+        </p>
+        {/* The Android app cannot show Google's sign-in, so a Google account
+            gets a password as its second way in - the same account, not a
+            second one. */}
+        {hasPassword(user) || linked ? (
+          <p className="mb-5 px-1 text-sm text-[var(--ink2)]">
+            In the app, sign in with <span className="font-medium">{user.email}</span> and your password - it opens this same account.
+          </p>
+        ) : (
+          <div className="mb-5 space-y-3">
+            <p className="px-1 text-sm text-[var(--ink2)]">
+              <span className="font-semibold">Set a password for the app.</span> Google sign-in does not work inside the Android app, so give this account a password: then, in the app, sign in with {user.email} and it opens this same account.
+            </p>
+            <input type="password" autoComplete="new-password" placeholder="New password (6 or more characters)" value={password}
+              onChange={(e) => setPassword(e.target.value)} className={field} />
+            <button type="button" disabled={busy}
+              onClick={() => (password.length < 6
+                ? setMsg({ ok: false, text: "Use a password of at least 6 characters." })
+                : run(async () => { await addPassword(password); setPassword(""); setLinked(true); }, `Password set. In the app, sign in with ${user.email} and this password.`))}
+              className={`${button} bg-[var(--accent-fill)] text-[var(--accent-fill-ink)]`}>Set a password for the app</button>
+          </div>
+        )}
+        {/* For the phone alerts' ALERT_UID secret: the runs that send the
+            pushes read this account's stars and holdings by this ID. Not a
+            secret - it identifies the account, it does not open it. */}
+        <div className="mb-5 rounded-2xl border border-[var(--line)] bg-[var(--card)] px-4 py-3">
+          <p className="text-[12px] text-[var(--ink3)]">Account ID, for phone alerts</p>
+          <div className="mt-1 flex items-center gap-2">
+            <code className="flex-1 min-w-0 truncate text-[13px] text-[var(--ink)]">{user.uid}</code>
+            <button type="button"
+              onClick={() => navigator.clipboard.writeText(user.uid).then(
+                () => setMsg({ ok: true, text: "Account ID copied." }),
+                () => setMsg({ ok: false, text: "Copying was blocked here - select the ID and copy it." }))}
+              className="shrink-0 rounded-lg border border-[var(--line)] px-3 py-1.5 text-[13px] text-[var(--accent-ink)]">Copy</button>
+          </div>
+        </div>
+        <button type="button" onClick={() => run(signOutOfGoogle, "Signed out. Everything on this device stays as it is.")} disabled={busy}
+          className={`${button} border border-[var(--line)] bg-[var(--card)] text-[var(--neg)]`}>Sign out</button>
+        {msg && <p role="status" className={`mt-4 px-1 text-sm ${msg.ok ? "text-[var(--pos)]" : "text-[var(--neg)]"}`}>{msg.text}</p>}
+      </div>
+    );
+  }
+  return (
+    <div>
+      <PageTitle>Sign in</PageTitle>
+      <p className="-mt-4 mb-5 px-1 text-sm text-[var(--ink3)]">
+        Keeps your watchlists, portfolio, notes, saved screens, own ratios and look in your account, so they follow you between your phone, the app and a computer. What is on this device now is kept and joined with the account&apos;s.
+      </p>
+      {!app && (
+        <>
+          <button type="button" disabled={busy} onClick={() => run(signInWithGoogle, "Signed in - syncing your lists.")}
+            className={`${button} bg-[var(--accent-fill)] text-[var(--accent-fill-ink)]`}>Continue with Google</button>
+          <p className="my-4 text-center text-[12px] text-[var(--ink3)]">or with email</p>
+        </>
+      )}
+      {app && <p className="mb-3 px-1 text-[12px] text-[var(--ink3)]">Google sign-in does not work inside the app - Google blocks it in apps&apos; built-in browsers. Use email here; in a browser you can use either.</p>}
+      <div className="space-y-3">
+        <input type="email" autoComplete="email" inputMode="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} className={field} />
+        <input type="password" autoComplete="current-password" placeholder="Password (6 or more characters)" value={password} onChange={(e) => setPassword(e.target.value)} className={field} />
+        <button type="button" disabled={busy} onClick={() => (missing() || run(() => signInWithEmail(email, password), "Signed in - syncing your lists."))}
+          className={`${button} ${app ? "bg-[var(--accent-fill)] text-[var(--accent-fill-ink)]" : "border border-[var(--line)] bg-[var(--card)] text-[var(--accent-ink)]"}`}>Sign in</button>
+        <button type="button" disabled={busy} onClick={() => (missing() || run(() => signInWithEmail(email, password, true), "Account created and signed in - syncing your lists."))}
+          className={`${button} border border-[var(--line)] bg-[var(--card)] text-[var(--ink2)]`}>Create account</button>
+        <button type="button" disabled={busy} onClick={() => (email.trim() ? run(() => sendPasswordReset(email), "If that email has an account, a reset link is on its way.") : setMsg({ ok: false, text: "Enter your email first." }))}
+          className="w-full text-[13px] text-[var(--accent-ink)] disabled:opacity-40 py-2">Forgot password</button>
+      </div>
+      {msg && <p role="status" className={`mt-4 px-1 text-sm ${msg.ok ? "text-[var(--pos)]" : "text-[var(--neg)]"}`}>{msg.text}</p>}
+    </div>
+  );
+}
+
+const ALERT_LIST = "https://github.com/RishilBhutada/rscreener/edit/main/alerts/watchlist.txt";
+
+/** Which stocks reach the phone. The list lives in the repository
+ *  (alerts/watchlist.txt), where the GitHub runs that send the pushes can read
+ *  it; the stars in the app live on this device and cannot reach them. This
+ *  turns the stars into the list's format and opens the file to paste into. */
+function AlertsScreen() {
+  const [text, setText] = useState("");
+  const [msg, setMsg] = useState("");
+  const copy = async () => {
+    const syms = allWatched();
+    if (!syms.length) { setMsg("No starred stocks on this device yet."); return; }
+    const list = syms.join("\n");
+    try {
+      await navigator.clipboard.writeText(list);
+      setMsg(`Copied ${syms.length} symbols. Open the list below, replace its symbols with them, and tap Commit changes.`);
+    } catch {
+      setText(list);
+      setMsg("Copying was blocked here - select the symbols below and copy them.");
+    }
+  };
+  const button = "w-full min-h-[50px] rounded-2xl text-[15px] font-semibold flex items-center justify-center";
+  return (
+    <div>
+      <PageTitle>Phone alerts</PageTitle>
+      <div className="-mt-4 mb-5 px-1 text-sm text-[var(--ink3)] space-y-2">
+        <p>Pushed through the ntfy app, for the stocks on your alert list:</p>
+        <ul className="list-disc pl-5 space-y-1">
+          <li><span className="text-[var(--ink2)]">Results out</span> - within minutes of NSE publishing them, with the time and the filing.</li>
+          <li><span className="text-[var(--ink2)]">Results figures</span> - sales and profit against a year before, once the company files them.</li>
+          <li><span className="text-[var(--ink2)]">Other announcements</span> - checked through the day.</li>
+        </ul>
+        <p>The alerts are sent from GitHub. Once your account is connected to them (two GitHub secrets, once: FIREBASE_SERVICE_ACCOUNT and ALERT_UID - your Account ID is under Account), every star and holding in your account is included automatically, on the next run after you add it.</p>
+        <p>The list file in the GitHub repository still counts too - anything on it is alerted as well. Until the account is connected, copy your stars into it here.</p>
+      </div>
+      <button type="button" onClick={copy} className={`${button} bg-[var(--accent-fill)] text-[var(--accent-fill-ink)]`}>Copy my starred stocks</button>
+      {text && (
+        <textarea readOnly value={text} rows={6} aria-label="Starred symbols"
+          className="mt-3 w-full rounded-2xl border border-[var(--line2)] bg-[var(--card)] p-3 text-[13px] font-mono text-[var(--ink)]" />
+      )}
+      <a href={ALERT_LIST} target="_blank" rel="noopener noreferrer"
+        className={`${button} mt-3 border border-[var(--line)] bg-[var(--card)] text-[var(--accent-ink)]`}>Open the alert list on GitHub</a>
+      {msg && <p role="status" className="mt-4 px-1 text-sm text-[var(--ink2)]">{msg}</p>}
+    </div>
+  );
+}
+
 function ReorderScreen({ kind, title, caption, items, split }: {
   kind: OrderKind;
   title: string;

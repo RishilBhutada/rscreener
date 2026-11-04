@@ -1,0 +1,46 @@
+name: US release alerts
+run-name: US release alerts
+
+# A push 30 minutes after each US release rated four stars or more on the gold
+# calendar (an hour after the Fed): did it surprise - the 2-year yield's move -
+# and how did gold move. See pipeline/us_release_alerts.py.
+#
+# Started each morning by the nightly run; the timed start is a backup only,
+# because GitHub drops most timed runs on this repository. The watcher hands
+# over to a fresh run (passing `until`) before the six-hour limit. One at a
+# time: a second waits, and finds what was already sent on the alert topic.
+
+on:
+  workflow_dispatch:
+    inputs:
+      until:
+        description: "UTC ISO end of the watch (set by a hand-over; leave empty)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "30 10 * * *"   # 16:00 IST, a backup for the nightly's start
+
+permissions:
+  actions: write     # handing over to the next watcher
+  contents: read
+
+concurrency:
+  group: us-alerts
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: pipeline
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - run: python pipeline/us_release_alerts.py --until "${{ github.event.inputs.until }}"
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          GH_TOKEN: ${{ github.token }}

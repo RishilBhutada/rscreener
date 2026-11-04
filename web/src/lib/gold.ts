@@ -10,7 +10,20 @@ export type GoldEvent = {
   comex?: [string, number]; mcx?: [string, number];
   /** an announcement found in the news: the article, and the rule it matched */
   url?: string; why?: string;
+  /** US releases, once out: the 2-year Treasury yield's move that day (basis
+   *  points) - the market's verdict on whether the data surprised. `sur`: big
+   *  enough to count as a surprise for this kind of release. `with`: a more
+   *  important release the same day owns the move. */
+  dy?: number; sur?: boolean; with?: string;
+  /** CPI and PCE: the Cleveland Fed model's nowcast for the month, month on
+   *  month, as it stood the day before the release (or now): headline, core. */
+  now?: { m: string; h?: number; c?: number; d: string };
 };
+
+/** How gold moved when a kind of US release surprised - the third of its
+ *  releases with the biggest 2-year yield move - and when it landed in line
+ *  (the smallest third). */
+export type GoldSurprise = { n: number; bp: number; move: number; quiet: number; ratio: number; stars: number };
 
 export type GoldFamily = {
   label: string; why: string; rule: number; stars: number; n: number;
@@ -19,6 +32,9 @@ export type GoldFamily = {
   fixed?: boolean;
   /** where the moves are measured: COMEX, or MCX for India's own events */
   market?: "COMEX" | "MCX";
+  surprise?: GoldSurprise;
+  /** "surprise": the stars come from the surprise measure, higher than the plain one */
+  basis?: "surprise";
 };
 
 export type GoldNews = { t: string; title: string; url: string; src: string; stars: number; why: string };

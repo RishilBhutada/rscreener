@@ -1,4 +1,9 @@
-# Turning on Google sign-in
+# Turning on sign-in
+
+**Checklist (about 15 minutes, once):** create the Firebase project → switch on
+**Email/Password** and **Google** sign-in → add `rishilbhutada.github.io` to the
+authorised domains → create the Firestore database with the rules below → add
+the four values as GitHub secrets. Then tell Claude, who republishes and checks.
 
 Rscreener remembers your watchlist, notes, portfolio, saved screens and theme in
 the browser you are using. Sign-in makes them follow you between devices instead.
@@ -20,11 +25,15 @@ Roughly ten minutes, once.
 
 You will be shown a `firebaseConfig` block. Keep it open.
 
-## 2. Turn on Google sign-in
+## 2. Turn on sign-in
 
 1. **Build → Authentication → Get started**
-2. **Sign-in method → Google → Enable**, pick a support email, **Save**
-3. **Settings → Authorized domains → Add domain**, add `rishilbhutada.github.io`
+2. **Sign-in method → Email/Password → Enable** (the first switch only), **Save**.
+   This is the one the Android app uses: Google refuses its sign-in page inside
+   an app's built-in browser.
+3. **Sign-in method → Add new provider → Google → Enable**, pick a support
+   email, **Save** - for signing in from a browser.
+4. **Settings → Authorized domains → Add domain**, add `rishilbhutada.github.io`
 
 Without that last step sign-in works locally and fails on the live site.
 
@@ -67,7 +76,8 @@ Add them as repository secrets so the build picks them up:
 
 Both workflows already pass these through to the build. Push anything, or start a
 run from the Data page with scope *rebuild and publish only*, and the **Sign in**
-button appears in the top bar.
+button appears in the top bar. It opens Settings → Account: email and password
+work everywhere, Google in browsers.
 
 ---
 

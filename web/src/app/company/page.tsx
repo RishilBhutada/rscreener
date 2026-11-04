@@ -4,12 +4,15 @@ import { ChevronGlyph, ExternalGlyph } from "@/components/Glyphs";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { saveFile } from "@/lib/download";
 import TopNav from "@/components/TopNav";
 import { shortName, titleCase } from "@/lib/names";
 import StockChart, { CorpAction, Quarter } from "@/components/StockChart";
 import { Row } from "@/lib/query";
 import { loadNote, pushRecent, saveNote } from "@/lib/store";
 import WatchStar from "@/components/WatchStar";
+import SeasonsCard, { Seasons } from "@/components/Seasons";
+import InstitutionsCard from "@/components/InstitutionsCard";
 import { loadSectionMode, SectionMode } from "@/components/Settings";
 import { isRefreshLoad } from "@/components/TopNav";
 import { applyOrder, loadOrder } from "@/lib/order";
@@ -41,6 +44,11 @@ type Shareholding = {
   promoter: (number | null)[];
   public: (number | null)[];
   employee: (number | null)[];
+  /** Foreign and domestic institutions and mutual funds, from each quarter's
+   *  XBRL - empty for quarters on SEBI's older format. */
+  fii?: (number | null)[];
+  dii?: (number | null)[];
+  mf?: (number | null)[];
 };
 type Pt = [string, number] | [string, number, number | null];
 type Prices = { monthly?: Pt[]; weekly?: Pt[]; daily?: Pt[] };
@@ -69,6 +77,11 @@ type Company = {
    *  as the other says the numbers cover a different business than they do. */
   basis?: string | null;
   fscore?: FScoreData | null;
+  seasons?: Seasons | null;
+  /** [index symbol, name, group] - the indices it is a member of, broad market first. */
+  indices?: [string, string, string][] | null;
+  /** What the company does: its Wikipedia article (CC BY-SA 4.0), verified by the ticker in its infobox. */
+  about?: { title: string; url: string; short: string | null; text: string | null } | null;
   exchange?: string | null;
   bse_code?: number | string | null;
   /** Written by pipeline/export_company_json.py so this page need not download
@@ -538,6 +551,29 @@ function CompoundedGrowth({ trend, prices }: { trend?: { annual?: Trend }; price
         <GrowthCard key={title} title={title} rows={rows} />
       ))}
     </section>
+  );
+}
+
+/** The indices the company is in: the first few, the rest one tap away. */
+function IndexChips({ list }: { list?: [string, string, string][] | null }) {
+  const [all, setAll] = useState(false);
+  if (!list?.length) return null;
+  const shown = all ? list : list.slice(0, 4);
+  return (
+    <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12px]">
+      <span className="text-[var(--ink3)]">In {list.length} {list.length === 1 ? "index" : "indices"}:</span>
+      {shown.map(([sym, name]) => (
+        <Link key={sym} href={`/indices/view?s=${encodeURIComponent(sym)}`}
+          className="rounded-full border border-[var(--line)] px-2 py-0.5 text-[var(--ink2)] hover:bg-[var(--card2)]">
+          {name.replace(/^NIFTY\b/, "Nifty")}
+        </Link>
+      ))}
+      {list.length > 4 && (
+        <button type="button" onClick={() => setAll(!all)} className="text-[var(--accent-ink)] font-medium px-1">
+          {all ? "Fewer" : `+${list.length - 4} more`}
+        </button>
+      )}
+    </p>
   );
 }
 
@@ -1817,18 +1853,16 @@ function CompanyView() {
         periods: company.shareholding.dates,
         items: [
           { label: "Promoters %", values: company.shareholding.promoter },
+          ...(company.shareholding.fii ? [{ label: "FIIs %", values: company.shareholding.fii }] : []),
+          ...(company.shareholding.dii ? [{ label: "DIIs %", values: company.shareholding.dii }] : []),
+          ...(company.shareholding.mf ? [{ label: "Mutual funds %", values: company.shareholding.mf }] : []),
           { label: "Public %", values: company.shareholding.public },
           { label: "Employee trusts %", values: company.shareholding.employee },
         ],
       });
     }
     const bom = String.fromCharCode(0xfeff);
-    const blob = new Blob([bom + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${symbol}_rscreener.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    void saveFile(`${symbol}_rscreener.csv`, bom + lines.join("\r\n"));
   };
 
   if (!symbol) return <p className="text-[var(--ink3)] p-6">No company selected. <Link className="text-[var(--accent-ink)] underline" href="/">Back to screener</Link></p>;
@@ -1859,12 +1893,15 @@ function CompanyView() {
             ) : "—"}
             {s.industry ? ` · ${String(s.industry)}` : ""}
           </p>
+          <IndexChips list={company.indices} />
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <IconButton name="download" label="Export to Excel (CSV)" onClick={exportCompanyCsv} />
+          <RefetchButton symbol={symbol} />
           <WatchStar symbol={symbol} />
         </div>
       </div>
+      <AboutCompany about={company.about} />
 
       {price !== null && (() => {
         // The day's move first, as a broker shows it; the distance from the
@@ -2063,7 +2100,12 @@ function CompanyView() {
           on every company, hardcoded, and 1,347 of the 3,198 with filed results
           file standalone - which excludes subsidiaries, so for a holding company
           the label named a different business from the one in the table. */}
-      {quarterly && <div id="quarters" className="scroll-mt-32"><StatementTable title="Quarterly results" stmt={quarterly} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} next={nextResults} kind="quarterly" symbol={symbol} /></div>}
+      {quarterly && (
+        <div id="quarters" className="scroll-mt-32 space-y-6">
+          <StatementTable title="Quarterly results" stmt={quarterly} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} next={nextResults} kind="quarterly" symbol={symbol} />
+          <SeasonsCard seasons={company.seasons} />
+        </div>
+      )}
 
       {pnl && (
         <div id="profit-loss" className="scroll-mt-32 space-y-6">
@@ -2101,6 +2143,8 @@ function CompanyView() {
 
       {company.ratios && <RatiosTable r={company.ratios} />}
 
+      <InstitutionsCard symbol={symbol} />
+
       {company.shareholding && company.shareholding.dates.length > 0 && (
         <div id="shareholding" className="scroll-mt-32"><StatementTable
           title="Shareholding pattern"
@@ -2111,6 +2155,9 @@ function CompanyView() {
             periods: company.shareholding.dates,
             items: [
               { label: "Promoters %", values: company.shareholding.promoter },
+              ...(company.shareholding.fii ? [{ label: "FIIs %", values: company.shareholding.fii }] : []),
+              ...(company.shareholding.dii ? [{ label: "DIIs %", values: company.shareholding.dii }] : []),
+              ...(company.shareholding.mf ? [{ label: "Mutual funds %", values: company.shareholding.mf }] : []),
               { label: "Public %", values: company.shareholding.public },
               { label: "Employee trusts %", values: company.shareholding.employee },
             ],
@@ -2169,6 +2216,68 @@ function CompanyView() {
         </InfoTip>
       </footer>
     </div>
+  );
+}
+
+/** "What it does" under the company's name, opened on tap (owner, 15-Oct-2026).
+ *  From the company's Wikipedia article, shown with its title, link and
+ *  licence as CC BY-SA asks; only an article whose infobox carries this
+ *  company's ticker is used. No article, no control - nothing dead to tap. */
+function AboutCompany({ about }: { about?: Company["about"] }) {
+  const [open, setOpen] = useState(false);
+  if (!about || (!about.text && !about.short)) return null;
+  return (
+    <div className="-mt-4">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
+        className="inline-flex items-center gap-1 text-[13px] text-[var(--accent-ink)]">
+        {about.short ? about.short.charAt(0).toUpperCase() + about.short.slice(1) : "What it does"}
+        <ChevronGlyph size={12} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="mt-2 rounded-xl border border-[var(--line)] bg-[var(--card)] p-3 text-[13px] leading-relaxed text-[var(--ink2)] space-y-2">
+          {(about.text ?? "").split("\n\n").filter(Boolean).map((para, i) => <p key={i}>{para}</p>)}
+          <p className="text-[11px] text-[var(--ink3)]">
+            From Wikipedia&apos;s article{" "}
+            <a href={about.url} target="_blank" rel="noopener noreferrer" className="underline">{about.title}</a>
+            , under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer" className="underline">CC BY-SA 4.0</a>.
+            Written by its editors, not checked by Rscreener.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const REPO = "https://github.com/RishilBhutada/rscreener";
+
+/** Data missing or stale on this page? Re-fetch all of it (owner, 15-Oct-2026).
+ *
+ *  The fetching runs on GitHub, and starting a run needs a token - which must
+ *  never ship inside the app, where anyone could lift it. So this opens a
+ *  pre-filled issue "Refetch SYMBOL"; submitting it starts refetch.yml, which
+ *  acts only on issues from the owner's account, re-reads everything for the
+ *  company, republishes its page, replies on the issue and closes it. */
+function RefetchButton({ symbol }: { symbol: string }) {
+  const [open, setOpen] = useState(false);
+  const body = `Requested from the Rscreener app: ${symbol}'s data looks missing or out of date.\n\n`
+    + `Submitting this re-fetches everything for ${symbol} and republishes its page. `
+    + "The run replies here and closes this when it is done.";
+  const url = `${REPO}/issues/new?title=${encodeURIComponent(`Refetch ${symbol}`)}&body=${encodeURIComponent(body)}`;
+  return (
+    <>
+      <IconButton name="refresh" label="Refetch this company's data" onClick={() => setOpen(true)} />
+      {open && (
+        <InfoDialog title={`Refetch ${symbol}'s data`} onClose={() => setOpen(false)}>
+          <p>If something on this page is missing or out of date, this fetches everything for {symbol} again - prices, quarterly results and statements, shareholding, filing dates, corporate actions, annual reports and announcements - and republishes its page.</p>
+          <p>It runs on GitHub. The button opens your request there, already filled in: tap <b>Submit new issue</b>. Only requests from your GitHub account are acted on. It takes about 10 to 20 minutes - longer while the nightly refresh is running - and your phone is told when it is done.</p>
+          <a href={url} target="_blank" rel="noopener noreferrer"
+            className="rs-press mt-1 inline-flex items-center justify-center w-full min-h-[44px] rounded-xl bg-[var(--accent-fill)] text-[var(--accent-fill-ink)] text-[14px] font-semibold">
+            Open the request on GitHub
+          </a>
+          <p className="text-[11px] text-[var(--ink3)]">Sources that refuse programs stay as they are: a company listed only on BSE has fewer sources to fetch from.</p>
+        </InfoDialog>
+      )}
+    </>
   );
 }
 

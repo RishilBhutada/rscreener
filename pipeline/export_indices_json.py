@@ -200,6 +200,14 @@ def main() -> None:
             "ret": ret, "cagr": cagr, "since": rows[0][0],
             "cagr_all": r2(((close / closes[0]) ** (1 / yrs_all) - 1) * 100, 1) if yrs_all >= 1 else None,
             "val": val,
+            # The first day NSE published a valuation for it: its launch. Its
+            # price before that is NSE's back-calculation, with no P/E - asked
+            # 11-Oct-2026 whether niftyindices holds any earlier (it does not:
+            # Nifty Capital Goods' P/E starts on its launch, 15-Jun-2026, its
+            # price in 2005) and whether one could be estimated from today's
+            # members (17-44% off NSE's own figure over the years it exists:
+            # today's members are not the 2010 index).
+            "val_since": next((r[0] for r in rows if r[7] or r[8] or r[9]), None),
             "members": members.get(name, []),
             "factsheet": fact,
             "etfs": sorted(set(etf_by.get(norm(name), []) + etf_by.get(norm(re.sub(r"\s+index$", "", name, flags=re.I)), []))),

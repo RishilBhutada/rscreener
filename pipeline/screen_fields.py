@@ -146,6 +146,28 @@ def promoter_changes(con: sqlite3.Connection) -> dict[str, dict]:
     return out
 
 
+def institutions(con: sqlite3.Connection) -> dict[str, dict]:
+    """FIIs', DIIs' and mutual funds' share of the company now, and how the
+    FII and DII shares moved since the quarter before, in percentage points
+    (fetch_shp_detail.py). Quarters on SEBI's older format carry no split and
+    are skipped rather than estimated."""
+    if not con.execute("SELECT 1 FROM sqlite_master WHERE name='shareholding_detail'").fetchone():
+        return {}
+    by: dict[str, list] = {}
+    for s, d, fii, dii, mf in con.execute(
+            "SELECT symbol, date, fii, dii, mf FROM shareholding_detail WHERE fii IS NOT NULL ORDER BY symbol, date"):
+        by.setdefault(s, []).append((d, fii, dii, mf))
+    out: dict[str, dict] = {}
+    for s, seq in by.items():
+        _, fii, dii, mf = seq[-1]
+        res = {"fii_holding": _r(fii, 2), "dii_holding": _r(dii, 2), "mf_holding": _r(mf, 2)}
+        if len(seq) >= 2 and seq[-2][1] is not None:
+            res["fii_chg_qtr"] = _r(fii - seq[-2][1], 2)
+            res["dii_chg_qtr"] = _r(dii - seq[-2][2], 2) if dii is not None and seq[-2][2] is not None else None
+        out[s] = res
+    return out
+
+
 _F_ITEMS = {
     "ni": ("Net Income", "Net Income Common Stockholders"),
     "rev": ("Total Revenue",),

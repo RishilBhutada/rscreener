@@ -20,6 +20,8 @@ from export_json import freshen_prices
 from fetch_corporate_actions import dividend_detail
 from trend_lib import build_trends, net_debt_series, ratio_bands
 import fund_units
+import seasons_lib
+from export_indices_json import group_of, sym_of
 
 
 def clean_nan(o):
@@ -744,6 +746,28 @@ def main() -> None:
     wc_ratios = working_capital_ratios(con)
     basis_by_symbol = reporting_basis(con)
     fscores = piotroski(con)
+    # Whether sales, profit and the share price follow the quarter of the
+    # year, and whether that beats luck (seasons_lib.py).
+    seasons_by_symbol = seasons_lib.seasons(con, only)
+    # The indices a company is in - passive money follows membership. Member
+    # lists come from each index's own page (fetch_indices.py); broad market
+    # first, then sectors, strategies and themes, and within each the most
+    # selective first (Nifty 50 before Nifty 100 before Nifty 500).
+    order = {"Broad market": 0, "Sectoral": 1, "Strategy": 2, "Thematic": 3}
+    indices_by_symbol: dict[str, list] = {}
+    if _table_exists(con, "idx_members"):
+        size = dict(con.execute("SELECT name, COUNT(*) FROM idx_members GROUP BY name").fetchall())
+        for name, s in con.execute("SELECT name, symbol FROM idx_members"):
+            indices_by_symbol.setdefault(s, []).append([sym_of(name), name, group_of(name)])
+        for lst in indices_by_symbol.values():
+            lst.sort(key=lambda x: (order.get(x[2], 9), size.get(x[1], 0), x[1].lower()))
+    # What the company does: its Wikipedia article's short description and
+    # opening paragraphs, verified by the ticker in its infobox (fetch_about.py).
+    about_by_symbol: dict[str, dict] = {}
+    if _table_exists(con, "company_about"):
+        for s, title, url, short, text in con.execute(
+                "SELECT symbol, title, url, short, text FROM company_about WHERE status='ok'"):
+            about_by_symbol[s] = {"title": title, "url": url, "short": short or None, "text": text or None}
     coverage_by_symbol = coverage_notes(con)
     # symbol -> (exchange, bse code). Older databases have no EXCHANGE column,
     # in which case every company is what it always was: NSE.
@@ -780,14 +804,25 @@ def main() -> None:
     shp_by_symbol: dict[str, dict] = {}
     if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='shareholding'").fetchone():
         shp = pd.read_sql("SELECT symbol, date, promoter, public, employee_trusts FROM shareholding ORDER BY date", con)
+        # Who holds the public part, from each quarter's XBRL (fetch_shp_detail.py).
+        detail: dict[tuple, tuple] = {}
+        if _table_exists(con, "shareholding_detail"):
+            for s_, d_, fii, dii, mf in con.execute("SELECT symbol, date, fii, dii, mf FROM shareholding_detail"):
+                detail[(s_, str(d_)[:10])] = (fii, dii, mf)
         for sym_key, grp in shp.groupby("symbol"):
             tail = grp.tail(12)
-            shp_by_symbol[sym_key] = {
-                "dates": tail["date"].tolist(),
+            dates = tail["date"].tolist()
+            entry = {
+                "dates": dates,
                 "promoter": [None if pd.isna(v) else float(v) for v in tail["promoter"]],
                 "public": [None if pd.isna(v) else float(v) for v in tail["public"]],
                 "employee": [None if pd.isna(v) else float(v) for v in tail["employee_trusts"]],
             }
+            for i, key in enumerate(("fii", "dii", "mf")):
+                vals = [detail.get((sym_key, str(d)[:10]), (None, None, None))[i] for d in dates]
+                if any(v is not None for v in vals):
+                    entry[key] = vals
+            shp_by_symbol[sym_key] = entry
     anndocs_by_symbol: dict[str, dict] = {}
     if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='announcement_docs'").fetchone():
         ad = pd.read_sql("SELECT symbol, doc_type, date, title, url FROM announcement_docs ORDER BY date DESC", con)
@@ -848,6 +883,9 @@ def main() -> None:
             "ratios": wc_ratios.get(sym),
             "basis": basis_by_symbol.get(sym),
             "fscore": fscores.get(sym),
+            "seasons": seasons_by_symbol.get(sym),
+            "indices": indices_by_symbol.get(sym),
+            "about": about_by_symbol.get(sym),
             "no_pe_reason": None if (bands.get(sym, {}) or {}).get("pe") else no_pe.get(sym),
             # Which exchange this company is listed on, because it decides what
             # can exist on the page. The as-filed quarterly table, the P/E band

@@ -79,7 +79,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install pandas requests yfinance
+      - run: pip install pandas requests yfinance google-auth beautifulsoup4 lxml
       - name: Download the data DB from the data-db release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -221,6 +221,17 @@ jobs:
           if [ -s data/just_reported_results.txt ]; then
             bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols @data/just_reported_results.txt --only-missing --limit 400 --sleep 0.2
           fi
+      - name: Tell the owner's phone about his watchlist's results (late ones)
+        # The results watcher stops at midnight; filings that land after it
+        # are fetched just above. Before the database save, so what is sent
+        # is remembered (alert_log) and the day's watcher does not repeat it.
+        if: github.event_name == 'schedule'
+        continue-on-error: true
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          ALERT_UID: ${{ secrets.ALERT_UID }}
+        run: python alerts/results_alerts.py
       - name: Refresh shareholding patterns (whole universe, rotating)
         if: steps.plan.outputs.earnings == '1'
         # Was @data/top500.txt, so the other 1,857 companies were unreachable: 432
@@ -229,6 +240,16 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "18"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_shareholding.py --symbols @data/nse_symbols.txt --max-age-hours 336 --limit 700 --sleep 0.3
+      - name: Who holds the public part - FIIs, DIIs, mutual funds (rotating)
+        if: steps.plan.outputs.earnings == '1'
+        # Each quarter's shareholding XBRL (pipeline/fetch_shp_detail.py): the
+        # newest five quarters a company, two files a company a night, newest
+        # missing first - files run to 1.25 MB for a large company, so the
+        # history fills in over a few weeks rather than in one night's
+        # downloads. Weekly per company after that, for the new quarter.
+        env:
+          RSCREENER_STEP_MINUTES: "15"
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_shp_detail.py --symbols @data/nse_symbols.txt --limit 350 --quarters 5 --per-company 2 --max-age-hours 168 --sleep 0.4
       - name: Refresh price-chart history (whole universe, rotating)
         if: steps.plan.outputs.prices == '1'
         # The WHOLE universe, every night - deliberately not a rotation.
@@ -308,6 +329,17 @@ jobs:
           RSCREENER_STEP_MINUTES: "5"
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_gold.py
+      - name: Refresh the US economy's history from FRED (inflation, jobs, rates, growth, dollar, oil)
+        # On every run, like gold's calendar above: about twenty-five small
+        # requests, one per series, each answering with the series' whole
+        # history - well inside FRED's 120 a minute. The whole history every
+        # time, not just the newest month, because the agencies revise past
+        # months and FRED carries the revisions. A series FRED refuses keeps
+        # its stored rows. Without the FRED_API_KEY secret it says so and skips.
+        env:
+          RSCREENER_STEP_MINUTES: "6"
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_macro.py
       - name: Refresh the mandi (spot) price beside each NCDEX contract
         # Agmarknet, the Government of India's mandi-price service: about a
         # dozen open requests, every run. Its CAPTCHA-guarded reports are not
@@ -315,6 +347,29 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "3"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_spot.py
+      - name: News, broker calls, deals and SAST (stock-name index refreshed)
+        # data/news.db is the News page's own small database (fetch_news.py);
+        # the watcher keeps it current through the day. Here the stock-name
+        # index it tags headlines with is rebuilt from tonight's universe.
+        if: steps.plan.outputs.earnings == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download data-db --pattern news.db.gz --dir data --clobber && gunzip -f data/news.db.gz \
+            || echo "no news database stored yet - starting one"
+          DD=7; [ -f data/news.db ] || DD=365
+          bash pipeline/guarded_fetch.sh python pipeline/fetch_news.py --names-from data/rscreener.db --deal-days $DD
+          if [ -f data/news.db ]; then
+            gzip -c data/news.db > news.db.gz && gh release upload data-db news.db.gz --clobber || echo "::warning::news.db not stored"
+          fi
+      - name: Find what each company does (Wikipedia articles, rotating)
+        if: steps.plan.outputs.earnings == '1'
+        # The article's short description and opening paragraphs, accepted only
+        # when its infobox lists the company's own ticker. Article pages only:
+        # Wikipedia's APIs are disallowed to programs by its robots.txt. About
+        # 500 companies a night, one page a second, verified ones re-read every
+        # 90 days and missing ones every 30 (fetch_about.py).
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_about.py --all --limit 500 --sleep 1.0 --max-minutes 25
       - name: Refresh concall/rating documents (whole universe, rotating)
         if: steps.plan.outputs.earnings == '1'
         # 480 of 2,357 companies covered, and capped at the top 500 it would have
@@ -479,6 +534,19 @@ jobs:
         run: python pipeline/export_commodities_json.py
       - name: Write the gold page (events rated, headlines, prices)
         run: python pipeline/export_gold_json.py
+      - name: Write the News page and each stock's Institutions file
+        # From data/news.db; a publish-only run fetches nothing, so it reads the
+        # stored copy. news.json is written even with no database (empty).
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -f data/news.db ] || { gh release download data-db --pattern news.db.gz --dir data --clobber && gunzip -f data/news.db.gz; } || true
+          python pipeline/export_news_json.py
+      - name: Write the US economy history
+        # web/public/macro.json - every stored FRED series, its whole history,
+        # for the gold page's charts. Generated, never committed. Written even
+        # before FRED has been read once, so the page can say "not loaded yet".
+        run: python pipeline/export_macro_json.py
       - name: Write the indices page and one file per index
         # web/public/indices.json, idx/<SYM>.json, their valuation and chart
         # files, and a row each in the search index.
@@ -681,6 +749,33 @@ jobs:
         run: |
           gh workflow run results-watch.yml -R "${{ github.repository }}" \
             || echo "could not start the watcher - its timed starts will"
+      - name: Re-queue refetch requests still open
+        # A refetch request (an issue "Refetch SYMBOL" from the app's button)
+        # is closed when its run finishes. One still open lost its run - GitHub
+        # drops a waiting run when a newer one queues - so it is started again.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue list -R "${{ github.repository }}" --state open --author "${{ github.repository_owner }}" \
+            --search "Refetch in:title" --json number,title --jq '.[] | "\(.number) \(.title)"' |
+          while read -r num rest; do
+            sym=$(echo "$rest" | sed -E 's/^[Rr]efetch[[:space:]]+//' | tr -cd 'A-Za-z0-9&_-' | tr '[:lower:]' '[:upper:]')
+            [ -n "$sym" ] || continue
+            echo "re-queueing #$num ($sym)"
+            gh workflow run refetch.yml -R "${{ github.repository }}" -f symbol="$sym" -f issue="$num" || true
+          done
+      - name: Start the day's news watch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run news-watch.yml -R "${{ github.repository }}" \
+            || echo "could not start the news watcher - its timed starts will"
+      - name: Start this evening's US release alerts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run us-alerts.yml -R "${{ github.repository }}" \
+            || echo "could not start the US release watcher - its timed start will"
 
   # A failed refresh is SILENT otherwise: the site keeps serving yesterday's data
   # and looks completely normal. That is what happened on 1-Aug-2026 - the depth

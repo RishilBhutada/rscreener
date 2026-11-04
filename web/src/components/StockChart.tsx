@@ -3,6 +3,7 @@
 import { CheckGlyph, ChevronGlyph } from "@/components/Glyphs";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import InfoTip from "@/components/InfoTip";
+import { useBackClose } from "@/lib/backclose";
 import { loadIndex } from "@/lib/index-data";
 import Link from "next/link";
 
@@ -326,8 +327,10 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const [view, setView] = useState<View>("price");
   const [range, setRange] = useState("5Yr");
   const [peWin, setPeWin] = useState("ttm");
-  const [showQ, setShowQ] = useState(false);
-  const [showDates, setShowDates] = useState(true);   // result lines, separately switchable
+  // The line on each day a quarter's results were declared. It used to sit
+  // behind a "Quarterly results" button that only opened a second "Result
+  // dates" button; the owner asked for the dates themselves (11-Oct-2026).
+  const [showDates, setShowDates] = useState(false);
   // Growth printed above each earnings bar. Year-on-year by default because a
   // December quarter compared with the September before it mostly measures the
   // calendar, not the business.
@@ -363,6 +366,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   }, [cmpSym]);
   const [on, setOn] = useState<Record<string, boolean>>({});
   const [moreOpen, setMoreOpen] = useState(false);
+  useBackClose(moreOpen, () => setMoreOpen(false));
   const [hover, setHover] = useState<{ t: number; px: number; py: number } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
@@ -875,29 +879,16 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       {(quarters?.length ?? 0) > 0 && (
         <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
           <button
-            onClick={() => setShowQ(!showQ)}
-            title="Mark the day each result was declared, and offer the single-quarter earnings views"
+            onClick={() => setShowDates(!showDates)}
+            title="Mark the day each quarter's results were declared"
             className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium border ${
-              showQ
+              showDates
                 ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
                 : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
             }`}
           >
-            {showQ && <CheckGlyph className="mr-1" />}Quarterly results
+            {showDates && <CheckGlyph className="mr-1" />}Result dates
           </button>
-          {showQ && (
-            <button
-              onClick={() => setShowDates(!showDates)}
-              title="Show or hide the dashed line marking the day each quarter's results were declared"
-              className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium border ${
-                showDates
-                  ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
-                  : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
-              }`}
-            >
-              {showDates && <CheckGlyph className="mr-1" />}Result dates
-            </button>
-          )}
           {view === "pe" && (
             <div className="flex items-center gap-1 flex-wrap">
               <button
@@ -940,7 +931,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
               )}
             </div>
           )}
-          {showQ && view === "pe" && peBand?.alt && (
+          {view === "pe" && peBand?.alt && (
             <div className="flex items-center gap-1 flex-wrap">
               <span className="text-[var(--ink3)] mr-0.5">Earnings</span>
               {PE_WINDOWS.filter(([k]) => k === "ttm" || peBand.alt?.[k]).map(([k, label, tip]) => (
@@ -969,14 +960,12 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
               ))}
             </div>
           )}
-          {showQ && (
+          {showDates && (
             <div className="flex items-center gap-2.5 flex-wrap text-[var(--ink3)]">
-              {showDates && (
-                <span className="inline-flex items-center gap-1">
-                  <i className="inline-block w-4 border-t-2 border-dashed border-[var(--ink3)]" />
-                  declared
-                </span>
-              )}
+              <span className="inline-flex items-center gap-1">
+                <i className="inline-block w-4 border-t-2 border-dashed border-[var(--ink3)]" />
+                declared
+              </span>
             </div>
           )}
         </div>
@@ -1063,7 +1052,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
               </g>
             );
           })}
-          {showQ && showDates && qShown.map((q, i) => (
+          {showDates && qShown.map((q, i) => (
             q.announced && toT(q.announced) >= t0 && toT(q.announced) <= t1 ? (
               <g key={`ql${i}`}>
                 <line x1={x(toT(q.announced))} x2={x(toT(q.announced))} y1={MT} y2={MT + plotH}

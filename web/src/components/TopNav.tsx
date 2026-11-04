@@ -13,6 +13,7 @@ import {
 } from "@/lib/reload";
 import { applyOrder, loadOrder } from "@/lib/order";
 import { previousPage, recordNavigation } from "@/lib/navdepth";
+import { useBackClose } from "@/lib/backclose";
 import { buildIndex, search, didYouMean, type SearchIndex, type SearchRow } from "@/lib/search";
 import AccountButton from "@/components/AccountButton";
 
@@ -171,6 +172,7 @@ function RefreshButton() {
   // running, when it was made, and whether anything newer has been published.
   // A tap asks the app to move; a hold asks it to explain itself.
   const [details, setDetails] = useState(false);
+  useBackClose(details, () => setDetails(false));
   const [live, setLive] = useState<Version | null>(null);
   const [liveError, setLiveError] = useState(false);
   const [pending, setPending] = useState<Pending>(null);
@@ -435,12 +437,13 @@ function BackButton() {
   );
 }
 
-export default function TopNav({ active }: { active?: "home" | "screens" | "sectors" | "calendar" | "portfolio" | "watchlists" | "others" | "etfs" | "commodities" | "indices" | "gold" | "status" | "settings" }) {
+export default function TopNav({ active }: { active?: "home" | "screens" | "sectors" | "calendar" | "portfolio" | "watchlists" | "others" | "etfs" | "commodities" | "indices" | "gold" | "news" | "status" | "settings" }) {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<Lite[]>([]);
   const [hi, setHi] = useState(0);
   const [moreOpen, setMoreOpen] = useState(false);
+  useBackClose(moreOpen, () => setMoreOpen(false));
   // Read on mount and refreshed when Settings changes it, so the bar reorders
   // under the panel rather than after the next page load.
   const [navOrder, setNavOrder] = useState<string[]>([]);
@@ -509,6 +512,8 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
             header is on every page - without this boundary the whole site would
             have had to render in the browser to draw an arrow. */}
         <Suspense fallback={null}><BackButton /></Suspense>
+        {/* The account, as a picture, left of the name (owner, 12-Oct-2026). */}
+        <AccountButton />
         <Link href="/" className="flex items-baseline gap-0.5 shrink-0">
           <span className="text-lg sm:text-xl font-bold tracking-tight text-[var(--ink)]">Rscreener</span>
           <span className="text-lg sm:text-xl font-bold text-[var(--accent)] hidden sm:inline">▮▮▮</span>
@@ -608,7 +613,6 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
             Two taps behind a panel is too far for the one control that answers
             "am I looking at the current version". */}
         <div className="shrink-0 ml-auto flex items-center gap-2">
-          <AccountButton />
           <RefreshButton />
           <Settings />
         </div>

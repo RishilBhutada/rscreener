@@ -109,6 +109,10 @@ def connect() -> sqlite3.Connection:
         CREATE TABLE IF NOT EXISTS gold_news (
             url TEXT PRIMARY KEY, seen_utc TEXT, title TEXT, domain TEXT);
         CREATE TABLE IF NOT EXISTS commodity_world (ticker TEXT, date TEXT, close REAL, PRIMARY KEY (ticker, date));
+        CREATE TABLE IF NOT EXISTS ust_curve (date TEXT PRIMARY KEY, y2 REAL);
+        CREATE TABLE IF NOT EXISTS inflation_nowcast (
+            target TEXT, measure TEXT, day TEXT, value REAL, actual INTEGER,
+            PRIMARY KEY (target, measure, day, actual));
     """)
     return con
 
@@ -171,7 +175,7 @@ def treasury(con, today: str) -> None:
             continue
         yld, cover = x.get("high_yield") or "", x.get("bid_to_cover_ratio") or ""
         actual = ""
-        if re.fullmatch(r"[\d.]+", yld) and re.fullmatch(r"[\d.]+", cover):
+        if re.fullmatch(r"\d+(?:\.\d+)?", yld) and re.fullmatch(r"\d+(?:\.\d+)?", cover):
             actual = f"{float(yld):.3f}% yield, {float(cover):.2f}× cover"
         upsert_event(con, f"ust|{term}|{day}", stamp(when), "USD", f"US {term}-year {kind} auction", "Medium",
                      "", "", actual, "US Treasury (Fiscal Data)", today, family="us_yields")
@@ -480,6 +484,15 @@ def fred_dates(con, today: str) -> None:
         print(f"FRED: {name} - {n} release dates")
 
 
+def readings(observations: list[dict]) -> list[tuple[str, float]]:
+    """(date, value) for the observations that have a number. FRED writes a
+    missing value as a lone "." - which the old check, -?[\\d.]+, took for a
+    number: float(".") then stopped the whole actual-figures step on the
+    first night the key existed (11-Oct-2026), dates in, no figures."""
+    return [(o["date"], float(o["value"])) for o in observations
+            if re.fullmatch(r"-?\d+(?:\.\d+)?", (o.get("value") or "").strip())]
+
+
 def figure(new: list[tuple[str, float]], how: str) -> str | None:
     """A FRED series, newest first, written the way the calendar writes it."""
     v = new[0][1]
@@ -531,8 +544,8 @@ def fred_actuals(con) -> None:
         except RuntimeError as e:
             print(e)
             continue
-        new = [(o["date"], float(o["value"])) for o in obs if re.fullmatch(r"-?[\d.]+", o.get("value") or "")]
-        old = [(o["date"], float(o["value"])) for o in before if re.fullmatch(r"-?[\d.]+", o.get("value") or "")]
+        new = readings(obs)
+        old = readings(before)
         # Nothing new that day: the release slipped, or FRED had not caught up.
         if not new or (old and old[0][0] == new[0][0] and abs(old[0][1] - new[0][1]) < 1e-9):
             continue
@@ -553,7 +566,7 @@ def fred_actuals(con) -> None:
         except RuntimeError as e:
             print(e)
             continue
-        latest = [(o["date"], float(o["value"])) for o in obs if re.fullmatch(r"-?[\d.]+", o.get("value") or "")]
+        latest = readings(obs)
         prev = figure(latest, how) if latest else None
         if prev:
             con.execute("UPDATE gold_events SET previous=? WHERE key=?", (prev + suffix, key))
@@ -569,7 +582,10 @@ def save_headline(con, url: str, seen: datetime, title: str, domain: str) -> boo
     now = datetime.now(timezone.utc)
     if seen < now - timedelta(days=7):
         return False
-    seen = min(seen, now)  # a feed that mislabels its time zone is not news from the future
+    # A feed that mislabels its time zone is not news from the future; and the
+    # stored time is UTC - an Indian feed's "+0530" printed with a Z put its
+    # headlines 5.5 hours ahead (found 15-Oct-2026).
+    seen = min(seen, now).astimezone(timezone.utc)
     con.execute("INSERT OR IGNORE INTO gold_news VALUES (?,?,?,?)",
                 (url, seen.strftime("%Y-%m-%dT%H:%M:%SZ"), title, domain.removeprefix("www.")))
     return True
@@ -671,6 +687,69 @@ def comex(con) -> None:
     print(f"COMEX gold: {len(rows)} daily closes")
 
 
+# The US Treasury's daily par yield curve (about 3:30pm New York), one CSV a
+# year. Only the 2-year yield is kept: its move on a release day is the
+# market's own verdict on whether the data surprised (owner, 13-Oct-2026).
+UST_CURVE = ("https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/"
+             "{y}/all?type=daily_treasury_yield_curve&field_tdr_date_value={y}&page&_format=csv")
+
+
+def treasury_curve(con) -> None:
+    have = con.execute("SELECT COUNT(*), MIN(date) FROM ust_curve").fetchone()
+    this = date.today().year
+    years = range(2020, this + 1) if not have[0] or have[1] > "2020-12-31" else sorted({this, (date.today() - timedelta(days=10)).year})
+    n = 0
+    for y in years:
+        text = get(UST_CURVE.format(y=y))
+        lines = text.splitlines()
+        head = [h.strip('"') for h in lines[0].split(",")]
+        if "2 Yr" not in head:
+            print(f"Treasury curve {y}: no 2-year column")
+            continue
+        i = head.index("2 Yr")
+        for line in lines[1:]:
+            cells = [c.strip('"') for c in line.split(",")]
+            if len(cells) <= i or not cells[i]:
+                continue
+            m, d, yy = cells[0].split("/")
+            con.execute("INSERT OR REPLACE INTO ust_curve VALUES (?,?)", (f"{yy}-{m}-{d}", float(cells[i])))
+            n += 1
+    con.commit()
+    print(f"Treasury curve: {n} daily 2-year yields ({years[0]}-{years[-1]})")
+
+
+# The Cleveland Fed's inflation nowcast: its model's daily estimate of this
+# month's CPI and PCE (month on month), and the actual figure once released.
+# A model, not the market's consensus - shown beside CPI and PCE as such.
+NOWCAST = "https://www.clevelandfed.org/-/media/files/webcharts/inflationnowcasting/nowcast_month.json?sc_lang=en"
+NOWCAST_MEASURES = ("CPI Inflation", "Core CPI Inflation", "PCE Inflation", "Core PCE Inflation")
+
+
+def cleveland_nowcast(con) -> None:
+    months = json.loads(get(NOWCAST).lstrip("\ufeff"))
+    keep = months[-24:]   # two years: the calendar shows one back and one ahead
+    n = 0
+    for m in keep:
+        ty, tm = map(int, m["chart"]["subcaption"].split("-"))
+        target = f"{ty}-{tm:02d}"
+        days = []
+        for c in m["categories"][0]["category"]:
+            if c.get("vline"):
+                continue
+            mm, dd = map(int, c["label"].split("/"))
+            days.append(f"{ty + (1 if mm < tm else 0)}-{mm:02d}-{dd:02d}")
+        series = {s["seriesname"]: [v.get("value") for v in s["data"] if not v.get("vline")] for s in m["dataset"]}
+        for meas in NOWCAST_MEASURES:
+            for actual, name in ((0, meas), (1, "Actual " + meas)):
+                for day, v in zip(days, series.get(name, [])):
+                    if v:
+                        con.execute("INSERT OR REPLACE INTO inflation_nowcast VALUES (?,?,?,?,?)",
+                                    (target, meas, day, round(float(v), 4), actual))
+                        n += 1
+    con.commit()
+    print(f"Cleveland Fed nowcast: {n} readings for {len(keep)} months")
+
+
 def main() -> None:
     con = connect()
     today = date.today().isoformat()
@@ -688,7 +767,8 @@ def main() -> None:
     else:
         print("FRED: no FRED_API_KEY secret - CPI, jobs, PPI, JOLTS and claims are not on the calendar, "
               "and no actual figures are filled in")
-    for step in steps + [lambda: headlines(con), lambda: comex(con)]:
+    for step in steps + [lambda: headlines(con), lambda: comex(con), lambda: treasury_curve(con),
+                         lambda: cleveland_nowcast(con)]:
         try:
             step()
         except Exception as e:  # noqa: BLE001 - each source fails on its own

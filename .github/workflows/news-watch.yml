@@ -1,0 +1,38 @@
+name: Watch the news
+run-name: Watch the news
+
+# Keeps the News page current from 07:00 to 23:59 IST: market headlines,
+# broker calls read from them, NSE bulk/block deals and SAST filings, every
+# twenty minutes, published at most every forty (pipeline/news_watch.py).
+#
+# Started each morning by the nightly run; the timed starts are backups only,
+# because GitHub drops most timed runs on this repository. One at a time.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "45 1,7,13 * * *"   # 07:15, 13:15 and 19:15 IST
+
+permissions:
+  actions: write     # starting "Publish news" and the next watcher
+  contents: write    # news.db.gz on the data-db release
+
+concurrency:
+  group: news-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: pipeline
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - run: python pipeline/news_watch.py
+        env:
+          GH_TOKEN: ${{ github.token }}

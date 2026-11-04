@@ -57,6 +57,11 @@ export const FIELD_CATALOG: FieldDef[] = [
   { key: "inventory_days", label: "Inventory days", group: "Balance sheet", unit: "days", desc: "How long stock sits before selling" },
 
   { key: "promoter_holding", label: "Promoter holding", group: "Ownership", unit: "%", desc: "Founders'/promoters' stake — skin in the game", short: "Promoter" },
+  { key: "fii_holding", label: "FII holding", group: "Ownership", unit: "%", desc: "Foreign institutions' share of the company (foreign portfolio investors and the like), from the latest shareholding pattern. Blank for quarters filed on SEBI's older format, which has no FII/DII split", short: "FII" },
+  { key: "dii_holding", label: "DII holding", group: "Ownership", unit: "%", desc: "Domestic institutions' share - mutual funds, insurers, banks, pension funds - from the latest shareholding pattern", short: "DII" },
+  { key: "mf_holding", label: "Mutual fund holding", group: "Ownership", unit: "%", desc: "Mutual funds' share of the company, part of the DII figure", short: "MF" },
+  { key: "fii_chg_qtr", label: "FII change (quarter)", group: "Ownership", unit: "pts", desc: "Change in FIIs' share since the previous shareholding filing, in percentage points", short: "FII Δq" },
+  { key: "dii_chg_qtr", label: "DII change (quarter)", group: "Ownership", unit: "pts", desc: "Change in DIIs' share since the previous shareholding filing, in percentage points", short: "DII Δq" },
   { key: "promoter_chg_qtr", label: "Promoter change (quarter)", group: "Ownership", unit: "pts", desc: "Change in the promoters' stake since the previous shareholding filing, in percentage points", short: "Promoter Δq" },
   { key: "promoter_chg_1y", label: "Promoter change (1 year)", group: "Ownership", unit: "pts", desc: "Change in the promoters' stake against the filing a year earlier, in percentage points", short: "Promoter Δ1y" },
 
@@ -70,6 +75,10 @@ export const FIELD_CATALOG: FieldDef[] = [
   { key: "dma50_200", label: "50-day vs 200-day average", group: "Technicals", unit: "%", desc: "The 50-day average against the 200-day one. Above 0 means the 50 is above the 200 (a golden-cross state); below 0, under it", short: "50 vs 200" },
   { key: "rsi14", label: "RSI (14)", group: "Technicals", unit: "", desc: "Relative strength index over 14 sessions, 0–100. Under 30 is usually called oversold, over 70 overbought", short: "RSI" },
   { key: "vol_surge", label: "Volume vs 20-day average", group: "Technicals", unit: "×", desc: "The last session's traded volume as a multiple of the average of the 20 before it", short: "Volume" },
+
+  { key: "season_peak", label: "Sales peak quarter", group: "Seasons", unit: "", desc: "The quarter of the financial year that usually brings the most sales: 1 = Apr–Jun, 2 = Jul–Sep, 3 = Oct–Dec, 4 = Jan–Mar. Only for companies whose pattern beats luck (shuffle test, and it repeats in later years); blank otherwise", short: "Peak qtr" },
+  { key: "season_low", label: "Sales weakest quarter", group: "Seasons", unit: "", desc: "The quarter that usually brings the least sales, numbered the same way. Blank unless the pattern beats luck", short: "Weak qtr" },
+  { key: "season_swing", label: "Seasonal swing", group: "Seasons", unit: "%", desc: "How much bigger sales usually are in the peak quarter than in the weakest, each against an average quarter of the same year. Blank unless the pattern beats luck", short: "Swing" },
 
   { key: "f_score", label: "Piotroski F-score", group: "Scores", unit: "/9", desc: "Nine pass/fail tests on the two latest annual reports: profit, cash flow, rising return on assets, cash above profit, no rise in debt, better current ratio, no new shares, rising gross margin, rising asset turnover. 8–9 is strong, 0–2 weak. Banks have no score", short: "F-score" },
 
