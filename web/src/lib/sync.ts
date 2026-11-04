@@ -12,6 +12,10 @@
  */
 import { getFirebase } from "./firebase";
 import { WatchState, mergeStates } from "./watchlists";
+import { mergeProfile, type Profile } from "./merge-profile";
+import { markSaved } from "./saved-at";
+
+export { markSaved };
 
 /** localStorage keys that represent the person, not the machine. */
 export const SYNCED_KEYS = [
@@ -19,7 +23,10 @@ export const SYNCED_KEYS = [
   "rscreener_watchlist",
   "rscreener_notes",
   "rscreener_portfolio",
+  "rscreener_portfolio_at",
   "rscreener_screens",
+  "rscreener_screens_at",
+  "rscreener_watchlists_at",
   "rscreener_ratios",
   "rs_theme",
   "rs_accent",
@@ -38,18 +45,6 @@ export const SYNCED_KEYS = [
   "rs_chart_presets_at",
 ] as const;
 
-/** Lists edited as a whole - entries removed, renamed, updated - where a union
- *  of two devices' copies would bring a removed entry back. A deleted price
- *  alert came back on the next sync and the phone kept being told about it.
- *  Each is saved with `<key>_at` (markSaved) and the copy saved last wins. */
-const WHOLE = new Set<string>(["rs_chart_presets", "rs_price_alerts", "rs_grid_pins", "rs_peer_cols"]);
-
-/** Record when a WHOLE list was saved on this device. */
-export function markSaved(key: string): void {
-  try { localStorage.setItem(`${key}_at`, String(Date.now())); } catch { /* private mode */ }
-}
-
-type Profile = Record<string, unknown>;
 
 function readLocal(): Profile {
   const out: Profile = {};
@@ -86,52 +81,19 @@ export function backupText(): string {
 export function restoreText(text: string): number {
   const doc = JSON.parse(text.trim());
   if (!doc || doc.rscreener_backup !== 1 || !doc.data || typeof doc.data !== "object") throw new Error("not a backup");
-  writeLocal(merge(readLocal(), doc.data as Profile));
+  writeLocal(merge(readLocal(), doc.data as Profile, true));   // a backup adds, never replaces
   return Object.keys(doc.data).filter((k) => (SYNCED_KEYS as readonly string[]).includes(k)).length;
 }
 
-/** Union for lists, key-by-key for objects, remote for plain values. */
-function merge(local: Profile, remote: Profile): Profile {
-  const out: Profile = { ...local };
-  for (const k of SYNCED_KEYS) {
-    const l = local[k], r = remote[k];
-    if (r === undefined) continue;
-    if (l === undefined) { out[k] = r; continue; }
-    // Named watchlists are an object of lists, and the generic object branch
-    // below lets this device's copy win outright - which would delete a list
-    // created on the phone the first time the laptop signed in. Lists are
-    // matched by id and their symbols unioned instead.
-    if (k === "rscreener_watchlists") {
-      out[k] = mergeStates(l as WatchState, r as WatchState);
-      continue;
-    }
-    // Chart presets, price alerts, pinned ratios and peer columns are edited
-    // as a whole, so a union would bring removed entries back. The list saved
-    // last, on whichever device, wins outright.
-    if (WHOLE.has(k)) {
-      const la = Number(local[`${k}_at`] ?? 0), ra = Number(remote[`${k}_at`] ?? 0);
-      out[k] = ra > la ? r : l;
-      continue;
-    }
-    if (k.endsWith("_at") && WHOLE.has(k.slice(0, -3))) {
-      out[k] = Math.max(Number(l ?? 0), Number(r ?? 0));
-      continue;
-    }
-    if (Array.isArray(l) && Array.isArray(r)) {
-      const seen = new Set<string>();
-      out[k] = [...l, ...r].filter((x) => {
-        const id = typeof x === "string" ? x : JSON.stringify(x);
-        if (seen.has(id)) return false;
-        seen.add(id);
-        return true;
-      });
-    } else if (l && r && typeof l === "object" && typeof r === "object") {
-      out[k] = { ...(r as object), ...(l as object) };   // this device wins a clash
-    } else {
-      out[k] = r;
-    }
-  }
-  return out;
+/** This device has merged with this account at least once. Not synced: it
+ *  is a fact about this device. Until then lists are joined, not replaced. */
+const mergedKey = (uid: string) => `rs_sync_merged_${uid}`;
+
+function merge(local: Profile, remote: Profile, first: boolean): Profile {
+  return mergeProfile(local, remote, SYNCED_KEYS, {
+    first,
+    mergeWatch: (a, b) => mergeStates(a as WatchState, b as WatchState),
+  });
 }
 
 /** Pull the stored profile, merge this device into it, push the result back. */
@@ -143,9 +105,12 @@ export async function syncNow(uid: string): Promise<{ ok: boolean; error?: strin
     const ref = doc(fb.db, "profiles", uid);
     const snap = await getDoc(ref);
     const remote = (snap.exists() ? snap.data() : {}) as Profile;
-    const merged = merge(readLocal(), remote);
+    let first = true;
+    try { first = localStorage.getItem(mergedKey(uid)) !== "1"; } catch { /* private mode: join, the safe way */ }
+    const merged = merge(readLocal(), remote, first);
     writeLocal(merged);
     await setDoc(ref, { ...merged, updatedAt: Date.now() }, { merge: true });
+    try { localStorage.setItem(mergedKey(uid), "1"); } catch { /* private mode */ }
     return { ok: true };
   } catch (e) {
     return { ok: false, error: String((e as Error).message ?? e) };

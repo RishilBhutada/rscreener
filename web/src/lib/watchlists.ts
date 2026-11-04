@@ -11,6 +11,8 @@
  *  still reading it (and any device on an older build) keeps working.
  */
 
+import { markSaved } from "./saved-at";
+
 const KEY = "rscreener_watchlists";
 const LEGACY_KEY = "rscreener_watchlist";
 
@@ -55,7 +57,9 @@ export function loadLists(): WatchState {
   if (!s || !Array.isArray(s.lists) || s.lists.length === 0) {
     const legacy = readRaw<string[]>(LEGACY_KEY, []);
     const fresh = blank(Array.isArray(legacy) ? legacy : []);
-    save(fresh);
+    // Not stamped: an empty list made on first open must never count as the
+    // newest copy and replace the account's lists at the next sync.
+    save(fresh, false);
     return fresh;
   }
   // Defend against a half-written or merged-in state: a missing activeId, a
@@ -73,9 +77,10 @@ export function loadLists(): WatchState {
   return { lists, activeId };
 }
 
-export function save(s: WatchState): WatchState {
+export function save(s: WatchState, mark = true): WatchState {
   try {
     localStorage.setItem(KEY, JSON.stringify(s));
+    if (mark) markSaved(KEY);   // the copy saved last wins a sync (lib/merge-profile.ts)
     // Mirror the active list to the old key. Everything written before named
     // lists existed reads that key, including older builds still open on
     // another device, and a silent divergence between the two would be far
