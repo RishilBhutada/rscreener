@@ -8,7 +8,13 @@ announcement of an hour it skipped. Each run looks back LOOKBACK_MIN minutes
 (default ten hours, inside ntfy's twelve-hour memory), and each push carries a
 tag rs-ann-<symbol>-<id> that is read back before sending, so overlapping
 runs never repeat one. If the topic cannot be read, nothing is sent that run.
-A crash sends a high-priority "checker FAILED" push, at most once a day.
+A crash sends a high-priority "checker FAILED" push, at most once every twelve
+hours (as long as ntfy remembers the last one).
+
+A quarterly business update is left to alerts/update_alerts.py, which says
+what it is - but that runs only inside the news watcher. When its tag
+(rs-upd-<symbol>-<quarter end>) is not on the topic, this sends the same push
+itself, with that tag, so neither script repeats it.
 """
 import hashlib
 import os
@@ -20,8 +26,9 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pipeline"))
+import business_updates  # noqa: E402
 import nse_session  # noqa: E402
-from business_updates import is_update  # noqa: E402
+import update_alerts  # noqa: E402
 from ntfy_lib import WINDOW_H, post, sent_tags  # noqa: E402
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -62,7 +69,8 @@ def main() -> None:
     body = r.json()
     announcements = body if isinstance(body, list) else body.get("data", [])
 
-    sent = sent_tags("rs-ann-")
+    # Both prefixes: this script's own tags and update_alerts.py's.
+    sent = sent_tags("rs-")
     if sent is None:
         print("announcements: ntfy topic unreadable - nothing sent, next run")
         return
@@ -77,10 +85,22 @@ def main() -> None:
             ts = datetime.strptime(raw_ts, "%d-%b-%Y %H:%M:%S").replace(tzinfo=IST)
         except ValueError:
             continue
-        if ts < cutoff or is_update(a):
-            continue  # update_alerts.py pushes business updates, with what they are
+        if ts < cutoff:
+            continue
         tag = tag_for(sym, a)
         if tag in sent:
+            continue
+        if business_updates.is_update(a):
+            # update_alerts.py pushes these, saying what they are. If it has
+            # not (the news watcher is not running), send its push from here.
+            for (usym, qe), (day, at, doc, subject) in business_updates.found([a]).items():
+                key = update_alerts.tag(usym, qe)
+                if key in sent:
+                    continue
+                if update_alerts.push(usym, qe, day, at, doc, subject, extra_tags=tag):
+                    sent.update((key, tag))
+                    hits += 1
+                    print(f"alert: {sym} | {raw_ts} | business update (update_alerts.py had not sent it)")
             continue
         desc = (a.get("desc") or "announcement").strip()
         detail = (a.get("attchmntText") or desc).strip()
@@ -99,10 +119,13 @@ if __name__ == "__main__":
         main()
     except Exception as e:  # noqa: BLE001 - heartbeat: NEVER fail silently
         print(f"announcements: FAILED {type(e).__name__}: {e}"[:300])
-        # Once a day: run every twenty minutes, a broken NSE would otherwise
-        # send seventy of these.
-        tag = f"rs-annfail-{datetime.now(IST):%Y%m%d}"
-        seen = sent_tags("rs-annfail-")
+        # At most once every twelve hours: run every twenty minutes, a broken
+        # NSE would otherwise send seventy a day. ntfy.sh keeps a message
+        # twelve hours, so that is as far back as "already sent" can be read;
+        # the tag used to carry the date, which read like "once a day" but
+        # repeated twelve hours later (and again just after midnight).
+        tag = "rs-annfail"
+        seen = sent_tags("rs-annfail")
         if seen is not None and tag not in seen:
             post("Rscreener checker FAILED", f"{type(e).__name__}: {e}"[:300], tags=f"warning,{tag}", priority="high")
         sys.exit(1)

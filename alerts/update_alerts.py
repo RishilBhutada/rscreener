@@ -45,6 +45,26 @@ def clock(hms: str) -> str:
     return f"{h % 12 or 12}:{m} {'am' if h < 12 else 'pm'}"
 
 
+def tag(sym: str, qe: str) -> str:
+    """The tag that marks a company's update for a quarter as pushed."""
+    return "rs-upd-" + re.sub(r"[^A-Za-z0-9]", "", sym) + "-" + qe
+
+
+def push(sym: str, qe: str, day: str, at: str, doc: str, subject: str, extra_tags: str = "") -> bool:
+    """One business-update push. Also used by alerts/check_announcements.py
+    when this script has not pushed the update (it runs only inside the news
+    watcher); the same tag then stops either script sending it again."""
+    q = business_updates.quarter_label(datetime.strptime(qe, "%Y-%m-%d").date())
+    url = doc if doc.startswith("http") else DOCS + doc
+    title = f"{sym}: {q} business update"
+    # No database here to check the results day against, so the push
+    # never claims "before its results"; the calendar does that check.
+    body = (f"Out {clock(at)} IST. {subject[:220]}\n"
+            "Past update-day moves did not tell which way results day would go.")
+    tags = f"newspaper,{tag(sym, qe)}" + (f",{extra_tags}" if extra_tags else "")
+    return post(title, body, tags=tags, click=url)
+
+
 def main() -> None:
     watch = set(alert_symbols())
     now = datetime.now(IST)
@@ -75,7 +95,7 @@ def main() -> None:
     oldest = now - timedelta(hours=WINDOW_H)
     pushed = 0
     for (sym, qe), (day, at, doc, subject) in sorted(mine.items(), key=lambda x: x[1][:2]):
-        key = "rs-upd-" + re.sub(r"[^A-Za-z0-9]", "", sym) + "-" + qe
+        key = tag(sym, qe)
         if key in sent:
             continue
         try:
@@ -83,14 +103,8 @@ def main() -> None:
                 continue        # older than ntfy remembers: could no longer tell if it was sent
         except ValueError:
             continue
-        q = business_updates.quarter_label(datetime.strptime(qe, "%Y-%m-%d").date())
-        url = doc if doc.startswith("http") else DOCS + doc
-        title = f"{sym}: {q} business update"
-        # No database here to check the results day against, so the push
-        # never claims "before its results"; the calendar does that check.
-        body = (f"Out {clock(at)} IST. {subject[:220]}\n"
-                "Past update-day moves did not tell which way results day would go.")
-        if post(title, body, tags=f"newspaper,{key}", click=url):
+        if push(sym, qe, day, at, doc, subject):
+            sent.add(key)
             pushed += 1
     print(f"updates: {len(found)} business updates on NSE today, {len(mine)} for the alert list, {pushed} pushed")
 
