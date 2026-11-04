@@ -1,10 +1,11 @@
 "use client";
 
+import { ChevronGlyph, ExternalGlyph } from "@/components/Glyphs";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
-import { titleCase } from "@/lib/names";
+import { shortName, titleCase } from "@/lib/names";
 import StockChart, { CorpAction, Quarter } from "@/components/StockChart";
 import { Row } from "@/lib/query";
 import { loadNote, pushRecent, saveNote } from "@/lib/store";
@@ -12,7 +13,10 @@ import WatchStar from "@/components/WatchStar";
 import { loadSectionMode, SectionMode } from "@/components/Settings";
 import { isRefreshLoad } from "@/components/TopNav";
 import { applyOrder, loadOrder } from "@/lib/order";
-import InfoTip, { InfoPart } from "@/components/InfoTip";
+import InfoTip, { InfoDialog, InfoPart } from "@/components/InfoTip";
+import { TableKind, arrange, change, changeText, usePct, useRowOrder } from "@/lib/tableprefs";
+import { move } from "@/lib/order";
+import { IconButton, dayMove, signed as signedNum, tone } from "@/components/QuoteUI";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -239,24 +243,113 @@ function declaredLabel(d: string | null | undefined): string | null {
   return new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
 }
 
-function StatementTable({ title, stmt, subtitle, boldRows }: { title: string; stmt: Stmt; subtitle?: string; boldRows?: string[] }) {
+/** Columns a statement table opens with: the latest twelve periods, as
+ *  screener.in shows. Reliance's quarterly table carries 85 quarters back to
+ *  2005, a thousand cells most visits never look at. */
+const RECENT_PERIODS = 12;
+
+/** The quarter after `p`: "2026-06-30" -> "2026-09-30". */
+function quarterAfter(p: string): string {
+  const m = Number(p.slice(5, 7)) + 3, y = Number(p.slice(0, 4)) + (m > 12 ? 1 : 0), mm = m > 12 ? m - 12 : m;
+  return `${y}-${String(mm).padStart(2, "0")}-${String(new Date(Date.UTC(y, mm, 0)).getUTCDate()).padStart(2, "0")}`;
+}
+
+/** The quarter a results meeting on `day` reports: the last one to end before it. */
+function quarterBefore(day: string): string {
+  const y = Number(day.slice(0, 4)), m = Number(day.slice(5, 7));
+  const qm = [12, 3, 6, 9][Math.floor((m - 1) / 3)], qy = m <= 3 ? y - 1 : y;
+  return `${qy}-${String(qm).padStart(2, "0")}-${String(new Date(Date.UTC(qy, qm, 0)).getUTCDate()).padStart(2, "0")}`;
+}
+
+/** The next results meeting on NSE's calendar: undefined while loading, null if none. */
+type NextResults = { date: string; purpose: string } | null | undefined;
+
+function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol }: {
+  title: string; stmt: Stmt; subtitle?: string; boldRows?: string[];
+  /** Adds the coming quarter as a blank last column - the quarterly table only. */
+  next?: NextResults;
+  /** Which table this is, for its "%" switch and row order; and whose page. */
+  kind: TableKind; symbol: string;
+}) {
+  const [all, setAll] = useState(false);
+  const [showPct, setShowPct] = usePct(kind);
+  const saved = useRowOrder(kind, symbol);
+  // Reordering: the order being edited, and whether to ask where it applies.
+  const [draft, setDraft] = useState<string[] | null>(null);
+  const [asking, setAsking] = useState(false);
+  const total = stmt.periods.length;
+  const from = all ? 0 : Math.max(0, total - RECENT_PERIODS);
+  const periods = stmt.periods.slice(from);
+  const coming = next !== undefined && total ? quarterAfter(stmt.periods[total - 1]) : null;
+  // The meeting's date belongs on that column only if it is that quarter's.
+  const due = coming && next && quarterBefore(next.date) === coming ? next.date : null;
+  const labels = stmt.items.map((it) => it.label);
+  const arranged = arrange(labels, saved.order);
+  const order = draft ?? arranged;
+  const byLabel = new Map(stmt.items.map((it) => [it.label, it]));
+  const rows = order.map((l) => byLabel.get(l)).filter((it): it is Stmt["items"][number] => Boolean(it));
+  const finish = () => {
+    if (!draft || draft.join("|") === arranged.join("|")) { setDraft(null); return; }
+    setAsking(true);
+  };
+  const keep = (scope: "company" | "all") => { if (draft) saved.save(draft, scope); setDraft(null); setAsking(false); };
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
-      <div className="px-4 pt-3.5 pb-2">
-        <h2 className="text-base font-semibold text-[var(--ink)]">{title}</h2>
-        <p className="text-xs text-[var(--ink3)] mt-0.5">{subtitle ?? "Figures in ₹ Crores"}</p>
+      <div className="px-4 pt-3.5 pb-2 flex items-start gap-1.5">
+        <div className="flex-1 min-w-0">
+          <h2 className="text-base font-semibold text-[var(--ink)]">{title}</h2>
+          <p className="text-xs text-[var(--ink3)] mt-0.5">
+            {draft ? "Move rows with the arrows, then Done"
+              : `${subtitle ?? "Figures in ₹ Crores"}${showPct ? " · in brackets, change from the period before" : ""}`}
+          </p>
+        </div>
+        {draft ? (
+          <>
+            <button type="button" onClick={() => setDraft(labels)}
+              className="shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold text-[var(--ink2)] border border-[var(--line)]">
+              Reset
+            </button>
+            <button type="button" onClick={finish}
+              className="shrink-0 min-h-[32px] px-3 rounded-lg text-[12px] font-semibold bg-[var(--accent-fill)] text-[var(--accent-fill-ink)]">
+              Done
+            </button>
+          </>
+        ) : (
+          <>
+            {/* On by default; one tap turns this table's figures' change on or off. */}
+            <button type="button" onClick={() => setShowPct(!showPct)} aria-pressed={showPct}
+              aria-label={showPct ? "Hide the % change" : "Show the % change"} title="% change from the period before"
+              className={`shrink-0 min-h-[32px] min-w-[32px] px-2 rounded-lg text-[13px] font-bold border ${showPct
+                ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
+                : "text-[var(--ink3)] border-[var(--line)]"}`}>
+              %
+            </button>
+            <button type="button" onClick={() => setDraft(arranged)} aria-label="Change the order of the rows" title="Row order"
+              className="shrink-0 min-h-[32px] min-w-[32px] px-2 rounded-lg text-[var(--ink2)] border border-[var(--line)] inline-flex items-center justify-center">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M7 4v16M3.5 7.5 7 4l3.5 3.5M17 20V4M13.5 16.5 17 20l3.5-3.5" />
+              </svg>
+            </button>
+            {total > RECENT_PERIODS && (
+              <button type="button" onClick={() => setAll(!all)}
+                className="shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold text-[var(--accent-ink)] bg-[var(--accent-soft)]">
+                {all ? `Last ${RECENT_PERIODS}` : `All ${total}`}
+              </button>
+            )}
+          </>
+        )}
       </div>
       {/* Opens on the NEWEST period. These tables carry up to twenty years of
           columns oldest-first, so the page landed on 2005 and the reader had to
           drag sideways every time to reach the year he was actually asking
           about. The pinned label column stays put either way. */}
-      <div className="overflow-x-auto" ref={(el) => { if (el) el.scrollLeft = el.scrollWidth; }}>
+      <div key={from} className="overflow-x-auto" ref={(el) => { if (el) el.scrollLeft = el.scrollWidth; }}>
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="text-xs text-[var(--ink3)] border-y border-[var(--line)]">
               <th className="px-3 py-2 text-left font-medium sticky left-0 bg-[var(--card)]"> </th>
-              {stmt.periods.map((p, i) => {
-                const dec = declaredLabel(stmt.declared?.[i]);
+              {periods.map((p, i) => {
+                const dec = declaredLabel(stmt.declared?.[from + i]);
                 return (
                   <th key={p} className="px-3 py-2 text-right font-medium whitespace-nowrap">
                     {periodLabel(p)}
@@ -264,25 +357,77 @@ function StatementTable({ title, stmt, subtitle, boldRows }: { title: string; st
                   </th>
                 );
               })}
+              {coming && (
+                <th className="px-3 py-2 text-right font-medium whitespace-nowrap text-[var(--accent-ink)]">
+                  {periodLabel(coming)}
+                  <span className="block font-normal text-[11px]">({due ? `due ${declaredLabel(due)}` : "date not out"})</span>
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
-            {stmt.items.map((it) => {
+            {rows.map((it, r) => {
               const bold = boldRows?.includes(it.label);
               return (
                 <tr key={it.label} className="border-b border-[var(--line)] hover:bg-[var(--card2)]">
-                  <td className={`px-3 py-2 sm:py-1.5 truncate max-w-[42vw] sm:max-w-none sm:whitespace-nowrap sticky left-0 bg-[var(--card)] ${bold ? "font-semibold text-[var(--ink)]" : "text-[var(--ink2)]"}`}>{it.label}</td>
-                  {it.values.map((v, i) => (
-                    <td key={i} className={`px-3 py-2 sm:py-1.5 text-right whitespace-nowrap tabular-nums ${bold ? "font-semibold" : ""} ${typeof v === "number" && v < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
-                      {fmtNum(v, it.label.includes("EPS") || it.label.includes("%") ? 2 : 0)}
-                    </td>
-                  ))}
+                  <td className={`px-3 py-2 sm:py-1.5 truncate max-w-[42vw] sm:max-w-none sm:whitespace-nowrap sticky left-0 bg-[var(--card)] ${bold ? "font-semibold text-[var(--ink)]" : "text-[var(--ink2)]"}`}>
+                    {draft && (
+                      <span className="inline-flex align-middle mr-1.5">
+                        <button type="button" disabled={r === 0} onClick={() => setDraft(move(order, it.label, -1))}
+                          aria-label={`Move ${it.label} up`}
+                          className="w-7 h-7 inline-flex items-center justify-center rounded-md border border-[var(--line)] text-[var(--ink2)] disabled:opacity-30">▲</button>
+                        <button type="button" disabled={r === rows.length - 1} onClick={() => setDraft(move(order, it.label, 1))}
+                          aria-label={`Move ${it.label} down`}
+                          className="w-7 h-7 ml-1 inline-flex items-center justify-center rounded-md border border-[var(--line)] text-[var(--ink2)] disabled:opacity-30">▼</button>
+                      </span>
+                    )}
+                    {it.label}
+                  </td>
+                  {it.values.slice(from).map((v, i) => {
+                    // Against the period before - the one off-screen to the
+                    // left too, so the first visible column still has one.
+                    const at = from + i, points = it.label.includes("%");
+                    const prev = at > 0 ? it.values[at - 1] : null;
+                    const ch = showPct ? change(v, prev, points) : null;
+                    return (
+                      <td key={i} className={`px-3 py-2 sm:py-1.5 text-right whitespace-nowrap tabular-nums ${bold ? "font-semibold" : ""} ${typeof v === "number" && v < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
+                        {fmtNum(v, it.label.includes("EPS") || it.label.includes("%") ? 2 : 0)}
+                        {ch !== null && (
+                          <span className={`ml-1 text-[11px] font-normal ${ch > 0 ? "text-[var(--pos)]" : ch < 0 ? "text-[var(--neg)]" : "text-[var(--ink3)]"}`}>
+                            ({changeText(ch, points, v, prev)})
+                          </span>
+                        )}
+                      </td>
+                    );
+                  })}
+                  {coming && <td className="px-3 py-2 sm:py-1.5 bg-[color-mix(in_srgb,var(--accent)_6%,transparent)]" />}
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
+      {!draft && saved.scope === "company" && (
+        <p className="px-4 py-2 text-[11px] text-[var(--ink3)]">Rows in this company&apos;s own order.</p>
+      )}
+      {asking && draft && (
+        <InfoDialog title="Use this order for every company?" onClose={() => setAsking(false)}>
+          <p>{title} rows in this order on every company&apos;s page.</p>
+          <p className="text-[12px] text-[var(--ink3)]">
+            A company with a row this one does not have keeps that row in its usual place. You can change the order again from any company.
+          </p>
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <button type="button" onClick={() => keep("company")}
+              className="rs-press min-h-[44px] rounded-xl border border-[var(--line)] text-[14px] font-medium text-[var(--ink2)]">
+              No, only {symbol}
+            </button>
+            <button type="button" onClick={() => keep("all")}
+              className="rs-press min-h-[44px] rounded-xl bg-[var(--accent-fill)] text-[var(--accent-fill-ink)] text-[14px] font-semibold">
+              Yes, all companies
+            </button>
+          </div>
+        </InfoDialog>
+      )}
     </section>
   );
 }
@@ -751,7 +896,7 @@ function DocumentsByYear({ docs }: { docs: NonNullable<Company["documents"]> }) 
                 </span>
               </span>
               <span className="text-xs text-[var(--ink3)] shrink-0">
-                {n} {n === 1 ? "document" : "documents"} {open ? "▾" : "▸"}
+                {n} {n === 1 ? "document" : "documents"} <ChevronGlyph dir={open ? "down" : "right"} />
               </span>
             </button>
             {open && (
@@ -761,7 +906,7 @@ function DocumentsByYear({ docs }: { docs: NonNullable<Company["documents"]> }) 
                     {g.reports.map((r) => (
                       <a key={r.url} href={r.url} target="_blank" rel="noopener noreferrer"
                          className="text-xs font-semibold bg-[var(--card2)] hover:bg-[var(--accent-soft)] border border-[var(--line)] rounded-full px-3 py-1.5">
-                        Annual report {r.from}–{String(r.to).slice(-2)} ↗
+                        Annual report {r.from}–{String(r.to).slice(-2)} <ExternalGlyph size={11} />
                       </a>
                     ))}
                   </div>
@@ -1065,8 +1210,8 @@ function ValuationHistory({ company }: { company: Company }) {
                     about four years. "2% of 42 months" invites a conclusion
                     that "42 months since 2023-03" does not. */}
                 <span>
-                  {r.short} was lower than this in <strong className="text-[var(--ink2)]">{r.pct}%</strong>{" "}
-                  of {r.n} months since {r.from} · median {fmtNum(r.median)}
+                  {r.short} was lower than this on <strong className="text-[var(--ink2)]">{r.pct}%</strong>{" "}
+                  of {r.n.toLocaleString("en-IN")} readings since {periodLabel(`${r.from}-01`)} · median {fmtNum(r.median)}
                 </span>
                 <span>High {fmtNum(r.hi)}</span>
               </div>
@@ -1110,7 +1255,7 @@ function industryMedian(cohort: Cohort, field: string): { value: number; n: numb
   return { value: m, n: vs.length };
 }
 
-function RatioGrid({ snapshot, row, cohort }: { snapshot: Row; row: Row | null; cohort: Cohort | null }) {
+function RatioGrid({ snapshot, row, cohort, next }: { snapshot: Row; row: Row | null; cohort: Cohort | null; next?: NextResults }) {
   const g = (k: string) => num(row, k) ?? num(snapshot, k);
   const method = String((row?.["vol_method"] ?? snapshot["vol_method"]) ?? "");
   const vol = (k: string) => {
@@ -1149,6 +1294,8 @@ function RatioGrid({ snapshot, row, cohort }: { snapshot: Row; row: Row | null; 
       ["Dividend Yield", pct(g("div_yield")), "div_yield"],
     ]],
     ["What it earns", [
+      ["Next results", next === undefined ? "—" : next === null ? "Not announced"
+        : new Date(`${next.date}T00:00:00`).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" }), ""],
       ["ROCE", pct(g("roce")), "roce"],
       ["ROE", pct(g("roe")), "roe"],
       ["Sales growth 5Y", pct(g("sales_cagr_5y")), "sales_cagr_5y"],
@@ -1202,7 +1349,9 @@ function RatioGrid({ snapshot, row, cohort }: { snapshot: Row; row: Row | null; 
               {heading}
             </h3>
             {cells.map(([label, value, field]) => {
-              const ctx = context(field);
+              const ctx = label === "Next results"
+                ? (next ? `${periodLabel(quarterBefore(next.date))} quarter · board meeting` : next === null ? "No date on NSE's calendar yet" : null)
+                : context(field);
               return (
                 <div key={label} className="border-b border-[var(--line)] py-1.5">
                   <div className="flex items-baseline justify-between">
@@ -1365,11 +1514,6 @@ function CompanyView() {
   useEffect(() => {
     const el = pager.current;
     if (!el || mode !== "swipe") return;
-
-    const paneAt = (i: number) => {
-      const id = paneIds[i];
-      return id ? (Array.from(el.children).find((c) => c.id === id) as HTMLElement | undefined) : undefined;
-    };
 
     let startX = 0, startY = 0, startScroll = 0, startIndex = 0;
     let axis: "x" | "y" | null = null;
@@ -1551,6 +1695,26 @@ function CompanyView() {
     setNote(loadNote(symbol));
   }, [symbol]);
 
+  // The next results meeting, from the calendar the Calendar page reads
+  // (8 KB on the wire). Undefined while loading, null if NSE lists none.
+  const [nextResults, setNextResults] = useState<NextResults>(undefined);
+  useEffect(() => {
+    if (!symbol) return;
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    fetch(`${BASE}/calendar.json`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((cal: { events?: { symbol: string; date: string; purpose: string; kind: string; type?: string }[] } | null) => {
+        if (!cal?.events) return setNextResults(undefined);
+        const hit = cal.events
+          .filter((e) => e.symbol === symbol && e.kind === "meeting" && e.date >= today
+            && (e.type === "results" || /result/i.test(e.purpose)))
+          .sort((a, b) => a.date.localeCompare(b.date))[0];
+        setNextResults(hit ? { date: hit.date, purpose: hit.purpose } : null);
+      })
+      .catch(() => setNextResults(undefined));
+  }, [symbol]);
+
   useEffect(() => {
     if (!symbol) return;
     // Past the HTTP cache on the load a refresh produced - a fresh shell around
@@ -1681,38 +1845,52 @@ function CompanyView() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--ink)]">{titleCase(String(s.name ?? "")) || symbol} <span className="text-[var(--accent-ink)]">({symbol})</span></h1>
-          <p className="text-sm text-[var(--ink3)]">
+      {/* Name, then the ticker and where it sits on one quiet line; the
+          export is an icon beside the star, not a button above the price. */}
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-2xl font-bold text-[var(--ink)] leading-tight">{titleCase(String(s.name ?? "")) || symbol}</h1>
+          <p className="text-sm text-[var(--ink3)] mt-0.5">
+            <span className="font-semibold text-[var(--ink2)]">{symbol}</span>
+            {company.exchange ? ` · ${company.exchange}` : ""}
+            {" · "}
             {s.sector ? (
               <Link href={`/sectors?s=${encodeURIComponent(String(s.sector))}`} className="hover:text-[var(--accent-ink)] hover:underline">{String(s.sector)}</Link>
             ) : "—"}
-            {" · "}{String(s.industry ?? "—")}
+            {s.industry ? ` · ${String(s.industry)}` : ""}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={exportCompanyCsv}
-            className="text-xs font-semibold bg-[var(--card2)] hover:bg-[var(--accent-soft)] border border-[var(--line)] rounded-lg px-3 py-1.5"
-          >
-            Export CSV
-          </button>
+        <div className="flex items-center gap-1 shrink-0">
+          <IconButton name="download" label="Export to Excel (CSV)" onClick={exportCompanyCsv} />
           <WatchStar symbol={symbol} />
         </div>
       </div>
 
-      {price !== null && (
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <span className="text-3xl font-bold text-[var(--ink)] tabular-nums">₹ {fmtNum(price)}</span>
-          {off !== null && (
-            <span className={`text-sm font-semibold ${off < 0 ? "text-[var(--neg)]" : "text-[var(--pos)]"}`}>
-              {off < 0 ? "" : "+"}{off.toFixed(1)}% from 52w high
-            </span>
-          )}
-          <PriceAsOf row={fullRow} snapshot={s} />
-        </div>
-      )}
+      {price !== null && (() => {
+        // The day's move first, as a broker shows it; the distance from the
+        // year's high is the second line.
+        const chg = num(fullRow, "ret_1d");
+        return (
+          <div>
+            <div className="flex flex-wrap items-baseline gap-x-2.5">
+              <span className="text-3xl font-bold text-[var(--ink)] tabular-nums">₹ {fmtNum(price)}</span>
+              {chg !== null && (
+                <span className={`text-[15px] font-semibold tabular-nums ${tone(chg)}`}>
+                  {signedNum(dayMove(price, chg))} ({signedNum(chg)}%)
+                </span>
+              )}
+            </div>
+            <p className="flex flex-wrap items-baseline gap-x-2 mt-0.5">
+              {off !== null && (
+                <span className={`text-xs font-medium ${off < 0 ? "text-[var(--neg)]" : "text-[var(--pos)]"}`}>
+                  {off < 0 ? "" : "+"}{off.toFixed(1)}% from 52-week high ·
+                </span>
+              )}
+              <PriceAsOf row={fullRow} snapshot={s} />
+            </p>
+          </div>
+        );
+      })()}
 
       {/* Built once: four tables share it, and they must not disagree. */}
       <nav ref={sectionNav} className="sticky top-0 sm:top-14 z-20 -mx-4 px-4 bg-[var(--card)] border-y border-[var(--line)] flex gap-1 overflow-x-auto text-sm font-medium py-2 sm:py-1.5 [scrollbar-width:none]">
@@ -1782,7 +1960,7 @@ function CompanyView() {
       <div ref={pager} className={mode === "swipe" ? "rs-pager" : "rs-stack"}>
 
       <div id="summary" className="scroll-mt-32">
-        <RatioGrid snapshot={s} row={fullRow} cohort={cohort} />
+        <RatioGrid snapshot={s} row={fullRow} cohort={cohort} next={nextResults} />
       </div>
 
       <div id="chart" className="scroll-mt-32 space-y-4">
@@ -1867,7 +2045,7 @@ function CompanyView() {
                 </tr>
                 {peers.map((p) => (
                   <tr key={String(p.symbol)} className="border-b border-[var(--line)] hover:bg-[var(--card2)]">
-                    <td className="px-3 py-1.5"><Link className="font-medium text-[var(--accent-ink)] hover:underline" href={`/company?s=${encodeURIComponent(String(p.symbol))}`}>{titleCase(String(p.name ?? "")) || String(p.symbol)}</Link></td>
+                    <td className="px-3 py-1.5"><Link className="font-medium text-[var(--accent-ink)] hover:underline" href={`/company?s=${encodeURIComponent(String(p.symbol))}`}>{shortName(String(p.name ?? ""), String(p.symbol)) || String(p.symbol)}</Link></td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.price as number)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.pe as number)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.mcap as number, 0)}</td>
@@ -1885,17 +2063,17 @@ function CompanyView() {
           on every company, hardcoded, and 1,347 of the 3,198 with filed results
           file standalone - which excludes subsidiaries, so for a holding company
           the label named a different business from the one in the table. */}
-      {quarterly && <div id="quarters" className="scroll-mt-32"><StatementTable title="Quarterly results" stmt={quarterly} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} /></div>}
+      {quarterly && <div id="quarters" className="scroll-mt-32"><StatementTable title="Quarterly results" stmt={quarterly} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} next={nextResults} kind="quarterly" symbol={symbol} /></div>}
 
       {pnl && (
         <div id="profit-loss" className="scroll-mt-32 space-y-6">
-          <StatementTable title="Profit & loss" stmt={pnl} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} />
+          <StatementTable title="Profit & loss" stmt={pnl} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} kind="pnl" symbol={symbol} />
           <CompoundedGrowth trend={company.trend} prices={company.prices} />
         </div>
       )}
 
-      {balance && <div id="balance-sheet" className="scroll-mt-32"><StatementTable title="Balance sheet" stmt={balance} subtitle={figuresCaption} boldRows={["Total Assets", "Total Liabilities"]} /></div>}
-      {cashflow && <div id="cash-flows" className="scroll-mt-32"><StatementTable title="Cash flows" stmt={cashflow} subtitle={figuresCaption} boldRows={["Free Cash Flow"]} /></div>}
+      {balance && <div id="balance-sheet" className="scroll-mt-32"><StatementTable title="Balance sheet" stmt={balance} subtitle={figuresCaption} boldRows={["Total Assets", "Total Liabilities"]} kind="balance" symbol={symbol} /></div>}
+      {cashflow && <div id="cash-flows" className="scroll-mt-32"><StatementTable title="Cash flows" stmt={cashflow} subtitle={figuresCaption} boldRows={["Free Cash Flow"]} kind="cash" symbol={symbol} /></div>}
 
       {Object.keys(company.statements).length === 0 && !company.trend?.annual && (
         <div className="bg-[var(--warn-soft)] border border-[var(--warn-line)] text-[var(--warn-ink)] rounded-xl p-4 text-sm">
@@ -1927,6 +2105,8 @@ function CompanyView() {
         <div id="shareholding" className="scroll-mt-32"><StatementTable
           title="Shareholding pattern"
           subtitle="Figures in %"
+          kind="shareholding"
+          symbol={symbol}
           stmt={{
             periods: company.shareholding.dates,
             items: [
@@ -1955,10 +2135,10 @@ function CompanyView() {
         {company.documents && <DocumentsByYear docs={company.documents} />}
         <div className="flex gap-4 flex-wrap text-sm">
           <a href={`https://www.nseindia.com/get-quotes/equity?symbol=${encodeURIComponent(symbol)}`} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-ink)] font-semibold hover:underline">
-            All NSE filings &amp; announcements ↗
+            All NSE filings &amp; announcements <ExternalGlyph />
           </a>
           <a href={`https://www.screener.in/company/${encodeURIComponent(symbol)}/`} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-ink)] font-semibold hover:underline">
-            Cross-check on Screener.in ↗
+            Cross-check on Screener.in <ExternalGlyph />
           </a>
         </div>
       </section>

@@ -47,13 +47,20 @@ concurrency:
   # code from ten commits earlier while every workflow reported success.
   #
   # Publishing is idempotent and the newest code should always win, so
-  # publish-only runs get their own group where the newest cancels the rest.
-  # The two can overlap safely: they hold separate runner filesystems, and Pages
-  # serialises deployments through the github-pages environment.
+  # publish-only runs get their own group. The two can overlap safely: they
+  # hold separate runner filesystems, and Pages serialises deployments through
+  # the github-pages environment.
+  #
+  # "Publish new results" (results.yml) shares the publish group, and nothing
+  # in it is cancelled any more - a newer run waits for the running one. That
+  # run republishes the LIVE site, so overlapping a publish would put the older
+  # site back; and cancelled during its database save, `gh release upload
+  # --clobber` has already deleted the stored copy and not yet replaced it.
+  # GitHub still keeps only the newest waiting run, so the newest code wins.
   group: >-
     nightly-${{ inputs.scope == 'rebuild and publish only (no fetching)'
       && 'publish' || 'refresh' }}
-  cancel-in-progress: ${{ inputs.scope == 'rebuild and publish only (no fetching)' }}
+  cancel-in-progress: false
 
 jobs:
   refresh:
@@ -184,6 +191,36 @@ jobs:
         # no retry, no guard, so one dropped NSE response took the results
         # calendar out for a night with the run still reported as a success.
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_events.py
+      - name: Record when each company's results came out
+        # NSE's announcements list, one call a day: the time each results
+        # announcement was published, which the calendar shows and dates
+        # results by (pipeline/fetch_result_times.py). The last three days on
+        # every run, and any day of the past year not held yet - the whole
+        # year the first time, about six minutes, then nothing.
+        env:
+          RSCREENER_STEP_MINUTES: "12"
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_result_times.py --days 3 --backfill
+      - name: Fetch first the companies whose results just came out
+        if: (steps.plan.outputs.earnings == '1' || steps.plan.outputs.scope == 'rebuild and publish only (no fetching)') && steps.plan.outputs.targeted == '0'
+        # The two steps further down reach each company once a week, so a
+        # company that reported yesterday could keep its old quarter for up to
+        # seven days - the calendar and the company page both showed it. This
+        # takes the companies whose results meeting or announcement was in the
+        # last five days and whose new quarter is not stored yet
+        # (pipeline/just_reported.py), and fetches only that quarter, before
+        # anything else can use up the time. Publish-only runs too: about two
+        # seconds a company, and a code publish then carries the day's results.
+        # During the day the results watcher does the same within minutes.
+        env:
+          RSCREENER_STEP_MINUTES: "15"
+        run: |
+          python pipeline/just_reported.py
+          if [ "${{ steps.plan.outputs.earnings }}" = "1" ] && [ -s data/just_reported_dates.txt ]; then
+            bash pipeline/guarded_fetch.sh python pipeline/fetch_filing_dates.py --symbols @data/just_reported_dates.txt --max-age-hours 1 --sleep 0.2
+          fi
+          if [ -s data/just_reported_results.txt ]; then
+            bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols @data/just_reported_results.txt --only-missing --limit 400 --sleep 0.2
+          fi
       - name: Refresh shareholding patterns (whole universe, rotating)
         if: steps.plan.outputs.earnings == '1'
         # Was @data/top500.txt, so the other 1,857 companies were unreachable: 432
@@ -250,6 +287,27 @@ jobs:
           ANGEL_PIN: ${{ secrets.ANGEL_PIN }}
           ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_ncdex.py
+      - name: Refresh every NSE index and the Sensex (candles, valuation, members)
+        # On every run, publish-only included: NSE's daily index file for the
+        # days since the last stored (seconds), the Sensex from Yahoo, and -
+        # once per index, then never again - its history since launch from
+        # NSE Indices. Member lists are re-read weekly.
+        env:
+          RSCREENER_STEP_MINUTES: "15"
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_indices.py
+      - name: Refresh gold's calendar, Fed dates, headlines and COMEX closes
+        # The release schedules of the Fed (meetings and its speech/testimony
+        # calendar), BEA, the Census Bureau, the ECB and the Bank of Japan;
+        # Treasury auctions (Fiscal Data API); GDELT and five publishers' RSS
+        # feeds for headlines; Yahoo's GC=F. About twenty-five requests, every
+        # run. Not Forex Factory: its terms forbid republishing its calendar.
+        # With the owner's FRED_API_KEY secret (free; he sets it himself)
+        # also the CPI/jobs/PPI/JOLTS/claims dates and the actual and previous
+        # figures of US releases; without it those steps skip.
+        env:
+          RSCREENER_STEP_MINUTES: "5"
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_gold.py
       - name: Refresh the mandi (spot) price beside each NCDEX contract
         # Agmarknet, the Government of India's mandi-price service: about a
         # dozen open requests, every run. Its CAPTCHA-guarded reports are not
@@ -419,6 +477,12 @@ jobs:
         # web/public/commodities.json and web/public/commodity/<ROOT>.json -
         # every expiry, the premium between them, and MCX against the world.
         run: python pipeline/export_commodities_json.py
+      - name: Write the gold page (events rated, headlines, prices)
+        run: python pipeline/export_gold_json.py
+      - name: Write the indices page and one file per index
+        # web/public/indices.json, idx/<SYM>.json, their valuation and chart
+        # files, and a row each in the search index.
+        run: python pipeline/export_indices_json.py
       - name: Tell the owner's phone about ETF premiums crossing his lines
         # alerts/etf_premium.txt holds the lines. Scheduled runs only: they are
         # the ones with a new day's NAVs, and a code publish re-running the
@@ -570,6 +634,9 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web/out
+          # "Publish new results" republishes from these files: kept three days
+          # (the default is one) so a failed night does not strand it.
+          retention-days: 3
 
   deploy:
     needs: refresh
@@ -597,6 +664,23 @@ jobs:
       - id: retry
         if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v4
+
+  # The day's results watcher (results-watch.yml), started as the nightly run
+  # ends - the one start GitHub does not drop. Whatever the night's outcome:
+  # watching NSE does not depend on tonight's publish having worked.
+  start-watch:
+    needs: [refresh, deploy]
+    if: always() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Start today's results watch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run results-watch.yml -R "${{ github.repository }}" \
+            || echo "could not start the watcher - its timed starts will"
 
   # A failed refresh is SILENT otherwise: the site keeps serving yesterday's data
   # and looks completely normal. That is what happened on 1-Aug-2026 - the depth

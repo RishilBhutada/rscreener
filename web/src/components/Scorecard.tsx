@@ -63,7 +63,7 @@ export default function Scorecard() {
     return Math.abs(d) < 0.05 ? null : d;
   };
 
-  const Delta = ({ k }: { k: string }) => {
+  const deltaTag = (k: string) => {
     const d = delta(k);
     if (d === null) return null;
     return (
@@ -96,7 +96,7 @@ export default function Scorecard() {
               {c.overall ?? "—"}
             </span>
             <span className="text-sm text-[var(--ink3)]">/100</span>
-            <Delta k="overall" />
+            {deltaTag("overall")}
           </div>
           <p className="text-[11px] text-[var(--ink3)]">{c.generated_at}</p>
         </div>
@@ -112,7 +112,7 @@ export default function Scorecard() {
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-sm font-semibold text-[var(--ink)]">{label}</span>
                 <span className="text-sm font-semibold tabular-nums" style={{ color: t.fg }}>
-                  {v ?? "—"}<Delta k={key} />
+                  {v ?? "—"}{deltaTag(key)}
                 </span>
               </div>
               <div className="h-1.5 rounded-full bg-[var(--card2)] mt-1 overflow-hidden">

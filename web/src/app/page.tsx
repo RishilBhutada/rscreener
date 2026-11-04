@@ -4,16 +4,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
+import Markets from "@/components/Markets";
 import { loadIndex, symbolHref } from "@/lib/index-data";
 import { loadRecent } from "@/lib/store";
 import { allWatched, loadLists } from "@/lib/watchlists";
-import { loadPortfolio } from "@/lib/portfolio";
+import { Holding, loadPortfolio } from "@/lib/portfolio";
 import { shortName } from "@/lib/names";
 import { buildIndex, search, didYouMean, type SearchIndex, type SearchRow } from "@/lib/search";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
-type Lite = SearchRow & { price?: number; ret_1m?: number; exchange?: string };
+type Lite = SearchRow & { price?: number; ret_1m?: number; ret_1d?: number; exchange?: string };
 
 /** A spread across sectors, shown only until there is something of the user's own. */
 type CalEvent = { kind?: string; symbol: string; purpose: string; date: string };
@@ -40,6 +41,7 @@ export default function Home() {
   const [asof, setAsof] = useState<string | null>(null);
   const [events, setEvents] = useState<CalEvent[]>([]);
   const [held, setHeld] = useState<string[]>([]);
+  const [holdings, setHoldings] = useState<Holding[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -47,7 +49,9 @@ export default function Home() {
     setWatch(allWatched(st));
     setLists(st.lists.filter((l) => l.symbols.length > 0).length);
     setRecent(loadRecent());
-    setHeld(loadPortfolio().map((h) => h.symbol));
+    const pf = loadPortfolio();
+    setHoldings(pf);
+    setHeld(pf.map((h) => h.symbol));
     // Results meetings and ex-dates, for "Coming up". The calendar file is
     // small; a failure just leaves the section out.
     fetch(`${BASE}/calendar.json`)
@@ -81,6 +85,24 @@ export default function Home() {
     return watch.map((s) => by.get(s)).filter(Boolean).slice(0, 8) as Lite[];
   }, [watch, rows]);
 
+  // Priced holdings only, as on the portfolio page: a holding without a price
+  // counted at cost would be a "current value" that is not current.
+  const pf = useMemo(() => {
+    if (!holdings.length || !rows.length) return null;
+    const by = new Map(rows.map((r) => [r.symbol, r]));
+    let invested = 0, current = 0, day = 0, n = 0;
+    for (const h of holdings) {
+      const r = by.get(h.symbol);
+      if (!r?.price) continue;
+      n += 1;
+      invested += h.qty * h.avg;
+      current += h.qty * r.price;
+      if (typeof r.ret_1d === "number") day += h.qty * (r.price - r.price / (1 + r.ret_1d / 100));
+    }
+    if (!n) return null;
+    return { n, current, day, pnl: current - invested, pnlPct: invested > 0 ? ((current - invested) / invested) * 100 : 0 };
+  }, [holdings, rows]);
+
   // The next two weeks' events for the companies he follows or holds - the
   // one thing on the calendar page he would otherwise have to go looking for.
   const upcoming = useMemo(() => {
@@ -98,7 +120,7 @@ export default function Home() {
     return hit ? shortName(hit.name, sym) : sym;
   };
 
-  const Chips = ({ title, syms, more }: {
+  const chips = ({ title, syms, more }: {
     title: string;
     syms: string[];
     /** optional link on the right of the heading, e.g. "Manage lists" */
@@ -163,13 +185,23 @@ export default function Home() {
               else if (e.key === "Enter" && matches[hi]) go(matches[hi].symbol);
               else if (e.key === "Escape") setQ("");
             }}
-            placeholder="Search a company, ETF or commodity"
-            aria-label="Search a company, ETF or commodity"
+            placeholder="Search a company, index, ETF or commodity"
+            aria-label="Search a company, index, ETF or commodity"
             autoComplete="off"
             className="w-full rounded-xl border border-[var(--line2)] bg-[var(--card)] pl-11 pr-4 py-3.5 text-base
                        text-[var(--ink)] placeholder:text-[var(--ink3)]
                        focus:outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent-soft)]"
           />
+          {/* A typo names its own fix: "relaince" offers Reliance Industries. */}
+          {matches.length === 0 && suggestion && (
+            <div className="absolute left-0 right-0 top-full mt-1 bg-[var(--card)] border border-[var(--line2)] rounded-xl shadow-lg z-20 px-4 py-2.5 text-sm">
+              <span className="text-[var(--ink3)]">Did you mean </span>
+              <button onClick={() => go(suggestion.symbol)} className="font-semibold text-[var(--accent-ink)]">
+                {suggestion.name || suggestion.symbol}
+              </button>
+              <span className="text-[var(--ink3)]">?</span>
+            </div>
+          )}
           {matches.length > 0 && (
             <div className="absolute left-0 right-0 top-full mt-1 bg-[var(--card)] border border-[var(--line2)]
                             rounded-xl shadow-lg overflow-hidden z-20">
@@ -182,18 +214,22 @@ export default function Home() {
                     i === hi ? "bg-[var(--accent-soft)]" : "hover:bg-[var(--card2)]"}`}
                 >
                   <span className="font-semibold text-[var(--ink)] truncate">{m.name || m.symbol}</span>
-                  <span className="text-[var(--ink3)] text-xs shrink-0">{m.symbol}</span>
+                  <span className="text-[var(--ink3)] text-xs shrink-0">
+                    {m.symbol.startsWith("^") ? "INDEX" : m.exchange === "MCX" || m.exchange === "NCDEX" ? `${m.symbol.replace(/_NCDEX$/, "")} · ${m.exchange}` : m.symbol}
+                  </span>
                 </button>
               ))}
             </div>
           )}
         </div>
 
-        <Chips title="Recent" syms={recent} />
+        {chips({ title: "Recent", syms: recent })}
         {/* Suggestions only for somebody with no watchlist yet. With one, this
             row repeated the same companies the priced list below shows - the
             watchlist appeared twice on one screen. */}
-        {watch.length === 0 && <Chips title="Start with" syms={SUGGESTED} />}
+        {watch.length === 0 && chips({ title: "Start with", syms: SUGGESTED })}
+
+        <Markets />
 
         {/* This was a grid of seven tiles - Watchlists, Screener, Sectors, IPO,
             Calendar, Portfolio, Data - every one of them already a link in the
@@ -201,6 +237,24 @@ export default function Home() {
             copy of its own navigation gives the reader nothing to read.
             Replaced with the numbers he came to see: the companies he is
             actually following, priced. */}
+        {/* The portfolio in one line: what it is worth and what today did to it. */}
+        {pf && (
+          <Link href="/portfolio" className="mt-7 flex items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--card)] px-3.5 py-3 active:bg-[var(--card2)]">
+            <span className="flex-1 min-w-0">
+              <span className="block text-xs uppercase tracking-wide text-[var(--ink3)]">Portfolio · {pf.n}</span>
+              <span className="block text-lg font-semibold tabular-nums text-[var(--ink)]">₹{Math.round(pf.current).toLocaleString("en-IN")}</span>
+            </span>
+            <span className="text-right tabular-nums">
+              <span className="block text-xs" style={{ color: pf.day >= 0 ? "var(--pos)" : "var(--neg)" }}>
+                Day {pf.day >= 0 ? "+" : "−"}₹{Math.abs(Math.round(pf.day)).toLocaleString("en-IN")}
+              </span>
+              <span className="block text-sm font-semibold" style={{ color: pf.pnl >= 0 ? "var(--pos)" : "var(--neg)" }}>
+                {pf.pnl >= 0 ? "+" : "−"}₹{Math.abs(Math.round(pf.pnl)).toLocaleString("en-IN")} ({pf.pnlPct >= 0 ? "+" : ""}{pf.pnlPct.toFixed(2)}%)
+              </span>
+            </span>
+          </Link>
+        )}
+
         {watchRows.length > 0 && (
           <section className="mt-7">
             <div className="flex items-baseline justify-between mb-2">
@@ -214,7 +268,7 @@ export default function Home() {
                   the list saying what the percentages are. */}
               <div className="flex items-center gap-3 px-3.5 pt-2 pb-1 text-[11px] text-[var(--ink3)]">
                 <span className="flex-1" />
-                <span className="w-16 text-right">1M</span>
+                <span className="w-16 text-right">Day</span>
               </div>
               {watchRows.map((r) => (
                 <Link
@@ -237,10 +291,10 @@ export default function Home() {
                   </span>
                   <span
                     className="text-xs tabular-nums shrink-0 w-16 text-right"
-                    style={{ color: r.ret_1m == null ? "var(--ink3)" : r.ret_1m >= 0 ? "var(--pos)" : "var(--neg)" }}
-                    title="Change over the last month"
+                    style={{ color: r.ret_1d == null ? "var(--ink3)" : r.ret_1d >= 0 ? "var(--pos)" : "var(--neg)" }}
+                    title="The last session's change"
                   >
-                    {r.ret_1m == null ? "—" : `${r.ret_1m >= 0 ? "+" : ""}${r.ret_1m.toFixed(1)}%`}
+                    {r.ret_1d == null ? "—" : `${r.ret_1d >= 0 ? "+" : ""}${r.ret_1d.toFixed(2)}%`}
                   </span>
                 </Link>
               ))}

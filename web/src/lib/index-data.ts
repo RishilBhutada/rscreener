@@ -26,6 +26,8 @@ export type LiteRow = {
   etf?: boolean;
   /** An MCX or NCDEX contract type - its page is the commodity page. */
   commodity?: boolean;
+  /** A market index (Nifty 50, Sensex, India VIX) - its own page. */
+  index?: boolean;
   /** The last session's change, close on close, in %. */
   ret_1d?: number;
 };
@@ -44,6 +46,7 @@ export type LiteIndex = {
 let cache: LiteIndex | null = null;
 const etfs = new Set<string>();
 const commodities = new Set<string>();
+const indices = new Set<string>();
 
 /** Where a symbol's page is. ETFs left the company table on 27-Sep-2026 and
  *  have their own page; a portfolio, a watchlist or a search can hold either.
@@ -51,6 +54,7 @@ const commodities = new Set<string>();
 export function symbolHref(symbol: string): string {
   const s = encodeURIComponent(symbol);
   if (commodities.has(symbol)) return `/commodity?s=${s}`;
+  if (indices.has(symbol) || symbol.startsWith("^")) return `/indices/view?s=${s}`;
   return etfs.has(symbol) ? `/etf?s=${s}` : `/company?s=${s}`;
 }
 let inflight: Promise<LiteIndex> | null = null;
@@ -82,11 +86,13 @@ export function loadIndex(): Promise<LiteIndex> {
         div_yield: (r[9] as number) ?? undefined,
         etf: r[10] === 1 ? true : undefined,
         commodity: r[10] === 2 ? true : undefined,
+        index: r[10] === 3 ? true : undefined,
         ret_1d: (r[11] as number) ?? undefined,
       }));
       for (const r of rows) {
         if (r.etf) etfs.add(r.symbol);
         if (r.commodity) commodities.add(r.symbol);
+        if (r.index) indices.add(r.symbol);
       }
       cache = {
         rows,

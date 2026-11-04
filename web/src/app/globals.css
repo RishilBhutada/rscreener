@@ -1,5 +1,16 @@
 @import "tailwindcss";
 
+/* "touch" = phones, and touch tablets at any width. An iPad is 768px and up,
+   so a width breakpoint alone gave it the desktop header - whose link row had
+   drifted out of step with the app and never listed Gold or Indices - and no
+   bar at the bottom edge, which iPadOS 26 Safari then covers with its glass
+   blur. Touch screens get the app's bottom bar; mouse desktops the header row. */
+@custom-variant touch {
+  @media (max-width: 639px), (pointer: coarse) {
+    @slot;
+  }
+}
+
 @theme inline {
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
@@ -161,12 +172,16 @@ input, textarea, select, button {
   transition: none;
 }
 
-/* The mobile nav is a fixed bottom bar, so the last rows of every page would sit
-   underneath it. Reserve that height on small screens only; the bar is
-   sm:hidden, so desktop keeps its original spacing. */
-@media (max-width: 639px) {
+/* The touch nav is a fixed bottom bar, so the last rows of every page would sit
+   underneath it. Reserve that height wherever the bar shows (see "touch" at the
+   top); mouse desktops keep their original spacing. */
+@media (max-width: 639px), (pointer: coarse) {
   main { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
 }
+
+/* Safari 26 tints its bars from the page and falls back to white when the root
+   is transparent; give the root the page colour, not only the body. */
+html { background: var(--bg); }
 
 
 /* A FILLED accent button, readable on every accent in both themes.

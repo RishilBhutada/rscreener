@@ -119,15 +119,6 @@ const Check = ({ size }: { size?: number }) => (
   <Icon size={size}><path d="m4.5 12.5 5 5 10-11" /></Icon>
 );
 
-/** Six lobes and a hub. Eight is the usual choice and turns to mush below 20px;
- *  six keeps daylight between the teeth at the 18px this renders at. */
-const Gear = ({ size }: { size?: number }) => (
-  <Icon size={size}>
-    <path d="M10.3 3.4a1 1 0 0 1 1-.85h1.4a1 1 0 0 1 1 .85l.2 1.35c.55.19 1.06.48 1.5.85l1.3-.5a1 1 0 0 1 1.2.44l.7 1.2a1 1 0 0 1-.2 1.25l-1.05.87c.06.29.09.6.09.91s-.03.62-.09.91l1.05.87a1 1 0 0 1 .2 1.25l-.7 1.2a1 1 0 0 1-1.2.44l-1.3-.5c-.44.37-.95.66-1.5.85l-.2 1.35a1 1 0 0 1-1 .85h-1.4a1 1 0 0 1-1-.85l-.2-1.35a5.6 5.6 0 0 1-1.5-.85l-1.3.5a1 1 0 0 1-1.2-.44l-.7-1.2a1 1 0 0 1 .2-1.25l1.05-.87a5.5 5.5 0 0 1 0-1.82l-1.05-.87a1 1 0 0 1-.2-1.25l.7-1.2a1 1 0 0 1 1.2-.44l1.3.5c.44-.37.95-.66 1.5-.85z" />
-    <circle cx="12" cy="12" r="2.5" />
-  </Icon>
-);
-
 /** Fetch the app again - but only when there is something to fetch.
  *
  *  The APK is a thin shell around the live site, so an update needs no
@@ -302,7 +293,7 @@ function RefreshButton() {
       {ready && !dismissed && (
         <div role="status"
           className="rs-sheet fixed inset-x-0 mx-auto w-fit max-w-[calc(100vw-2rem)] z-50
-                     bottom-[calc(76px+env(safe-area-inset-bottom))] sm:bottom-6
+                     bottom-6 touch:bottom-[calc(76px+env(safe-area-inset-bottom))]
                      flex items-center gap-3 rounded-full border border-[var(--line2)] bg-[var(--card)]
                      shadow-[0_10px_30px_rgba(0,0,0,0.35)] pl-4 pr-1.5 py-1.5">
           <span className="text-[13px] font-medium text-[var(--ink)] whitespace-nowrap">New version ready</span>
@@ -444,7 +435,7 @@ function BackButton() {
   );
 }
 
-export default function TopNav({ active }: { active?: "home" | "screens" | "sectors" | "calendar" | "portfolio" | "watchlists" | "others" | "etfs" | "commodities" | "status" | "settings" }) {
+export default function TopNav({ active }: { active?: "home" | "screens" | "sectors" | "calendar" | "portfolio" | "watchlists" | "others" | "etfs" | "commodities" | "indices" | "gold" | "status" | "settings" }) {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<Lite[]>([]);
@@ -505,19 +496,10 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
   const ordered = applyOrder(DESTINATIONS, (d) => d.key, navOrder);
   const PRIMARY = ordered.slice(0, BAR_SLOTS);
   const SECONDARY = ordered.slice(BAR_SLOTS);
-
-  const links: [string, string, string][] = [
-    ["home", "Home", "/"],
-    ["watchlists", "Watchlists", "/watchlists"],
-    ["sectors", "Sectors", "/sectors"],
-    ["etfs", "ETFs", "/etfs"],
-    ["commodities", "Commodities", "/commodities"],
-    ["others", "Others", "/others"],
-    ["calendar", "Calendar", "/calendar"],
-    ["portfolio", "Portfolio", "/portfolio"],
-    ["screens", "Screener", "/screens"],
-    ["status", "Data", "/status"],
-  ];
+  // The desktop row is the same list as the phone bar: the first four, the page
+  // you are on if it is further down, and More for the rest. It used to be a
+  // hand-kept list of its own, which never learnt about Gold or Indices.
+  const deskLinks = [...PRIMARY, ...SECONDARY.filter((d) => d.key === active)];
 
   return (
     <header className="bg-[var(--card)] border-b border-[var(--line)] sm:sticky sm:top-0 z-30">
@@ -545,8 +527,8 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
               else if (e.key === "Enter" && matches[hi]) go(matches[hi].symbol);
               else if (e.key === "Escape") (e.target as HTMLElement).blur();
             }}
-            placeholder="Search a company, ETF or commodity"
-            aria-label="Search a company, ETF or commodity"
+            placeholder="Search a company, index, ETF or commodity"
+            aria-label="Search a company, index, ETF or commodity"
             className="w-full text-sm bg-[var(--card2)] border border-[var(--line)] rounded-full px-4 py-2.5 sm:py-1.5 focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:bg-[var(--card)]"
           />
           {(matches.length > 0 || suggestion || (ql.trim().length >= 2 && idx)) && (
@@ -559,11 +541,13 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
                   className={`block w-full text-left px-4 py-2 text-sm ${i === hi ? "bg-[var(--accent-soft)]" : ""}`}
                 >
                   <span className="font-semibold text-[var(--ink)]">{m.name || m.symbol}</span>
-                  <span className="text-[var(--ink3)] ml-2 text-xs">{m.symbol.replace(/_NCDEX$/, "")}</span>
+                  {!m.symbol.startsWith("^") && <span className="text-[var(--ink3)] ml-2 text-xs">{m.symbol.replace(/_NCDEX$/, "")}</span>}
                   {/* Half the companies here are BSE-only now. Saying which is
                       the difference between "this page has no filings yet" and
                       "this company files nowhere this app can read". */}
-                  {(m.exchange === "BSE" || m.exchange === "MCX" || m.exchange === "NCDEX") && (
+                  {m.symbol.startsWith("^") ? (
+                    <span className="ml-1.5 text-[11px] rounded px-1 py-0.5 bg-[var(--card2)] text-[var(--ink3)]">INDEX</span>
+                  ) : (m.exchange === "BSE" || m.exchange === "MCX" || m.exchange === "NCDEX") && (
                     <span className="ml-1.5 text-[11px] rounded px-1 py-0.5 bg-[var(--card2)] text-[var(--ink3)]">{m.exchange}</span>
                   )}
                 </button>
@@ -596,8 +580,8 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
           )}
         </div>
 
-        <nav className="hidden sm:flex items-center gap-1 text-sm font-medium">
-          {links.map(([key, label, href]) => (
+        <nav className="hidden sm:flex touch:hidden! items-center gap-1 text-sm font-medium">
+          {deskLinks.map(({ key, label, href }) => (
             <Link
               key={key}
               href={href}
@@ -606,6 +590,8 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
               {label}
             </Link>
           ))}
+          <button onClick={() => setMoreOpen(true)}
+            className="px-3 py-1.5 rounded-lg text-[var(--ink2)] hover:bg-[var(--card2)]">More</button>
         </nav>
 
         {/* Top right. Theme, accent and reload used to sit out here as three
@@ -644,7 +630,11 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
           miss. The three that did not make the cut - Calendar, IPO and Data -
           are reachable from the More sheet, and none of them is somewhere you
           go mid-task. */}
-      <nav className="sm:hidden fixed bottom-0 inset-x-0 z-40 grid grid-cols-5 border-t border-[var(--line)] bg-[var(--card)] pb-[env(safe-area-inset-bottom)]">
+      {/* Full width with a solid colour: iPadOS 26 Safari leaves an edge clear
+          of its glass blur only where a fixed, opaque, near-full-width bar
+          sits on it. The five cells keep a phone's spacing on an iPad. */}
+      <nav className="hidden touch:block fixed bottom-0 inset-x-0 z-40 border-t border-[var(--line)] bg-[var(--card)] pb-[env(safe-area-inset-bottom)]">
+        <div className="grid grid-cols-5 max-w-xl mx-auto">
         {PRIMARY.map(({ key, label, href, icon }) => (
           <Link
             key={key}
@@ -669,13 +659,17 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
           <span className="flex items-center justify-center w-14 h-7 rounded-full"><MoreIcon /></span>
           More
         </button>
+        </div>
       </nav>
 
       {moreOpen && (
-        <div className="sm:hidden fixed inset-0 z-50" onClick={() => setMoreOpen(false)}>
+        <div className="fixed inset-0 z-50" onClick={() => setMoreOpen(false)}>
           <div className="rs-fade absolute inset-0 bg-black/40" />
+          {/* A bottom sheet on a phone; on a wider screen the same list as a
+              card, not a strip stretched across the whole width. */}
           <div
-            className="rs-sheet absolute bottom-0 inset-x-0 bg-[var(--card)] rounded-t-2xl border-t border-[var(--line)] p-2 pb-[calc(env(safe-area-inset-bottom)+8px)]"
+            className="rs-sheet absolute bottom-0 inset-x-0 bg-[var(--card)] rounded-t-2xl border-t border-[var(--line)] p-2 pb-[calc(env(safe-area-inset-bottom)+8px)]
+                       sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 sm:bottom-6 sm:w-80 sm:rounded-2xl sm:border"
             onClick={(e) => e.stopPropagation()}
           >
             {SECONDARY.map(({ key, label, href, icon }) => (

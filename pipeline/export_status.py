@@ -111,7 +111,7 @@ def main() -> None:
 
     sources.append({
         "key": "prices",
-            "_have_sql": "SELECT DISTINCT symbol FROM prices",
+            "_have_sql": "SELECT DISTINCT symbol FROM prices WHERE symbol IN (SELECT SYMBOL FROM universe)",
         "name": "Share prices",
         "what": "Daily closes from the exchange feed. Drives every price, market cap and ratio.",
         # SIX DAYS, not zero. This was the one source judged against "is it on
@@ -128,7 +128,10 @@ def main() -> None:
         # fails the build when the median price is older than six trading days -
         # so the page and the guard now draw the line in the same place instead
         # of disagreeing by a factor of twenty-four.
-        **_spread(con, "SELECT symbol, MAX(date) FROM prices WHERE freq='daily' GROUP BY symbol", 6),
+        # Companies only: ETFs, which share the prices table, counted here put
+        # the page at "102% up to date - 5,015 of 4,914" on 1-Oct-2026.
+        **_spread(con, "SELECT symbol, MAX(date) FROM prices WHERE freq='daily' "
+                       "AND symbol IN (SELECT SYMBOL FROM universe) GROUP BY symbol", 6),
         "cadence": "every night",
     })
 

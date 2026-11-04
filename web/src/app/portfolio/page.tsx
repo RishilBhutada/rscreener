@@ -170,7 +170,7 @@ export default function PortfolioPage() {
     const q = pickQuery.trim().toLowerCase();
     if (!q) return [];
     return rows
-      .filter((r) => !r.commodity)
+      .filter((r) => !r.commodity && !r.index)
       .map((r) => {
         const sym = r.symbol.toLowerCase(), nm = r.name.toLowerCase();
         const score = sym === q ? -1 : sym.startsWith(q) ? 0 : nm.startsWith(q) ? 1 : nm.includes(q) || sym.includes(q) ? 2 : 9;

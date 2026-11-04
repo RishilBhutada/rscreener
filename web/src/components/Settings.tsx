@@ -7,6 +7,7 @@ import { BUILD_TIME, BUILD_COMMIT, BUILD_SUBJECT } from "@/lib/buildinfo";
 import { DESTINATIONS, BAR_SLOTS } from "@/lib/destinations";
 import { applyOrder, clearOrder, loadOrder, move, saveOrder, OrderKind } from "@/lib/order";
 import { reloadBypassingCache } from "@/lib/reload";
+import { clearOrders, customOrders } from "@/lib/tableprefs";
 import { Glyph, Group, PageTitle, Row, Segmented } from "@/components/ListUI";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -215,6 +216,7 @@ function MainScreen() {
   const [theme, setTheme] = useState("system");
   const [accent, setAccent] = useState("indigo");
   const [sections, setSections] = useState<SectionMode>("scroll");
+  const [rowOrders, setRowOrders] = useState<string[]>([]);
   const [isDark, setIsDark] = useState(false);
   const [navOrder, setNavOrder] = useState<string[]>([]);
   const [secOrder, setSecOrder] = useState<string[]>([]);
@@ -224,6 +226,7 @@ function MainScreen() {
     setTheme(localStorage.getItem("rs_theme") || "system");
     setAccent(localStorage.getItem("rs_accent") || "indigo");
     setSections(loadSectionMode());
+    setRowOrders(customOrders());
     setNavOrder(loadOrder("nav"));
     setSecOrder(loadOrder("sections"));
     const resolve = () => setIsDark(document.documentElement.dataset.theme === "dark");
@@ -315,6 +318,21 @@ function MainScreen() {
           right={<Segmented label="Company page layout" value={sections} options={LAYOUTS} onChange={pickSections} />}
         />
         <Row icon={<Glyph d={ICON.order} />} title="Section order" sub={`${secs}…`} href="/settings?p=sections" chevron />
+        {/* Shown only once an order has been saved: a reset with nothing to
+            reset is a dead control. */}
+        {rowOrders.length > 0 && (
+          <Row
+            icon={<Glyph d={ICON.order} />}
+            title="Table row order"
+            sub={`Your own order on ${rowOrders.length} table${rowOrders.length === 1 ? "" : "s"}`}
+            right={
+              <button type="button" onClick={() => { clearOrders(); setRowOrders([]); }}
+                className="rs-press shrink-0 min-h-[34px] px-3 rounded-full text-[13px] border border-[var(--line)] text-[var(--ink2)]">
+                Reset
+              </button>
+            }
+          />
+        )}
       </Group>
 
       <Group title="Navigation">

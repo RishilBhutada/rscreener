@@ -161,7 +161,8 @@ class Parser {
   toks: Tok[];
   i = 0;
   fields = new Set<string>();
-  constructor(toks: Tok[]) { this.toks = toks; }
+  allowed: Set<string>;
+  constructor(toks: Tok[], allowed: readonly string[]) { this.toks = toks; this.allowed = new Set(allowed); }
 
   peek(): Tok | undefined { return this.toks[this.i]; }
   next(): Tok | undefined { return this.toks[this.i++]; }
@@ -245,8 +246,8 @@ class Parser {
     if (tok.kind === "num") return { a: "num", v: parseFloat(tok.value) };
     if (tok.kind === "ident") {
       const field = ALIASES[tok.value] ?? tok.value;
-      if (!NUMERIC_FIELDS.includes(field)) {
-        throw new QueryError(`unknown field '${tok.value}' - try: ${NUMERIC_FIELDS.slice(0, 8).join(", ")}...`, tok.pos);
+      if (!this.allowed.has(field)) {
+        throw new QueryError(`unknown field '${tok.value}' - try: ${[...this.allowed].slice(0, 8).join(", ")}...`, tok.pos);
       }
       this.fields.add(field);
       return { a: "field", name: field };
@@ -317,12 +318,14 @@ function evalNode(node: Node, row: Row): boolean | null {
 
 export function compile(
   src: string,
-  customRatios: Record<string, string> = {}
+  customRatios: Record<string, string> = {},
+  /** The fields this universe has; companies' by default. */
+  allowed: readonly string[] = NUMERIC_FIELDS,
 ): { run: (row: Row) => boolean | null; fields: string[] } {
   const substituted = substituteRatios(src, customRatios);
   const toks = tokenize(substituted);
   if (toks.length === 0) throw new QueryError("empty query", 0);
-  const p = new Parser(toks);
+  const p = new Parser(toks, allowed);
   const ast = p.parseExpr();
   if (p.i < p.toks.length) {
     const extra = p.toks[p.i];

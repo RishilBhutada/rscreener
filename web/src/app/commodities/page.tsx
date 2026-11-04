@@ -50,7 +50,7 @@ export default function CommoditiesPage() {
         <h1 className="text-xl font-bold flex items-center gap-1.5">
           Commodities
           <InfoTip title="Commodities">
-            <p>MCX futures: the same commodity trades for several delivery months at once, each at its own price.</p>
+            <p>MCX and NCDEX futures: the same commodity trades for several delivery months at once, each at its own price.</p>
             <p><b>Next expiry</b> is how far the second month sits above the first. Above zero, later delivery costs more — usually the interest and storage on holding the metal. Below zero, the market wants it now.</p>
             <p><b>vs World</b> is MCX against the same month on COMEX or NYMEX, in rupees at the day&apos;s dollar rate. For gold and silver most of the gap is import duty; for crude and gas, which MCX settles on the US price, it should be near zero.</p>
             <p>For NCDEX the same column is the contract against the physical (mandi) price at its delivery centre - Unjha for jeera, Deesa for castor - from Agmarknet. Most of that gap is grade and place.</p>
@@ -64,7 +64,7 @@ export default function CommoditiesPage() {
         {data && (
           <>
             <p className="text-sm text-[var(--ink2)]">
-              MCX closes of {dayLabel(data.asof, true)}
+              Closes of {dayLabel(data.asof, true)} · MCX and NCDEX
             </p>
             <div className="flex items-center gap-2 flex-wrap">
               <Segmented label="Show" value={show} options={SHOWS} onChange={setShow} />

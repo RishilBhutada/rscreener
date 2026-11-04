@@ -6,13 +6,13 @@ import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { Row, canonicalField, compile, isValidRatioName } from "@/lib/query";
-import { FIELD_CATALOG, FIELD_GROUPS, FieldDef } from "@/lib/fields";
+import { FIELD_CATALOG, FieldDef, Universe, catalogFor } from "@/lib/fields";
 import { LIBRARY, LibraryScreen, libraryById } from "@/lib/screen-library";
 import { SavedScreen, diff, loadSaved, matchesOf, storeSaved } from "@/lib/saved-screens";
 import { WatchState, loadLists, toggleIn } from "@/lib/watchlists";
 import { shortName } from "@/lib/names";
 import {
-  Chips, Icon, IconButton, SheetAction, Stat, dayMove, money, shortDay, signed, tone,
+  Chips, Icon, IconButton, SheetAction, Stat, dayMove, money, shortDay, shownSymbol, signed, tone,
 } from "@/components/QuoteUI";
 
 /** The screener, built for a phone: filters as chips, a searchable field
@@ -41,7 +41,9 @@ type Sheet =
   | { kind: "saved"; name: string }
   | null;
 
-const FIELD_BY_KEY = new Map<string, FieldDef>(FIELD_CATALOG.map((f) => [f.key, f]));
+type ByKey = Map<string, FieldDef>;
+const COMPANY_BY: ByKey = new Map<string, FieldDef>(FIELD_CATALOG.map((f) => [f.key, f]));
+const UNIVERSES: [Universe, string][] = [["companies", "Companies"], ["indices", "Indices"], ["commodities", "Commodities"]];
 const OPS: [string, string, string][] = [
   [">", "Above", ">"], [">=", "At least", "≥"], ["<", "Below", "<"], ["<=", "At most", "≤"], ["=", "Equals", "="],
 ];
@@ -49,19 +51,19 @@ const OP_SYM: Record<string, string> = { ">": ">", ">=": "≥", "<": "<", "<=": 
 const MONEY = new Set(["revenue", "net_income", "total_debt", "total_cash", "free_cashflow"]);
 const UNIT_SUFFIX: Record<string, string> = { "%": "%", "%/yr": "%", "₹Cr": " Cr", pts: " pts", "×": "×" };
 
-function labelOf(key: string): string {
-  const f = FIELD_BY_KEY.get(key);
+function labelOf(key: string, by: ByKey = COMPANY_BY): string {
+  const f = by.get(key);
   return f?.short ?? f?.label ?? key;
 }
 
-function fmtVal(key: string, v: unknown): string {
+function fmtVal(key: string, v: unknown, by: ByKey = COMPANY_BY): string {
   if (typeof v !== "number" || !Number.isFinite(v)) return "—";
   const crore = (cr: number) => (Math.abs(cr) >= 1e5 ? `₹${(cr / 1e5).toFixed(2)}L Cr` : `₹${Math.round(cr).toLocaleString("en-IN")} Cr`);
   if (key === "mcap") return crore(v);
   if (MONEY.has(key)) return crore(v / 1e7);
-  if (["price", "wk52_high", "wk52_low", "book_value"].includes(key)) return `₹${v.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  const u = by.get(key)?.unit ?? "";
+  if (u === "₹" || ["wk52_high", "wk52_low", "book_value"].includes(key)) return `₹${v.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
   if (key === "f_score") return `${Math.round(v)}/9`;
-  const u = FIELD_BY_KEY.get(key)?.unit ?? "";
   if (u === "%" || u === "%/yr") return `${v.toLocaleString("en-IN", { maximumFractionDigits: 1 })}%`;
   if (u === "pts") return `${signed(v, 2)} pts`;
   if (u === "×") return `${v.toFixed(2)}×`;
@@ -70,7 +72,7 @@ function fmtVal(key: string, v: unknown): string {
 
 /** Simple queries - "field op number" joined by one kind of and/or - become
  *  chips. Anything else (arithmetic, brackets, custom ratios) stays a formula. */
-function parseConds(q: string): { conds: Cond[]; joiner: "and" | "or" } | null {
+function parseConds(q: string, by: ByKey = COMPANY_BY): { conds: Cond[]; joiner: "and" | "or" } | null {
   const t = q.trim();
   if (!t) return { conds: [], joiner: "and" };
   const parts = t.split(/\s+(and|or)\s+/i);
@@ -81,7 +83,7 @@ function parseConds(q: string): { conds: Cond[]; joiner: "and" | "or" } | null {
     const m = /^([a-z_][a-z0-9_]*)\s*(<=|>=|!=|<|>|=)\s*(-?\d+(?:\.\d+)?)$/i.exec(parts[i].trim());
     if (!m) return null;
     const field = canonicalField(m[1]);
-    if (!FIELD_BY_KEY.has(field)) return null;
+    if (!by.has(field)) return null;
     conds.push({ field, op: m[2], value: m[3] });
   }
   return { conds, joiner: (joins[0] as "and" | "or") ?? "and" };
@@ -98,12 +100,20 @@ function readJSON<T>(key: string, fallback: T): T {
 function ScreensInner() {
   const router = useRouter();
   const params = useSearchParams();
-  const query = params.has("q") ? params.get("q") ?? "" : DEFAULT_QUERY;
+  // What is being screened: companies, indices, or MCX and NCDEX contracts.
+  const uniRaw = params.get("u");
+  const uni: Universe = uniRaw === "indices" || uniRaw === "commodities" ? uniRaw : "companies";
+  const catalog = useMemo(() => catalogFor(uni), [uni]);
+  const by = useMemo<ByKey>(() => new Map(catalog.map((f) => [f.key, f])), [catalog]);
+  const groupsOf = useMemo(() => Array.from(new Set(catalog.map((f) => f.group))), [catalog]);
+  const query = params.has("q") ? params.get("q") ?? "" : uni === "companies" ? DEFAULT_QUERY : "";
   const sectors = useMemo(() => (params.get("sec") ?? "").split(",").filter(Boolean), [params]);
   const libId = params.get("lib");
   const lib = useMemo(() => libraryById(libId), [libId]);
 
   const [data, setData] = useState<Data | null>(null);
+  const [idxRows, setIdxRows] = useState<Row[] | null>(null);
+  const [comRows, setComRows] = useState<Row[] | null>(null);
   const [loadError, setLoadError] = useState("");
   const [tab, setTab] = useState<Tab>("screen");
   const [sheet, setSheet] = useState<Sheet>(null);
@@ -129,22 +139,46 @@ function ScreensInner() {
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then(setData)
       .catch((e) => setLoadError(`Could not load the company data (${e.message}).`));
+    // Indices and commodities are small files, read once and shaped into the
+    // same rows the query engine reads; the group filter is NSE's index group
+    // for an index and the exchange for a contract.
+    fetch(`${BASE}/indices.json`).then((r) => (r.ok ? r.json() : null)).then((d) => {
+      if (!d?.items) return;
+      setIdxRows(d.items.map((x: Record<string, unknown>) => ({
+        symbol: x.s, name: x.name, sector: x.group, price: x.close, ret_1d: x.chg_pct, ret_1m: x.r1m, ret_1y: x.r1y,
+        pe: x.pe, pb: x.pb, div_yield: x.dy, pe_pct: x.pe_pct, from_ath: x.from_ath, members: x.n || null,
+      }) as unknown as Row));
+    }).catch(() => {});
+    fetch(`${BASE}/commodities.json`).then((r) => (r.ok ? r.json() : null)).then((d) => {
+      if (!d?.items) return;
+      setComRows(d.items.map((x: Record<string, unknown>) => ({
+        symbol: x.s, name: x.name, sector: x.exchange ?? "MCX", price: x.close, ret_1d: x.chg, next_prem: x.next_prem,
+        carry_pa: x.carry_pa, world_prem: x.world_prem, spot_prem: x.spot_prem ?? null, oi: x.oi || null, vol: x.vol || null,
+      }) as unknown as Row));
+    }).catch(() => {});
     setSaved(loadSaved());
     setRatios(readJSON<Ratio[]>("rscreener_ratios", []));
     setLists(loadLists());
   }, []);
 
   const ratiosMap = useMemo(() => Object.fromEntries(ratios.map((r) => [r.name, r.formula])), [ratios]);
-  const parsed = useMemo(() => parseConds(query), [query]);
+  const parsed = useMemo(() => parseConds(query, by), [query, by]);
+  // The rows of whatever is being screened.
+  const rows = uni === "indices" ? idxRows : uni === "commodities" ? comRows : data?.rows ?? null;
+  const hrefOf = (sym: string) => uni === "indices" ? `/indices/view?s=${encodeURIComponent(sym)}`
+    : uni === "commodities" ? `/commodity?s=${encodeURIComponent(sym)}` : `/company?s=${encodeURIComponent(sym)}`;
+  const chartOf = (sym: string) => `/chart?s=${encodeURIComponent(uni === "commodities" ? `${sym}1!` : sym)}`;
 
   /** The screen is the address: Back, reload and a shared link all land on
    *  the same result. Editing a filter replaces the entry; opening another
    *  screen adds one. */
-  const go = (next: { q?: string; sec?: string[]; lib?: string | null }, push = false) => {
+  const go = (next: { q?: string; sec?: string[]; lib?: string | null; u?: Universe }, push = false) => {
+    const u = next.u ?? uni;
     const q = next.q ?? query;
     const sec = next.sec ?? sectors;
     const l = next.lib === undefined ? lib?.id : next.lib;
     const sp = new URLSearchParams();
+    if (u !== "companies") sp.set("u", u);
     sp.set("q", q);
     if (sec.length) sp.set("sec", sec.join(","));
     if (l) sp.set("lib", l);
@@ -155,17 +189,19 @@ function ScreensInner() {
   const setConds = (conds: Cond[], joiner: "and" | "or" = parsed?.joiner ?? "and") => go({ q: toQuery(conds, joiner) });
 
   const allSectors = useMemo(
-    () => Array.from(new Set((data?.rows ?? []).map((r) => String(r.sector ?? "")).filter(Boolean))).sort(),
-    [data]);
+    () => Array.from(new Set((rows ?? []).map((r) => String(r.sector ?? "")).filter(Boolean))).sort(),
+    [rows]);
 
   const result = useMemo(() => {
-    if (!data) return null;
+    if (!rows) return null;
     try {
-      const { run, fields } = query.trim() ? compile(query, ratiosMap) : { run: () => true as boolean | null, fields: [] as string[] };
+      const { run, fields } = query.trim()
+        ? compile(query, uni === "companies" ? ratiosMap : {}, uni === "companies" ? undefined : catalog.map((f) => f.key))
+        : { run: () => true as boolean | null, fields: [] as string[] };
       const sec = sectors.length ? new Set(sectors) : null;
       const matches: Row[] = [];
       let skipped = 0;
-      for (const r of data.rows) {
+      for (const r of rows) {
         if (sec && !sec.has(String(r.sector ?? ""))) continue;
         const res = run(r);
         if (res === true) matches.push(r);
@@ -175,9 +211,9 @@ function ScreensInner() {
     } catch (e) {
       return { matches: [] as Row[], skipped: 0, fields: [] as string[], error: e instanceof Error ? e.message : String(e) };
     }
-  }, [data, query, sectors, ratiosMap]);
+  }, [rows, uni, catalog, query, sectors, ratiosMap]);
 
-  const sortKey = sort?.key ?? (lib?.rank ? "__rank" : lib?.sort?.[0] ?? "mcap");
+  const sortKey = sort?.key ?? (lib?.rank ? "__rank" : lib?.sort?.[0] ?? (uni === "companies" ? "mcap" : uni === "indices" ? "members" : "oi"));
   const sortDesc = sort ? sort.desc : lib?.rank ? false : lib?.sort ? lib.sort[1] === -1 : true;
 
   const sorted = useMemo(() => {
@@ -209,20 +245,21 @@ function ScreensInner() {
   // The figures each result row shows: the ones being filtered on.
   const rowFields = useMemo(() => {
     const own = (result?.fields ?? []).filter((f) => !["price", "ret_1d"].includes(f));
-    const pick = own.length ? own : ["pe", "roce", "mcap"];
+    const pick = own.length ? own
+      : uni === "indices" ? ["pe", "ret_1y", "from_ath"] : uni === "commodities" ? ["next_prem", "world_prem", "spot_prem"] : ["pe", "roce", "mcap"];
     return pick.slice(0, 3);
-  }, [result]);
+  }, [result, uni]);
 
   // Each figure's median across companies - the value a new filter starts at,
   // so "ROCE above" opens on a sensible number rather than a blank.
   const medianOf = useMemo(() => {
     const m = new Map<string, number>();
-    for (const f of FIELD_CATALOG) {
-      const v = (data?.rows ?? []).map((r) => r[f.key]).filter((x): x is number => typeof x === "number" && Number.isFinite(x)).sort((a, b) => a - b);
+    for (const f of catalog) {
+      const v = (rows ?? []).map((r) => r[f.key]).filter((x): x is number => typeof x === "number" && Number.isFinite(x)).sort((a, b) => a - b);
       if (v.length) m.set(f.key, v[Math.floor(v.length / 2)]);
     }
     return m;
-  }, [data]);
+  }, [rows, catalog]);
   const medians = (key: string): number | null => medianOf.get(key) ?? null;
 
   // ── saved screens and what changed in them ──
@@ -241,14 +278,14 @@ function ScreensInner() {
     setSort(null);
     setTab("screen");
     setSheet(null);
-    go({ q: s.query, sec: s.sectors ?? [], lib: s.lib ?? null }, true);
+    go({ q: s.query, sec: s.sectors ?? [], lib: s.lib ?? null, u: "companies" }, true);
   };
 
   const openLibrary = (l: LibraryScreen) => {
     setSort(null);
     setTab("screen");
     const sec = l.excludeSectors ? allSectors.filter((x) => !l.excludeSectors!.includes(x)) : [];
-    go({ q: l.query, sec, lib: l.id }, true);
+    go({ q: l.query, sec, lib: l.id, u: "companies" }, true);
   };
 
   const saveScreen = () => {
@@ -284,12 +321,12 @@ function ScreensInner() {
 
   const exportCsv = () => {
     if (!result) return;
-    const cols = ["symbol", "name", "sector", "price", "ret_1d", "mcap", ...result.fields.filter((f) => !["price", "ret_1d", "mcap"].includes(f))];
+    const cols = ["symbol", "name", "sector", "price", "ret_1d", ...(uni === "companies" ? ["mcap"] : []), ...result.fields.filter((f) => !["price", "ret_1d", "mcap"].includes(f))];
     const esc = (v: unknown) => {
       const s = v === null || v === undefined ? "" : String(v);
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const lines = [cols.map((c) => (c === "symbol" ? "Symbol" : c === "name" ? "Name" : c === "sector" ? "Sector" : FIELD_BY_KEY.get(c)?.label ?? c)).join(",")];
+    const lines = [cols.map((c) => (c === "symbol" ? "Symbol" : c === "name" ? "Name" : c === "sector" ? "Sector" : by.get(c)?.label ?? c)).join(",")];
     for (const r of sorted) lines.push(cols.map((c) => esc(r[c])).join(","));
     const blob = new Blob([String.fromCharCode(0xfeff) + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
@@ -320,10 +357,10 @@ function ScreensInner() {
 
   const pickList = useMemo(() => {
     const q = pickText.trim().toLowerCase();
-    return FIELD_CATALOG.filter((f) => !q || f.label.toLowerCase().includes(q) || f.key.includes(q) || (f.short ?? "").toLowerCase().includes(q));
-  }, [pickText]);
+    return catalog.filter((f) => !q || f.label.toLowerCase().includes(q) || f.key.includes(q) || (f.short ?? "").toLowerCase().includes(q));
+  }, [pickText, catalog]);
 
-  const sheetRow = sheet?.kind === "row" ? data?.rows.find((r) => r.symbol === sheet.sym) : undefined;
+  const sheetRow = sheet?.kind === "row" ? rows?.find((r) => r.symbol === sheet.sym) : undefined;
   const sheetSaved = sheet?.kind === "saved" ? savedState.find((x) => x.s.name === sheet.name) : undefined;
 
   const chip = "rs-press inline-flex items-center gap-1.5 min-h-[36px] px-3 rounded-full text-[13px] border";
@@ -360,6 +397,16 @@ function ScreensInner() {
         {/* ── your screen ── */}
         {tab === "screen" && (
           <>
+            <div role="radiogroup" aria-label="What to screen" className="flex gap-1 mb-3">
+              {UNIVERSES.map(([k, label]) => (
+                <button key={k} type="button" role="radio" aria-checked={uni === k}
+                  onClick={() => { if (k !== uni) { setSort(null); go({ u: k, q: k === "companies" ? DEFAULT_QUERY : "", sec: [], lib: null }, true); } }}
+                  className={`min-h-[32px] px-3 rounded-full text-[13px] border ${uni === k
+                    ? "bg-[var(--card2)] text-[var(--ink)] border-[var(--line2)] font-semibold" : "text-[var(--ink3)] border-transparent"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
             {lib && (
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-[13px] font-semibold text-[var(--accent-ink)]">{lib.name}</span>
@@ -374,10 +421,10 @@ function ScreensInner() {
                   {parsed.conds.map((c, i) => (
                     <span key={`${c.field}-${i}`} className={`${chip} pr-1 bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-semibold`}>
                       <button type="button" onClick={() => openCond(i, c.field)} className="tabular-nums">
-                        {labelOf(c.field)} {OP_SYM[c.op] ?? c.op} {c.value}{UNIT_SUFFIX[FIELD_BY_KEY.get(c.field)?.unit ?? ""] ?? ""}
+                        {labelOf(c.field, by)} {OP_SYM[c.op] ?? c.op} {c.value}{UNIT_SUFFIX[by.get(c.field)?.unit ?? ""] ?? ""}
                       </button>
                       <button type="button" onClick={() => setConds(parsed.conds.filter((_, j) => j !== i))}
-                        aria-label={`Remove ${labelOf(c.field)}`} className="w-6 h-6 inline-flex items-center justify-center opacity-70">
+                        aria-label={`Remove ${labelOf(c.field, by)}`} className="w-6 h-6 inline-flex items-center justify-center opacity-70">
                         <Icon name="close" size={13} />
                       </button>
                     </span>
@@ -401,7 +448,8 @@ function ScreensInner() {
               </button>
               <button type="button" onClick={() => setSheet({ kind: "sectors" })}
                 className={`${chip} ${sectors.length ? "bg-[var(--accent-soft)] border-[var(--accent-line)] text-[var(--accent-ink)] font-semibold" : "border-[var(--line)] text-[var(--ink2)]"}`}>
-                {sectors.length === 0 ? "All sectors" : sectors.length === 1 ? sectors[0] : `${sectors.length} sectors`}
+                {sectors.length === 0 ? (uni === "indices" ? "All groups" : uni === "commodities" ? "MCX and NCDEX" : "All sectors")
+                  : sectors.length === 1 ? sectors[0] : `${sectors.length} ${uni === "indices" ? "groups" : uni === "commodities" ? "exchanges" : "sectors"}`}
               </button>
             </div>
 
@@ -412,7 +460,9 @@ function ScreensInner() {
                 <div className="flex items-center gap-1 border-b border-[var(--line)] pb-1">
                   <p className="text-[13px] text-[var(--ink2)] flex items-center">
                     <strong className="text-[var(--ink)] tabular-nums mr-1">{result.matches.length.toLocaleString("en-IN")}</strong>
-                    {result.matches.length === 1 ? "company" : "companies"}
+                    {uni === "indices" ? (result.matches.length === 1 ? "index" : "indices")
+                      : uni === "commodities" ? (result.matches.length === 1 ? "contract type" : "contract types")
+                      : result.matches.length === 1 ? "company" : "companies"}
                     {result.skipped > 0 && (
                       <InfoTip title="Left out" className="ml-1.5">
                         <p>{result.skipped.toLocaleString("en-IN")} companies are missing one of the figures filtered on, so they are left out rather than counted as zero.</p>
@@ -434,16 +484,16 @@ function ScreensInner() {
                         <button type="button" onClick={() => setSheet({ kind: "row", sym })}
                           className="w-full py-2.5 text-left active:bg-[var(--card2)]">
                           <div className="flex items-baseline justify-between gap-3">
-                            <span className="min-w-0 truncate text-[15px] font-medium text-[var(--ink)]">{sym}</span>
+                            <span className="min-w-0 truncate text-[15px] font-medium text-[var(--ink)]">{uni === "indices" ? String(r.name) : shownSymbol(sym)}</span>
                             <span className={`shrink-0 text-[15px] font-medium tabular-nums ${tone(chg)}`}>{money(price)}</span>
                           </div>
                           <div className="flex items-baseline justify-between gap-3 text-[11px] text-[var(--ink3)]">
-                            <span className="min-w-0 truncate">{shortName(String(r.name ?? ""), sym)}</span>
+                            <span className="min-w-0 truncate">{uni === "companies" ? shortName(String(r.name ?? ""), sym) : String(r.sector ?? "")}</span>
                             <span className="shrink-0 tabular-nums">{chg === null ? "—" : <>{signed(dayMove(price, chg))} <span className={tone(chg)}>({signed(chg)}%)</span></>}</span>
                           </div>
                           <p className="mt-0.5 text-[12px] text-[var(--ink2)] tabular-nums truncate">
-                            {rowFields.map((f, i) => (
-                              <span key={f}>{i > 0 && <span className="text-[var(--ink3)]"> · </span>}<span className="text-[var(--ink3)]">{labelOf(f)}</span> {fmtVal(f, r[f])}</span>
+                            {rowFields.filter((f) => uni === "companies" || r[f] != null).map((f, i) => (
+                              <span key={f}>{i > 0 && <span className="text-[var(--ink3)]"> · </span>}<span className="text-[var(--ink3)]">{labelOf(f, by)}</span> {fmtVal(f, r[f], by)}</span>
                             ))}
                           </p>
                         </button>
@@ -457,10 +507,10 @@ function ScreensInner() {
                     Show more · {(sorted.length - rowLimit).toLocaleString("en-IN")} left
                   </button>
                 )}
-                {sorted.length === 0 && <p className="py-12 text-center text-[13px] text-[var(--ink3)]">No company passes every filter</p>}
+                {sorted.length === 0 && <p className="py-12 text-center text-[13px] text-[var(--ink3)]">Nothing passes every filter</p>}
               </>
             )}
-            {!data && !loadError && <p className="py-12 text-center text-[13px] text-[var(--ink3)]">Loading companies…</p>}
+            {!rows && !loadError && <p className="py-12 text-center text-[13px] text-[var(--ink3)]">Loading…</p>}
           </>
         )}
 
@@ -519,7 +569,7 @@ function ScreensInner() {
               className="flex-1 min-w-0 bg-transparent outline-none text-[14px] text-[var(--ink)]" />
           </label>
           <div className="max-h-[52vh] overflow-y-auto -mx-1 px-1">
-            {FIELD_GROUPS.map((g) => {
+            {groupsOf.map((g) => {
               const fs = pickList.filter((f) => f.group === g);
               if (!fs.length) return null;
               return (
@@ -544,7 +594,7 @@ function ScreensInner() {
 
       {/* ── one filter ── */}
       {sheet?.kind === "cond" && (() => {
-        const f = FIELD_BY_KEY.get(sheet.field);
+        const f = by.get(sheet.field);
         const med = medians(sheet.field);
         return (
           <InfoDialog title={f?.label ?? sheet.field} onClose={() => setSheet(null)}>
@@ -566,8 +616,8 @@ function ScreensInner() {
               </label>
               {med !== null && (
                 <p className="text-[12px] text-[var(--ink3)]">
-                  Median across companies: <button type="button" onClick={() => setValText(String(Math.round(med * 10) / 10))}
-                    className="font-semibold text-[var(--accent-ink)] tabular-nums">{fmtVal(sheet.field, med)}</button>
+                  Median across {uni === "companies" ? "companies" : uni}: <button type="button" onClick={() => setValText(String(Math.round(med * 10) / 10))}
+                    className="font-semibold text-[var(--accent-ink)] tabular-nums">{fmtVal(sheet.field, med, by)}</button>
                 </p>
               )}
               <button type="submit" disabled={!Number.isFinite(parseFloat(valText))}
@@ -609,8 +659,9 @@ function ScreensInner() {
 
       {/* ── sort ── */}
       {sheet?.kind === "sort" && (() => {
-        const keys = Array.from(new Set([...(lib?.rank ? ["__rank"] : []), "mcap", "ret_1d", "price", ...(result?.fields ?? [])]));
-        const opts = keys.map((k) => [k, k === "__rank" ? "Combined rank" : FIELD_BY_KEY.get(k)?.label ?? k] as [string, string]);
+        const base = uni === "companies" ? ["mcap", "ret_1d", "price"] : uni === "indices" ? ["members", "ret_1d", "ret_1y", "pe"] : ["oi", "ret_1d", "next_prem"];
+        const keys = Array.from(new Set([...(lib?.rank ? ["__rank"] : []), ...base, ...(result?.fields ?? [])]));
+        const opts = keys.map((k) => [k, k === "__rank" ? "Combined rank" : by.get(k)?.label ?? k] as [string, string]);
         return (
           <InfoDialog title="Sort" onClose={() => setSheet(null)}>
             <Chips value={sortKey} options={opts}
@@ -630,13 +681,13 @@ function ScreensInner() {
           <p className="flex items-center gap-1">Field names, &lt; &gt; = and or, and arithmetic.
             <InfoTip title="Formula">
               <p>Example: <code className="font-mono">roce &gt; 20 and pe &lt; median_pe_5y * 0.8</code></p>
-              <p>Field names are the ones in the filter list, written in lower case with underscores: {FIELD_CATALOG.slice(0, 12).map((f) => f.key).join(", ")} and so on. Custom ratios work too.</p>
+              <p>Field names are the ones in the filter list, written in lower case with underscores: {catalog.slice(0, 12).map((f) => f.key).join(", ")} and so on.{uni === "companies" ? " Custom ratios work too." : ""}</p>
             </InfoTip>
           </p>
           <textarea value={formulaText} onChange={(e) => setFormulaText(e.target.value)} rows={3} spellCheck={false} autoFocus
             className="w-full font-mono text-[13px] px-3 py-2 rounded-lg border border-[var(--line)] bg-[var(--card2)] text-[var(--ink)] outline-none focus:border-[var(--accent-line)]" />
           {(() => {
-            try { if (formulaText.trim()) compile(formulaText, ratiosMap); return null; }
+            try { if (formulaText.trim()) compile(formulaText, uni === "companies" ? ratiosMap : {}, uni === "companies" ? undefined : catalog.map((f) => f.key)); return null; }
             catch (e) { return <p className="text-[12px] text-[var(--neg)]">{e instanceof Error ? e.message : String(e)}</p>; }
           })()}
           <button type="button" onClick={() => { go({ q: formulaText.trim() }); setSheet(null); }}
@@ -649,13 +700,13 @@ function ScreensInner() {
       {/* ── more ── */}
       {sheet?.kind === "more" && (
         <InfoDialog title="This screen" onClose={() => setSheet(null)}>
-          <SheetAction icon="check" onClick={() => { setNameText(lib?.name ?? ""); setSheet({ kind: "save" }); }}>Save screen</SheetAction>
+          {uni === "companies" && <SheetAction icon="check" onClick={() => { setNameText(lib?.name ?? ""); setSheet({ kind: "save" }); }}>Save screen</SheetAction>}
           <SheetAction icon="page" onClick={() => {
             navigator.clipboard?.writeText(location.href).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1800); }, () => {});
           }}>{copied ? "Link copied" : "Copy link"}</SheetAction>
           <SheetAction icon="upload" onClick={() => { exportCsv(); setSheet(null); }}>Export to Excel (CSV)</SheetAction>
           <SheetAction icon="edit" onClick={() => { setFormulaText(query); setSheet({ kind: "formula" }); }}>Edit as formula</SheetAction>
-          <SheetAction icon="sliders" onClick={() => { setRatioError(""); setSheet({ kind: "ratios" }); }}>Custom ratios</SheetAction>
+          {uni === "companies" && <SheetAction icon="sliders" onClick={() => { setRatioError(""); setSheet({ kind: "ratios" }); }}>Custom ratios</SheetAction>}
         </InfoDialog>
       )}
 
@@ -703,7 +754,10 @@ function ScreensInner() {
         const sym = String(sheetRow.symbol);
         const price = typeof sheetRow.price === "number" ? sheetRow.price : null;
         const chg = typeof sheetRow.ret_1d === "number" ? sheetRow.ret_1d : null;
-        const figs = Array.from(new Set([...(result?.fields ?? []), "pe", "roce", "mcap", "roe", "de", "ret_1y"])).filter((f) => !["price", "ret_1d"].includes(f)).slice(0, 9);
+        const more = uni === "companies" ? ["pe", "roce", "mcap", "roe", "de", "ret_1y"]
+          : uni === "indices" ? ["pe", "pb", "div_yield", "pe_pct", "ret_1m", "ret_1y", "from_ath", "members"]
+          : ["next_prem", "carry_pa", "world_prem", "spot_prem", "oi", "vol"];
+        const figs = Array.from(new Set([...(result?.fields ?? []), ...more])).filter((f) => !["price", "ret_1d"].includes(f) && sheetRow[f] != null).slice(0, 9);
         return (
           <InfoDialog title={shortName(String(sheetRow.name ?? ""), sym)} onClose={() => setSheet(null)}>
             <div className="flex items-baseline flex-wrap gap-x-2">
@@ -712,14 +766,14 @@ function ScreensInner() {
             </div>
             <p className="text-[11px] text-[var(--ink3)]">{sym}{sheetRow.sector ? ` · ${sheetRow.sector}` : ""}</p>
             <div className="grid grid-cols-3 gap-3 py-2">
-              {figs.map((f) => <Stat key={f} label={labelOf(f)} value={fmtVal(f, sheetRow[f])} />)}
+              {figs.map((f) => <Stat key={f} label={labelOf(f, by)} value={fmtVal(f, sheetRow[f], by)} />)}
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <Link href={`/company?s=${encodeURIComponent(sym)}`}
+              <Link href={hrefOf(sym)}
                 className="rs-press inline-flex items-center justify-center gap-2 min-h-[44px] rounded-xl bg-[var(--accent-fill)] text-[var(--accent-fill-ink)] text-[14px] font-semibold">
                 <Icon name="page" size={16} /> Overview
               </Link>
-              <Link href={`/chart?s=${encodeURIComponent(sym)}`}
+              <Link href={chartOf(sym)}
                 onClick={() => { try { sessionStorage.setItem("rs_chart_from", location.pathname + location.search); } catch { /* private mode */ } }}
                 className="rs-press inline-flex items-center justify-center gap-2 min-h-[44px] rounded-xl border border-[var(--line2)] text-[var(--ink)] text-[14px] font-semibold">
                 <Icon name="chart" size={16} /> Chart

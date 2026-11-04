@@ -85,8 +85,8 @@ export default function StatusPage() {
             <InfoTip title="Data status" className="ml-2">
               <p>
                 What Rscreener holds, how fresh each part is, and where it is still catching up.
-                Everything refreshes automatically each night at 22:00 IST — nothing here needs
-                you to press anything.
+                Everything refreshes automatically each night. The run is scheduled for 22:00 IST;
+                GitHub often starts it a few hours later. Nothing here needs you to press anything.
               </p>
               <p>
                 &ldquo;Current&rdquo; means a company is no more than one reporting period behind
@@ -119,7 +119,7 @@ export default function StatusPage() {
               {[
                 ["Companies tracked", s.universe.toLocaleString("en-IN")],
                 ["Data built", s.generated_at],
-                ["Refresh schedule", "Nightly, 22:00 IST"],
+                ["Refresh schedule", "Nightly, from 22:00 IST"],
               ].map(([k, v]) => (
                 <div key={k} className="bg-[var(--card)] border border-[var(--line)] rounded-xl px-4 py-3">
                   <p className="text-xs text-[var(--ink3)]">{k}</p>

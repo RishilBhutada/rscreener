@@ -15,8 +15,8 @@ const DAY = 86400;
 type Row = [number, number, number | null, number | null]; // day, pe, pb, dy
 type Metric = "pe" | "pb" | "dy";
 const METRICS: [Metric, string, number][] = [["pe", "PE", 1], ["pb", "PB", 2], ["dy", "Div yield", 3]];
-type Range = "1Y" | "3Y" | "5Y" | "10Y";
-const RANGES: [Range, number][] = [["1Y", 366], ["3Y", 1096], ["5Y", 1827], ["10Y", 3653]];
+type Range = "1Y" | "3Y" | "5Y" | "10Y" | "All";
+const RANGES: [Range, number][] = [["1Y", 366], ["3Y", 1096], ["5Y", 1827], ["10Y", 3653], ["All", 100000]];
 
 const toTime = (d: number) => (d * DAY) as UTCTimestamp;
 const dateOf = (d: number) =>

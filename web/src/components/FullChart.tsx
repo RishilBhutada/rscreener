@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronGlyph } from "@/components/Glyphs";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -76,7 +77,6 @@ function caTag(k: string, detail?: string | null): string {
   return "Other";
 }
 /** Indian fiscal quarter of a calendar month: Apr-Jun is Q1. */
-const fyQ = (month: number) => (month >= 4 && month <= 6 ? 1 : month >= 7 && month <= 9 ? 2 : month >= 10 ? 3 : 4);
 
 const RANGES: Range[] = ["1M", "3M", "6M", "YTD", "1Y", "2Y", "3Y", "5Y", "10Y", "MAX"];
 const RANGE_DAYS: Record<Range, number> = {
@@ -1495,13 +1495,14 @@ export default function FullChart({ symbol }: { symbol: string }) {
         </button>
         <div className="min-w-0 flex-1">
           <p className="text-[15px] font-bold leading-tight truncate">
-            {symbol}
-            <span className="ml-1.5 text-[10px] font-semibold rounded px-1 py-0.5 bg-[var(--card2)] text-[var(--ink3)] align-middle">{exch}</span>
-            {name && <span className="ml-1.5 text-xs font-medium text-[var(--ink3)]">{name}</span>}
+            {symbol.startsWith("^") ? name || symbol.slice(1) : symbol}
+            <span className="ml-1.5 text-[10px] font-semibold rounded px-1 py-0.5 bg-[var(--card2)] text-[var(--ink3)] align-middle">{symbol.startsWith("^") ? `${exch} INDEX` : exch}</span>
+            {name && !symbol.startsWith("^") && <span className="ml-1.5 text-xs font-medium text-[var(--ink3)]">{name}</span>}
           </p>
           {lastD && (
             <p className="text-xs leading-tight tabular-nums">
-              <span className="font-semibold text-[var(--ink)]">₹{price(lastD[4])}</span>
+              {/* An index is in points, not rupees. */}
+              <span className="font-semibold text-[var(--ink)]">{symbol.startsWith("^") ? "" : "₹"}{price(lastD[4])}</span>
               {dayChg !== null && prevD && (
                 <span className={`ml-1.5 font-medium ${tone(dayChg)}`}>
                   {dayChg >= 0 ? "+" : ""}{price(dayChg)} ({dayChg >= 0 ? "+" : ""}{((dayChg / prevD[4]) * 100).toFixed(2)}%)
@@ -1645,7 +1646,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
                   );
                 })}
               </div>
-              <button onClick={() => setSheet("type")} className={pill(prefs.log)}>{kindLabel}{prefs.log ? " · Log" : ""} ▾</button>
+              <button onClick={() => setSheet("type")} className={pill(prefs.log)}>{kindLabel}{prefs.log ? " · Log" : ""} <ChevronGlyph size={11} /></button>
             </>
           ) : view === "pe" && company?.pe_band?.alt?.q1 ? (
             <Seg value={peWin} options={PE_WINDOWS.map(([k, label]) => [k, label] as [string, string])} onChange={(v) => { kept.current = null; setPeWin(v); }} />

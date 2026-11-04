@@ -1,7 +1,9 @@
 "use client";
 
+import { CheckGlyph, ChevronGlyph } from "@/components/Glyphs";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import InfoTip from "@/components/InfoTip";
+import { loadIndex } from "@/lib/index-data";
 import Link from "next/link";
 
 type Pt = [string, number] | [string, number, number | null];
@@ -429,10 +431,12 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
 
   useEffect(() => {
     if (!pickAny || allCos.length) return;
-    fetch(`${CHART_BASE}/data.json`)
-      .then((r) => r.json())
-      .then((d) => setAllCos((d.rows as Record<string, unknown>[]).map((r) => ({
-        symbol: String(r.symbol), name: String(r.name ?? ""), mcap: (r.mcap as number) ?? 0,
+    // The search index, not the 1.4 MB company table: a name and a size per
+    // company is all the picker needs. Companies only - no ETFs, contracts or
+    // indices, which have no P/E or EPS to compare.
+    loadIndex()
+      .then((d) => setAllCos(d.rows.filter((r) => !r.etf && !r.commodity && !r.index).map((r) => ({
+        symbol: r.symbol, name: r.name, mcap: r.mcap ?? 0,
       }))))
       .catch(() => { /* the peer list still works without it */ });
   }, [pickAny, allCos.length]);
@@ -672,7 +676,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     }
 
     return defs;
-  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, showQ, epsCmp, quarters, cmp, symbol]);
+  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, epsCmp, quarters, cmp, symbol, exchange, years]);
 
   // With the quarterly-results overlay on, the per-quarter EPS bars are already
   // on screen. Keeping the summed TTM bars too puts two different quantities in
@@ -696,7 +700,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const mkAxis = (axis: "L" | "R") => {
     const vals = axisVals(axis);
     if (!vals.length) return null;
-    let lo = Math.min(...vals), hi = Math.max(...vals);
+    let lo = Math.min(...vals);
+    const hi = Math.max(...vals);
     if (axis === "L") {
       // Earnings compound ~40x over 20 years. Anchored at zero the early bars
       // collapse into invisible slivers and the series reads as "line goes up"
@@ -878,7 +883,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                 : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
             }`}
           >
-            {showQ ? "✓ " : ""}Quarterly results
+            {showQ && <CheckGlyph className="mr-1" />}Quarterly results
           </button>
           {showQ && (
             <button
@@ -890,7 +895,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                   : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
               }`}
             >
-              {showDates ? "✓ " : ""}Result dates
+              {showDates && <CheckGlyph className="mr-1" />}Result dates
             </button>
           )}
           {view === "pe" && (
@@ -904,7 +909,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                     : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
                 }`}
               >
-                {showChg ? "✓ " : ""}Growth %
+                {showChg && <CheckGlyph className="mr-1" />}Growth %
               </button>
               {showChg && (
                 <div className="flex items-center gap-0.5 rounded-lg border border-[var(--line)] p-0.5">
@@ -1270,7 +1275,7 @@ function ChartShell({
           {moreItems.length > 0 && (
             <div className="relative">
               <button onClick={() => setMoreOpen(!moreOpen)} className={btn(!!activeMore)}>
-                {activeMore ? activeMore[1] : "More"} <span className="text-[11px]">▾</span>
+                {activeMore ? activeMore[1] : "More"} <ChevronGlyph size={11} />
               </button>
               {moreOpen && <div className="fixed inset-0 z-10" onClick={() => setMoreOpen(false)} />}
               {moreOpen && (
