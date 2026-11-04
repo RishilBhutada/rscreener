@@ -38,7 +38,7 @@ Ordered by how much it could mislead you, worst first.
 | 18 | `pipeline/seasons_lib.py:189-193` | PLAUSIBLE | The month in progress is stored with its latest session's date, so in Mar/Jun/Sep/Dec a part-month close is taken as that quarter's end. | The current quarter's price-season figure is based on a partial quarter until the month ends. Minor. | Ignore a quarter-end month whose label is not the month's last trading day. |
 | 19 | `pipeline/fetch_prices.py:93` | PLAUSIBLE | Split dates are converted in UTC while prices are dated in Indian time (`price_periods.ist_date`). If Yahoo stamps a split earlier than 05:30 IST, it is recorded a day early. | A split stamped on the day after a quarter end would be filed on the quarter-end day, so `adj_factor` would not adjust that quarter's EPS. Only matters for that timing. | Use `price_periods.ist_date` here too. |
 
-Counts: 10 CONFIRMED, 9 PLAUSIBLE (#6 counted as CONFIRMED).
+Counts: 11 CONFIRMED (1-9, 11, 14; #6 counted as CONFIRMED), 8 PLAUSIBLE.
 
 Not reported (checked, looked right): `price_periods.fold` labelling; `price_adjust`
 view and the "already adjusted" test; `fund_units`; `check_prices` age and median
