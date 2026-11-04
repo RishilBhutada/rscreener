@@ -125,6 +125,26 @@ def main() -> None:
         held += len(rows)
         a = b + timedelta(days=1)
 
+    # Today's rows are kept because NSE drops a meeting on its own day - but a
+    # meeting POSTPONED on the day was kept too, and the results watcher
+    # watched all evening for results that were not coming. A postponement
+    # shows as the same company with the same purpose on a later day in the
+    # new list; then today's row goes. (A meeting cancelled with no new date
+    # cannot be told from NSE's usual same-day drop, so it still stays.)
+    t0 = today.isoformat()
+    # The two NSE lists word a purpose differently; results are results.
+    what = lambda p_: "results" if "result" in (p_ or "").lower() else (p_ or "").strip().lower()  # noqa: E731
+    later = {(r[1], what(r[3])) for r in meetings
+             if t0 < r[4] <= (today + timedelta(days=30)).isoformat()}
+    on_list_today = {r[1] for r in meetings if r[4] == t0}
+    moved = [(sym, t0) for sym, purpose in con.execute(
+        "SELECT symbol, purpose FROM calendar_events WHERE kind='meeting' AND date=?", (t0,)).fetchall()
+        if sym not in on_list_today and (sym, what(purpose)) in later]
+    if moved:
+        con.executemany("DELETE FROM calendar_events WHERE kind='meeting' AND symbol=? AND date=?", moved)
+        con.commit()
+        print(f"board meetings moved off today: {', '.join(m[0] for m in moved)}")
+
     r = s.get(EXDATES.format(a=today, b=today + timedelta(days=45)), timeout=30)
     r.raise_for_status()
     body = r.json()
