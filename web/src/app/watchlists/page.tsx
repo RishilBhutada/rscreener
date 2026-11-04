@@ -330,7 +330,8 @@ export default function WatchlistsPage() {
                   ["roe", "ROE", (r) => r.roe, (v) => `${v.toFixed(1)}%`],
                   ["roce", "ROCE", (r) => r.roce, (v) => `${v.toFixed(1)}%`],
                   ["div_yield", "Div yld", (r) => r.div_yield, (v) => `${v.toFixed(2)}%`],
-                  ["mcap", "MCap ₹Cr", (r) => r.mcap || null, (v) => v >= 1e5 ? `${(v / 1e5).toFixed(2)}L` : Math.round(v).toLocaleString("en-IN")],
+                  // "18.45L Cr", not "18.45L" under a "₹Cr" heading, which read as ₹18.45 lakh.
+                  ["mcap", "MCap ₹", (r) => r.mcap || null, (v) => v >= 1e5 ? `${(v / 1e5).toFixed(2)}L Cr` : `${Math.round(v).toLocaleString("en-IN")} Cr`],
                 ];
                 const get = (sym: string, k: string) => {
                   const r = bySymbol.get(sym);
