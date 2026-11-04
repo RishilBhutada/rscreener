@@ -7,7 +7,7 @@ evening it happens: 30 minutes after each US release rated four stars or more
 on the gold calendar (an hour after the Fed, whose press conference starts 30
 minutes in), one push -
 
-  title    "US CPI inflation: a surprise" / "...: in line"
+  title    "US CPI inflation: early read, surprise-sized" / "...: early read, in line so far"
   body     the 2-year yield's move since the release (from the 2-Year T-Note
            futures, converted at a duration of about 1.9), the release's own
            surprise mark from the gold page, COMEX gold's move with prices,
@@ -126,10 +126,17 @@ def compose(e: dict, fam: dict) -> tuple[str, str] | None:
     gold5, gold1 = (g5 / g0 - 1) * 100, (g1 / g0 - 1) * 100
     mark = (fam.get("surprise") or {}).get("bp")
     mins = AFTER.get(e["fam"], 30)
-    verdict = "" if mark is None else (": a surprise" if max(abs(bp5), abs(bp1)) >= mark else ": in line")
+    # An EARLY read, and said so. The mark is built from whole-day moves on
+    # Treasury's 3:30pm curve; this compares it with the futures' move in the
+    # first 5-60 minutes - a different window and a different instrument - so
+    # the gold page's verdict for the day can differ. A matching intraday
+    # mark would need years of 5-minute history, which Yahoo does not keep.
+    verdict = "" if mark is None else (": early read, surprise-sized" if max(abs(bp5), abs(bp1)) >= mark
+                                       else ": early read, in line so far")
     lines = [
         f"{t.astimezone(IST):%H:%M} IST release. 2-year yield {bps(bp5)} in 5 min, {bps(bp1)} after {mins} min"
-        + (f" (a surprise for this release is {mark:g}bp or more)." if mark is not None else "."),
+        + (f" (the gold page calls it a surprise at {mark:g}bp or more over the whole day; this first read"
+           " from futures can differ from the day's)." if mark is not None else "."),
         f"COMEX gold {gold5:+.2f}% in 5 min, {gold1:+.2f}% after {mins} min ({g0:,.1f} to {g1:,.1f}).",
     ]
     now = e.get("now") or {}
