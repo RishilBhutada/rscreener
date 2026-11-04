@@ -54,6 +54,9 @@ jobs:
         run: |
           mkdir -p data site web/public/companies
           gh release download data-db --pattern rscreener.db.gz --dir data
+          # Kept as downloaded: before saving, pipeline/merge_newest.sh takes in
+          # whatever a nightly or refetch stored meanwhile instead of overwriting it.
+          cp data/rscreener.db.gz "$RUNNER_TEMP/rscreener-base.db.gz"
           gunzip -f data/rscreener.db.gz
           RUN=$(python pipeline/live_site.py)
           echo "run=$RUN" >> "$GITHUB_OUTPUT"
@@ -150,6 +153,9 @@ jobs:
           if [ "$SIZE" -lt 100000000 ]; then
             echo "database is only $SIZE bytes - refusing to overwrite the stored copy"; exit 0
           fi
+          # A nightly or refetch may have stored the database while this ran
+          # (different concurrency groups): take its work in, don't overwrite it.
+          bash pipeline/merge_newest.sh rscreener.db.gz data/rscreener.db "$RUNNER_TEMP/rscreener-base.db.gz"
           gzip -c data/rscreener.db > rscreener.db.gz
           ok=0
           for attempt in 1 2 3; do
