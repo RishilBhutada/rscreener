@@ -43,3 +43,11 @@ Checked and looked right (not reported): gold/silver/copper/aluminium unit facto
 premium rule; TER matching; index returns/CAGR spans (calendar days); the calendar's
 results "move" window and its voiding on reshaping events; Fed/BEA/FRED event
 times in New York time.
+
+## Checked against the stored database (4-Nov-2026, later the same day)
+
+| # | Verdict | What the data shows |
+|---|---|---|
+| 1 (COMEX gold dated two ways) | **CONFIRMED, fixed** | `GC=F` held 158 Sunday rows and repeated closes; the December contract had a Sunday 1-Nov row and no Friday 31-Oct, a day off until US clocks changed. Fixed on `main` in ab41034 (one dating rule, `commodities_lib.futures_day`). |
+| 10 (IPO listing date wiped) | NOT SEEN | No listed IPO has lost its listing date. What the data does show instead: 12 "upcoming" and 1 "current" rows whose bidding closed weeks ago and never moved to "past" (e.g. MADHURKNIT, SUMAX, ESDS) - harmless today, because the calendar only lists issues still open or listing ahead. Low priority. |
+| 12 (MCX 23:00 cut-off) | not testable from the database | |
