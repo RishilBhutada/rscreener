@@ -23,6 +23,9 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "web" / "public" / "data.json"
 STATE = Path(__file__).with_name("screen_state.json")
 SITE = "https://rishilbhutada.github.io/rscreener"
+# How many nights in a row a member may be kept on a missing figure before it
+# counts as having left.
+UNKNOWN_NIGHTS = 3
 
 # The screener's field aliases (web/src/lib/query.ts), the ones a hand-written
 # line is likely to use; any other name is read as the field itself.
@@ -224,21 +227,32 @@ def main() -> None:
             print(f"  {name}: cannot read the query ({e})")
             continue
         sec = set(sectors)
-        before = state.get(name, {}).get("symbols")
-        had = set(before or [])
-        now, unknown = [], 0
+        prev = state.get(name, {})
+        before = prev.get("symbols")
+        # Members are carried over a missing figure only while the screen is
+        # the one they passed: same query, same sectors. (A state saved
+        # before sectors were stored has none; it is taken as the same.)
+        same = prev.get("query") == query and prev.get("sectors", sectors) == sectors
+        had = set(before or []) if same else set()
+        streak = prev.get("unknown_nights", {}) if same else {}
+        now, unknown, nights = [], 0, {}
         for r in rows:
             if sec and r.get("sector") not in sec:
                 continue
             res = test(tree, r)
+            sym = r["symbol"]
             # A figure missing tonight is "unknown", not "fails": a member
             # whose figure went blank stays a member rather than "leaving"
-            # tonight and "joining" again when the figure comes back.
-            if res is True or (res is None and r["symbol"] in had):
-                now.append(r["symbol"])
-                unknown += res is None
+            # tonight and "joining" again when the figure comes back - for
+            # UNKNOWN_NIGHTS nights at most, then it counts as gone.
+            if res is True:
+                now.append(sym)
+            elif res is None and sym in had and streak.get(sym, 0) < UNKNOWN_NIGHTS:
+                now.append(sym)
+                nights[sym] = streak.get(sym, 0) + 1
+                unknown += 1
         now.sort()
-        new_state = {"asof": asof, "query": query, "symbols": now}
+        new_state = {"asof": asof, "query": query, "sectors": sectors, "symbols": now, "unknown_nights": nights}
         if before is None:
             state[name] = new_state
             print(f"  {name}: {len(now)} today - recorded, nothing to compare with yet")
