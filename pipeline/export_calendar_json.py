@@ -100,10 +100,31 @@ def crore(v: float | None) -> float | None:
     return round(c) if abs(c) >= 1000 else round(c, 1)
 
 
+RUPEES = re.compile(r"(?:₹|\bR[se]\.?)\s*([\d]+(?:\.\d+)?)")
+
+
 def money(text: str | None) -> float | None:
-    """"₹2.20", "Dividend - Rs 2.20 Per Share", "Re 0.10" -> the rupee amount."""
-    m = re.search(r"(?:₹|\bR[se]\.?)\s*([\d]+(?:\.\d+)?)", text or "")
+    """"₹2.20", "Dividend - Rs 2.20 Per Share", "Re 0.10" -> the first rupee
+    amount. For the stored detail, whose first figure is already the total
+    ("₹75 (₹8 + ₹67)", fetch_corporate_actions.dividend_detail)."""
+    m = RUPEES.search(text or "")
     return float(m.group(1)) if m else None
+
+
+def dividend_amount(text: str | None) -> float | None:
+    """The dividend per share in a corporate action's own wording, counting
+    every dividend it names: "Interim Dividend - Rs 10 Per Share And Special
+    Dividend - Rs 5 Per Share" is 15, not 10. Same rule as
+    fetch_corporate_actions.dividend_detail: one amount is that amount, and
+    wording that says one INCLUDES the other ("Rs 8.50 (Including Special
+    Dividend Of Rs 2)") takes the first. A face value is never a dividend."""
+    t = re.sub(r"face\s*value\s*(?:of\s*)?(?:₹|\bR[se]\.?)\s*[\d.]+", " ", text or "", flags=re.I)
+    amounts = [float(a) for a in RUPEES.findall(t)]
+    if not amounts:
+        return None
+    if len(amounts) == 1 or re.search(r"\bincl(?:uding|usive|\.)?\b", t, re.I):
+        return amounts[0]
+    return round(sum(amounts), 4)
 
 
 def price(text: str | None) -> float | None:
@@ -295,7 +316,7 @@ def main() -> None:
         e = {"d": d, "k": kind if kind in ("dividend", "bonus", "split", "rights", "buyback") else "other",
              "s": sym, "x": (subject or "").strip()}
         if kind == "dividend":
-            amt = money(detail) or money(subject)
+            amt = money(detail) or dividend_amount(subject)
             if amt:
                 e["amt"] = amt
                 b = closes.before(sym, d)
@@ -438,7 +459,7 @@ def main() -> None:
                              "purpose": f"Ex-date: {subject}", "date": d, "desc": "",
                              "type": kind if kind in ("dividend", "bonus", "split", "rights", "buyback") else "other"})
     for e in upcoming:
-        if e["kind"] == "exdate" and e["type"] == "dividend" and (amt := money(e["purpose"])):
+        if e["kind"] == "exdate" and e["type"] == "dividend" and (amt := dividend_amount(e["purpose"])):
             e["amt"] = amt
             last = closes.latest(e["symbol"])
             if last and last[1] > 0:
