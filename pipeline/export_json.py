@@ -595,6 +595,11 @@ def main() -> None:
         if fno:
             for sym in df["symbol"]:
                 extra_fields.setdefault(sym, {})["in_fno"] = 1 if sym in fno else 0
+    # USD/INR, for Yahoo figures reported in dollars (see the scale check below).
+    usd_inr_rate = None
+    if con.execute("SELECT 1 FROM sqlite_master WHERE name='commodity_world'").fetchone():
+        r_ = con.execute("SELECT close FROM commodity_world WHERE ticker='INR=X' ORDER BY date DESC LIMIT 1").fetchone()
+        usd_inr_rate = round(float(r_[0]), 4) if r_ and r_[0] else None
     con.close()
 
     # computed ratios need RAW rupee values - run before any unit conversion
@@ -811,6 +816,34 @@ def main() -> None:
                 return v if (today - datetime.fromisoformat(p).date()).days <= 456 else None
         return None
 
+    # Yahoo's money figures on another scale from the filings. Infosys and
+    # HCL Technologies are listed in New York and Yahoo reports their revenue,
+    # debt and cash in US DOLLARS (Infosys cash 3.98e9 against TCS's 5.1e11
+    # rupees), which overstated Infosys' EV by about Rs 30,000 Cr and showed
+    # its revenue as Rs 2,040 Cr (review 4-Nov-2026). Where Yahoo's revenue is
+    # under a twentieth of the filed four quarters, its money figures are
+    # withheld rather than shown in the wrong currency. (Yahoo LARGER than the
+    # filings is left alone: there the filing is as likely to be the wrong one.)
+    # Where the gap is the dollar rate itself, the figures are converted at the
+    # stored USD/INR close; any other gap is a units error and they are withheld.
+    money_cols = ["revenue", "net_income", "total_debt", "total_cash", "free_cashflow"]
+    usd_inr = usd_inr_rate
+    scale_of: dict[str, float | None] = {}
+    for sym, yrev in zip(df["symbol"], df["revenue"]):
+        frev = filed_ttm(sym, "revenue")          # Rs crore
+        if yrev is not None and yrev == yrev and yrev > 0 and frev and frev > 0 and (yrev / 1e7) / frev < 1 / 20:
+            gap = frev * 1e7 / yrev
+            scale_of[sym] = usd_inr if (usd_inr and 0.8 * usd_inr <= gap <= 1.25 * usd_inr) else None
+    if scale_of:
+        for col in money_cols:
+            if col in df.columns:
+                df[col] = [(None if scale_of[s_] is None or v is None or v != v else v * scale_of[s_])
+                           if s_ in scale_of else v for s_, v in zip(df["symbol"], df[col])]
+        conv = [s_ for s_, f in scale_of.items() if f]
+        held = [s_ for s_, f in scale_of.items() if not f]
+        print(f"  Yahoo money figures on another scale from the filings: {len(conv)} converted from US dollars "
+              f"at {usd_inr} ({', '.join(conv[:8])}), {len(held)} withheld ({', '.join(held[:8])})")
+
     rebuilt_ps = rebuilt_ev = 0
     ps_new, ev_new = [], []
     for sym, mc, ps_old, ev_old, debt, cash in zip(
@@ -823,11 +856,15 @@ def main() -> None:
             ps_new.append(round(mc / rev, 2)); rebuilt_ps += 1
         else:
             ps_new.append(ps_old)
-        if mc and eb and eb > 0:
-            ev = mc + (debt or 0) / 1e7 - (cash or 0) / 1e7
+        # Debt and cash both known, or no EV: a missing figure counted as zero
+        # moved EV by the whole of it (review 4-Nov-2026). 159 companies have
+        # neither; their EV is left blank rather than set to the market cap.
+        known = debt is not None and debt == debt and cash is not None and cash == cash
+        if mc and eb and eb > 0 and known:
+            ev = mc + debt / 1e7 - cash / 1e7
             ev_new.append(round(ev / eb, 2)); rebuilt_ev += 1
         else:
-            ev_new.append(ev_old)
+            ev_new.append(ev_old if known else None)
     df["ps"], df["ev_ebitda"] = ps_new, ev_new
     print(f"  rebuilt from filed figures: P/S {rebuilt_ps}, EV/EBITDA {rebuilt_ev}")
     df = df.rename(columns=RENAME)
