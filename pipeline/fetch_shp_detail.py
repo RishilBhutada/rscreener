@@ -23,6 +23,10 @@ more than 1% - with the group it is filed under (screener.in's "+" under each
 row). Checked on RELIANCE, 30-Sep-2026: government 0.10%, 50,72,456
 shareholders (screener.in: 50,72,457).
 
+Table shp_detail_read(symbol, date, read_at): each quarter's file read by
+this parser, whatever it found. A filing with no shareholder count used to be
+read again every time, because "read" was judged by n_holders being filled.
+
 Usage:
   python fetch_shp_detail.py --symbols @data/nse_symbols.txt --limit 300 --per-company 2
 """
@@ -179,13 +183,16 @@ def main() -> None:
             con.execute(f"ALTER TABLE shareholding_detail ADD COLUMN {c} {t}")
     con.execute("CREATE TABLE IF NOT EXISTS shp_holders (symbol TEXT, date TEXT, category TEXT, name TEXT, pct REAL,"
                 " PRIMARY KEY (symbol, date, category, name))")
+    con.execute("CREATE TABLE IF NOT EXISTS shp_detail_read (symbol TEXT, date TEXT, read_at TEXT, PRIMARY KEY (symbol, date))")
     con.commit()
     log = {s: t for s, t in con.execute("SELECT symbol, fetched_at FROM shp_detail_log WHERE error IS NULL")}
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=args.max_age_hours)).strftime("%Y-%m-%d %H:%M:%S")
     due = sorted((s for s in symbols if log.get(s, "") < cutoff), key=lambda s: log.get(s) or "")[:args.limit]
     # A quarter read before holders and counts were parsed (27-Oct-2026) is
-    # read again, newest first, a few a company per run.
+    # read again, newest first, a few a company per run - once: a filing that
+    # simply carries no count is recorded in shp_detail_read and left alone.
     held = {(s, d) for s, d in con.execute("SELECT symbol, date FROM shareholding_detail WHERE n_holders IS NOT NULL")}
+    held |= {(s, d) for s, d in con.execute("SELECT symbol, date FROM shp_detail_read")}
     print(f"shareholding detail for {len(due)} companies...", flush=True)
 
     s = requests.Session()
@@ -212,6 +219,8 @@ def main() -> None:
                 except (ET.ParseError, requests.RequestException) as e:
                     print(f"  {sym} {d}: {type(e).__name__}")
                     continue
+                db_retry(lambda: con.execute("INSERT OR REPLACE INTO shp_detail_read VALUES (?,?,?)",
+                                             (sym, d, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))))
                 if not any(x is not None for k, x in got.items() if k != "holders"):
                     continue
                 db_retry(lambda: con.execute(
