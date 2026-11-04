@@ -171,3 +171,30 @@ def test_unknown_non_member_is_not_added(tmp_path, monkeypatch):
     data.write_text(json.dumps({"rows": [{"symbol": "AAA", "pe": None}]}))
     screen_alerts.main()
     assert json.loads(state.read_text())["Cheap"]["symbols"] == []
+
+
+# ── commodities_lib.back_adjust: the continuous commodity charts ────────────
+
+def test_back_adjust_roll_is_not_a_day_move():
+    from commodities_lib import back_adjust
+    bar = lambda d, c: (d, c, c, c, c, 10, 5)  # noqa: E731
+    days = [
+        (bar("2026-01-30", 102.0), 101.0),    # FEB contract
+        (bar("2026-01-31", 103.0), 102.0),    # FEB
+        (bar("2026-02-01", 113.0), 113.0),    # roll to APR: APR flat on its own day
+        (bar("2026-02-02", 114.0), 113.0),    # APR
+    ]
+    out = back_adjust(days)
+    closes = [b[4] for b in out]
+    assert closes[-1] == 114.0                                  # newest is the real price
+    assert closes[2] / closes[1] == pytest.approx(1.0)          # roll day: APR's own 0%
+    assert closes[1] / closes[0] == pytest.approx(103 / 102)    # FEB's own move kept
+    assert all(b[5] == 10 for b in out)                         # volume untouched
+    assert out[0][1] == out[0][4]                               # open scaled with close
+
+
+def test_back_adjust_without_a_previous_close_invents_no_move():
+    from commodities_lib import back_adjust
+    days = [(("d1", 1, 1, 1, 100.0, 0, None), None), (("d2", 1, 1, 1, 120.0, 0, None), None)]
+    out = back_adjust(days)
+    assert out[0][4] == pytest.approx(120.0) and out[1][4] == 120.0

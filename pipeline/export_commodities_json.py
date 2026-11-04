@@ -28,7 +28,7 @@ from collections import defaultdict
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from commodities_lib import FX, GROUPS, NCDEX_SUFFIX, SPOT, WORLD, describe, world_front, world_ticker
+from commodities_lib import FX, GROUPS, NCDEX_SUFFIX, SPOT, WORLD, back_adjust, describe, world_front, world_ticker
 from export_chart_json import OUT as CHART_DIR, _day, _normalise, _px
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -239,13 +239,18 @@ def main() -> None:
             sym = f"{root}-{date.fromisoformat(c['expiry']).strftime('%b%y').upper()}"
             write_chart(sym, f"{name} {date.fromisoformat(c['expiry']).strftime('%b %y')}", exch, bars[c["key"]])
             chart_of[c["expiry"]] = sym
+        # Back-adjusted (commodities_lib.back_adjust): stitched raw, each roll
+        # to the next month drew the carry between the two contracts as a
+        # day's move - the fault fixed for the gold page (review 4-Nov-2026).
         front_by_day: dict[str, tuple] = {}
         for c in cs:                                   # nearest expiry first
-            for b in bars[c["key"]]:
+            own = bars[c["key"]]
+            for i, b in enumerate(own):
                 if b[0] not in front_by_day and day_no(c["expiry"]) - day_no(b[0]) >= EXPIRING_DAYS:
-                    front_by_day[b[0]] = b
+                    front_by_day[b[0]] = (b, own[i - 1][4] if i else None)
         cont = f"{root}1!"
-        write_chart(cont, f"{name} - continuous (front month)", exch, [front_by_day[d] for d in sorted(front_by_day)])
+        write_chart(cont, f"{name} - continuous (front month, back-adjusted)", exch,
+                    back_adjust([front_by_day[d] for d in sorted(front_by_day)]))
 
         w = WORLD.get(root)
         sm = SPOT.get(root.removesuffix(NCDEX_SUFFIX)) if root.endswith(NCDEX_SUFFIX) else None
