@@ -83,13 +83,14 @@ export type ChartTrendQ = {
   sps?: (number | null)[];
   expenses?: (number | null)[];
   ebitda?: (number | null)[];
+  other_income?: (number | null)[];
   book_value?: (number | null)[];
   opm?: (number | null)[];
   gpm?: (number | null)[];
   npm?: (number | null)[];
 } | null;
 
-type View = "price" | "years" | "pe" | "sales" | "ev" | "pb" | "ps";
+type View = "price" | "years" | "pe" | "sales" | "ebitda" | "ev" | "pb" | "ps";
 type XY = {
   t: number; v: number;
   /** set on the EPS bars: the quarter whose declaration produced this value, and
@@ -671,6 +672,19 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       if (npm.length > 1) defs.push({ key: "npm", label: "NPM %", color: "var(--chart-pos)", kind: "smooth", axis: "R", data: npm, fmt: "pct" });
     }
 
+    // EBITDA each quarter - operating profit plus other income, so it agrees
+    // with the EBITDA row of the results table - and its margin on sales.
+    if (view === "ebitda" && trendQ?.ebitda) {
+      const eb = trendQ.ebitda.map((v, i) => (v === null || v === undefined ? null : v + (trendQ.other_income?.[i] ?? 0)));
+      const bars = qBars(eb);
+      if (bars.length) defs.push({ key: "ebitda", label: "Quarter EBITDA", color: "var(--chart-bar)", kind: "bars", axis: "L", data: bars, fmt: "cr" });
+      const m = qBars(eb.map((v, i) => {
+        const r = trendQ.revenue[i];
+        return v === null || !r ? null : Math.round((v / r) * 1000) / 10;
+      }));
+      if (m.length > 1) defs.push({ key: "ebitda_m", label: "EBITDA margin %", color: "var(--chart-dma50)", kind: "smooth", axis: "R", data: m, fmt: "pct" });
+    }
+
     // The peer is drawn on the SAME axis as the metric it is compared against,
     // except price: two share prices in rupees have no common scale (₹5,726 beside
     // ₹748 makes the smaller one a flat line), so both are rebased to percent
@@ -727,7 +741,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     return (
       <ChartShell range={range} setRange={setRange} view={view} setView={setView} ui={ui}
         expandHref={symbol ? `/chart?s=${encodeURIComponent(symbol)}` : undefined}
-        moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand }} peLabel={spsOn ? "P/S Ratio" : "PE Ratio"}>
+        moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand, ebitda: !!trendQ?.ebitda?.some((v) => v !== null) }} peLabel={spsOn ? "P/S Ratio" : "PE Ratio"}>
         <YearsChart prices={prices} />
       </ChartShell>
     );
@@ -736,7 +750,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     return (
       <ChartShell range={range} setRange={setRange} view={view} setView={setView}
         expandHref={symbol ? `/chart?s=${encodeURIComponent(symbol)}` : undefined}
-        moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand }} peLabel={spsOn ? "P/S Ratio" : "PE Ratio"}>
+        moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand, ebitda: !!trendQ?.ebitda?.some((v) => v !== null) }} peLabel={spsOn ? "P/S Ratio" : "PE Ratio"}>
         <div className="h-64 flex items-center justify-center text-sm text-[var(--ink3)]">No data yet for this view.</div>
       </ChartShell>
     );
@@ -940,7 +954,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const shellProps = {
     range, setRange, view, setView, moreOpen, setMoreOpen,
     expandHref: symbol ? `/chart?s=${encodeURIComponent(symbol)}` : undefined,
-    avail: { pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand },
+    avail: { pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand, ebitda: !!trendQ?.ebitda?.some((v) => v !== null) },
     peLabel: spsOn ? "P/S Ratio" : "PE Ratio", onViewChange: () => setHover(null),
   };
   const plotAndLegend = (
@@ -1442,7 +1456,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
 }
 
 const MORE_VIEWS: [View, string][] = [
-  ["sales", "Sales & Margin"], ["ev", "EV / EBITDA"], ["pb", "Price to Book"], ["ps", "Market Cap / Sales"],
+  ["sales", "Sales & Margin"], ["ebitda", "EBITDA"], ["ev", "EV / EBITDA"], ["pb", "Price to Book"], ["ps", "Market Cap / Sales"],
 ];
 
 function ChartShell({
@@ -1459,7 +1473,7 @@ function ChartShell({
   range: string; setRange: (r: string) => void;
   view: View; setView: (v: View) => void;
   moreOpen: boolean; setMoreOpen: (b: boolean) => void;
-  avail: { pe: boolean; sales: boolean; ev: boolean; pb: boolean; ps: boolean };
+  avail: { pe: boolean; sales: boolean; ebitda?: boolean; ev: boolean; pb: boolean; ps: boolean };
   onViewChange?: () => void;
   children: React.ReactNode;
 }) {

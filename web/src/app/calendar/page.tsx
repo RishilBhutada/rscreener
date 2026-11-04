@@ -145,7 +145,9 @@ export default function CalendarPage() {
   const [past, setPast] = useState<PastDoc | null>(null);
   const [error, setError] = useState("");
   const [pastError, setPastError] = useState("");
-  const [when, setWhen] = useState<"next" | "past">("next");
+  // Always the coming days now (owner, 31-Oct-2026): the past year is reached
+  // by searching, which looks both ways.
+  const when = "next" as "next" | "past";
   const [group, setGroup] = useState("all");
   const [mineOnly, setMineOnly] = useState(false);
   const [mine, setMine] = useState<Set<string>>(new Set());
@@ -154,6 +156,8 @@ export default function CalendarPage() {
   const [open, setOpen] = useState<CalEvent | null>(null);
   const [today, setToday] = useState("");
   const [basis, setBasis] = useState<Basis>("y");
+  // The week strip's chosen day; none shows every day.
+  const [day, setDay] = useState<string | null>(null);
   const pickBasis = (b: Basis) => {
     setBasis(b);
     try { localStorage.setItem(BASIS_KEY, b); } catch { /* the choice just is not remembered */ }
@@ -218,11 +222,33 @@ export default function CalendarPage() {
   const nextList = useMemo(() => (searching ? coming : upcoming).filter(keep), [upcoming, coming, searching, group, mineOnly, mine, q]); // eslint-disable-line react-hooks/exhaustive-deps
   const pastList = useMemo(() => history.filter(keep), [history, group, mineOnly, mine, q]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => setShown(PAGE), [when, group, mineOnly, q]);
+  useEffect(() => setShown(PAGE), [when, group, mineOnly, q, day]);
+
+  // The date strip: seven days, today in the middle with the three before and
+  // the three after it (owner, 31-Oct-2026). The days before come from the past
+  // year's results and actions, the rest from the coming calendar; a day with
+  // nothing shows 0. The list below holds only the day picked - today when the
+  // page opens.
+  const win = useMemo(() => {
+    if (!today) return [] as string[];
+    const t = new Date(`${today}T00:00:00`);
+    return [-3, -2, -1, 0, 1, 2, 3].map((o) => {
+      const d = new Date(t.getFullYear(), t.getMonth(), t.getDate() + o);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    });
+  }, [today]);
+  const windowEvents = useMemo(() => win.length ? [
+    ...history.filter((e) => e.date >= win[0] && e.date < today).filter(keep),
+    ...nextList.filter((e) => e.date <= win[6]),
+  ] : [], [win, history, nextList, today, group, mineOnly, mine]); // eslint-disable-line react-hooks/exhaustive-deps
+  const strip: [string, number][] = win.map((d) => [d, windowEvents.filter((e) => e.date === d).length]);
+  const stripOn = when === "next" && !searching && win.length === 7;
+  const pickedDay = stripOn ? (day && win.includes(day) ? day : today) : null;
+  const nextShown = pickedDay ? windowEvents.filter((e) => e.date === pickedDay) : nextList;
 
   const sections: [string, CalEvent[], number][] = searching
     ? [["Coming up", nextList, nextList.length], ["Past year", pastList, pastList.length]]
-    : [["", when === "next" ? nextList : pastList, (when === "next" ? nextList : pastList).length]];
+    : [["", when === "next" ? nextShown : pastList, (when === "next" ? nextShown : pastList).length]];
 
   let budget = shown;
   const drawn = sections.map(([title, list, total]) => {
@@ -273,9 +299,6 @@ export default function CalendarPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {!searching && (
-            <Chips value={when} options={[["next", "Coming up"], ["past", "Past year"]] as ["next" | "past", string][]} onChange={setWhen} />
-          )}
           <button type="button" onClick={() => setMineOnly(!mineOnly)} aria-pressed={mineOnly}
             className={`rs-press inline-flex items-center gap-1 min-h-[34px] px-3 rounded-full text-[13px] border ${mineOnly
               ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)] font-semibold" : "text-[var(--ink2)] border-[var(--line)]"}`}>
@@ -305,6 +328,31 @@ export default function CalendarPage() {
           </div>
         )}
 
+        {stripOn && (() => {
+          const top = Math.max(1, ...strip.map(([, c]) => c));
+          return (
+            <div role="group" aria-label="Days" className="grid grid-cols-7 gap-0.5 rounded-xl border border-[var(--line)] bg-[var(--card)] p-1">
+              {strip.map(([d, c]) => {
+                const on = pickedDay === d;
+                const dt = new Date(`${d}T00:00:00`);
+                return (
+                  <button key={d} type="button" aria-pressed={on} onClick={() => setDay(d)}
+                    className={`min-w-0 flex flex-col items-center rounded-lg py-1.5 ${on ? "bg-[var(--accent-soft)]" : "active:bg-[var(--card2)]"} ${d < today ? "opacity-80" : ""}`}>
+                    <span className={`text-[10.5px] ${on ? "text-[var(--accent-ink)] font-semibold" : "text-[var(--ink3)]"}`}>
+                      {d === today ? "Today" : dt.toLocaleDateString("en-IN", { weekday: "short" })}
+                    </span>
+                    <span className={`text-[14px] font-semibold tabular-nums ${on ? "text-[var(--accent-ink)]" : "text-[var(--ink)]"}`}>{dt.getDate()}</span>
+                    <span className="h-7 flex items-end mt-0.5" aria-hidden="true">
+                      <span className="w-3.5 rounded-sm" style={{ height: `${c ? Math.max(3, (c / top) * 28) : 2}px`, background: on ? "var(--accent)" : "var(--line2)" }} />
+                    </span>
+                    <span className="text-[10.5px] tabular-nums text-[var(--ink3)]">{c}</span>
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })()}
+
         {error && <p className="text-[var(--neg)] text-sm">The calendar did not load ({error}).</p>}
         {stale > 3 && !searching && when === "next" && (
           <div className="text-sm rounded-xl border border-[var(--neg-line)] bg-[var(--neg-soft)] text-[var(--neg)] p-3">
@@ -326,11 +374,11 @@ export default function CalendarPage() {
             )}
             {s.total === 0 && (
               <p className="py-6 text-center text-[13px] text-[var(--ink3)]">
-                Nothing{searching ? ` for “${q.trim()}”` : ""}{mineOnly ? " in your stocks" : ""}{group !== "all" ? " of this type" : ""}{(searching ? s.title === "Coming up" : when === "next") ? " coming up" : " in the past year"}
+                Nothing{searching ? ` for “${q.trim()}”` : ""}{mineOnly ? " in your stocks" : ""}{group !== "all" ? " of this type" : ""}{pickedDay && !searching ? " on this day" : (searching ? s.title === "Coming up" : when === "next") ? " coming up" : " in the past year"}
               </p>
             )}
             {s.days.map(([d, list], i) => (
-              <Fragment key={`${s.title}${d}`}>
+              <Fragment key={`${s.title}${d}${list[0]?.upcoming ? "-next" : "-out"}`}>
                 {(i === 0 || s.days[i - 1][0].slice(0, 7) !== d.slice(0, 7)) && s.days[i - 1]?.[0] !== d && (
                   <h3 className="pt-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
                     {new Date(`${d}T12:00:00Z`).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" })}
@@ -402,9 +450,12 @@ export default function CalendarPage() {
           </button>
         )}
         {next && (
-          <p className="text-[11px] text-[var(--ink3)]">
-            {next.updated ? `Updated ${new Date(next.updated).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" })} IST, re-checked every 3 minutes while open · ` : ""}
-            NSE event calendar read {next.generated_at ?? "—"}{past ? ` · past year ${dayLabel(past.from, true)} to ${dayLabel(past.to, true)}, prices to ${past.prices_to ? dayLabel(past.prices_to, true) : "—"}` : ""}
+          <p className="text-[11px] text-[var(--ink3)] flex items-center gap-1">
+            {next.updated ? `Updated ${new Date(next.updated).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" })}` : "Updated —"}
+            <InfoTip title="Data">
+              <p>Re-checked every 3 minutes while the page is open.</p>
+              <p>NSE event calendar read {next.generated_at ?? "—"}.{past ? ` Past year ${dayLabel(past.from, true)} to ${dayLabel(past.to, true)}, prices to ${past.prices_to ? dayLabel(past.prices_to, true) : "—"}.` : ""}</p>
+            </InfoTip>
           </p>
         )}
       </main>

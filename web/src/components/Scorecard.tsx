@@ -146,7 +146,8 @@ export default function Scorecard() {
         <div className="mt-3 space-y-4 text-xs">
           <div>
             <p className="font-semibold text-[var(--ink2)] mb-1">
-              Correct — each line compares two independent figures
+              Correct
+              <InfoTip title="Correct" className="ml-1"><p>Each line compares two independent figures.</p></InfoTip>
             </p>
             {Object.entries(c.parts.correct?.checks ?? {}).map(([name, ck]) => (
               <div key={name} className="py-1 border-t border-[var(--line)]">
@@ -161,11 +162,11 @@ export default function Scorecard() {
             ))}
           </div>
           <div>
-            <p className="font-semibold text-[var(--ink2)] mb-1">Complete — by field</p>
-            <p className="text-[var(--ink3)] mb-1">
-              Each figure is measured against the companies it CAN apply to, not against all
-              of them — a loss-making company has no P/E and a BSE-only company files no
-              shareholding pattern with the NSE. How many that is, is stated beside each.
+            <p className="font-semibold text-[var(--ink2)] mb-1">
+              Complete, by field
+              <InfoTip title="Complete, by field" className="ml-1">
+                <p>Each figure is measured against the companies it can apply to, not against all of them: a loss-making company has no P/E and a BSE-only company files no shareholding pattern with the NSE. How many that is, is stated beside each.</p>
+              </InfoTip>
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
               {Object.entries(c.parts.complete?.fields ?? {}).map(([label, v]) => {

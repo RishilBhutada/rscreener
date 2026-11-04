@@ -2151,5 +2151,185 @@
    "fresh"
   ],
   "companies": 4984
+ },
+ {
+  "at": "2026-10-28 16:21 UTC",
+  "overall": 91.4,
+  "complete": 80.9,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 85.7,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4984
+ },
+ {
+  "at": "2026-10-28 16:51 UTC",
+  "overall": 91.4,
+  "complete": 80.9,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 85.7,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4984
+ },
+ {
+  "at": "2026-10-28 17:32 UTC",
+  "overall": 91.4,
+  "complete": 80.9,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 85.7,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4984
+ },
+ {
+  "at": "2026-10-29 01:16 UTC",
+  "overall": 91.4,
+  "complete": 80.9,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 85.7,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4986
+ },
+ {
+  "at": "2026-10-30 01:54 UTC",
+  "overall": 91.4,
+  "complete": 80.9,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 85.7,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4987
+ },
+ {
+  "at": "2026-10-31 01:26 UTC",
+  "overall": 91.4,
+  "complete": 81.0,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 85.7,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4987
+ },
+ {
+  "at": "2026-10-31 05:12 UTC",
+  "overall": 91.4,
+  "complete": 81.0,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 85.7,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4987
+ },
+ {
+  "at": "2026-10-31 06:00 UTC",
+  "overall": 91.4,
+  "complete": 81.0,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 85.7,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4987
+ },
+ {
+  "at": "2026-10-31 08:29 UTC",
+  "overall": 91.4,
+  "complete": 81.0,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 85.7,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4987
+ },
+ {
+  "at": "2026-10-31 12:48 UTC",
+  "overall": 91.4,
+  "complete": 81.0,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 85.7,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4987
+ },
+ {
+  "at": "2026-10-31 13:21 UTC",
+  "overall": 91.4,
+  "complete": 81.0,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 85.7,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4987
+ },
+ {
+  "at": "2026-10-31 14:46 UTC",
+  "overall": 91.4,
+  "complete": 81.0,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 85.7,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4987
  }
 ]
