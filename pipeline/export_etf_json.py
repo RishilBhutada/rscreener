@@ -355,6 +355,12 @@ def main() -> None:
         thin = bool(last20) and (med_turn < THIN_TURNOVER_CR or traded < THIN_TRADED_DAYS)
 
         nav_series = sorted(nav.items())
+        # The price shown is the last TRADED close, dated by its own day. An
+        # untraded day carries that close forward for the chart, and the
+        # last row's date used to be shown beside it - a weeks-old price of a
+        # thin ETF read as today's (review 4-Nov-2026).
+        traded = [(d, c) for d, c, _v in prices if d in traded_on]
+        last_px = traded[-1] if traded else None
         # Price returns from days something traded: an untraded day carries a
         # close that can be months old (SILVER1 went unquoted for weeks, and its
         # "price a year ago" was one of those - a 170% return in a year its NAV
@@ -363,6 +369,8 @@ def main() -> None:
         idx_series = [(d, v) for d in [p[0] for p in prices[-800:]] if (v := index_inr(d))]
         year_ago = (date.fromisoformat(prices[-1][0]) - timedelta(days=365)).isoformat() if prices else None
         prem_1y = [p for p in prem if year_ago and p[0] >= year_ago]
+        month_ago = (date.fromisoformat(prem[-1][0]) - timedelta(days=30)).isoformat() if prem else None
+        prem_1m = [p[1] for p in prem if month_ago and p[0] >= month_ago]
         hi = max(prem_1y, key=lambda p: p[1]) if prem_1y else None
         lo = min(prem_1y, key=lambda p: p[1]) if prem_1y else None
         doc = {
@@ -374,13 +382,15 @@ def main() -> None:
             "listed": listed,
             "amfi_code": code,
             "index": {"label": ilabel, "ticker": itick, "fx": fxtick, "chart": idx_chart.get((itick, fxtick))} if itick else None,
-            "price": round(prices[-1][1], 2) if prices else None,
-            "price_date": prices[-1][0] if prices else None,
+            "price": round(last_px[1], 2) if last_px else None,
+            "price_date": last_px[0] if last_px else None,
             "nav": nav_series[-1][1] if nav_series else None,
             "nav_date": nav_series[-1][0] if nav_series else None,
             "prem": round(prem[-1][1], 2) if prem else None,
             "prem_date": prem[-1][0] if prem else None,
-            "prem_avg_1m": round(mean(p[1] for p in prem[-21:]), 2) if prem else None,
+            # Readings from the last 30 days only: the last 21 readings of a
+            # thin ETF could span months.
+            "prem_avg_1m": round(mean(prem_1m), 2) if prem_1m else None,
             "prem_hi_1y": [hi[0], round(hi[1], 2)] if hi else None,
             "prem_lo_1y": [lo[0], round(lo[1], 2)] if lo else None,
             # Where today's premium sits in its own past year: the share of
@@ -422,8 +432,9 @@ def main() -> None:
             "pe": (doc["valuation"] or {}).get("pe"),
             "r1y_price": doc["ret_price"].get("1y"), "r1y_nav": doc["ret_nav"].get("1y"),
             "r1m_price": doc["ret_price"].get("1m"),
+            # The day's change only when the latest session traded.
             "r1d_price": round((prices[-1][1] / prices[-2][1] - 1) * 100, 2)
-                         if len(prices) >= 2 and prices[-2][1] else None,
+                         if len(prices) >= 2 and prices[-2][1] and prices[-1][0] in traded_on else None,
             "index": ilabel})
 
     # Same-index comparison, then every file is written.
