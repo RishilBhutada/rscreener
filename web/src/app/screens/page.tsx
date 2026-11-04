@@ -470,33 +470,64 @@ function ScreensInner() {
                     <IconButton name="more" label="Save, share and more" onClick={() => setSheet({ kind: "more" })} />
                   </div>
                 </div>
-                <ul className="divide-y divide-[var(--line)]">
-                  {sorted.slice(0, rowLimit).map((r) => {
-                    const sym = String(r.symbol);
-                    const chg = typeof r.ret_1d === "number" ? r.ret_1d : null;
-                    const price = typeof r.price === "number" ? r.price : null;
-                    return (
-                      <li key={sym}>
-                        <button type="button" onClick={() => setSheet({ kind: "row", sym })}
-                          className="w-full py-2.5 text-left active:bg-[var(--card2)]">
-                          <div className="flex items-baseline justify-between gap-3">
-                            <span className="min-w-0 truncate text-[15px] font-medium text-[var(--ink)]">{uni === "indices" ? String(r.name) : shownSymbol(sym)}</span>
-                            <span className={`shrink-0 text-[15px] font-medium tabular-nums ${tone(chg)}`}>{money(price)}</span>
-                          </div>
-                          <div className="flex items-baseline justify-between gap-3 text-[11px] text-[var(--ink3)]">
-                            <span className="min-w-0 truncate">{uni === "companies" ? shortName(String(r.name ?? ""), sym) : String(r.sector ?? "")}</span>
-                            <span className="shrink-0 tabular-nums">{chg === null ? "—" : <>{signed(dayMove(price, chg))} <span className={tone(chg)}>({signed(chg)}%)</span></>}</span>
-                          </div>
-                          <p className="mt-0.5 text-[12px] text-[var(--ink2)] tabular-nums truncate">
-                            {rowFields.filter((f) => uni === "companies" || r[f] != null).map((f, i) => (
-                              <span key={f}>{i > 0 && <span className="text-[var(--ink3)]"> · </span>}<span className="text-[var(--ink3)]">{labelOf(f, by)}</span> {fmtVal(f, r[f], by)}</span>
-                            ))}
-                          </p>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
+                {/* One row per result, one column per figure (Step 3: grid only).
+                    Price and the day's move, then the figures filtered on, then
+                    size. Any heading sorts; tap again to flip. The name column
+                    stays put while the figures scroll sideways. */}
+                {(() => {
+                  const extra = uni === "companies" && !rowFields.includes("mcap") ? ["mcap"] : [];
+                  const cols = [...rowFields.filter((f) => f !== "price" && f !== "ret_1d"), ...extra];
+                  const head = (key: string, label: string, left = false) => (
+                    <th key={key} scope="col" aria-sort={sortKey === key ? (sortDesc ? "descending" : "ascending") : undefined}
+                      className={`px-2 py-2 font-medium whitespace-nowrap ${left ? "text-left sticky left-0 z-10 bg-[var(--bg)]" : "text-right"}`}>
+                      <button type="button" onClick={() => setSort({ key, desc: key === sortKey ? !sortDesc : true })}
+                        className={`inline-flex items-center gap-0.5 ${sortKey === key ? "text-[var(--accent-ink)] font-semibold" : ""}`}>
+                        {label}{sortKey === key && <span aria-hidden="true">{sortDesc ? "\u25BE" : "\u25B4"}</span>}
+                      </button>
+                    </th>
+                  );
+                  // The day's move tinted by its size: green up, red down, full at 3%.
+                  const tint = (c: number | null) => c ? `color-mix(in srgb, var(${c > 0 ? "--pos" : "--neg"}) ${Math.round(8 + 18 * Math.min(Math.abs(c) / 3, 1))}%, transparent)` : undefined;
+                  return (
+                    <div className="overflow-x-auto -mx-4 px-4 [scrollbar-width:none]">
+                      <table className="w-full text-[13px] border-collapse tabular-nums">
+                        <thead>
+                          <tr className="text-[11px] text-[var(--ink3)] border-b border-[var(--line)]">
+                            {head(uni === "indices" ? "name" : "symbol", "Name", true)}
+                            {head("price", "Price")}
+                            {head("ret_1d", "Day")}
+                            {cols.map((f) => head(f, labelOf(f, by)))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sorted.slice(0, rowLimit).map((r) => {
+                            const sym = String(r.symbol);
+                            const chg = typeof r.ret_1d === "number" ? r.ret_1d : null;
+                            const price = typeof r.price === "number" ? r.price : null;
+                            return (
+                              <tr key={sym} onClick={() => setSheet({ kind: "row", sym })}
+                                className="border-b border-[var(--line)] cursor-pointer active:bg-[var(--card2)] hover:bg-[var(--card2)]">
+                                <th scope="row" className="px-2 py-2 text-left font-semibold text-[var(--ink)] sticky left-0 bg-[var(--bg)] max-w-[34vw] sm:max-w-none">
+                                  <button type="button" className="block max-w-full truncate text-left"
+                                    title={uni === "companies" ? shortName(String(r.name ?? ""), sym) : String(r.name ?? sym)}>
+                                    {uni === "indices" ? String(r.name) : shownSymbol(sym)}
+                                  </button>
+                                </th>
+                                <td className="px-2 py-2 text-right text-[var(--ink)] whitespace-nowrap">{money(price)}</td>
+                                <td className="px-2 py-2 text-right whitespace-nowrap rounded-sm" style={{ background: tint(chg) }}>
+                                  <span className={tone(chg)}>{chg === null ? "—" : `${signed(chg)}%`}</span>
+                                </td>
+                                {cols.map((f) => (
+                                  <td key={f} className="px-2 py-2 text-right text-[var(--ink2)] whitespace-nowrap">{fmtVal(f, r[f], by)}</td>
+                                ))}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
                 {sorted.length > rowLimit && (
                   <button type="button" onClick={() => setRowLimit(rowLimit + 50)}
                     className="rs-press w-full mt-3 min-h-[44px] rounded-xl border border-[var(--line)] text-[14px] font-semibold text-[var(--ink2)]">

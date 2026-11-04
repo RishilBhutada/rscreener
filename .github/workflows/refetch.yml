@@ -47,7 +47,8 @@ jobs:
   refetch:
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.issue.user.login == github.repository_owner && startsWith(github.event.issue.title, 'Refetch '))
+      (github.event.issue.user.login == github.repository_owner && startsWith(github.event.issue.title, 'Refetch ')
+       && !startsWith(github.event.issue.title, 'Refetch calendar'))
     runs-on: ubuntu-latest
     timeout-minutes: 330
     environment:

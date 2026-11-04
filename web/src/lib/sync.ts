@@ -25,6 +25,11 @@ export const SYNCED_KEYS = [
   "rs_accent",
   "rs_pct_tables",
   "rs_row_order",
+  "rs_table_view",
+  "rs_chart_ui",
+  "rs_peer_cols",
+  "rs_grid_pins",
+  "rs_price_alerts",
 ] as const;
 
 type Profile = Record<string, unknown>;

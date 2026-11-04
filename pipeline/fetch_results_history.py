@@ -62,6 +62,13 @@ TAGS = {
     "TaxExpense": "tax",
     "ProfitLossForPeriod": "pat",
     "ProfitLossForPeriodAttributableToOwnersOfParent": "pat_owners",
+    # What sits between the group's profit and the owners' (screener.in's
+    # "Net Profit +"). NSE's names, read off a live filing 27-Oct-2026 - the
+    # owners' tag above is not the one NSE uses, which is why it never stored.
+    "ProfitOrLossAttributableToOwnersOfParent": "pat_owners",
+    "ProfitOrLossAttributableToNonControllingInterests": "minority",
+    "ShareOfProfitLossOfAssociatesAndJointVenturesAccountedForUsingEquityMethod": "associates",
+    "ExceptionalItemsBeforeTax": "exceptional",
     "BasicEarningsLossPerShareFromContinuingAndDiscontinuedOperations": "eps",
     # banks file a different P&L shape
     "InterestEarned": "revenue_bank",
@@ -276,6 +283,46 @@ def parse_xbrl(xml_bytes: bytes, period_type: str) -> dict[str, float]:
     return facts
 
 
+def parse_segments(xml_bytes: bytes, period_type: str) -> dict[str, dict[str, float]]:
+    """{segment name: {"rev": ..., "ebit": ...}} from a results XBRL's segment note.
+
+    The same fixed-column layout as the P&L: OneReportable<n>D holds segment n's
+    revenue for the quarter, OneReportableFinance<n>D its profit before
+    interest and tax; Four... the year to date. The name is the
+    DescriptionOfReportableSegment on the revenue context. Revenue is the
+    segment's gross figure, before inter-segment sales are taken out.
+    Read off RELIANCE's Mar-2026 filing, 27-Oct-2026 (O2C, Oil and Gas, Retail,
+    Digital Services, Others). A single-segment company reports none."""
+    root = ET.fromstring(xml_bytes)
+    pre = "Four" if period_type == "annual" else "One"
+    names: dict[str, str] = {}
+    rev: dict[str, float] = {}
+    ebit: dict[str, float] = {}
+    for el in root.iter():
+        cref = el.get("contextRef") or ""
+        m = re.fullmatch(pre + r"Reportable(Finance)?(\d+)D", cref)
+        if not m or el.text is None:
+            continue
+        tag, n = el.tag.split("}")[-1], m.group(2)
+        if tag == "DescriptionOfReportableSegment" and not m.group(1):
+            names[n] = " ".join(el.text.split())[:80]
+        elif tag == "SegmentRevenue" and not m.group(1):
+            try:
+                rev[n] = float(el.text)
+            except ValueError:
+                pass
+        elif tag == "SegmentProfitLossBeforeTaxAndFinanceCosts" and m.group(1):
+            try:
+                ebit[n] = float(el.text)
+            except ValueError:
+                pass
+    out = {}
+    for n, name in names.items():
+        if n in rev or n in ebit:
+            out[name] = {k: v for k, v in (("rev", rev.get(n)), ("ebit", ebit.get(n))) if v is not None}
+    return out if len(out) >= 2 else {}
+
+
 def get_retry(session, url: str, tries: int = 4, timeout: int = 25):
     """GET with backoff. NSE (and the local resolver, under parallel load) throws
     transient DNS/reset/timeout errors far more often than real failures - without
@@ -312,7 +359,7 @@ def db_retry(fn, tries: int = 6, delay: float = 2.0):
             delay *= 1.6
 
 
-def integrated_filings(session, sym: str) -> list[dict]:
+def integrated_filings(session, sym: str, want: str = "consolidated") -> list[dict]:
     """Recent quarters from the Integrated Filing regime, newest first.
 
     Returns rows shaped like the legacy index so the same parse/store path can
@@ -336,7 +383,10 @@ def integrated_filings(session, sym: str) -> list[dict]:
         start = datetime(end.year, ((end.month - 1) // 3) * 3 + 1, 1)
         key = end.strftime("%Y-%m-%d")
         cons = (r.get("consolidated") or "").lower().startswith("cons")
-        if key in best and not (cons and not best[key]["_cons"]):
+        if want == "standalone":
+            if cons:
+                continue
+        elif key in best and not (cons and not best[key]["_cons"]):
             continue
         best[key] = {
             "xbrl": x,
@@ -356,7 +406,7 @@ def _has_xbrl(r: dict) -> bool:
     return bool(x) and not x.endswith("/-") and x not in ("-", "")
 
 
-def pick_filings(rows: list[dict], quarters_back: int, period: str) -> list[dict]:
+def pick_filings(rows: list[dict], quarters_back: int, period: str, want: str = "consolidated") -> list[dict]:
     """One filing per period: consolidated wins over standalone; newest first.
 
     Accepts both modern XBRL filings and pre-Ind-AS ones that only expose the
@@ -367,6 +417,8 @@ def pick_filings(rows: list[dict], quarters_back: int, period: str) -> list[dict
     by_period: dict[tuple, dict] = {}
     for r in rows:
         if not _has_xbrl(r) and not r.get("resultDetailedDataLink"):
+            continue
+        if want == "standalone" and r.get("consolidated") == "Consolidated":
             continue
         if not r.get("fromDate") or not r.get("toDate"):
             continue
@@ -423,7 +475,16 @@ def main() -> None:
     # fetch logs alone so the weekly full pass still comes round as usual.
     ap.add_argument("--only-missing", action="store_true",
                     help="fetch only quarters not stored yet, from the Integrated Filing list")
+    # The Consolidated / Standalone switch on the company page (27-Oct-2026).
+    # The main table holds ONE basis per period (consolidated where filed) and
+    # every reader of it relies on that, so a company's standalone figures go
+    # to a table of their own - results_history_sa - for companies that file
+    # consolidated, read recent periods only (--quarters-back, last 6 years).
+    ap.add_argument("--standalone", action="store_true",
+                    help="fetch STANDALONE filings into results_history_sa (consolidated filers only)")
     args = ap.parse_args()
+    want = "standalone" if args.standalone else "consolidated"
+    store = "results_history_sa" if args.standalone else "results_history"
 
     raw = (ROOT / args.symbols[1:]).read_text(encoding="utf-8") if args.symbols.startswith("@") else args.symbols
     symbols = [s.strip().upper() for s in raw.split(",") if s.strip()]
@@ -437,6 +498,10 @@ def main() -> None:
     con.execute("PRAGMA busy_timeout=180000")
     con.execute(
         "CREATE TABLE IF NOT EXISTS results_history (symbol TEXT, basis TEXT, period_type TEXT, period_start TEXT, period_end TEXT, item TEXT, value REAL)"
+    )
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS results_segments (symbol TEXT, basis TEXT, period_type TEXT, period_end TEXT,"
+        " segment TEXT, revenue REAL, ebit REAL, PRIMARY KEY (symbol, period_type, period_end, segment))"
     )
     # Two passes run against this script every night and they are NOT the same
     # job: the shallow one asks for the last 8 quarters of every symbol weekly,
@@ -453,7 +518,15 @@ def main() -> None:
     # no migration of the existing table, and the deep log starting empty is
     # exactly right - as far as the deep pass is concerned, nothing has been
     # done yet, because nothing has.
-    log_table = "results_fetch_log_full" if args.quarters_back == 0 else "results_fetch_log"
+    log_table = ("results_fetch_log_sa" if args.standalone
+                 else "results_fetch_log_full" if args.quarters_back == 0 else "results_fetch_log")
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS results_history_sa (symbol TEXT, basis TEXT, period_type TEXT, period_start TEXT, period_end TEXT, item TEXT, value REAL)"
+    )
+    if args.standalone:
+        # Only companies whose main figures are consolidated have a second basis.
+        cons = {r[0] for r in con.execute("SELECT DISTINCT symbol FROM results_history WHERE basis='consolidated'")}
+        symbols = [s_ for s_ in symbols if s_ in cons]
     con.execute(
         f"CREATE TABLE IF NOT EXISTS {log_table} (symbol TEXT PRIMARY KEY, fetched_at TEXT, error TEXT, n_periods INTEGER)"
     )
@@ -507,21 +580,30 @@ def main() -> None:
                 r = get_retry(s, INDEX_API.format(sym=nse_session.q(sym), period=period))
                 body = r.json()
                 rows = body if isinstance(body, list) else body.get("data", [])
-                for f in pick_filings(rows, args.quarters_back, period):
+                picked = pick_filings(rows, args.quarters_back, period, want)
+                if args.standalone and period == "Annual":
+                    picked = picked[:6]
+                for f in picked:
                     f["_ptype"] = "annual" if period == "Annual" else "quarterly"
                     filings.append(f)
                 time.sleep(args.sleep)
             # the legacy index stops in 2024; the newest quarters live here
             if not args.only_missing:
                 have = {(f["fromDate"], f["toDate"]) for f in filings}
-                for f in integrated_filings(s, sym):
+                for f in integrated_filings(s, sym, want)[: (args.quarters_back or 99)]:
                     if (f["fromDate"], f["toDate"]) not in have:
                         filings.append(f)
             time.sleep(args.sleep)
             for f in filings:
                 try:
+                    segs = {}
                     if _has_xbrl(f):
-                        facts = parse_xbrl(get_retry(s, f["xbrl"], tries=3).content, f["_ptype"])
+                        body_x = get_retry(s, f["xbrl"], tries=3).content
+                        facts = parse_xbrl(body_x, f["_ptype"])
+                        try:
+                            segs = parse_segments(body_x, f["_ptype"])
+                        except ET.ParseError:
+                            segs = {}
                     else:  # pre-Ind-AS: parse the HTML detail sheet instead
                         facts = parse_old_html(get_retry(s, f["resultDetailedDataLink"], tries=3).text)
                 except Exception:
@@ -533,11 +615,20 @@ def main() -> None:
                 basis = "consolidated" if f.get("consolidated") == "Consolidated" else "standalone"
                 ps, pe = iso(f["fromDate"]), iso(f["toDate"])
                 rows_in = [(sym, basis, f["_ptype"], ps, pe, k, v) for k, v in facts.items()]
+                if args.standalone and basis != "standalone":
+                    skipped += 1
+                    continue
                 db_retry(lambda: con.execute(
-                    "DELETE FROM results_history WHERE symbol=? AND period_type=? AND period_start=? AND period_end=?",
+                    f"DELETE FROM {store} WHERE symbol=? AND period_type=? AND period_start=? AND period_end=?",
                     (sym, f["_ptype"], ps, pe),
                 ))
-                db_retry(lambda: con.executemany("INSERT INTO results_history VALUES (?,?,?,?,?,?,?)", rows_in))
+                db_retry(lambda: con.executemany(f"INSERT INTO {store} VALUES (?,?,?,?,?,?,?)", rows_in))
+                if segs and not args.standalone:
+                    db_retry(lambda: con.execute("DELETE FROM results_segments WHERE symbol=? AND period_type=? AND period_end=?",
+                                                 (sym, f["_ptype"], pe)))
+                    db_retry(lambda: con.executemany(
+                        "INSERT OR REPLACE INTO results_segments VALUES (?,?,?,?,?,?,?)",
+                        [(sym, basis, f["_ptype"], pe, nm, v.get("rev"), v.get("ebit")) for nm, v in segs.items()]))
                 n_periods += 1
                 time.sleep(0.15)
             if not args.only_missing:

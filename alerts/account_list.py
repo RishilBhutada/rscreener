@@ -61,11 +61,20 @@ def symbols_in(profile: dict) -> set[str]:
     return {s.strip().upper() for s in out if s.strip() and not s.startswith("^") and ":" not in s}
 
 
-def account_symbols() -> set[str]:
+_PROFILE: dict | None = None
+
+
+def account_profile() -> dict | None:
+    """The owner's synced profile (stars, holdings, price alerts), read once per
+    run; None when the secrets are not set or anything fails."""
+    global _PROFILE
+    if _PROFILE is not None:
+        return _PROFILE or None
+    _PROFILE = {}
     raw, uid = os.environ.get("FIREBASE_SERVICE_ACCOUNT", "").strip(), os.environ.get("ALERT_UID", "").strip()
     if not raw or not uid:
         print("account list: not set up (FIREBASE_SERVICE_ACCOUNT / ALERT_UID) - using alerts/watchlist.txt only")
-        return set()
+        return None
     try:
         from google.auth.transport.requests import Request
         from google.oauth2 import service_account
@@ -79,14 +88,21 @@ def account_symbols() -> set[str]:
         r = requests.get(url, headers={"Authorization": f"Bearer {creds.token}"}, timeout=30)
         if r.status_code != 200:
             print(f"account list: Firestore answered HTTP {r.status_code} - using alerts/watchlist.txt only")
-            return set()
-        profile = {k: _value(v) for k, v in (r.json().get("fields") or {}).items()}
-        syms = symbols_in(profile)
-        print(f"account list: {len(syms)} symbols from the account's stars and holdings")
-        return syms
+            return None
+        _PROFILE = {k: _value(v) for k, v in (r.json().get("fields") or {}).items()}
+        return _PROFILE
     except Exception as e:  # noqa: BLE001 - never stop an alert run, never print the key
         print(f"account list: {type(e).__name__} - using alerts/watchlist.txt only")
+        return None
+
+
+def account_symbols() -> set[str]:
+    profile = account_profile()
+    if not profile:
         return set()
+    syms = symbols_in(profile)
+    print(f"account list: {len(syms)} symbols from the account's stars and holdings")
+    return syms
 
 
 def alert_symbols() -> list[str]:

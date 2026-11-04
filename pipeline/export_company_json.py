@@ -18,8 +18,9 @@ import pandas as pd
 
 from export_json import freshen_prices
 from fetch_corporate_actions import dividend_detail
-from trend_lib import build_trends, net_debt_series, ratio_bands
+from trend_lib import adj_factor, build_trends, net_debt_series, ratio_bands, split_factors, standalone_tables
 import fund_units
+import business_updates
 import seasons_lib
 from export_indices_json import group_of, sym_of
 
@@ -434,6 +435,26 @@ def quarter_blocks(con: sqlite3.Connection) -> dict[str, list[dict]]:
                 "SELECT symbol, period_end, announced_on FROM filing_dates"
             ) if a
         }
+    # The results announcement's PDF (fetch_result_times.py): the first one
+    # after the quarter ended - screener.in's "Raw PDF" under each quarter.
+    pdfs: dict[str, list[tuple[str, str]]] = {}
+    if _table_exists(con, "result_times"):
+        for s_, d_, doc in con.execute("SELECT symbol, day, doc FROM result_times WHERE doc <> '' ORDER BY day"):
+            pdfs.setdefault(s_, []).append((d_, doc))
+
+    def pdf_for(sym: str, end: str, announced: str | None) -> str | None:
+        lst = pdfs.get(sym)
+        if not lst:
+            return None
+        # Results are due within 45 days of a quarter (60 for March); 75
+        # allows a late filer without reaching the next quarter's results.
+        lo, hi = end, (date.fromisoformat(end) + timedelta(days=75)).isoformat()
+        if announced:
+            for d_, doc in lst:
+                if d_ == announced:
+                    return doc
+        return next((doc for d_, doc in lst if lo < d_ <= hi), None)
+
     rows = con.execute(
         "SELECT symbol, period_start, period_end, value FROM results_history "
         "WHERE period_type='quarterly' AND item='eps' AND period_start<>'' "
@@ -453,6 +474,7 @@ def quarter_blocks(con: sqlite3.Connection) -> dict[str, list[dict]]:
             "eps": round(float(eps), 2),
             "announced": announced.get((sym, end)),
             "q": fq,
+            **({"pdf": pdf} if (pdf := pdf_for(sym, end, announced.get((sym, end)))) else {}),
         })
     return out
 
@@ -491,7 +513,7 @@ def _table_exists(con: sqlite3.Connection, name: str) -> bool:
     return bool(con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone())
 
 
-def asfiled_table(trend: dict | None, announced: dict | None = None) -> dict | None:
+def asfiled_table(trend: dict | None, announced: dict | None = None, payout: list | None = None) -> dict | None:
     """A results table built from the AS-FILED NSE figures, quarterly or annual.
 
     Both sources were being exported and the page rendered the wrong one. Yahoo
@@ -514,18 +536,34 @@ def asfiled_table(trend: dict | None, announced: dict | None = None) -> dict | N
         return None
     per = trend["periods"]
     declared = [(announced or {}).get(p) for p in per]
+    # (label, values, parent): a row with a parent is folded under that row's
+    # "+" on the page, as screener.in does.
+    opex = trend.get("opex") if any(v is not None for v in (trend.get("opex") or [])) else trend.get("expenses")
     rows = [
-        ("Revenue", trend.get("revenue")),
-        ("Expenses", trend.get("expenses")),
-        ("Operating Profit", trend.get("ebitda")),
-        ("OPM %", trend.get("opm")),
-        ("Interest", trend.get("interest")),
-        ("Depreciation", trend.get("depreciation")),
-        ("Net Profit", trend.get("pat")),
-        ("EPS (Rs)", trend.get("eps")),
+        ("Revenue", trend.get("revenue"), None),
+        ("Expenses", opex, None),
+        ("Material Cost %", trend.get("material_pct"), "Expenses"),
+        ("Employee Cost %", trend.get("employee_pct"), "Expenses"),
+        ("Other Cost %", trend.get("other_cost_pct"), "Expenses"),
+        ("Operating Profit", trend.get("ebitda"), None),
+        ("OPM %", trend.get("opm"), None),
+        ("Other Income", trend.get("other_income"), None),
+        ("Interest", trend.get("interest"), None),
+        ("Depreciation", trend.get("depreciation"), None),
+        ("Profit before tax", trend.get("pbt"), None),
+        ("Tax %", trend.get("tax_pct"), None),
+        ("Net Profit", trend.get("pat"), None),
+        ("Profit from associates", trend.get("associates"), "Net Profit"),
+        ("Minority share", trend.get("minority"), "Net Profit"),
+        ("Profit to owners", trend.get("pat_owners"), "Net Profit"),
+        ("Exceptional items (pre-tax)", trend.get("exceptional"), "Net Profit"),
+        ("EPS (Rs)", trend.get("eps"), None),
+        ("Dividend Payout %", payout, None),
     ]
-    items = [{"label": lab, "values": vals} for lab, vals in rows
-             if vals and any(v is not None for v in vals)]
+    # A row that is blank or zero throughout says nothing (a software company
+    # has no material cost) and is left out.
+    items = [{"label": lab, "values": vals, **({"parent": par} if par else {})} for lab, vals, par in rows
+             if vals and any(v not in (None, 0) for v in vals)]
     if not items:
         return None
     out = {"periods": per, "items": items}
@@ -533,6 +571,82 @@ def asfiled_table(trend: dict | None, announced: dict | None = None) -> dict | N
         out["declared"] = declared   # shown in brackets after each period
     return out
 
+
+
+def dividends_per_share(con: sqlite3.Connection) -> dict[str, list[tuple[str, float, bool]]]:
+    """{symbol: [(ex_date, rupees per share, is_final), ...]} from corporate actions."""
+    out: dict[str, list] = {}
+    if not _table_exists(con, "corporate_actions"):
+        return out
+    import re as _re
+    for sym, d, detail, subject in con.execute(
+            "SELECT symbol, ex_date, detail, subject FROM corporate_actions WHERE kind='dividend' ORDER BY ex_date"):
+        # Every amount on the subject line: "Interim Dividend Rs 11 Per Share/
+        # Special Dividend Rs 46 Per Share" is Rs 57, while `detail` holds 11.
+        pat_ = r"(?:Rs\.?|Re\.?|INR|₹)\s*([0-9]+(?:\.[0-9]+)?)"
+        amts = ([float(x) for x in _re.findall(pat_, subject or "", _re.I)]
+                or [float(x) for x in _re.findall(pat_, detail or "", _re.I)][:1])
+        amt = sum(amts)
+        if amt <= 0 or amt > 1e5:
+            continue
+        # A final dividend is usually filed as plain "Dividend - Rs 30 Per Share";
+        # only interim and special ones say so.
+        final = not _re.search(r"interim|special", subject or "", _re.I)
+        out.setdefault(sym, []).append((str(d)[:10], amt, final))
+    return out
+
+
+def dividend_payout(trend: dict | None, dps: list | None, splits: list | None) -> list | None:
+    """Dividend Payout % per financial year: dividends per share for the year over
+    EPS, both on today's share base (EPS already is; a dividend is divided by the
+    splits and bonuses since its ex-date).
+
+    A final dividend is paid after the year it belongs to (TCS's FY26 final went
+    ex in June 2026), so a final within nine months after a year-end counts for
+    that year; interim and special dividends count for the year they fall in.
+    """
+    if not trend or not dps or not trend.get("periods"):
+        return None
+    ends = trend["periods"]
+    per_year = {e: 0.0 for e in ends}
+    seen = set()
+    for d, amt, final in dps:
+        adj = amt / adj_factor(splits, d)
+        if final:
+            year = max((e for e in ends if e < d and (date.fromisoformat(d) - date.fromisoformat(e)).days <= 270), default=None)
+        else:
+            year = min((e for e in ends if e >= d and (date.fromisoformat(e) - date.fromisoformat(d)).days < 366), default=None)
+        if year is not None:
+            per_year[year] += adj
+            seen.add(year)
+    out = []
+    for e, eps in zip(ends, trend.get("eps") or []):
+        if e in seen and eps and eps > 0:
+            out.append(round(per_year[e] / eps * 100, 1))
+        elif e in seen or not eps:
+            out.append(None)
+        else:
+            # A profitable year with no dividend on record within our window of
+            # corporate actions is shown blank, not 0% - the record may start later.
+            out.append(None)
+    return out if any(v is not None for v in out) else None
+
+
+def cfo_ebitda(cash_flow: dict | None, annual: dict | None) -> None:
+    """Adds "CFO / EBITDA %" to the cash-flow table: how much of operating profit
+    arrived as cash. Matched by financial year (periods end on the same date)."""
+    if not cash_flow or not annual or not annual.get("periods"):
+        return
+    eb = dict(zip(annual["periods"], annual.get("ebitda") or []))
+    cfo = next((it for it in cash_flow.get("items", []) if it.get("label") == "Cash from Operations"), None)
+    if not cfo:
+        return
+    vals = []
+    for p_, v in zip(cash_flow.get("periods", []), cfo.get("values", [])):
+        e = eb.get(str(p_)[:10])
+        vals.append(round(v / e * 100) if (v is not None and e) else None)
+    if any(v is not None for v in vals):
+        cash_flow["items"].append({"label": "CFO / EBITDA %", "values": vals})
 
 
 def reporting_basis(con: sqlite3.Connection) -> dict[str, str]:
@@ -584,7 +698,7 @@ def screener_context(data_json: Path) -> tuple[dict, dict, dict]:
     # whole row for eight peers would put most of the saving straight back.
     PEER_FIELDS = ("symbol", "name", "price", "mcap", "pe", "pb", "roce", "roe",
                    "div_yield", "net_margin", "sales_cagr_5y", "profit_cagr_5y",
-                   "de", "exchange")
+                   "de", "exchange", "qtr_sales", "qtr_profit", "qtr_sales_yoy", "qtr_profit_yoy")
     MEDIAN_FIELDS = ("pe", "div_yield", "roce", "roe", "sales_cagr_5y",
                      "profit_cagr_5y", "de", "promoter_holding",
                      "volatility_1y", "volatility_30d")
@@ -592,6 +706,13 @@ def screener_context(data_json: Path) -> tuple[dict, dict, dict]:
     by_industry: dict[str, list] = {}
     for r in rows:
         by_industry.setdefault(r.get("industry") or "", []).append(r)
+    # Peers by NSE's basic industry where NSE says what it is and at least
+    # three others share it (Refineries & Marketing: IOC, BPCL, HPCL ...);
+    # otherwise by the source's industry, which is finer than NSE's sector.
+    by_basic: dict[str, list] = {}
+    for r in rows:
+        if r.get("nse_basic"):
+            by_basic.setdefault(r["nse_basic"], []).append(r)
 
     # Rank by size, computed once over the whole table rather than per company.
     with_cap = [r for r in rows if isinstance(r.get("mcap"), (int, float))]
@@ -627,13 +748,18 @@ def screener_context(data_json: Path) -> tuple[dict, dict, dict]:
     for r in rows:
         sym, ind = r["symbol"], (r.get("industry") or "")
         row_by[sym] = r
+        group = by_basic.get(r.get("nse_basic") or "", [])
+        pool = group if len(group) >= 4 else by_industry.get(ind, [])
         peers_by[sym] = [
             {k: p.get(k) for k in PEER_FIELDS}
-            for p in sorted((x for x in by_industry.get(ind, []) if x["symbol"] != sym),
+            for p in sorted((x for x in pool if x["symbol"] != sym),
                             key=lambda x: -(x.get("mcap") or 0))[:8]
         ]
         ctx_by[sym] = {
             "industry": ind,
+            "nse_sector": r.get("nse_sector"),
+            "nse_basic": r.get("nse_basic"),
+            "peer_group": r.get("nse_basic") if len(group) >= 4 else ind,
             "medians": medians_by_industry.get(ind, {}),
             "rank": rank_all.get(sym),
             "rank_of": len(with_cap),
@@ -769,6 +895,39 @@ def main() -> None:
                 "SELECT symbol, title, url, short, text FROM company_about WHERE status='ok'"):
             about_by_symbol[s] = {"title": title, "url": url, "short": short or None, "text": text or None}
     coverage_by_symbol = coverage_notes(con)
+    # Face value (NSE's equity list / BSE's) and dividends per share, for the
+    # Face Value tile and the Dividend Payout % row.
+    face_value: dict[str, float] = {}
+    try:
+        for s_, fv in con.execute('SELECT SYMBOL, "FACE VALUE" FROM universe'):
+            try:
+                if fv not in (None, "") and float(fv) > 0:
+                    face_value[s_] = float(fv)
+            except (TypeError, ValueError):
+                pass
+    except Exception:  # noqa: BLE001 - an older universe table has no such column
+        pass
+    dps_by_symbol = dividends_per_share(con)
+    fno = {r[0] for r in con.execute("SELECT symbol FROM fno_lots")} if _table_exists(con, "fno_lots") else set()
+    # Each company's own icon (fetch_logos.py), written beside the company
+    # files as logos/<SYM>.<ext>; the page shows initials where there is none.
+    LOGO_EXT = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/x-icon": "ico"}
+    logos: dict[str, tuple[str, bytes]] = {}
+    if _table_exists(con, "logos"):
+        for s_, mime, data in con.execute("SELECT symbol, mime, data FROM logos WHERE status='ok' AND data IS NOT NULL"):
+            if mime in LOGO_EXT:
+                logos[s_] = (LOGO_EXT[mime], data)
+    logo_dir = OUT_DIR.parent / "logos"
+    splits_by_symbol = split_factors(con)
+    # Quarterly business updates filed before the results (business_updates.py):
+    # how often, how many days after the quarter, and the latest.
+    updates_by_symbol: dict[str, dict] = {}
+    if _table_exists(con, "business_updates_log"):
+        since = con.execute("SELECT MIN(day) FROM business_updates_log").fetchone()[0]
+        if since:
+            for s_, lst in business_updates.load(con).items():
+                if (summ := business_updates.summary(lst, since)):
+                    updates_by_symbol[s_] = summ
     # symbol -> (exchange, bse code). Older databases have no EXCHANGE column,
     # in which case every company is what it always was: NSE.
     try:
@@ -785,6 +944,7 @@ def main() -> None:
     # order. Falls back silently when absent so a standalone run still works.
     row_by_sym, peers_by_sym, ctx_by_sym = screener_context(OUT_DIR.parent / "data.json")
     trends = build_trends(con, shares_by_symbol, only)
+    standalone = standalone_tables(con, only)
     bands = ratio_bands(con, shares_by_symbol, netdebt_by_symbol, only)
     prices_by_symbol: dict[str, dict] = {}
     if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='prices'").fetchone():
@@ -807,10 +967,18 @@ def main() -> None:
         # Who holds the public part, from each quarter's XBRL (fetch_shp_detail.py).
         detail: dict[tuple, tuple] = {}
         if _table_exists(con, "shareholding_detail"):
-            for s_, d_, fii, dii, mf in con.execute("SELECT symbol, date, fii, dii, mf FROM shareholding_detail"):
-                detail[(s_, str(d_)[:10])] = (fii, dii, mf)
+            has_new = "n_holders" in {r[1] for r in con.execute("PRAGMA table_info(shareholding_detail)")}
+            q_ = ("SELECT symbol, date, fii, dii, mf, gov, n_holders FROM shareholding_detail" if has_new
+                  else "SELECT symbol, date, fii, dii, mf, NULL, NULL FROM shareholding_detail")
+            for s_, d_, fii, dii, mf, gov, nh in con.execute(q_):
+                detail[(s_, str(d_)[:10])] = (fii, dii, mf, gov, nh)
+        named: dict[str, dict[tuple, dict]] = {}
+        if _table_exists(con, "shp_holders"):
+            for s_, d_, cat, nm, pc in con.execute("SELECT symbol, date, category, name, pct FROM shp_holders"):
+                named.setdefault(s_, {}).setdefault((cat, nm), {})[str(d_)[:10]] = pc
         for sym_key, grp in shp.groupby("symbol"):
-            tail = grp.tail(12)
+            # Eleven years: the page's Yearly view reads the March filing of each.
+            tail = grp.tail(44)
             dates = tail["date"].tolist()
             entry = {
                 "dates": dates,
@@ -818,10 +986,17 @@ def main() -> None:
                 "public": [None if pd.isna(v) else float(v) for v in tail["public"]],
                 "employee": [None if pd.isna(v) else float(v) for v in tail["employee_trusts"]],
             }
-            for i, key in enumerate(("fii", "dii", "mf")):
-                vals = [detail.get((sym_key, str(d)[:10]), (None, None, None))[i] for d in dates]
+            for i, key in enumerate(("fii", "dii", "mf", "gov", "holders_n")):
+                vals = [detail.get((sym_key, str(d)[:10]), (None,) * 5)[i] for d in dates]
                 if any(v is not None for v in vals):
                     entry[key] = vals
+            # Named holders, each across the same dates (blank where not named).
+            hl = [{"cat": cat, "name": nm, "values": [by.get(str(d)[:10]) for d in dates]}
+                  for (cat, nm), by in (named.get(sym_key) or {}).items()]
+            hl = [h for h in hl if any(v is not None for v in h["values"])]
+            if hl:
+                hl.sort(key=lambda h: (h["cat"], -(next((v for v in reversed(h["values"]) if v is not None), 0))))
+                entry["named"] = hl
             shp_by_symbol[sym_key] = entry
     anndocs_by_symbol: dict[str, dict] = {}
     if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='announcement_docs'").fetchone():
@@ -831,6 +1006,39 @@ def main() -> None:
                 {"date": d, "title": t, "url": u}
                 for d, t, u in zip(grp["date"], grp["title"], grp["url"])
             ]
+    # The Announcements list (fetch_announcement_docs.py): [at, category,
+    # subject, url, important] - short keys, fifty to a company.
+    anns_by_symbol: dict[str, list] = {}
+    if _table_exists(con, "announcements"):
+        for s_, at, cat, subj, url, imp in con.execute(
+                "SELECT symbol, at, category, subject, url, important FROM announcements ORDER BY at DESC"):
+            anns_by_symbol.setdefault(s_, []).append([at, cat, subj, url, imp])
+    # Segments (fetch_results_history.parse_segments): per period type, the
+    # last 8 quarters / 5 years, each segment's revenue and EBIT in Rs crore.
+    segs_by_symbol: dict[str, dict] = {}
+    if _table_exists(con, "results_segments"):
+        raw_s: dict[tuple, dict] = {}
+        for s_, pt, pe_, nm, rv, eb in con.execute(
+                "SELECT symbol, period_type, period_end, segment, revenue, ebit FROM results_segments"):
+            raw_s.setdefault((s_, pt), {}).setdefault(pe_, {})[nm] = (rv, eb)
+        for (s_, pt), by_p in raw_s.items():
+            per = sorted(by_p)[-(8 if pt == "quarterly" else 5):]
+            names = sorted({nm for p_ in per for nm in by_p[p_]}, key=lambda nm: -((by_p[per[-1]].get(nm) or (0, 0))[0] or 0))
+            cr = lambda v: round(v / 1e7, 1) if v is not None else None  # noqa: E731
+            segs_by_symbol.setdefault(s_, {})[pt] = {
+                "periods": per,
+                "items": [{"name": nm, "rev": [cr((by_p[p_].get(nm) or (None, None))[0]) for p_ in per],
+                           "ebit": [cr((by_p[p_].get(nm) or (None, None))[1]) for p_ in per]} for nm in names],
+            }
+    # Insider trades (fetch_announcement_docs.py, NSE's PIT feed):
+    # [day, name, category, kind, shares, value Rs, mode], newest first.
+    insider_by_symbol: dict[str, list] = {}
+    if _table_exists(con, "insider_trades"):
+        for s_, day, nm, cat, kind, mode, sh, val in con.execute(
+                "SELECT symbol, day, name, category, kind, mode, shares, value FROM insider_trades ORDER BY day DESC"):
+            lst = insider_by_symbol.setdefault(s_, [])
+            if len(lst) < 20:
+                lst.append([day, nm, cat, kind, sh, val, mode])
     has_docs_table = con.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='documents'"
     ).fetchone()
@@ -868,7 +1076,10 @@ def main() -> None:
             "documents": {
                 "annual_reports": docs_by_symbol.get(sym, []),
                 "concalls": anndocs_by_symbol.get(sym, {}).get("concall", []),
+                "ppts": anndocs_by_symbol.get(sym, {}).get("ppt", []),
+                "recordings": anndocs_by_symbol.get(sym, {}).get("rec", []),
                 "ratings": anndocs_by_symbol.get(sym, {}).get("rating", []),
+                "announcements": anns_by_symbol.get(sym, []),
             },
             "trend": trends.get(sym, {}),
             "shareholding": shp_by_symbol.get(sym),
@@ -886,6 +1097,12 @@ def main() -> None:
             "seasons": seasons_by_symbol.get(sym),
             "indices": indices_by_symbol.get(sym),
             "about": about_by_symbol.get(sym),
+            "face_value": face_value.get(sym),
+            "fno": True if sym in fno else None,
+            "segments": segs_by_symbol.get(sym),
+            "insider": insider_by_symbol.get(sym),
+            "logo": f"logos/{sym}.{logos[sym][0]}" if sym in logos else None,
+            "updates": updates_by_symbol.get(sym),
             "no_pe_reason": None if (bands.get(sym, {}) or {}).get("pe") else no_pe.get(sym),
             # Which exchange this company is listed on, because it decides what
             # can exist on the page. The as-filed quarterly table, the P/E band
@@ -918,13 +1135,25 @@ def main() -> None:
         # what put Yahoo's owners-only profit on screen next to the filed figure.
         for key, tkey, yf_key in (("quarterly_results", "quarterly", "_yf_quarterly"),
                                   ("annual_pnl", "annual", "_yf_annual")):
-            asf = asfiled_table((trends.get(sym) or {}).get(tkey),
-                                {q["end"]: q.get("announced") for q in (quarters_by_symbol.get(sym) or [])})
+            tr = (trends.get(sym) or {}).get(tkey)
+            asf = asfiled_table(tr, {q["end"]: q.get("announced") for q in (quarters_by_symbol.get(sym) or [])},
+                                dividend_payout(tr, dps_by_symbol.get(sym), splits_by_symbol.get(sym)) if tkey == "annual" else None)
             fallback = payload["statements"].pop(yf_key, None)
             chosen = asf or fallback
             if chosen:
                 payload["statements"][key] = chosen
                 payload.setdefault("sources", {})[key] = "as-filed (NSE)" if asf else "Yahoo Finance"
+        # The standalone figures, for the Consolidated / Standalone switch -
+        # only where the main tables are consolidated (else they ARE standalone).
+        if basis_by_symbol.get(sym) == "consolidated" and sym in standalone:
+            for key, tkey in (("quarterly_results_sa", "quarterly"), ("annual_pnl_sa", "annual")):
+                t_sa = asfiled_table(standalone[sym].get(tkey))
+                if t_sa:
+                    payload["statements"][key] = t_sa
+        cfo_ebitda(payload["statements"].get("cash_flow"), (trends.get(sym) or {}).get("annual"))
+        if sym in logos:
+            logo_dir.mkdir(parents=True, exist_ok=True)
+            (logo_dir / f"{sym}.{logos[sym][0]}").write_bytes(logos[sym][1])
         if payload["statements"]:
             n_with += 1
         else:

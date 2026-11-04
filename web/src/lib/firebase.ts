@@ -163,13 +163,6 @@ export async function signOutOfGoogle(): Promise<void> {
   await signOut(fb.auth);
 }
 
-export async function watchUser(cb: (u: User | null) => void): Promise<() => void> {
-  const fb = await getFirebase();
-  if (!fb) { cb(null); return () => {}; }
-  const { onAuthStateChanged } = await import("firebase/auth");
-  return onAuthStateChanged(fb.auth, cb);
-}
-
 // ---------------------------------------------------------------- who is signed in
 /** The account last signed in on this device. Shown while Firebase is still
  *  loading, so the top bar and the account screen never show "signed out" to

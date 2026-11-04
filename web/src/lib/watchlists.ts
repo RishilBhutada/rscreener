@@ -160,16 +160,6 @@ export function toggleIn(listId: string, symbol: string): WatchState {
   });
 }
 
-export function addTo(listId: string, symbols: string[]): WatchState {
-  const s = loadLists();
-  return save({
-    ...s,
-    lists: s.lists.map((l) =>
-      l.id !== listId ? l : { ...l, symbols: Array.from(new Set([...l.symbols, ...symbols])) },
-    ),
-  });
-}
-
 export function removeFrom(listId: string, symbol: string): WatchState {
   const s = loadLists();
   return save({
@@ -189,12 +179,6 @@ export function moveSymbol(fromId: string, toId: string, symbol: string): WatchS
       return l;
     }),
   });
-}
-
-/** Star behaviour from a table: toggle on the ACTIVE list. */
-export function toggleActive(symbol: string): WatchState {
-  const s = loadLists();
-  return toggleIn(s.activeId, symbol);
 }
 
 /** Union across every list - what the calendar and "anything I follow" want. */

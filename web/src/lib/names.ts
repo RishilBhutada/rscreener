@@ -83,8 +83,3 @@ export function shortName(name: string, symbol = ""): string {
   const dangling = /\b(of|and|the|&|for|de)$/i.test(s);
   return s.length >= 3 && !dangling ? s : (titleCase(name) || symbol);
 }
-
-/** The full registered name, cleaned but not shortened - for page headings. */
-export function fullName(name: string, symbol = ""): string {
-  return titleCase(name || "") || symbol;
-}

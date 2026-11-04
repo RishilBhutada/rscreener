@@ -8,21 +8,29 @@ import { InstDoc, inr, loadInst, qtyShort, since, tally } from "@/lib/news";
  *  latest call per broker as headlines reported them (180 days), bulk/block
  *  deals and SAST stake filings (a year), and the month's headlines.
  *  Nothing shown when there is nothing - no empty card. */
-export default function InstitutionsCard({ symbol }: { symbol: string }) {
+export default function InstitutionsCard({ symbol, onLoad }: {
+  symbol: string;
+  /** Told whether there is a card, so the company page's section menu lists
+   *  "Institutions" only when it has somewhere to go. */
+  onLoad?: (has: boolean) => void;
+}) {
   const [doc, setDoc] = useState<InstDoc | null>(null);
   const [now, setNow] = useState(0);
   const [more, setMore] = useState(false);
   useEffect(() => {
     let live = true;
-    loadInst(symbol).then((d) => { if (live) { setDoc(d); setNow(Date.now()); } }).catch(() => {});
+    loadInst(symbol)
+      .then((d) => { if (live) { setDoc(d); setNow(Date.now()); onLoad?.(Boolean(d)); } })
+      .catch(() => { if (live) onLoad?.(false); });
     return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onLoad is a state setter
   }, [symbol]);
   if (!doc) return null;
   const t = tally(doc.calls);
   const tone = (b: string | null) => (b === "Buy" ? "text-[var(--pos)]" : b === "Sell" ? "text-[var(--neg)]" : "text-[var(--ink2)]");
   const head = "px-3 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]";
   return (
-    <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
+    <section id="institutions" className="scroll-mt-32 rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
       <h2 className={`${head} flex items-center gap-1`}>
         Institutions
         <InfoTip title="Institutions">

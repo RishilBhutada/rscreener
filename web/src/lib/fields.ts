@@ -67,6 +67,9 @@ export const FIELD_CATALOG: FieldDef[] = [
 
   { key: "qtr_sales_yoy", label: "Quarter sales growth (YoY)", group: "Results", unit: "%", desc: "Latest quarter's sales against the same quarter a year earlier", short: "Qtr sales YoY" },
   { key: "qtr_profit_yoy", label: "Quarter profit growth (YoY)", group: "Results", unit: "%", desc: "Latest quarter's profit against the same quarter a year earlier. Left blank when that quarter was a loss", short: "Qtr profit YoY" },
+  { key: "qtr_sales", label: "Sales, latest quarter", group: "Results", unit: "₹ Cr", desc: "Sales (revenue from operations) in the latest filed quarter", short: "Sales qtr" },
+  { key: "qtr_profit", label: "Net profit, latest quarter", group: "Results", unit: "₹ Cr", desc: "Net profit in the latest filed quarter", short: "NP qtr" },
+  { key: "in_fno", label: "In F&O segment", group: "Results", unit: "", desc: "1 when the stock trades in NSE's futures & options segment, else 0", short: "F&O" },
   { key: "qtr_sales_qoq", label: "Quarter sales growth (QoQ)", group: "Results", unit: "%", desc: "Latest quarter's sales against the quarter before", short: "Qtr sales QoQ" },
   { key: "qtr_profit_qoq", label: "Quarter profit growth (QoQ)", group: "Results", unit: "%", desc: "Latest quarter's profit against the quarter before. Left blank when that quarter was a loss", short: "Qtr profit QoQ" },
 
@@ -85,8 +88,6 @@ export const FIELD_CATALOG: FieldDef[] = [
   { key: "volatility_1y", label: "Volatility (1y)", group: "Risk", unit: "%", desc: "How wildly the price swings — annualised realised volatility from a year of daily bars (Yang-Zhang OHLC estimator); under ~25% is calm, over ~50% is stormy", short: "Vol 1y" },
   { key: "volatility_30d", label: "Volatility (30d)", group: "Risk", unit: "%", desc: "Same measure over just the last month — spikes when news hits", short: "Vol 30d" },
 ];
-
-export const FIELD_GROUPS = [...new Set(FIELD_CATALOG.map((f) => f.group))];
 
 /** What the screener can screen besides companies. Each has its own fields,
  *  read from the same files its list page uses. */

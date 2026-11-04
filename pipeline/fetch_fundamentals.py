@@ -55,6 +55,9 @@ INFO_FIELDS = {
     "fiftyTwoWeekHigh": "wk52_high",
     "fiftyTwoWeekLow": "wk52_low",
     "beta": "beta",
+    # The company's own site - a link under its name (screener.in shows one),
+    # and where its logo is looked for (fetch_logos.py).
+    "website": "website",
 }
 
 # (yfinance Ticker attribute, statement type, period type)
@@ -203,6 +206,13 @@ def replace_symbol_rows(con: sqlite3.Connection, table: str, symbols: list[str],
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
     ).fetchone()
     if existing:
+        # A field added to INFO_FIELDS is a column the stored table has never
+        # had; add it rather than let the append fail and lose the night.
+        have = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+        for c in df.columns:
+            if c not in have:
+                kind = "TEXT" if df[c].dtype == object else "REAL"
+                con.execute(f'ALTER TABLE {table} ADD COLUMN "{c}" {kind}')
         # coalesce only for one-row-per-symbol tables. `statements` holds many
         # rows per symbol keyed by period and item, where a row absent from the
         # new payload genuinely is a row that should go.

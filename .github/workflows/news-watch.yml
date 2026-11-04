@@ -4,6 +4,7 @@ run-name: Watch the news
 # Keeps the News page current from 07:00 to 23:59 IST: market headlines,
 # broker calls read from them, NSE bulk/block deals and SAST filings, every
 # twenty minutes, published at most every forty (pipeline/news_watch.py).
+# The same loop pushes a starred company's quarterly business update.
 #
 # Started each morning by the nightly run; the timed starts are backups only,
 # because GitHub drops most timed runs on this repository. One at a time.
@@ -28,11 +29,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: pipeline
+          sparse-checkout: |
+            pipeline
+            alerts
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install requests
+      - run: pip install requests google-auth
       - run: python pipeline/news_watch.py
         env:
           GH_TOKEN: ${{ github.token }}
+          # alerts/update_alerts.py: business updates for the owner's stars
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          ALERT_UID: ${{ secrets.ALERT_UID }}

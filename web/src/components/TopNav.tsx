@@ -6,12 +6,11 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Settings from "@/components/Settings";
 import { loadIndex, symbolHref } from "@/lib/index-data";
 import { BUILD_COMMIT, BUILD_SUBJECT, BUILD_TIME } from "@/lib/buildinfo";
-import { DESTINATIONS, BAR_SLOTS } from "@/lib/destinations";
+import { HUBS, HUB_OF, destination } from "@/lib/destinations";
 import {
   REFRESH_MARK, isRefreshLoad, reloadBypassingCache,
   fetchLiveVersion, isNewer, pendingRelease, pendingText, type Pending, type Version,
 } from "@/lib/reload";
-import { applyOrder, loadOrder } from "@/lib/order";
 import { previousPage, recordNavigation } from "@/lib/navdepth";
 import { useBackClose } from "@/lib/backclose";
 import { buildIndex, search, didYouMean, type SearchIndex, type SearchRow } from "@/lib/search";
@@ -54,14 +53,6 @@ function NavIcon({ d }: { d: string }) {
     <svg viewBox="0 0 24 24" className="w-[22px] h-[22px]" fill="none" stroke="currentColor"
       strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d={d} />
-    </svg>
-  );
-}
-
-function MoreIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="w-[22px] h-[22px]" fill="currentColor" aria-hidden="true">
-      <circle cx="5.5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="18.5" cy="12" r="1.6" />
     </svg>
   );
 }
@@ -442,17 +433,27 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<Lite[]>([]);
   const [hi, setHi] = useState(0);
-  const [moreOpen, setMoreOpen] = useState(false);
-  useBackClose(moreOpen, () => setMoreOpen(false));
-  // Read on mount and refreshed when Settings changes it, so the bar reorders
-  // under the panel rather than after the next page load.
-  const [navOrder, setNavOrder] = useState<string[]>([]);
+  // The hub this page belongs to, and the tab last opened in each hub: a hub
+  // button reopens where you were in it rather than its first tab.
+  const hub = active ? HUB_OF[active] : undefined;
+  const [lastTab, setLastTab] = useState<Record<string, string>>({});
   useEffect(() => {
-    const read = () => setNavOrder(loadOrder("nav"));
-    read();
-    window.addEventListener("rs-order", read);
-    return () => window.removeEventListener("rs-order", read);
-  }, []);
+    const sync = () => {
+      let saved: Record<string, string> = {};
+      try { saved = JSON.parse(localStorage.getItem("rs_hub_last") ?? "{}") ?? {}; } catch { /* first tabs */ }
+      if (hub && hub !== "home" && active) {
+        saved = { ...saved, [hub]: active };
+        try { localStorage.setItem("rs_hub_last", JSON.stringify(saved)); } catch { /* not remembered */ }
+      }
+      setLastTab(saved);
+    };
+    sync();
+  }, [hub, active]);
+  const hubHref = (h: (typeof HUBS)[number]) => {
+    const key = lastTab[h.key] && h.tabs.includes(lastTab[h.key]) ? lastTab[h.key] : h.tabs[0];
+    return destination(key)?.href ?? "/";
+  };
+  const hubTabs = hub && hub !== "home" ? HUBS.find((h) => h.key === hub)?.tabs ?? [] : [];
   const boxRef = useRef<HTMLDivElement>(null);
 
   const ensureData = async () => {
@@ -489,20 +490,6 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
     (document.activeElement as HTMLElement | null)?.blur();
     router.push(symbolHref(sym));
   };
-
-  // Which four sit in the bar is the reader's choice now, not a guess. The old
-  // split - Home, Lists, Screener, Portfolio in the bar; Sectors, Calendar, IPO
-  // and Data behind More - was a reasonable guess about what somebody reaches
-  // for mid-task, and a wrong one for anybody who never opens a portfolio and
-  // checks the results calendar every morning. Settings reorders one list; the
-  // first four land in the bar and the rest fall into More.
-  const ordered = applyOrder(DESTINATIONS, (d) => d.key, navOrder);
-  const PRIMARY = ordered.slice(0, BAR_SLOTS);
-  const SECONDARY = ordered.slice(BAR_SLOTS);
-  // The desktop row is the same list as the phone bar: the first four, the page
-  // you are on if it is further down, and More for the rest. It used to be a
-  // hand-kept list of its own, which never learnt about Gold or Indices.
-  const deskLinks = [...PRIMARY, ...SECONDARY.filter((d) => d.key === active)];
 
   return (
     <header className="bg-[var(--card)] border-b border-[var(--line)] sm:sticky sm:top-0 z-30">
@@ -586,17 +573,15 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
         </div>
 
         <nav className="hidden sm:flex touch:hidden! items-center gap-1 text-sm font-medium">
-          {deskLinks.map(({ key, label, href }) => (
+          {HUBS.map((h) => (
             <Link
-              key={key}
-              href={href}
-              className={`px-3 py-1.5 rounded-lg ${active === key ? "text-[var(--accent-ink)] bg-[var(--accent-soft)] font-semibold" : "text-[var(--ink2)] hover:bg-[var(--card2)]"}`}
+              key={h.key}
+              href={hubHref(h)}
+              className={`px-3 py-1.5 rounded-lg ${hub === h.key ? "text-[var(--accent-ink)] bg-[var(--accent-soft)] font-semibold" : "text-[var(--ink2)] hover:bg-[var(--card2)]"}`}
             >
-              {label}
+              {h.label}
             </Link>
           ))}
-          <button onClick={() => setMoreOpen(true)}
-            className="px-3 py-1.5 rounded-lg text-[var(--ink2)] hover:bg-[var(--card2)]">More</button>
         </nav>
 
         {/* Top right. Theme, accent and reload used to sit out here as three
@@ -618,85 +603,56 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
         </div>
       </div>
 
-      {/* Content-sized and wrapping, NOT a fixed column count. `grid-cols-5` gave
-          every link a 67px cell, which is narrower than "Other screens" — the
-          label then overflowed its cell and printed straight over "Data" sitting
-          beside it. Any fixed grid breaks the moment a label or the link count
-          changes; letting each item take its own width cannot. */}
-      {/* On a phone this was eight links wrapping into two rows at the top of
-          every page - roughly 80px of chrome above the content, scrolled away
-          the moment you started reading, and unreachable again without scrolling
-          all the way back up. Pages here run to eight screens.
-
-          It is now a fixed bar at the BOTTOM: five destinations, thumb-height,
-          always reachable. Five and not eight because a row of eight on a 375px
-          screen gives each one 47px including its label, which is a target you
-          miss. The three that did not make the cut - Calendar, IPO and Data -
-          are reachable from the More sheet, and none of them is somewhere you
-          go mid-task. */}
-      {/* Full width with a solid colour: iPadOS 26 Safari leaves an edge clear
-          of its glass blur only where a fixed, opaque, near-full-width bar
-          sits on it. The five cells keep a phone's spacing on an iPad. */}
-      <nav className="hidden touch:block fixed bottom-0 inset-x-0 z-40 border-t border-[var(--line)] bg-[var(--card)] pb-[env(safe-area-inset-bottom)]">
-        <div className="grid grid-cols-5 max-w-xl mx-auto">
-        {PRIMARY.map(({ key, label, href, icon }) => (
-          <Link
-            key={key}
-            href={href}
-            aria-current={active === key ? "page" : undefined}
-            className={`rs-press flex flex-col items-center justify-center gap-1 min-h-[58px] text-[11px] ${
-              active === key ? "text-[var(--accent-ink)] font-semibold" : "text-[var(--ink3)] font-medium"}`}
-          >
-            {/* The current page sits in a pill, not just a change of colour -
-                a tint alone is the one signal a glance in daylight misses. */}
-            <span className={`flex items-center justify-center w-14 h-7 rounded-full transition-colors duration-200 ${
-              active === key ? "bg-[var(--accent-soft)]" : ""}`}>
-              <NavIcon d={icon} />
-            </span>
-            {label}
-          </Link>
-        ))}
-        <button
-          onClick={() => setMoreOpen(true)}
-          className="rs-press flex flex-col items-center justify-center gap-1 min-h-[58px] text-[11px] font-medium text-[var(--ink3)]"
-        >
-          <span className="flex items-center justify-center w-14 h-7 rounded-full"><MoreIcon /></span>
-          More
-        </button>
-        </div>
-      </nav>
-
-      {moreOpen && (
-        <div className="fixed inset-0 z-50" onClick={() => setMoreOpen(false)}>
-          <div className="rs-fade absolute inset-0 bg-black/40" />
-          {/* A bottom sheet on a phone; on a wider screen the same list as a
-              card, not a strip stretched across the whole width. */}
-          <div
-            className="rs-sheet absolute bottom-0 inset-x-0 bg-[var(--card)] rounded-t-2xl border-t border-[var(--line)] p-2 pb-[calc(env(safe-area-inset-bottom)+8px)]
-                       sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 sm:bottom-6 sm:w-80 sm:rounded-2xl sm:border"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {SECONDARY.map(({ key, label, href, icon }) => (
-              <Link
-                key={key}
-                href={href}
-                onClick={() => setMoreOpen(false)}
-                className={`px-4 min-h-[50px] flex items-center gap-3.5 rounded-xl text-sm font-medium ${
-                  active === key ? "text-[var(--accent-ink)] bg-[var(--accent-soft)]" : "text-[var(--ink2)] active:bg-[var(--card2)]"}`}
-              >
-                <NavIcon d={icon} />
-                {label}
-              </Link>
-            ))}
-            <button
-              onClick={() => setMoreOpen(false)}
-              className="w-full px-4 min-h-[48px] text-sm font-semibold text-[var(--ink3)]"
-            >
-              Close
-            </button>
+      {/* The hub's own pages as tabs, the same pattern as a company page's
+          tabs: every page but Home is one of these, so there is no More menu. */}
+      {hubTabs.length > 0 && (
+        <div className="max-w-6xl mx-auto px-4">
+          <div role="tablist" aria-label={HUBS.find((h) => h.key === hub)?.label}
+            className="flex gap-5 sm:gap-7 overflow-x-auto [scrollbar-width:none] text-[13.5px] -mb-px">
+            {hubTabs.map((k) => {
+              const dst = destination(k);
+              if (!dst) return null;
+              const on = active === k;
+              return (
+                <Link key={k} href={dst.href} role="tab" aria-selected={on}
+                  className={`shrink-0 whitespace-nowrap pt-2 pb-2 border-b-2 ${on
+                    ? "border-[var(--accent)] text-[var(--ink)] font-semibold"
+                    : "border-transparent text-[var(--ink3)] hover:text-[var(--ink2)]"}`}>
+                  {dst.label}
+                </Link>
+              );
+            })}
           </div>
         </div>
       )}
+
+      {/* A fixed bar at the BOTTOM, thumb-height and always reachable: the four
+          hubs. Full width with a solid colour, which iPadOS 26 Safari needs to
+          keep its glass blur off the edge. */}
+      <nav className="hidden touch:block fixed bottom-0 inset-x-0 z-40 border-t border-[var(--line)] bg-[var(--card)] pb-[env(safe-area-inset-bottom)]">
+        <div className="grid grid-cols-4 max-w-xl mx-auto">
+        {HUBS.map((h) => {
+          const on = hub === h.key;
+          return (
+            <Link
+              key={h.key}
+              href={hubHref(h)}
+              aria-current={on ? "page" : undefined}
+              className={`rs-press flex flex-col items-center justify-center gap-1 min-h-[58px] text-[11px] ${
+                on ? "text-[var(--accent-ink)] font-semibold" : "text-[var(--ink3)] font-medium"}`}
+            >
+              {/* The current hub sits in a pill, not just a change of colour -
+                  a tint alone is the one signal a glance in daylight misses. */}
+              <span className={`flex items-center justify-center w-14 h-7 rounded-full transition-colors duration-200 ${
+                on ? "bg-[var(--accent-soft)]" : ""}`}>
+                <NavIcon d={h.icon} />
+              </span>
+              {h.label}
+            </Link>
+          );
+        })}
+        </div>
+      </nav>
     </header>
   );
 }

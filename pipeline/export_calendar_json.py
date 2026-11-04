@@ -7,9 +7,11 @@
                                  with the quarter's sales and profit against a
                                  year before, how the stock moved, and the
                                  earnings call - dividends, bonuses, splits,
-                                 rights, buybacks, IPO listings, and the board
-                                 meetings fetch_events.py keeps. Only the
-                                 calendar page reads it.
+                                 rights, buybacks, IPO listings, the board
+                                 meetings fetch_events.py keeps, and the
+                                 quarterly business updates some companies file
+                                 before their results. Only the calendar page
+                                 reads it.
 
 Written on EVERY run, publish-only ones included, so a code change can never
 put an old calendar back on the site (see fetch_events.py). If NSE refuses for
@@ -47,6 +49,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+import business_updates
 import seasons_lib
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -366,6 +369,23 @@ def main() -> None:
             unlisted += 1
     for lst in results_by.values():
         lst.sort(key=lambda r: r["d"])
+
+    # ── quarterly business updates filed before the results (business_updates.py) ──
+    for sym, lst in business_updates.load(con).items():
+        for u in lst:
+            if not lo <= u["d"] <= today:
+                continue
+            e = {"d": u["d"], "k": "update", "s": sym, "q": u["q"], "x": u["x"]}
+            if u["at"]:
+                e["at"] = u["at"]
+            if u["doc"]:
+                e["doc"] = u["doc"]
+            # The same window as a result's move, so the two read side by side.
+            if (mv := move(closes, sym, u["d"], reshaped)) is not None:
+                e["mv"] = mv
+                if (nf := move(nifty, "NIFTY", u["d"], {})) is not None:
+                    e["nf"] = nf
+            past.append(e)
 
     # ── what is coming ──
     upcoming = []

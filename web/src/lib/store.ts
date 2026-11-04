@@ -1,4 +1,3 @@
-const WATCH_KEY = "rscreener_watchlist";
 const RECENT_KEY = "rscreener_recent";
 const NOTES_KEY = "rscreener_notes";
 
@@ -9,17 +8,6 @@ function read<T>(key: string, fallback: T): T {
   } catch {
     return fallback;
   }
-}
-
-export function loadWatchlist(): string[] {
-  return read<string[]>(WATCH_KEY, []);
-}
-
-export function toggleWatch(symbol: string): string[] {
-  const list = loadWatchlist();
-  const next = list.includes(symbol) ? list.filter((s) => s !== symbol) : [...list, symbol];
-  localStorage.setItem(WATCH_KEY, JSON.stringify(next));
-  return next;
 }
 
 export function loadNote(symbol: string): string {

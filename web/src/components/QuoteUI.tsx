@@ -58,6 +58,7 @@ const PATHS = {
   upload: "M12 16V4M7 9l5-5 5 5M5 20h14",
   download: "M12 4v12M7 11l5 5 5-5M5 20h14",
   refresh: "M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5",
+  bell: "M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0",
 } as const;
 
 export function Icon({ name, size = 18, className = "" }: { name: keyof typeof PATHS; size?: number; className?: string }) {

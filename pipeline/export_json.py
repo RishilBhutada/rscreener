@@ -56,10 +56,44 @@ RENAME = {
 # list cannot drift apart.
 SCREEN_FIELDS = ["vs_dma50", "vs_dma200", "dma50_200", "rsi14", "vol_surge",
                  "qtr_sales_yoy", "qtr_profit_yoy", "qtr_sales_qoq", "qtr_profit_qoq",
+                 "qtr_sales", "qtr_profit", "in_fno",
                  "promoter_chg_qtr", "promoter_chg_1y", "f_score",
                  "season_peak", "season_low", "season_swing",
                  "fii_holding", "dii_holding", "mf_holding", "fii_chg_qtr", "dii_chg_qtr"]
 RETURN_ANCHORS = {"ret_1m": 1, "ret_3m": 3, "ret_6m": 6, "ret_1y": 12, "ret_3y": 36, "ret_5y": 60}
+
+
+# NSE's 22 sectors (its 2023 classification); any other "Industry" value in an
+# index file is a basic industry.
+NSE_SECTORS = {
+    "automobile and auto components", "capital goods", "chemicals", "construction", "construction materials",
+    "consumer durables", "consumer services", "diversified", "fast moving consumer goods", "financial services",
+    "forest materials", "healthcare", "information technology", "media entertainment & publication",
+    "metals & mining", "oil gas & consumable fuels", "power", "realty", "services", "telecommunication",
+    "textiles", "utilities",
+}
+
+
+def nse_classification(db) -> tuple[dict, dict]:
+    """{symbol: NSE sector}, {symbol: NSE basic industry} from idx_members."""
+    import collections
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        rows = con.execute("SELECT symbol, industry FROM idx_members WHERE industry <> ''").fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    con.close()
+    sec, basic = collections.defaultdict(collections.Counter), collections.defaultdict(collections.Counter)
+    for sym, ind in rows:
+        label = " ".join(ind.replace(",", " ").split())
+        key = label.lower()
+        if key in NSE_SECTORS:
+            # NSE writes it both with and without the comma; keep its own form.
+            sec[sym][ind.strip()] += 1
+        else:
+            basic[sym][ind.strip()] += 1
+    pick = lambda c: max(c.items(), key=lambda kv: (kv[1], "," in kv[0]))[0]  # noqa: E731
+    return {s: pick(c) for s, c in sec.items()}, {s: pick(c) for s, c in basic.items()}
 
 
 def _yang_zhang(o, h, l, c, n: int, ann: float):
@@ -135,6 +169,17 @@ def volatility_fields(con: sqlite3.Connection) -> dict[str, dict]:
             d["vol_method"] = "yang-zhang" if has_ohlc else "close-close"
             out[sym] = d
     return out
+
+
+def at_52w(r: dict):
+    """Where the price sits in its 52-week range, 0-100; None without a range."""
+    p, hi, lo = r.get("price"), r.get("wk52_high"), r.get("wk52_low")
+    try:
+        if p is None or hi is None or lo is None or not hi > lo:
+            return None
+        return int(round(min(100, max(0, (p - lo) / (hi - lo) * 100))))
+    except TypeError:
+        return None
 
 
 def price_returns(con: sqlite3.Connection) -> dict[str, dict]:
@@ -537,6 +582,13 @@ def main() -> None:
                  seasons_lib.screen_fields(seasons_lib.seasons(con))):
         for sym, vals in part.items():
             extra_fields.setdefault(sym, {}).update(vals)
+    # In NSE's futures & options segment: 1, else 0 (fetch_fno.py) - so
+    # "in_fno = 1" screens for it. Left blank everywhere if the list is absent.
+    if con.execute("SELECT 1 FROM sqlite_master WHERE name='fno_lots'").fetchone():
+        fno = {r[0] for r in con.execute("SELECT symbol FROM fno_lots")}
+        if fno:
+            for sym in df["symbol"]:
+                extra_fields.setdefault(sym, {})["in_fno"] = 1 if sym in fno else 0
     con.close()
 
     # computed ratios need RAW rupee values - run before any unit conversion
@@ -548,6 +600,14 @@ def main() -> None:
     for col in comp_df.columns:
         df[col] = comp_df[col].values
     df["promoter_holding"] = df["symbol"].map(promoter_by_symbol)
+    # NSE's own classification, where NSE's index files carry it (fetch_indices.py
+    # reads each index's member list, whose "Industry" column is NSE's sector -
+    # "Oil, Gas & Consumable Fuels" - or, in a few files, its basic industry -
+    # "Refineries & Marketing"). The full four-level path sits only behind
+    # NSE's quote API, which refuses programs; this is the part that is open.
+    nse_sec, nse_basic = nse_classification(DB)
+    df["nse_sector"] = df["symbol"].map(nse_sec)
+    df["nse_basic"] = df["symbol"].map(nse_basic)
     df["median_pe_5y"] = df["symbol"].map(lambda s: pe_by_symbol.get(s, {}).get("median_5y"))
     for vk in ("volatility_1y", "volatility_30d", "vol_method"):
         df[vk] = df["symbol"].map(lambda s, k=vk: vol_by_symbol.get(s, {}).get(k))
@@ -760,7 +820,7 @@ def main() -> None:
     df = df.rename(columns=RENAME)
 
     keep = [
-        "symbol", "name", "sector", "industry", "price", "mcap", "pe", "forward_pe",
+        "symbol", "name", "sector", "industry", "nse_sector", "nse_basic", "price", "mcap", "pe", "forward_pe",
         "pb", "book_value", "roe", "roa", "de", "div_yield", "net_margin", "op_margin",
         "gross_margin", "rev_growth", "earn_growth", "revenue", "net_income",
         "total_debt", "total_cash", "free_cashflow", "wk52_high", "wk52_low", "beta",
@@ -841,12 +901,15 @@ def main() -> None:
         # index serving four pages beats a second file or a 5.6 MB download.
         # kind: 0 company, 1 ETF, 2 commodity (those two files append their
         # own rows). ret_1d is the day's change in %, for the watchlist.
+        # at_52w: where the price sits in its 52-week range, 0 (low) to 100
+        # (high), for the home page's watchlist bar. One small integer rather
+        # than the two prices it is worked out from.
         "fields": ["symbol", "name", "exchange", "price", "ret_1m", "mcap",
-                   "pe", "roe", "roce", "div_yield", "kind", "ret_1d"],
+                   "pe", "roe", "roce", "div_yield", "kind", "ret_1d", "at_52w"],
         "rows": [[r.get("symbol"), r.get("name"), r.get("exchange"),
                   r.get("price"), r.get("ret_1m"), r.get("mcap"),
                   r.get("pe"), r.get("roe"), r.get("roce"), r.get("div_yield"),
-                  0, r.get("ret_1d")]
+                  0, r.get("ret_1d"), at_52w(r)]
                  for r in payload["rows"]],
     }), ensure_ascii=False, allow_nan=False, separators=(",", ":")), encoding="utf-8")
     ikb = idx.stat().st_size / 1024

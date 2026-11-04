@@ -5,6 +5,8 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { saveFile } from "@/lib/download";
+import { buildXlsx, Cell, XLSX_MIME } from "@/lib/xlsx";
+import { FIELD_CATALOG } from "@/lib/fields";
 import TopNav from "@/components/TopNav";
 import { shortName, titleCase } from "@/lib/names";
 import StockChart, { CorpAction, Quarter } from "@/components/StockChart";
@@ -17,15 +19,16 @@ import { loadSectionMode, SectionMode } from "@/components/Settings";
 import { isRefreshLoad } from "@/components/TopNav";
 import { applyOrder, loadOrder } from "@/lib/order";
 import InfoTip, { InfoDialog, InfoPart } from "@/components/InfoTip";
-import { TableKind, arrange, change, changeText, usePct, useRowOrder } from "@/lib/tableprefs";
+import { TableKind, TableView, arrange, change, changeText, usePct, useRowOrder, useView } from "@/lib/tableprefs";
 import { move } from "@/lib/order";
 import { IconButton, dayMove, signed as signedNum, tone } from "@/components/QuoteUI";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
-type Stmt = { periods: string[]; items: { label: string; values: (number | null)[] }[]; declared?: (string | null)[] };
+/** `parent`: a breakdown row, folded under that row's "+" (Material Cost % under Expenses). */
+type Stmt = { periods: string[]; items: { label: string; values: (number | null)[]; parent?: string }[]; declared?: (string | null)[] };
 type AnnualReport = { from: string; to: string; url: string };
-type AnnDoc = { date: string; title: string; url: string };
+type AnnDoc = { date: string; title: string; url: string; kind?: string };
 type Trend = {
   periods: string[];
   revenue: (number | null)[];
@@ -37,9 +40,16 @@ type Trend = {
   opm?: (number | null)[];
   gpm?: (number | null)[];
   npm?: (number | null)[];
+  /** Return on equity per year, % (annual trend). */
+  roe?: (number | null)[];
   source: string[];
 };
 type Shareholding = {
+  /** Central and state governments, %; number of shareholders; holders the
+   *  filing names (promoters, and others above 1%), aligned with dates. */
+  gov?: (number | null)[];
+  holders_n?: (number | null)[];
+  named?: { cat: string; name: string; values: (number | null)[] }[];
   dates: string[];
   promoter: (number | null)[];
   public: (number | null)[];
@@ -60,7 +70,13 @@ type Company = {
   generated_at: string;
   snapshot: Row;
   statements: Record<string, Stmt>;
-  documents?: { annual_reports?: AnnualReport[]; concalls?: AnnDoc[]; ratings?: AnnDoc[] };
+  documents?: {
+    annual_reports?: AnnualReport[]; concalls?: AnnDoc[]; ratings?: AnnDoc[];
+    /** Concall presentations and recordings, beside the transcripts. */
+    ppts?: AnnDoc[]; recordings?: AnnDoc[];
+    /** [at "YYYY-MM-DD HH:MM", NSE category, subject, PDF, important 0/1]. */
+    announcements?: [string, string, string, string, number][];
+  };
   trend?: { annual?: Trend; quarterly?: Trend };
   shareholding?: Shareholding;
   prices?: Prices | null;
@@ -82,6 +98,18 @@ type Company = {
   indices?: [string, string, string][] | null;
   /** What the company does: its Wikipedia article (CC BY-SA 4.0), verified by the ticker in its infobox. */
   about?: { title: string; url: string; short: string | null; text: string | null } | null;
+  /** Quarterly business updates filed before the results (pipeline/business_updates.py):
+   *  n of the last `of` quarters on record, typical days after the quarter ended, the latest. */
+  updates?: Updates | null;
+  /** Face value per share, Rs (the exchange's equity list). */
+  face_value?: number | null;
+  /** In NSE's futures & options segment (fetch_fno.py). */
+  fno?: boolean | null;
+  /** The company's icon, relative to the site root (logos/SYM.png). */
+  logo?: string | null;
+  segments?: { quarterly?: Segments; annual?: Segments } | null;
+  /** [day, name, category, Buy/Sell, shares, value Rs, mode] - newest first. */
+  insider?: [string, string, string, string, number | null, number | null, string][] | null;
   exchange?: string | null;
   bse_code?: number | string | null;
   /** Written by pipeline/export_company_json.py so this page need not download
@@ -96,6 +124,11 @@ type Company = {
     rank_of?: number;
     ind_rank?: number | null;
     ind_rank_of?: number;
+    /** NSE's sector and basic industry where its index files carry them. */
+    nse_sector?: string | null;
+    nse_basic?: string | null;
+    /** What the peers were picked by: NSE's basic industry, or the source's industry. */
+    peer_group?: string | null;
   } | null;
 };
 
@@ -187,7 +220,7 @@ function fmtNum(v: number | string | null | undefined, dec = 2): string {
   return v.toLocaleString("en-IN", { maximumFractionDigits: dec });
 }
 
-function RatiosTable({ r }: { r: WcRatios }) {
+function RatiosTable({ r, symbol }: { r: WcRatios; symbol: string }) {
   // The one section screener.in has that this app did not. Every figure is
   // arithmetic on filed lines, and a year missing an input shows a dash rather
   // than a zero - a nought-day cash conversion cycle is a remarkable business,
@@ -201,46 +234,22 @@ function RatiosTable({ r }: { r: WcRatios }) {
     ["ROCE %", "roce", "Operating profit over capital employed"],
   ];
   return (
-    <section id="ratios" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
-      <div className="px-4 pt-3.5 pb-2">
-        <h2 className="text-base font-semibold text-[var(--ink)]">
-          Ratios
+    <div id="ratios" className="scroll-mt-32">
+      <StatementTable title="Ratios" kind="ratios" symbol={symbol} subtitle="Days, and ROCE in %"
+        stmt={{ periods: r.periods, items: ROWS.map(([label, key]) => ({ label, values: (r[key] as (number | null)[]) ?? [] })) }}
+        info={
           <InfoTip title="Ratios" className="ml-1.5">
             <p>How the business is financed, year by year.</p>
+            <ul className="list-disc pl-4 space-y-0.5">
+              {ROWS.map(([label, , help]) => <li key={label}><strong>{label}</strong>: {help}</li>)}
+            </ul>
             <p>
               Computed from the filed balance sheet and income statement — nothing here is
               estimated. A year missing an input shows a dash rather than a zero.
             </p>
           </InfoTip>
-        </h2>
-      </div>
-      <div className="overflow-x-auto" ref={(el) => { if (el) el.scrollLeft = el.scrollWidth; }}>
-        <table className="w-full text-sm border-collapse">
-          <thead>
-            <tr className="text-xs text-[var(--ink3)] border-y border-[var(--line)]">
-              <th className="px-3 py-2 text-left font-medium sticky left-0 bg-[var(--card)]"> </th>
-              {r.periods.map((p) => (
-                <th key={p} className="px-3 py-2 text-right font-medium whitespace-nowrap">{periodLabel(p)}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {ROWS.map(([label, key, help]) => (
-              <tr key={label} className="border-b border-[var(--line)] last:border-b-0">
-                <th title={help} className="px-3 py-2 text-left font-medium text-[var(--ink2)] whitespace-nowrap sticky left-0 bg-[var(--card)]">
-                  {label}
-                </th>
-                {(r[key] as (number | null)[]).map((v, i) => (
-                  <td key={i} className="px-3 py-2 text-right tabular-nums text-[var(--ink)]">
-                    {v === null || v === undefined ? "—" : v.toLocaleString("en-IN", { maximumFractionDigits: 1 })}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
+        } />
+    </div>
   );
 }
 
@@ -274,18 +283,378 @@ function quarterBefore(day: string): string {
   return `${qy}-${String(qm).padStart(2, "0")}-${String(new Date(Date.UTC(qy, qm, 0)).getUTCDate()).padStart(2, "0")}`;
 }
 
+/** pipeline/business_updates.py summary(). */
+type Updates = { n: number; of: number; typ: number | null; last: { q: string; d: string; at?: string; doc?: string } };
 /** The next results meeting on NSE's calendar: undefined while loading, null if none. */
 type NextResults = { date: string; purpose: string } | null | undefined;
 
-function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol }: {
+/** Peer comparison, with screener.in's columns: the quarter's profit and sales
+ *  and their change from a year before, a median row across the companies
+ *  shown, and a column picker (rs_peer_cols, synced). */
+const PEER_COLS: { key: string; label: string; dec: number }[] = [
+  { key: "price", label: "CMP ₹", dec: 2 },
+  { key: "pe", label: "P/E", dec: 2 },
+  { key: "mcap", label: "MCap ₹Cr", dec: 0 },
+  { key: "div_yield", label: "Div Yld %", dec: 2 },
+  { key: "qtr_profit", label: "NP Qtr ₹Cr", dec: 0 },
+  { key: "qtr_profit_yoy", label: "Qtr Profit Var %", dec: 1 },
+  { key: "qtr_sales", label: "Sales Qtr ₹Cr", dec: 0 },
+  { key: "qtr_sales_yoy", label: "Qtr Sales Var %", dec: 1 },
+  { key: "roce", label: "ROCE %", dec: 1 },
+  { key: "roe", label: "ROE %", dec: 1 },
+  { key: "pb", label: "P/B", dec: 2 },
+  { key: "de", label: "Debt / Eq", dec: 2 },
+  { key: "net_margin", label: "Net margin %", dec: 1 },
+  { key: "sales_cagr_5y", label: "Sales gr 5Y %", dec: 1 },
+  { key: "profit_cagr_5y", label: "Profit gr 5Y %", dec: 1 },
+];
+const PEER_DEFAULT = ["price", "pe", "mcap", "div_yield", "qtr_profit", "qtr_profit_yoy", "qtr_sales", "qtr_sales_yoy", "roce"];
+
+function PeerTable({ symbol, self, peers, industry }: { symbol: string; self: Row; peers: Row[]; industry: string }) {
+  const [cols, setCols] = useState<string[]>(PEER_DEFAULT);
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem("rs_peer_cols") ?? "null");
+      if (Array.isArray(v) && v.length) setCols(v.filter((k: string) => PEER_COLS.some((c) => c.key === k)));
+    } catch { /* the default columns */ }
+  }, []);
+  const pick = (k: string) => {
+    const next = cols.includes(k) ? cols.filter((x) => x !== k) : PEER_COLS.map((c) => c.key).filter((x) => x === k || cols.includes(x));
+    setCols(next);
+    try { localStorage.setItem("rs_peer_cols", JSON.stringify(next)); } catch { /* not remembered */ }
+  };
+  const shownCols = PEER_COLS.filter((c) => cols.includes(c.key));
+  const all = [self, ...peers];
+  const med = (k: string): number | null => {
+    const v = all.map((r) => r[k]).filter((x): x is number => typeof x === "number" && Number.isFinite(x)).sort((a, b) => a - b);
+    if (v.length < 3) return null;
+    return v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2;
+  };
+  const cell = (v: unknown, dec: number, k: string, bold = false) => {
+    const n = typeof v === "number" && Number.isFinite(v) ? v : null;
+    const signed = k.endsWith("_yoy");
+    return (
+      <td key={k} className={`px-3 py-1.5 text-right tabular-nums whitespace-nowrap ${bold ? "font-semibold" : ""} ${signed && n !== null ? (n < 0 ? "text-[var(--neg)]" : n > 0 ? "text-[var(--pos)]" : "") : ""}`}>
+        {n === null ? "—" : fmtNum(n, dec)}
+      </td>
+    );
+  };
+  return (
+    <section id="peers" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
+      <div className="px-4 pt-3.5 pb-2 flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <h2 className="text-base font-semibold text-[var(--ink)]">Peers</h2>
+          <p className="text-xs text-[var(--ink3)] mt-0.5">{industry}</p>
+        </div>
+        <Link href={`/compare?s=${[symbol, ...peers.slice(0, 3).map((p) => String(p.symbol))].map(encodeURIComponent).join(",")}`}
+          className="shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold text-[var(--accent-ink)] bg-[var(--accent-soft)] inline-flex items-center">
+          Compare
+        </Link>
+        <button type="button" onClick={() => setEditing(!editing)} aria-expanded={editing}
+          className={`shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold border ${editing ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]" : "text-[var(--ink2)] border-[var(--line)]"}`}>
+          {editing ? "Done" : "Columns"}
+        </button>
+      </div>
+      {editing && (
+        <div className="px-4 pb-3 flex flex-wrap gap-1.5">
+          {PEER_COLS.map((c) => (
+            <button key={c.key} type="button" onClick={() => pick(c.key)} aria-pressed={cols.includes(c.key)}
+              className={`rounded-full px-2.5 py-1 text-[12px] font-medium border ${cols.includes(c.key) ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]" : "text-[var(--ink3)] border-[var(--line)]"}`}>
+              {c.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="text-xs text-[var(--ink3)] border-y border-[var(--line)]">
+              <th className="px-3 py-2 text-left font-medium sticky left-0 bg-[var(--card)]">Name</th>
+              {shownCols.map((c) => <th key={c.key} className="px-3 py-2 text-right font-medium whitespace-nowrap">{c.label}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="border-b border-[var(--line)] bg-[var(--card2)]">
+              <td className="px-3 py-1.5 sticky left-0 bg-[var(--card2)]"><span className="font-semibold text-[var(--ink)]">{symbol}</span></td>
+              {shownCols.map((c) => cell(self[c.key], c.dec, c.key, true))}
+            </tr>
+            {peers.map((p) => (
+              <tr key={String(p.symbol)} className="border-b border-[var(--line)] hover:bg-[var(--card2)]">
+                <td className="px-3 py-1.5 sticky left-0 bg-[var(--card)] max-w-[40vw] truncate"><Link className="font-medium text-[var(--accent-ink)] hover:underline" href={`/company?s=${encodeURIComponent(String(p.symbol))}`}>{shortName(String(p.name ?? ""), String(p.symbol)) || String(p.symbol)}</Link></td>
+                {shownCols.map((c) => cell(p[c.key], c.dec, c.key))}
+              </tr>
+            ))}
+            <tr className="text-[var(--ink2)]">
+              <td className="px-3 py-1.5 sticky left-0 bg-[var(--card)] font-medium">Median · {all.length} cos</td>
+              {shownCols.map((c) => cell(med(c.key), c.dec, `${c.key}_m`))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+/** Your own picks on the top grid - any screener field or a ratio you defined
+ *  (screener's "Add ratio to table"). Kept as rs_grid_pins, synced. */
+function PinnedRatios({ row }: { row: Row | null }) {
+  const [pins, setPins] = useState<string[]>([]);
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  useEffect(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem("rs_grid_pins") ?? "[]");
+      if (Array.isArray(v)) setPins(v.filter((x): x is string => typeof x === "string"));
+    } catch { /* none */ }
+  }, []);
+  const save = (next: string[]) => {
+    setPins(next);
+    try { localStorage.setItem("rs_grid_pins", JSON.stringify(next)); } catch { /* not remembered */ }
+  };
+  const byKey = new Map(FIELD_CATALOG.map((f) => [f.key, f]));
+  const hits = q.trim().length < 1 ? [] : FIELD_CATALOG
+    .filter((f) => !pins.includes(f.key) && `${f.label} ${f.key} ${f.short ?? ""}`.toLowerCase().includes(q.trim().toLowerCase()))
+    .slice(0, 8);
+  const value = (k: string, unit: string) => {
+    const v = num(row, k);
+    if (v === null) return "—";
+    return unit === "₹ Cr" ? `₹ ${fmtNum(v, 0)} Cr` : unit === "₹" ? `₹ ${fmtNum(v)}` : unit === "%" ? `${fmtNum(v)} %` : fmtNum(v);
+  };
+  return (
+    <div className="mt-4 pt-3 border-t border-[var(--line)]">
+      {pins.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6">
+          {pins.map((k) => {
+            const f = byKey.get(k);
+            if (!f) return null;
+            return (
+              <div key={k} className="border-b border-[var(--line)] py-1.5 flex items-baseline justify-between gap-2">
+                <span className="text-sm text-[var(--ink3)] truncate">{f.label}</span>
+                <span className="flex items-baseline gap-2">
+                  <span className="text-sm font-semibold text-[var(--ink)] tabular-nums">{value(k, f.unit)}</span>
+                  <button type="button" onClick={() => save(pins.filter((x) => x !== k))} aria-label={`Remove ${f.label}`}
+                    className="text-[var(--ink3)] text-xs px-1">✕</button>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {open ? (
+        <div className="mt-2">
+          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a ratio, e.g. PEG or debtor days"
+            className="w-full rounded-lg border border-[var(--line)] bg-[var(--card2)] px-3 py-2 text-sm text-[var(--ink)] placeholder:text-[var(--ink3)]" />
+          <div className="mt-1">
+            {hits.map((f) => (
+              <button key={f.key} type="button" onClick={() => { save([...pins, f.key]); setQ(""); setOpen(false); }}
+                className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-[var(--card2)] flex items-baseline justify-between gap-3">
+                <span className="text-sm text-[var(--ink)]">{f.label}</span>
+                <span className="text-xs text-[var(--ink3)] tabular-nums">{value(f.key, f.unit)}</span>
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={() => { setOpen(false); setQ(""); }} className="mt-1 text-xs text-[var(--ink3)]">Cancel</button>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setOpen(true)} className="mt-2 text-[13px] font-semibold text-[var(--accent-ink)]">+ Add ratio</button>
+      )}
+    </div>
+  );
+}
+
+/** Segments, as the company reports them in its results (screener.in's
+ *  "Product segments"): revenue or profit before interest and tax per segment.
+ *  Revenue is before inter-segment sales are removed, so the rows can add up
+ *  to more than the company's sales. */
+type Segments = { periods: string[]; items: { name: string; rev: (number | null)[]; ebit: (number | null)[] }[] };
+function SegmentsTable({ segs, symbol }: { segs: { quarterly?: Segments; annual?: Segments }; symbol: string }) {
+  const [pt, setPt] = useState<"quarterly" | "annual">(segs.quarterly ? "quarterly" : "annual");
+  const [what, setWhat] = useState<"rev" | "ebit">("rev");
+  const sg = segs[pt] ?? segs.quarterly ?? segs.annual;
+  if (!sg) return null;
+  const seg = (v: string, opts: readonly (readonly [string, string])[], set: (k: never) => void, label: string) => (
+    <div className="inline-flex gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs" role="radiogroup" aria-label={label}>
+      {opts.map(([k, l]) => (
+        <button key={k} type="button" role="radio" aria-checked={v === k} onClick={() => set(k as never)}
+          className={`rounded-md px-2.5 py-1 font-medium ${v === k ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>{l}</button>
+      ))}
+    </div>
+  );
+  return (
+    <div id="segments" className="scroll-mt-32 space-y-1.5">
+      <div className="flex justify-end gap-1.5 flex-wrap">
+        {segs.quarterly && segs.annual && seg(pt, [["quarterly", "Quarterly"], ["annual", "Yearly"]], setPt as (k: never) => void, "Segment periods")}
+        {seg(what, [["rev", "Revenue"], ["ebit", "EBIT"]], setWhat as (k: never) => void, "Segment figure")}
+      </div>
+      <StatementTable title="Segments" kind="segments" symbol={symbol}
+        subtitle={what === "rev" ? "Revenue by segment, ₹ Crores, before inter-segment sales" : "Profit before interest and tax by segment, ₹ Crores"}
+        stmt={{ periods: sg.periods, items: sg.items.map((it) => ({ label: it.name, values: what === "rev" ? it.rev : it.ebit })) }} />
+    </div>
+  );
+}
+
+/** Insider trades - directors, promoters and designated employees buying or
+ *  selling, as disclosed under SEBI's insider-trading rules (screener.in's
+ *  "TRADES"). Shown as NSE lists them; its feed gives the latest twenty at
+ *  most and can lag, so the list says so. A trade is a fact, not a signal. */
+function InsiderTrades({ list }: { list: [string, string, string, string, number | null, number | null, string][] }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? list : list.slice(0, 5);
+  const day = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  return (
+    <div className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-2">
+      <h3 className="text-[13px] font-semibold text-[var(--ink)]">Insider trades</h3>
+      <ul className="divide-y divide-[var(--line)]">
+        {shown.map((t, i) => (
+          <li key={i} className="py-1.5 flex items-baseline justify-between gap-3 text-[13px]">
+            <span className="min-w-0">
+              <span className="block text-[var(--ink)] truncate">{t[1]}</span>
+              <span className="block text-[11px] text-[var(--ink3)] truncate">{day(t[0])} · {t[2] || "Insider"}{t[6] ? ` · ${t[6]}` : ""}</span>
+            </span>
+            <span className="text-right shrink-0">
+              <span className="block font-semibold text-[var(--ink2)]">{t[3] || "Trade"}</span>
+              <span className="block text-[11px] text-[var(--ink3)] tabular-nums">
+                {t[4] !== null ? `${fmtNum(t[4], 0)} sh` : ""}{t[5] ? ` · ₹${fmtNum(t[5] / 1e7, 2)} Cr` : ""}
+              </span>
+            </span>
+          </li>
+        ))}
+      </ul>
+      {list.length > 5 && <button type="button" onClick={() => setAll(!all)} className="text-[13px] font-semibold text-[var(--accent-ink)]">{all ? "Fewer" : `All ${list.length}`}</button>}
+      <p className="text-[11px] text-[var(--ink3)]">From NSE&apos;s insider-trading disclosures; its feed lists the latest twenty at most and can be incomplete.</p>
+    </div>
+  );
+}
+
+/** Shareholding, quarterly or year by year (the March filing of each year). */
+function ShareholdingTable({ sh, symbol }: { sh: NonNullable<Company["shareholding"]>; symbol: string }) {
+  const [yearly, setYearly] = useState(false);
+  const idx = sh.dates.map((d, i) => [d, i] as const).filter(([d]) => !yearly || String(d).slice(5, 7) === "03").map(([, i]) => i);
+  const pickV = (v?: (number | null)[] | null) => (v ? idx.map((i) => v[i] ?? null) : null);
+  const parentOf: Record<string, string> = { Promoters: "Promoters %", FIIs: "FIIs %", DIIs: "DIIs %", Public: "Public %", "DR holders": "Public %" };
+  const named = (sh.named ?? []).map((h) => ({ label: `${h.name} %`, values: pickV(h.values) ?? [], parent: parentOf[h.cat] ?? "Public %" }))
+    .filter((h) => h.values.some((v) => v !== null));
+  const items = [
+    { label: "Promoters %", values: pickV(sh.promoter) },
+    { label: "FIIs %", values: pickV(sh.fii) },
+    { label: "DIIs %", values: pickV(sh.dii) },
+    { label: "Mutual funds %", values: pickV(sh.mf) },
+    { label: "Government %", values: pickV(sh.gov) },
+    { label: "Public %", values: pickV(sh.public) },
+    { label: "Employee trusts %", values: pickV(sh.employee) },
+    { label: "No. of shareholders", values: pickV(sh.holders_n) },
+  ].filter((it): it is { label: string; values: (number | null)[] } => !!it.values && it.values.some((v) => v !== null && v !== 0))
+    .concat(named.filter((h, i, a) => a.findIndex((x) => x.label === h.label && x.parent === h.parent) === i));
+  return (
+    <>
+      <div className="flex justify-end mb-1.5">
+        <div className="inline-flex gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs" role="radiogroup" aria-label="Shareholding periods">
+          {([[false, "Quarterly"], [true, "Yearly"]] as const).map(([y, label]) => (
+            <button key={label} type="button" role="radio" aria-checked={yearly === y} onClick={() => setYearly(y)}
+              className={`rounded-md px-2.5 py-1 font-medium ${yearly === y ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>{label}</button>
+          ))}
+        </div>
+      </div>
+      <StatementTable title="Shareholding pattern" subtitle="Figures in %" kind="shareholding" symbol={symbol}
+        stmt={{ periods: idx.map((i) => sh.dates[i]), items }} />
+    </>
+  );
+}
+
+/** Whether a table's columns are quarters (else years), from the dates. */
+function isQuarterly(periods: string[]): boolean {
+  const n = periods.length;
+  if (n < 2) return false;
+  const a = Date.parse(periods[n - 2].slice(0, 10)), b = Date.parse(periods[n - 1].slice(0, 10));
+  return Number.isFinite(a) && Number.isFinite(b) && (b - a) / 864e5 < 200;
+}
+
+/** The value a year before column i, found by DATE: with a quarter missing,
+ *  counting back four columns would compare against fifteen months ago. */
+function yearBefore(periods: string[], values: (number | null)[], i: number, quarterly: boolean): number | null {
+  if (!quarterly) return i > 0 ? values[i - 1] ?? null : null;
+  const day = 864e5, target = Date.parse(periods[i].slice(0, 10)) - 365.25 * day;
+  for (let j = i - 1; j >= 0; j--) {
+    const d = Date.parse(periods[j].slice(0, 10));
+    if (Math.abs(d - target) <= 45 * day) return values[j] ?? null;
+    if (d < target - 45 * day) break;
+  }
+  return null;
+}
+
+/** One row's last few periods as a line; the end dot says which way it last moved. */
+function Spark({ values }: { values: (number | null)[] }) {
+  const W = 48, H = 18, P = 2;
+  const pts: [number, number][] = [];
+  values.forEach((v, i) => { if (typeof v === "number" && Number.isFinite(v)) pts.push([i, v]); });
+  if (pts.length < 2) return <span className="block w-[48px]" aria-hidden="true" />;
+  const lo = Math.min(...pts.map((p) => p[1])), hi = Math.max(...pts.map((p) => p[1])), r = hi - lo || 1;
+  const x = (i: number) => P + (i * (W - 2 * P)) / Math.max(1, values.length - 1);
+  const y = (v: number) => P + ((hi - v) / r) * (H - 2 * P);
+  const [li, lv] = pts[pts.length - 1], pv = pts[pts.length - 2][1];
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} fill="none" aria-hidden="true" className="block">
+      <polyline points={pts.map(([i, v]) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ")}
+        stroke="var(--ink3)" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={x(li)} cy={y(lv)} r="2" fill={lv > pv ? "var(--pos)" : lv < pv ? "var(--neg)" : "var(--ink3)"} />
+    </svg>
+  );
+}
+
+/** A change, green when the figure rose and red when it fell - the literal
+ *  direction, never a judgement on whether that is good. */
+function Delta({ cur, prev, points }: { cur: number | null | undefined; prev: number | null | undefined; points: boolean }) {
+  const ch = change(cur, prev, points);
+  if (ch === null) return <span className="text-[var(--ink3)]">—</span>;
+  return (
+    <span className={ch > 0 ? "text-[var(--pos)]" : ch < 0 ? "text-[var(--neg)]" : "text-[var(--ink3)]"}>
+      {changeText(ch, points, cur, prev)}
+    </span>
+  );
+}
+
+/** The Trend | Grid switch at the top right of every table. */
+function ViewSwitch({ view, onChange }: { view: TableView; onChange: (v: TableView) => void }) {
+  return (
+    <div className="shrink-0 inline-flex gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs" role="radiogroup" aria-label="Table view">
+      {([["trend", "Trend"], ["grid", "Grid"]] as const).map(([k, label]) => (
+        <button key={k} type="button" role="radio" aria-checked={view === k} onClick={() => onChange(k)}
+          className={`min-h-[28px] rounded-md px-2.5 font-medium ${view === k ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** A grid cell's tint: green if it rose from the period before, red if it fell,
+ *  stronger the bigger the move (full at 25%, or 3 points for a % row). */
+function heatTint(cur: number | null | undefined, prev: number | null | undefined, points: boolean): string | undefined {
+  const ch = change(cur, prev, points);
+  if (ch === null || ch === 0) return undefined;
+  const mag = Math.min(Math.abs(ch) / (points ? 3 : 25), 1);
+  if (mag < 0.04) return undefined;
+  return `color-mix(in srgb, var(${ch > 0 ? "--pos" : "--neg"}) ${Math.round(6 + 20 * mag)}%, transparent)`;
+}
+
+function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, pdfs, info }: {
   title: string; stmt: Stmt; subtitle?: string; boldRows?: string[];
+  /** The results PDF for each period, aligned with stmt.periods ("Raw PDF" row). */
+  pdfs?: (string | null)[];
   /** Adds the coming quarter as a blank last column - the quarterly table only. */
   next?: NextResults;
   /** Which table this is, for its "%" switch and row order; and whose page. */
   kind: TableKind; symbol: string;
+  /** The "i" beside the title, where a table has one. */
+  info?: import("react").ReactNode;
 }) {
   const [all, setAll] = useState(false);
   const [showPct, setShowPct] = usePct(kind);
+  const [view, setView] = useView(kind);
+  const trend = view === "trend";
+  const quarterlyCols = isQuarterly(stmt.periods);
+  const decOf = (label: string) => kind === "ratios" ? 1 : label.includes("EPS") || label.includes("%") ? 2 : 0;
   const saved = useRowOrder(kind, symbol);
   // Reordering: the order being edited, and whether to ask where it applies.
   const [draft, setDraft] = useState<string[] | null>(null);
@@ -296,11 +665,17 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol }:
   const coming = next !== undefined && total ? quarterAfter(stmt.periods[total - 1]) : null;
   // The meeting's date belongs on that column only if it is that quarter's.
   const due = coming && next && quarterBefore(next.date) === coming ? next.date : null;
-  const labels = stmt.items.map((it) => it.label);
+  // Breakdown rows (with a parent) fold under their parent's "+" and move with it.
+  const [openRows, setOpenRows] = useState<Record<string, boolean>>({});
+  const top = stmt.items.filter((it) => !it.parent);
+  const kids = (l: string) => stmt.items.filter((it) => it.parent === l);
+  const labels = top.map((it) => it.label);
   const arranged = arrange(labels, saved.order);
   const order = draft ?? arranged;
-  const byLabel = new Map(stmt.items.map((it) => [it.label, it]));
+  const byLabel = new Map(top.map((it) => [it.label, it]));
   const rows = order.map((l) => byLabel.get(l)).filter((it): it is Stmt["items"][number] => Boolean(it));
+  const shown = rows.flatMap((it, r) => [{ it, r, child: false },
+    ...(openRows[it.label] && !draft ? kids(it.label).map((k) => ({ it: k, r, child: true })) : [])]);
   const finish = () => {
     if (!draft || draft.join("|") === arranged.join("|")) { setDraft(null); return; }
     setAsking(true);
@@ -310,10 +685,12 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol }:
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
       <div className="px-4 pt-3.5 pb-2 flex items-start gap-1.5">
         <div className="flex-1 min-w-0">
-          <h2 className="text-base font-semibold text-[var(--ink)]">{title}</h2>
+          <h2 className="text-base font-semibold text-[var(--ink)]">{title}{info}</h2>
           <p className="text-xs text-[var(--ink3)] mt-0.5">
             {draft ? "Move rows with the arrows, then Done"
-              : `${subtitle ?? "Figures in ₹ Crores"}${showPct ? " · in brackets, change from the period before" : ""}`}
+              : `${subtitle ?? "Figures in ₹ Crores"}${!trend && showPct ? " · in brackets, change from the period before" : ""}`}
+            {/* The coming quarter is a column in the grid; in the trend view it is said here. */}
+            {!draft && trend && coming && ` · ${periodLabel(coming)} results ${due ? `due ${declaredLabel(due)}` : "date not out"}`}
           </p>
         </div>
         {draft ? (
@@ -329,33 +706,99 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol }:
           </>
         ) : (
           <>
-            {/* On by default; one tap turns this table's figures' change on or off. */}
-            <button type="button" onClick={() => setShowPct(!showPct)} aria-pressed={showPct}
-              aria-label={showPct ? "Hide the % change" : "Show the % change"} title="% change from the period before"
-              className={`shrink-0 min-h-[32px] min-w-[32px] px-2 rounded-lg text-[13px] font-bold border ${showPct
-                ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
-                : "text-[var(--ink3)] border-[var(--line)]"}`}>
-              %
-            </button>
-            <button type="button" onClick={() => setDraft(arranged)} aria-label="Change the order of the rows" title="Row order"
-              className="shrink-0 min-h-[32px] min-w-[32px] px-2 rounded-lg text-[var(--ink2)] border border-[var(--line)] inline-flex items-center justify-center">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M7 4v16M3.5 7.5 7 4l3.5 3.5M17 20V4M13.5 16.5 17 20l3.5-3.5" />
-              </svg>
-            </button>
-            {total > RECENT_PERIODS && (
-              <button type="button" onClick={() => setAll(!all)}
-                className="shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold text-[var(--accent-ink)] bg-[var(--accent-soft)]">
-                {all ? `Last ${RECENT_PERIODS}` : `All ${total}`}
-              </button>
-            )}
+            <ViewSwitch view={view} onChange={setView} />
           </>
         )}
       </div>
+      {/* The table's other tools sit under the title, so the title keeps the row
+          and the Trend | Grid switch stays at the top right. */}
+      {!draft && (
+        <div className="px-4 pb-2 -mt-0.5 flex justify-end gap-1.5">
+              {/* On by default; one tap turns this table's figures' change on or off. */}
+              {!trend && <button type="button" onClick={() => setShowPct(!showPct)} aria-pressed={showPct}
+                aria-label={showPct ? "Hide the % change" : "Show the % change"} title="% change from the period before"
+                className={`shrink-0 min-h-[32px] min-w-[32px] px-2 rounded-lg text-[13px] font-bold border ${showPct
+                  ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
+                  : "text-[var(--ink3)] border-[var(--line)]"}`}>
+                %
+              </button>}
+              <button type="button" onClick={() => setDraft(arranged)} aria-label="Change the order of the rows" title="Row order"
+                className="shrink-0 min-h-[32px] min-w-[32px] px-2 rounded-lg text-[var(--ink2)] border border-[var(--line)] inline-flex items-center justify-center">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M7 4v16M3.5 7.5 7 4l3.5 3.5M17 20V4M13.5 16.5 17 20l3.5-3.5" />
+                </svg>
+              </button>
+              {!trend && total > RECENT_PERIODS && (
+                <button type="button" onClick={() => setAll(!all)}
+                  className="shrink-0 min-h-[32px] px-2.5 rounded-lg text-[12px] font-semibold text-[var(--accent-ink)] bg-[var(--accent-soft)]">
+                  {all ? `Last ${RECENT_PERIODS}` : `All ${total}`}
+                </button>
+              )}
+        </div>
+      )}
       {/* Opens on the NEWEST period. These tables carry up to twenty years of
           columns oldest-first, so the page landed on 2005 and the reader had to
           drag sideways every time to reach the year he was actually asking
           about. The pinned label column stays put either way. */}
+      {trend && !draft ? (() => {
+        const last = total - 1;
+        const cols = quarterlyCols ? "grid-cols-[minmax(84px,1fr)_48px_minmax(52px,auto)_46px_46px]" : "grid-cols-[minmax(84px,1fr)_48px_minmax(52px,auto)_56px]";
+        const span = Math.min(8, total);
+        const recentPdfs = pdfs ? pdfs.map((u, i) => [u, stmt.periods[i]] as const).filter(([u]) => Boolean(u)).slice(-4).reverse() : [];
+        return (
+          <div className="px-4 pb-3">
+            <div className={`grid ${cols} gap-x-1.5 items-end py-1.5 border-y border-[var(--line)] text-[11px] text-[var(--ink3)]`}>
+              <span className="truncate">{span} {quarterlyCols ? "quarters" : "years"}</span>
+              <span>Trend</span>
+              <span className="text-right whitespace-nowrap">{last >= 0 ? periodLabel(stmt.periods[last]) : ""}</span>
+              <span className="text-right">{quarterlyCols ? "YoY" : "Change"}</span>
+              {quarterlyCols && <span className="text-right">QoQ</span>}
+            </div>
+            {shown.map(({ it, child }) => {
+              const bold = boldRows?.includes(it.label);
+              const hasKids = !child && kids(it.label).length > 0;
+              const points = it.label.includes("%");
+              const cur = last >= 0 ? it.values[last] ?? null : null;
+              return (
+                <div key={it.label} className={`grid ${cols} gap-x-1.5 items-center py-1.5 border-b border-[var(--line)] text-sm`}>
+                  <span className={`min-w-0 truncate ${child ? "pl-3 text-[13px] text-[var(--ink3)]" : bold ? "font-semibold text-[var(--ink)]" : "text-[var(--ink2)]"}`}>
+                    {hasKids ? (
+                      <button type="button" onClick={() => setOpenRows({ ...openRows, [it.label]: !openRows[it.label] })}
+                        aria-expanded={!!openRows[it.label]} className="inline-flex items-center gap-1 text-left max-w-full">
+                        <span className="truncate">{it.label}</span>
+                        <span className="text-[var(--accent-ink)] font-semibold">{openRows[it.label] ? "−" : "+"}</span>
+                      </button>
+                    ) : it.label}
+                  </span>
+                  <Spark values={it.values.slice(Math.max(0, total - span))} />
+                  <span className={`text-right tabular-nums whitespace-nowrap ${bold ? "font-semibold" : "font-medium"} ${typeof cur === "number" && cur < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
+                    {fmtNum(cur, decOf(it.label))}
+                  </span>
+                  <span className="text-right text-[11px] sm:text-[12px] tabular-nums whitespace-nowrap">
+                    <Delta cur={cur} prev={last >= 0 ? yearBefore(stmt.periods, it.values, last, quarterlyCols) : null} points={points} />
+                  </span>
+                  {quarterlyCols && (
+                    <span className="text-right text-[11px] sm:text-[12px] tabular-nums whitespace-nowrap">
+                      <Delta cur={cur} prev={last > 0 ? it.values[last - 1] : null} points={points} />
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+            {recentPdfs.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 pt-2 text-[12px]">
+                <span className="text-[var(--ink3)]">Raw PDF</span>
+                {recentPdfs.map(([u, p]) => (
+                  <a key={p} href={u!.includes("://") ? u! : `https://nsearchives.nseindia.com/corporate/${u}`} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 rounded-md border border-[var(--line)] px-2 py-0.5 text-[var(--ink2)] hover:text-[var(--accent-ink)]">
+                    {periodLabel(p)} <ExternalGlyph size={12} />
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })() : (
       <div key={from} className="overflow-x-auto" ref={(el) => { if (el) el.scrollLeft = el.scrollWidth; }}>
         <table className="w-full text-sm border-collapse">
           <thead>
@@ -379,12 +822,13 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol }:
             </tr>
           </thead>
           <tbody>
-            {rows.map((it, r) => {
+            {shown.map(({ it, r, child }) => {
               const bold = boldRows?.includes(it.label);
+              const hasKids = !child && kids(it.label).length > 0;
               return (
-                <tr key={it.label} className="border-b border-[var(--line)] hover:bg-[var(--card2)]">
-                  <td className={`px-3 py-2 sm:py-1.5 truncate max-w-[42vw] sm:max-w-none sm:whitespace-nowrap sticky left-0 bg-[var(--card)] ${bold ? "font-semibold text-[var(--ink)]" : "text-[var(--ink2)]"}`}>
-                    {draft && (
+                <tr key={it.label} className={`border-b border-[var(--line)] hover:bg-[var(--card2)] ${child ? "text-[13px]" : ""}`}>
+                  <td className={`px-3 py-2 sm:py-1.5 truncate max-w-[42vw] sm:max-w-none sm:whitespace-nowrap sticky left-0 bg-[var(--card)] ${child ? "pl-7 text-[var(--ink3)]" : bold ? "font-semibold text-[var(--ink)]" : "text-[var(--ink2)]"}`}>
+                    {draft && !child && (
                       <span className="inline-flex align-middle mr-1.5">
                         <button type="button" disabled={r === 0} onClick={() => setDraft(move(order, it.label, -1))}
                           aria-label={`Move ${it.label} up`}
@@ -394,7 +838,13 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol }:
                           className="w-7 h-7 ml-1 inline-flex items-center justify-center rounded-md border border-[var(--line)] text-[var(--ink2)] disabled:opacity-30">▼</button>
                       </span>
                     )}
-                    {it.label}
+                    {hasKids && !draft ? (
+                      <button type="button" onClick={() => setOpenRows({ ...openRows, [it.label]: !openRows[it.label] })}
+                        aria-expanded={!!openRows[it.label]} className="inline-flex items-center gap-1 text-left">
+                        {it.label}
+                        <span className="text-[var(--accent-ink)] font-semibold">{openRows[it.label] ? "−" : "+"}</span>
+                      </button>
+                    ) : it.label}
                   </td>
                   {it.values.slice(from).map((v, i) => {
                     // Against the period before - the one off-screen to the
@@ -403,8 +853,9 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol }:
                     const prev = at > 0 ? it.values[at - 1] : null;
                     const ch = showPct ? change(v, prev, points) : null;
                     return (
-                      <td key={i} className={`px-3 py-2 sm:py-1.5 text-right whitespace-nowrap tabular-nums ${bold ? "font-semibold" : ""} ${typeof v === "number" && v < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
-                        {fmtNum(v, it.label.includes("EPS") || it.label.includes("%") ? 2 : 0)}
+                      <td key={i} style={{ background: heatTint(v, prev, points) }}
+                        className={`px-3 py-2 sm:py-1.5 text-right whitespace-nowrap tabular-nums ${bold ? "font-semibold" : ""} ${typeof v === "number" && v < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
+                        {fmtNum(v, decOf(it.label))}
                         {ch !== null && (
                           <span className={`ml-1 text-[11px] font-normal ${ch > 0 ? "text-[var(--pos)]" : ch < 0 ? "text-[var(--neg)]" : "text-[var(--ink3)]"}`}>
                             ({changeText(ch, points, v, prev)})
@@ -417,9 +868,22 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol }:
                 </tr>
               );
             })}
+            {pdfs && !draft && pdfs.slice(from).some(Boolean) && (
+              <tr className="border-b border-[var(--line)]">
+                <td className="px-3 py-2 sm:py-1.5 sticky left-0 bg-[var(--card)] text-[var(--ink2)]">Raw PDF</td>
+                {pdfs.slice(from).map((u, i) => (
+                  <td key={i} className="px-3 py-2 sm:py-1.5 text-right">
+                    {u ? <a href={u.includes("://") ? u : `https://nsearchives.nseindia.com/corporate/${u}`} target="_blank" rel="noopener noreferrer"
+                      aria-label={`Results PDF, ${periodLabel(stmt.periods[from + i])}`} className="inline-flex text-[var(--accent-ink)]"><ExternalGlyph size={14} /></a> : null}
+                  </td>
+                ))}
+                {coming && <td />}
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
+      )}
       {!draft && saved.scope === "company" && (
         <p className="px-4 py-2 text-[11px] text-[var(--ink3)]">Rows in this company&apos;s own order.</p>
       )}
@@ -545,8 +1009,18 @@ function CompoundedGrowth({ trend, prices }: { trend?: { annual?: Trend }; price
     ["Compounded profit growth", [["10 years", cagr(a.pat, 10, a.periods)], ["5 years", cagr(a.pat, 5, a.periods)], ["3 years", cagr(a.pat, 3, a.periods)], ["1 year", cagr(a.pat, 1, a.periods)]]],
     ["Stock price CAGR", [["10 years", stockCagr(120)], ["5 years", stockCagr(60)], ["3 years", stockCagr(36)], ["1 year", stockCagr(12)]]],
   ];
+  // Return on equity, averaged over the years (as screener.in shows it): the
+  // middle of a run of years says more than one year's figure.
+  const roeAvg = (n: number): number | null => {
+    const v = (a.roe ?? []).filter((x): x is number => x !== null && x !== undefined).slice(-n);
+    return v.length >= Math.min(n, 2) && v.length >= (n === 1 ? 1 : Math.ceil(n * 0.8))
+      ? Math.round(v.reduce((s, x) => s + x, 0) / v.length) : null;
+  };
+  if ((a.roe ?? []).some((x) => x !== null && x !== undefined)) {
+    cards.push(["Return on equity", [["10 years", roeAvg(10)], ["5 years", roeAvg(5)], ["3 years", roeAvg(3)], ["Last year", roeAvg(1)]]]);
+  }
   return (
-    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 grid sm:grid-cols-3 gap-6">
+    <section className={`bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 grid sm:grid-cols-2 ${cards.length > 3 ? "lg:grid-cols-4" : "lg:grid-cols-3"} gap-6`}>
       {cards.map(([title, rows]) => (
         <GrowthCard key={title} title={title} rows={rows} />
       ))}
@@ -556,24 +1030,29 @@ function CompoundedGrowth({ trend, prices }: { trend?: { annual?: Trend }; price
 
 /** The indices the company is in: the first few, the rest one tap away. */
 function IndexChips({ list }: { list?: [string, string, string][] | null }) {
-  const [all, setAll] = useState(false);
+  // Behind a small button on the ticker line (owner, 27-Oct-2026: "only by
+  // drop down beside the name, not always").
+  const [open, setOpen] = useState(false);
   if (!list?.length) return null;
-  const shown = all ? list : list.slice(0, 4);
   return (
-    <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12px]">
-      <span className="text-[var(--ink3)]">In {list.length} {list.length === 1 ? "index" : "indices"}:</span>
-      {shown.map(([sym, name]) => (
-        <Link key={sym} href={`/indices/view?s=${encodeURIComponent(sym)}`}
-          className="rounded-full border border-[var(--line)] px-2 py-0.5 text-[var(--ink2)] hover:bg-[var(--card2)]">
-          {name.replace(/^NIFTY\b/, "Nifty")}
-        </Link>
-      ))}
-      {list.length > 4 && (
-        <button type="button" onClick={() => setAll(!all)} className="text-[var(--accent-ink)] font-medium px-1">
-          {all ? "Fewer" : `+${list.length - 4} more`}
-        </button>
+    <>
+      {" · "}
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
+        className="inline-flex items-center gap-0.5 text-[var(--accent-ink)] font-medium">
+        {list.length} {list.length === 1 ? "index" : "indices"}
+        <ChevronGlyph size={11} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <span className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12px]">
+          {list.map(([sym, name]) => (
+            <Link key={sym} href={`/indices/view?s=${encodeURIComponent(sym)}`}
+              className="rounded-full border border-[var(--line)] px-2 py-0.5 text-[var(--ink2)] hover:bg-[var(--card2)]">
+              {name.replace(/^NIFTY\b/, "Nifty")}
+            </Link>
+          ))}
+        </span>
       )}
-    </p>
+    </>
   );
 }
 
@@ -695,6 +1174,11 @@ const METRIC_INFO: Record<string, { how: string; means: string; watch?: string }
     means: "The cash return at today's price, before any capital gain.",
     watch: "A high yield is as often a collapsed price as a generous dividend.",
   },
+  "Business update": {
+    how: "The company's own early look at the quarter - sales, loans, deposits, store count - filed with NSE before its results. Read off NSE's announcements each day; \"usually day N\" is the middle of the days after quarter end it filed them, from two quarters or more.",
+    means: "Some of the quarter is known before the results. Over five quarters (116 companies), the share made a big move on 16.5% of update days - against 5.6% of ordinary days and 25-33% of results days.",
+    watch: "Which way the share moved on the update did not tell which way it would move on results day - 46% the same way, close to a coin toss. Voluntary: a company can stop at any quarter.",
+  },
   "ROCE": {
     how: "Operating profit divided by capital employed - total assets less current liabilities - from the filed annual statements.",
     means: "How hard the money inside the business works, regardless of how it was funded. The single most useful quality measure for an operating company.",
@@ -740,23 +1224,6 @@ const METRIC_INFO: Record<string, { how: string; means: string; watch?: string }
  *  that raised the question, and on a phone often off-screen entirely. Now
  *  it is the same "i" used everywhere else, and the words arrive on top of
  *  the page rather than under it. */
-function MetricInfo({ label, method }: { label: string; method: string }) {
-  const info = METRIC_INFO[label];
-  if (!info) return null;
-  return (
-    <InfoTip title={label} label={`How ${label} is worked out`} className="ml-1">
-      <InfoPart head="How it is worked out">{info.how}</InfoPart>
-      <InfoPart head="What it tells you">{info.means}</InfoPart>
-      {info.watch && <InfoPart head="Where it misleads">{info.watch}</InfoPart>}
-      {label.startsWith("Volatility") && method && (
-        <p className="text-[var(--ink3)]">
-          Method used for this company: {method === "yang-zhang" ? "Yang-Zhang (OHLC)" : "close-to-close"}.
-        </p>
-      )}
-    </InfoTip>
-  );
-}
-
 /** Price history and performance, in one block.
  *
  *  Every figure here was already being published in data.json and none of it
@@ -771,74 +1238,115 @@ function MetricInfo({ label, method }: { label: string; method: string }) {
 function PriceHistory({ row, snapshot }: { row: Row | null; snapshot: Row }) {
   const g = (k: string) => num(row, k) ?? num(snapshot, k);
   const price = g("price"), hi = g("wk52_high"), lo = g("wk52_low");
-
   const returns: [string, number | null][] = [
-    ["1 month", g("ret_1m")], ["3 months", g("ret_3m")], ["6 months", g("ret_6m")],
-    ["1 year", g("ret_1y")], ["3 years", g("ret_3y")], ["5 years", g("ret_5y")],
+    ["1M", g("ret_1m")], ["3M", g("ret_3m")], ["6M", g("ret_6m")],
+    ["1Y", g("ret_1y")], ["3Y", g("ret_3y")], ["5Y", g("ret_5y")],
   ];
   const shown = returns.filter(([, v]) => v !== null && v !== undefined);
   const at = price !== null && hi !== null && lo !== null && hi > lo
     ? Math.min(100, Math.max(0, ((price - lo) / (hi - lo)) * 100))
     : null;
+  const off = price !== null && hi ? ((price - hi) / hi) * 100 : null;
   const beta = g("beta");
-
   if (shown.length === 0 && at === null) return null;
-
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
       <h2 className="text-base font-semibold text-[var(--ink)]">
         Price history
         <InfoTip title="Price history" className="ml-1.5">
           <p>Change in the share price alone.</p>
-          <p>
-            Dividends are not added back, so a high-yield company has done better than these
-            figures say.
-          </p>
+          <p>Dividends are not added back, so a high-yield company has done better than these figures say.</p>
+          {beta !== null && beta !== undefined && (
+            <p>
+              Beta {fmtNum(beta)}: over the last year this share moved about{" "}
+              {Math.abs(beta) < 0.05 ? "independently of" : `${fmtNum(Math.abs(beta))}× as far as`} the market on an
+              average day. A number below 1 is not safety; it is only a smaller swing.
+            </p>
+          )}
         </InfoTip>
       </h2>
-
-      {at !== null && (
-        <div className="mt-3">
-          <div className="relative h-2 rounded-full bg-[var(--card2)] border border-[var(--line)]">
-            <div className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-[var(--accent)]"
-                 style={{ left: `calc(${at}% - 5px)` }} />
-          </div>
-          <div className="flex justify-between text-[11px] text-[var(--ink3)] mt-1 tabular-nums">
-            <span>52w low ₹{fmtNum(lo, 0)}</span>
-            <span className="text-[var(--ink2)]">₹{fmtNum(price)} — {at.toFixed(0)}% up the range</span>
-            <span>52w high ₹{fmtNum(hi, 0)}</span>
-          </div>
-        </div>
-      )}
-
       {shown.length > 0 && (
-        <div className="mt-3 grid grid-cols-3 sm:grid-cols-6 gap-x-3 gap-y-2">
+        <div className="mt-2.5 grid grid-cols-6 gap-1 text-center">
           {shown.map(([label, v]) => (
             <div key={label}>
-              <p className="text-[11px] text-[var(--ink3)]">{label}</p>
-              <p className="text-sm font-semibold tabular-nums"
-                 style={{ color: (v as number) >= 0 ? "var(--pos)" : "var(--neg)" }}>
-                {(v as number) >= 0 ? "+" : ""}{fmtNum(v)}%
+              <p className="text-[10.5px] text-[var(--ink3)]">{label}</p>
+              <p className="text-[13px] font-semibold tabular-nums" style={{ color: (v as number) > 0 ? "var(--pos)" : (v as number) < 0 ? "var(--neg)" : "var(--ink2)" }}>
+                {(v as number) > 0 ? "+" : (v as number) < 0 ? "−" : ""}{fmtNum(Math.abs(v as number), 1)}%
               </p>
             </div>
           ))}
         </div>
       )}
-
+      {at !== null && (
+        <div className="mt-3">
+          <div className="flex items-center gap-2 text-[11px] text-[var(--ink3)] tabular-nums">
+            <span>₹{fmtNum(lo, 0)}</span>
+            <div className="relative flex-1 h-1 rounded-full bg-[var(--line)]">
+              <div className="absolute -top-1 w-[2px] h-3 bg-[var(--ink)]" style={{ left: `calc(${at}% - 1px)` }} />
+            </div>
+            <span>₹{fmtNum(hi, 0)}</span>
+          </div>
+          <div className="flex justify-between text-[10.5px] text-[var(--ink3)] mt-0.5">
+            <span>52-week low</span>
+            {off !== null && <span className="tabular-nums">From high {off > 0 ? "+" : off < 0 ? "−" : ""}{Math.abs(off).toFixed(1)}%</span>}
+            <span>52-week high</span>
+          </div>
+        </div>
+      )}
       {beta !== null && beta !== undefined && (
-        <p className="text-[11px] text-[var(--ink3)] mt-3">
-          Beta {fmtNum(beta)}
-          <InfoTip title="Beta" className="ml-1">
-            <p>
-              Over the last year this share moved about{" "}
-              {Math.abs(beta) < 0.05 ? "independently of" : `${fmtNum(Math.abs(beta))}× as far as`}{" "}
-              the market on an average day.
-            </p>
-            <p>A number below 1 is not safety; it is only a smaller swing.</p>
-          </InfoTip>
-        </p>
+        <p className="text-[11px] text-[var(--ink3)] mt-2">Beta {fmtNum(beta)}</p>
       )}
     </section>
+  );
+}
+
+/** The company's announcements as NSE lists them (fetch_announcement_docs.py,
+ *  newest 50): Recent, or only the kinds that move a share (results, board
+ *  outcomes, dividends, ratings, deals, orders), and a search over the subject
+ *  and NSE's category - screener.in's Announcements box, without its AI
+ *  summaries (the app shows no model-written text). */
+function Announcements({ list }: { list: [string, string, string, string, number][] }) {
+  const [tab, setTab] = useState<"recent" | "important">("recent");
+  const [q, setQ] = useState("");
+  const [all, setAll] = useState(false);
+  const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const rows = list.filter((a) => (tab === "recent" || a[4] === 1)
+    && words.every((w) => `${a[1]} ${a[2]}`.toLowerCase().includes(w)));
+  const shown = all || words.length ? rows : rows.slice(0, 8);
+  const when = (at: string) => new Date(`${at.slice(0, 10)}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <h3 className="text-[13px] font-semibold text-[var(--ink)] mr-auto">Announcements</h3>
+        <div className="inline-flex gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs" role="radiogroup" aria-label="Announcements">
+          {([["recent", "Recent"], ["important", "Important"]] as const).map(([k, label]) => (
+            <button key={k} type="button" role="radio" aria-checked={tab === k} onClick={() => setTab(k)}
+              className={`rounded-md px-2.5 py-1 font-medium ${tab === k ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>{label}</button>
+          ))}
+        </div>
+      </div>
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search announcements"
+        className="w-full rounded-lg border border-[var(--line)] bg-[var(--card2)] px-3 py-2 text-sm text-[var(--ink)] placeholder:text-[var(--ink3)]" />
+      {shown.length === 0 ? (
+        <p className="text-xs text-[var(--ink3)]">{words.length ? "No announcement matches." : "None in the latest fifty."}</p>
+      ) : (
+        <ul className="divide-y divide-[var(--line)]">
+          {shown.map((a, i) => (
+            <li key={`${a[0]}-${i}`} className="py-1.5">
+              <a href={a[3]} target="_blank" rel="noopener noreferrer" className="block hover:underline">
+                <span className="text-[13px] text-[var(--ink)] line-clamp-2">{a[2] || a[1]}</span>
+                <span className="text-[11px] text-[var(--ink3)]">{when(a[0])} · {a[1]}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!words.length && rows.length > 8 && (
+        <button type="button" onClick={() => setAll(!all)} className="text-[13px] font-semibold text-[var(--accent-ink)]">
+          {all ? "Fewer" : `All ${rows.length}`}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -880,10 +1388,13 @@ function DocumentsByYear({ docs }: { docs: NonNullable<Company["documents"]> }) 
       const y = Number(r.to);
       if (Number.isFinite(y)) get(y).reports.push(r);
     }
-    for (const d of docs.concalls ?? []) {
-      const y = fyOf(d.date);
-      if (y !== null) get(y).concalls.push(d);
+    for (const [list, kind] of [[docs.concalls, ""], [docs.ppts, "PPT"], [docs.recordings, "Recording"]] as const) {
+      for (const d of list ?? []) {
+        const y = fyOf(d.date);
+        if (y !== null) get(y).concalls.push(kind ? { ...d, kind } : d);
+      }
     }
+    for (const g of bucket.values()) g.concalls.sort((a, b) => b.date.localeCompare(a.date));
     for (const d of docs.ratings ?? []) {
       const y = fyOf(d.date);
       if (y !== null) get(y).ratings.push(d);
@@ -908,7 +1419,8 @@ function DocumentsByYear({ docs }: { docs: NonNullable<Company["documents"]> }) 
       <a href={d.url} target="_blank" rel="noopener noreferrer"
          className="text-[var(--accent-ink)] hover:underline line-clamp-2 sm:truncate block">
         <span className="text-[var(--ink3)] font-mono text-xs mr-2">{d.date}</span>
-        {d.title || "document"}
+        {d.kind && <span className="text-[10px] font-bold rounded px-1.5 py-0.5 mr-1.5 bg-[var(--accent-soft)] text-[var(--accent-ink)]">{d.kind}</span>}
+        {(d.title || "document").replace(/^.{0,120}?has informed the exchange (?:about|regarding)\s*/i, "")}
       </a>
     </li>
   );
@@ -1069,75 +1581,65 @@ type FScoreData = {
  *  the past, not a view about the price.
  */
 function FScore({ f }: { f: FScoreData }) {
-  const total = f.measured || 1;
-  // Green above two thirds, red below a third - the same reading Piotroski
-  // gave the score, stated on screen rather than left to a colour.
-  const tone = f.score / total >= 0.67 ? "var(--pos)"
-    : f.score / total <= 0.33 ? "var(--neg)" : "var(--warn)";
+  const [all, setAll] = useState(false);
+  const failed = f.checks.filter((c) => c.pass !== true);
+  const listed = all ? f.checks : failed;
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h2 className="text-base font-semibold text-[var(--ink)]">
-            Nine tests on the accounts
-            <InfoTip title="Nine tests on the accounts" className="ml-1.5">
-              <p>
-                The Piotroski F-score, comparing {f.years[1].slice(0, 4)} against{" "}
-                {f.years[0].slice(0, 4)}. Every test is arithmetic on two filed years, and all
-                nine are shown — a score whose workings are hidden cannot be argued with.
-              </p>
-              <p>
-                A test whose inputs are missing counts as neither a pass nor a fail. Scoring an
-                absent figure as zero would turn missing data into bad news, which is not what
-                it is.
-              </p>
-            </InfoTip>
-          </h2>
-          <p className="text-xs text-[var(--ink3)] mt-0.5 tabular-nums">
-            {f.years[1].slice(0, 4)} vs {f.years[0].slice(0, 4)}
-          </p>
-        </div>
-        <div className="text-right shrink-0">
-          <div className="flex items-baseline gap-0.5">
-            <span className="text-3xl font-bold tabular-nums" style={{ color: tone }}>{f.score}</span>
-            <span className="text-sm text-[var(--ink3)]">/{f.measured}</span>
-          </div>
-          {f.measured < f.of && (
-            <p className="text-[11px] text-[var(--ink3)]">
-              {f.of - f.measured} of {f.of} not measurable
+      <div className="flex items-baseline gap-2">
+        <h2 className="flex-1 text-base font-semibold text-[var(--ink)]">
+          Nine tests
+          <InfoTip title="Nine tests on the accounts" className="ml-1.5">
+            <p>
+              The Piotroski F-score, comparing {f.years[1].slice(0, 4)} against {f.years[0].slice(0, 4)}. Every test is
+              arithmetic on two filed years, and all nine are shown — a score whose workings are hidden cannot be argued with.
             </p>
-          )}
-        </div>
+            <p>
+              A test whose inputs are missing counts as neither a pass nor a fail. Scoring an absent figure as zero would
+              turn missing data into bad news, which is not what it is.
+            </p>
+          </InfoTip>
+        </h2>
+        <span className="text-sm font-semibold tabular-nums text-[var(--ink)]">{f.score}/{f.measured}</span>
+        <button type="button" onClick={() => setAll(!all)} aria-expanded={all}
+          className="text-[12px] font-semibold text-[var(--accent-ink)]">{all ? "Failed only" : `All ${f.checks.length}`}</button>
       </div>
-
-      <ul className="mt-3 divide-y divide-[var(--line)]">
+      <div className="mt-2.5 grid grid-cols-9 gap-1" role="list" aria-label="Test results">
         {f.checks.map((c) => (
-          <li key={c.test} className="py-2 flex items-start gap-2.5">
-            <span
-              aria-hidden="true"
-              className="mt-0.5 shrink-0 w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold"
-              style={{
-                background: c.pass === null ? "var(--card2)" : c.pass ? "var(--pos)" : "var(--neg)",
-                color: c.pass === null ? "var(--ink3)" : "var(--card)",
-                border: c.pass === null ? "1px solid var(--line2)" : "none",
-              }}
-            >
-              {c.pass === null ? "?" : c.pass ? "\u2713" : "\u2715"}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="text-sm text-[var(--ink)]">{c.name}</span>
-              <span className="sr-only">
-                {c.pass === null ? " - not measurable" : c.pass ? " - passed" : " - failed"}
-              </span>
-              <span className="block text-[11px] text-[var(--ink3)]">
-                {c.test}
-                {c.detail ? ` — ${c.detail}` : " — not reported in both years, so not scored"}
-              </span>
-            </span>
-          </li>
+          <span key={c.test} role="listitem" title={`${c.name} - ${c.pass === null ? "not measurable" : c.pass ? "passed" : "failed"}`}
+            className="h-6 rounded-md flex items-center justify-center"
+            style={{ background: c.pass === null ? "var(--card2)" : `color-mix(in srgb, var(${c.pass ? "--pos" : "--neg"}) 16%, transparent)` }}>
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+              stroke={c.pass === null ? "var(--ink3)" : c.pass ? "var(--pos)" : "var(--neg)"}>
+              <path d={c.pass === null ? "M12 7v6M12 17v.5" : c.pass ? "M5 12.5l4.5 4.5L19 7.5" : "M7 7l10 10M17 7L7 17"} />
+            </svg>
+            <span className="sr-only">{c.name}: {c.pass === null ? "not measurable" : c.pass ? "passed" : "failed"}</span>
+          </span>
         ))}
-      </ul>
-
+      </div>
+      {listed.length > 0 && (
+        <>
+          <p className="mt-2.5 text-[10.5px] font-semibold uppercase tracking-wide text-[var(--ink3)]">
+            {all ? "All tests" : "Failed or not measurable"} · {f.years[1].slice(0, 4)} vs {f.years[0].slice(0, 4)}
+          </p>
+          <ul className="divide-y divide-[var(--line)]">
+            {listed.map((c) => (
+              <li key={c.test} className="py-1.5 flex items-baseline gap-2 text-[13px]">
+                <span className="shrink-0 w-3 text-center font-bold" aria-hidden="true"
+                  style={{ color: c.pass === null ? "var(--ink3)" : c.pass ? "var(--pos)" : "var(--neg)" }}>
+                  {c.pass === null ? "?" : c.pass ? "\u2713" : "\u2715"}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="text-[var(--ink)]">{c.name}</span>
+                  <span className="block text-[11px] text-[var(--ink3)]">
+                    {c.test}{c.detail ? ` — ${c.detail}` : " — not reported in both years, so not scored"}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </section>
   );
 }
@@ -1206,7 +1708,7 @@ function ValuationHistory({ company }: { company: Company }) {
 
   return (
     <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
-      <h2 className="text-base font-semibold text-[var(--ink)] mb-3">
+      <h2 className="text-base font-semibold text-[var(--ink)] mb-1">
         Against its own history
         <InfoTip title="Against its own history" className="ml-1.5">
           <p>Where today&rsquo;s valuation sits in this company&rsquo;s own record.</p>
@@ -1221,36 +1723,30 @@ function ValuationHistory({ company }: { company: Company }) {
           </p>
         </InfoTip>
       </h2>
-      <div className="space-y-3.5">
+      <div className="divide-y divide-[var(--line)]">
         {rows.map((r) => {
-          // Position on the bar, clamped: the newest point IS the max or the
-          // min often enough that an unclamped marker sits half off the track.
-          const span = r.hi - r.lo;
-          const at = span > 0 ? Math.min(100, Math.max(0, ((r.value - r.lo) / span) * 100)) : 50;
+          // Today's value against the median of its own record, on one scale
+          // from zero; the gap is printed, never coloured as good or bad.
+          const top = Math.max(r.value, r.median, 0) * 1.15 || 1;
+          const gap = r.median ? ((r.value - r.median) / Math.abs(r.median)) * 100 : null;
           return (
-            <div key={r.label}>
-              <div className="flex items-baseline justify-between gap-2 text-sm">
-                <span className="text-[var(--ink2)]">{r.label}</span>
-                <span className="font-semibold text-[var(--ink)] tabular-nums">{fmtNum(r.value)}</span>
-              </div>
-              <div className="relative h-1.5 rounded-full bg-[var(--card2)] mt-1.5 border border-[var(--line)]">
-                <div className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-[var(--accent)]"
-                     style={{ left: `calc(${at}% - 4px)` }} />
-              </div>
-              <div className="flex justify-between text-[11px] leading-snug text-[var(--ink3)] mt-1 tabular-nums">
-                <span>Low {fmtNum(r.lo)}</span>
-                {/* The window is stated, not just its length. These four
-                    series do NOT reach equally far back: P/E and MCap/Sales
-                    come from filed quarterly results to 2006, while EV/EBITDA
-                    needs debt and cash, which the balance sheets only give for
-                    about four years. "2% of 42 months" invites a conclusion
-                    that "42 months since 2023-03" does not. */}
-                <span>
-                  {r.short} was lower than this on <strong className="text-[var(--ink2)]">{r.pct}%</strong>{" "}
-                  of {r.n.toLocaleString("en-IN")} readings since {periodLabel(`${r.from}-01`)} · median {fmtNum(r.median)}
+            <div key={r.label} className="py-1.5">
+              <div className="grid grid-cols-[76px_44px_minmax(0,1fr)_auto] items-center gap-2 text-[13px]">
+                <span className="text-[var(--ink2)] truncate">{r.short}</span>
+                <span className="text-right font-semibold text-[var(--ink)] tabular-nums">{fmtNum(r.value)}</span>
+                <span className="relative h-1.5 rounded-full bg-[var(--line)]" aria-hidden="true">
+                  <span className="absolute left-0 top-0 h-1.5 rounded-full bg-[var(--ink3)]" style={{ width: `${Math.max(0, (r.value / top) * 100)}%` }} />
+                  <span className="absolute -top-[3px] w-[2px] h-3 bg-[var(--accent)]" style={{ left: `${Math.max(0, (r.median / top) * 100)}%` }} />
                 </span>
-                <span>High {fmtNum(r.hi)}</span>
+                <span className="text-[11px] text-[var(--ink3)] tabular-nums whitespace-nowrap">
+                  Med {fmtNum(r.median)}{gap !== null && <> · <span className="text-[var(--ink2)]">{gap > 0 ? "+" : gap < 0 ? "−" : ""}{Math.abs(gap).toFixed(0)}%</span></>}
+                </span>
               </div>
+              {/* The window is stated, not just its length: these series do not
+                  reach equally far back. */}
+              <p className="text-[10.5px] text-[var(--ink3)] tabular-nums mt-0.5">
+                Lower than now on {r.pct}% of {r.n.toLocaleString("en-IN")} months since {periodLabel(`${r.from}-01`)} · range {fmtNum(r.lo)}–{fmtNum(r.hi)}
+              </p>
             </div>
           );
         })}
@@ -1291,130 +1787,164 @@ function industryMedian(cohort: Cohort, field: string): { value: number; n: numb
   return { value: m, n: vs.length };
 }
 
-function RatioGrid({ snapshot, row, cohort, next }: { snapshot: Row; row: Row | null; cohort: Cohort | null; next?: NextResults }) {
+/** A ₹ crore figure short enough for a tile whose label carries "₹Cr":
+ *  8.13L (lakh crore) or 45,031. */
+function crShort(v: number | null): string {
+  if (v === null) return "—";
+  const a = Math.abs(v), sign = v < 0 ? "−" : "";
+  if (a >= 1e5) return `${sign}${(a / 1e5).toFixed(2)}L`;
+  return `${sign}${fmtNum(a, 0)}`;
+}
+
+type Tile = { label: string; value: string; sub?: string | null; field?: string; full?: string; info?: string };
+
+function RatioGrid({ snapshot, row, cohort, next, updates, faceValue }: {
+  snapshot: Row; row: Row | null; cohort: Cohort | null; next?: NextResults; updates?: Updates | null; faceValue?: number | null;
+}) {
   const g = (k: string) => num(row, k) ?? num(snapshot, k);
   const method = String((row?.["vol_method"] ?? snapshot["vol_method"]) ?? "");
-  const vol = (k: string) => {
-    const v = g(k);
-    return v === null ? "—" : `${v.toFixed(1)} %`;
-  };
-  // Volatility now sits in the list at the same weight as everything else. It was
-  // a large separate card, which gave it an importance out of proportion to market
-  // cap, price or P/E.
-  // A missing value is shown as a bare dash, not "₹ — Cr". Wrapping a currency
-  // symbol and a unit around nothing dresses an absence up as a figure, which is
-  // the one thing this app is not supposed to do.
-  const money = (v: unknown, dec = 2, suffix = "") =>
-    v === null || v === undefined ? "—" : `₹ ${fmtNum(v as number, dec)}${suffix}`;
-  const pct = (v: unknown) =>
-    v === null || v === undefined ? "—" : `${fmtNum(v as number)} %`;
-  const plain = (v: unknown) =>
-    v === null || v === undefined ? "—" : fmtNum(v as number);
+  // A missing value is a bare dash, never "₹ — Cr": a unit wrapped round
+  // nothing dresses an absence up as a figure.
+  const pct = (v: number | null) => (v === null ? "—" : `${fmtNum(v, Math.abs(v) >= 100 ? 0 : 1)}%`);
+  const plain = (v: number | null) => (v === null ? "—" : fmtNum(v));
+  const rupee = (v: number | null, dec = 2) => (v === null ? "—" : `₹${fmtNum(v, dec)}`);
+  const price = g("price"), hi = g("wk52_high"), lo = g("wk52_low");
+  const fromHi = price !== null && hi ? ((price - hi) / hi) * 100 : null;
+  const fromLo = price !== null && lo ? ((price - lo) / lo) * 100 : null;
+  const signedPct = (v: number | null) => (v === null ? null : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(1)}%`);
+  const debt = g("total_debt"), cash = g("total_cash"), mcap = g("mcap");
+  const ev = mcap === null ? null : mcap + ((debt ?? 0) - (cash ?? 0)) / 1e7;
+  const day = (d: string, opts: Intl.DateTimeFormatOptions) => new Date(`${d}T00:00:00`).toLocaleDateString("en-IN", opts);
 
-  // Grouped by the question each one answers. Fourteen numbers in one flat grid
-  // is a list to read end to end; four short groups is a page to scan.
-  /** Third entry is the data.json field this row can be compared on, or "" for
-   *  the ones where an industry median would be nonsense: a book value per
-   *  share or a share price is a function of how many shares exist, so its
-   *  median across an industry compares nothing. */
-  const groups: [string, [string, string, string][]][] = [
+  // Grouped by the question each one answers; four short groups is a page to
+  // scan where fourteen rows were a list to read. `field` is the data.json
+  // field an industry median is taken on - none for a per-share figure, whose
+  // median across an industry compares nothing.
+  const groups: [string, Tile[]][] = [
     ["Size and price", [
-      ["Market Cap", money(g("mcap"), 0, " Cr"), "mcap"],
-      ["Current Price", money(g("price")), ""],
-      ["High / Low", g("wk52_high") == null && g("wk52_low") == null ? "—"
-        : `₹ ${fmtNum(g("wk52_high"), 0)} / ${fmtNum(g("wk52_low"), 0)}`, ""],
+      { label: "MCap ₹Cr", info: "Market Cap", value: crShort(mcap), full: mcap === null ? undefined : `₹${fmtNum(mcap, 0)} Cr`,
+        sub: cohort?.rank ? `#${cohort.rank.toLocaleString("en-IN")} of ${cohort.rankOf.toLocaleString("en-IN")}` : null },
+      { label: "Ind. rank", value: cohort?.indRank ? `#${cohort.indRank}` : "—", sub: cohort?.indRank ? `of ${cohort.indRankOf}` : null },
+      { label: "52W high", info: "High / Low", value: rupee(hi, 0), sub: fromHi === null ? null : signedPct(fromHi) },
+      { label: "52W low", value: rupee(lo, 0), sub: fromLo === null ? null : signedPct(fromLo) },
     ]],
     ["What it costs", [
-      ["Stock P/E", plain(g("pe")), "pe"],
-      ["Book Value", money(g("book_value")), ""],
-      ["Dividend Yield", pct(g("div_yield")), "div_yield"],
+      { label: "Stock P/E", value: plain(g("pe")), field: "pe" },
+      { label: "Book value", info: "Book Value", value: rupee(g("book_value")), sub: "Per share" },
+      { label: "Div. yield", info: "Dividend Yield", value: pct(g("div_yield")), field: "div_yield" },
+      ...(faceValue ? [{ label: "Face value", value: `₹${fmtNum(faceValue, faceValue % 1 ? 2 : 0)}`, sub: "Per share" }] : []),
     ]],
     ["What it earns", [
-      ["Next results", next === undefined ? "—" : next === null ? "Not announced"
-        : new Date(`${next.date}T00:00:00`).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" }), ""],
-      ["ROCE", pct(g("roce")), "roce"],
-      ["ROE", pct(g("roe")), "roe"],
-      ["Sales growth 5Y", pct(g("sales_cagr_5y")), "sales_cagr_5y"],
-      ["Profit growth 5Y", pct(g("profit_cagr_5y")), "profit_cagr_5y"],
+      { label: "ROCE", value: pct(g("roce")), field: "roce" },
+      { label: "ROE", value: pct(g("roe")), field: "roe" },
+      { label: "Sales 5Y", info: "Sales growth 5Y", value: pct(g("sales_cagr_5y")), field: "sales_cagr_5y" },
+      { label: "Profit 5Y", info: "Profit growth 5Y", value: pct(g("profit_cagr_5y")), field: "profit_cagr_5y" },
+      { label: "Results", value: next ? day(next.date, { day: "numeric", month: "short" }) : "—",
+        full: next ? day(next.date, { weekday: "short", day: "numeric", month: "short", year: "numeric" }) : undefined,
+        sub: next ? `${periodLabel(quarterBefore(next.date))} qtr` : next === null ? "No date yet" : null },
+      // Only for a company that files them (owner: no dead tiles).
+      ...(updates ? [{ label: "Update", info: "Business update", value: day(updates.last.d, { day: "numeric", month: "short" }),
+        sub: `${updates.n} of ${updates.of} qtrs`,
+        full: [`${updates.last.q}`, `${updates.n} of ${updates.of} quarters`, updates.typ != null && `usually day ${updates.typ}`].filter(Boolean).join(" · ") }] : []),
     ]],
     ["Risk and ownership", [
-      // Absolute debt and cash, not only the ratio. Finology leads with these
-      // and it is right to: "Debt / Equity 0.37" tells you the shape of the
-      // funding, "Rs 2,31,381 crore of debt against Rs 1,08,179 crore of cash"
-      // tells you the size of it, and the second is the one a reader can hold
-      // against the profit. Both were already in the export and neither was on
-      // the page.
-      ["Enterprise value", g("mcap") === null ? "—"
-        : money((g("mcap") ?? 0) + ((g("total_debt") ?? 0) - (g("total_cash") ?? 0)) / 1e7, 0, " Cr"), ""],
-      ["Total debt", g("total_debt") === null ? "—" : money((g("total_debt") ?? 0) / 1e7, 0, " Cr"), ""],
-      ["Cash", g("total_cash") === null ? "—" : money((g("total_cash") ?? 0) / 1e7, 0, " Cr"), ""],
-      ["Debt / Equity", plain(g("de")), "de"],
-      ["Promoter holding", pct(g("promoter_holding")), "promoter_holding"],
-      ["Volatility 1Y", vol("volatility_1y"), "volatility_1y"],
-      ["Volatility 30D", vol("volatility_30d"), "volatility_30d"],
+      // Absolute debt and cash as well as the ratio: the ratio gives the shape
+      // of the funding, these give its size against the profit.
+      { label: "EV ₹Cr", info: "Enterprise value", value: crShort(ev), full: "Market cap plus debt, less cash" },
+      { label: "Debt ₹Cr", value: debt === null ? "—" : crShort(debt / 1e7) },
+      { label: "Cash ₹Cr", value: cash === null ? "—" : crShort(cash / 1e7) },
+      { label: "Debt/equity", info: "Debt / Equity", value: plain(g("de")), field: "de" },
+      { label: "Promoter", info: "Promoter holding", value: pct(g("promoter_holding")), field: "promoter_holding" },
+      { label: "Vol. 1Y", info: "Volatility 1Y", value: pct(g("volatility_1y")), field: "volatility_1y" },
+      { label: "Vol. 30D", info: "Volatility 30D", value: pct(g("volatility_30d")), field: "volatility_30d" },
     ]],
   ];
 
-  /** The grey line under a figure: what the rest of the industry does. */
-  const context = (field: string) => {
-    if (!field || !cohort) return null;
-    if (field === "mcap") {
-      if (!cohort.rank) return null;
-      // The industry name is already printed under the company name at the top
-      // of the page; repeating it here wrapped this line onto three.
-      return `${cohort.rank.toLocaleString("en-IN")} of ${cohort.rankOf.toLocaleString("en-IN")} by size${
-        cohort.indRank ? ` · ${cohort.indRank} of ${cohort.indRankOf} in its industry` : ""}`;
-    }
-    const med = industryMedian(cohort, field);
-    const mine = g(field);
-    if (!med) return null;
-    const shown = Math.abs(med.value) >= 100 ? fmtNum(med.value, 0) : fmtNum(med.value);
-    const side = mine === null ? "" : mine > med.value ? " · above" : mine < med.value ? " · below" : " · at";
-    // Say how many companies it was taken over when that number is small.
-    // NSDL sits in an industry of six: "industry median 40.27" reads like a
-    // fact about an industry, when it is the middle of five other companies.
-    const n = med.n < 15 ? ` (of ${med.n})` : "";
-    return `Industry median ${shown}${n}${side}`;
-  };
   return (
-    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-5">
-        {groups.map(([heading, cells]) => (
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4">
+      <h2 className="text-base font-semibold text-[var(--ink)] px-1">
+        Key figures
+        <InfoTip title="Key figures" label="How these figures are worked out" className="ml-1.5">
+          {groups.flatMap(([, tiles]) => tiles).map((t) => {
+            const info = METRIC_INFO[t.info ?? t.label];
+            if (!info) return null;
+            return (
+              <InfoPart key={t.label} head={t.info ?? t.label}>
+                {info.how} {info.means}{info.watch ? ` ${info.watch}` : ""}
+                {(t.info ?? t.label).startsWith("Volatility") && method && ` Method for this company: ${method === "yang-zhang" ? "Yang-Zhang (OHLC)" : "close-to-close"}.`}
+              </InfoPart>
+            );
+          })}
+          <p className="text-[var(--ink3)]">The bar under a figure puts this company (grey) and its industry median (blue line) on one scale. Neither colour means good or bad.</p>
+        </InfoTip>
+      </h2>
+      <div className="mt-1 space-y-3">
+        {groups.map(([heading, tiles]) => (
           <div key={heading}>
-            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink3)] mb-1.5">
-              {heading}
-            </h3>
-            {cells.map(([label, value, field]) => {
-              const ctx = label === "Next results"
-                ? (next ? `${periodLabel(quarterBefore(next.date))} quarter · board meeting` : next === null ? "No date on NSE's calendar yet" : null)
-                : context(field);
-              return (
-                <div key={label} className="border-b border-[var(--line)] py-1.5">
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-sm text-[var(--ink3)]">
-                      {label}
-                      <MetricInfo label={label} method={method} />
-                    </span>
-                    <span className="text-sm font-semibold text-[var(--ink)] tabular-nums">{value}</span>
+            <h3 className="text-[10.5px] font-semibold uppercase tracking-wide text-[var(--ink3)] mb-1.5 px-1">{heading}</h3>
+            <div className="grid grid-cols-4 gap-1.5">
+              {tiles.map((t) => {
+                const med = t.field && cohort ? industryMedian(cohort, t.field) : null;
+                const mine = t.field ? g(t.field) : null;
+                const medTxt = med ? (Math.abs(med.value) >= 100 ? fmtNum(med.value, 0) : fmtNum(med.value, 1)) : null;
+                // Value and industry median on one scale from zero. Grey and
+                // blue, never green or red: above the median is not good news.
+                const top = med && mine !== null && mine > 0 && med.value > 0 ? Math.max(mine, med.value) * 1.1 : null;
+                return (
+                  <div key={t.label} className="min-w-0 rounded-lg bg-[var(--card2)] px-2 py-1.5" title={t.full}>
+                    <p className="text-[10.5px] leading-tight text-[var(--ink3)] truncate">{t.label}</p>
+                    <p className="text-[14px] leading-[18px] font-semibold text-[var(--ink)] tabular-nums truncate">{t.value}</p>
+                    {med ? (
+                      <p className="text-[10px] leading-tight text-[var(--accent-ink)] truncate tabular-nums"
+                        title={`Industry median ${medTxt} across ${med.n} companies`}>
+                        Ind {medTxt}{med.n < 15 ? ` (${med.n})` : ""}
+                      </p>
+                    ) : t.sub ? (
+                      <p className="text-[10px] leading-tight text-[var(--ink3)] truncate">{t.sub}</p>
+                    ) : null}
+                    {top && mine !== null && med && (
+                      <div className="relative h-[3px] mt-1.5 rounded-full bg-[var(--line)]" aria-hidden="true">
+                        <div className="h-[3px] rounded-full bg-[var(--ink3)]" style={{ width: `${(mine / top) * 100}%` }} />
+                        <div className="absolute -top-[2px] w-[2px] h-[7px] bg-[var(--accent)]" style={{ left: `${(med.value / top) * 100}%` }} />
+                      </div>
+                    )}
                   </div>
-                  {/* Grey and unemphasised, and never green or red. Tickertape
-                      and Trendlyne both colour this line as good or bad news;
-                      a P/E above the industry median is neither, and this app
-                      does not hand out opinions it cannot defend. */}
-                  {ctx && <p className="text-[11px] leading-snug text-[var(--ink3)] text-right tabular-nums">{ctx}</p>}
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         ))}
       </div>
-
+      <p className="mt-2 px-1 text-[10.5px] text-[var(--ink3)] flex flex-wrap gap-x-3 gap-y-0.5">
+        <span>Bar: this company <span className="inline-block align-middle w-3 h-[3px] rounded bg-[var(--ink3)]" /> vs industry median <span className="inline-block align-middle w-[2px] h-[7px] bg-[var(--accent)]" /></span>
+      </p>
+      <PinnedRatios row={row} />
     </section>
   );
 }
 
 /** The shape of a company page, shimmering, while its data loads - instead of
  *  "Loading TCS..." on an empty screen that then jumps into a full page. */
+/** The page's tabs, and the sections each one holds. Every section of the old
+ *  single scroll lives in exactly one tab, so nothing is lost by the split; a
+ *  link to a section (#quarters, #shareholding) opens the tab that holds it. */
+type TabKey = "overview" | "results" | "accounts" | "owners" | "filings";
+const TABS: { key: TabKey; label: string; sections: string[] }[] = [
+  { key: "overview", label: "Overview", sections: ["summary", "chart", "performance", "analysis", "checks", "valuation", "peers"] },
+  { key: "results", label: "Results", sections: ["quarters", "segments", "profit-loss"] },
+  { key: "accounts", label: "Accounts", sections: ["balance-sheet", "cash-flows", "ratios"] },
+  { key: "owners", label: "Owners", sections: ["institutions", "shareholding"] },
+  { key: "filings", label: "Filings", sections: ["documents", "notes"] },
+];
+const TAB_OF: Record<string, TabKey> = Object.fromEntries(TABS.flatMap((t) => [[t.key, t.key], ...t.sections.map((id) => [id, t.key])]));
+
+/** "26 L" holders, "4.2 K", or the plain count. */
+function holdersShort(n: number): string {
+  if (n >= 1e5) return `${(n / 1e5).toFixed(n >= 1e6 ? 0 : 1)} L`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)} K`;
+  return String(n);
+}
+
 function CompanySkeleton() {
   return (
     <div className="space-y-4" aria-busy="true" aria-label="Loading">
@@ -1450,12 +1980,41 @@ function CompanyView() {
   // stale the first time a section is added or made conditional.
   const [paneIds, setPaneIds] = useState<string[]>([]);
   const [sectionOrder, setSectionOrder] = useState<string[]>([]);
+  // Whether this company has an Institutions card (it loads on its own).
+  const [hasInst, setHasInst] = useState(false);
   useEffect(() => {
     const read = () => setSectionOrder(loadOrder("sections"));
     read();
     window.addEventListener("rs-order", read);
     return () => window.removeEventListener("rs-order", read);
   }, []);
+
+  // Which tab is open. A link to a tab (#results) or to a section inside one
+  // (#quarters) opens that tab, then scrolls to the section once it is shown.
+  const [tab, setTab] = useState<TabKey>("overview");
+  const tabAnchor = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const fromHash = () => {
+      const id = decodeURIComponent(window.location.hash.slice(1));
+      const t = TAB_OF[id];
+      if (!t) return;
+      setTab(t);
+      if (id !== t) requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ block: "start" }));
+    };
+    fromHash();
+    window.addEventListener("hashchange", fromHash);
+    return () => window.removeEventListener("hashchange", fromHash);
+  }, [company]);
+  const pickTab = (k: TabKey) => {
+    setTab(k);
+    try { window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#${k}`); } catch { /* the tab still opens */ }
+    // Opening a tab while scrolled down shows it from its top, under the bar.
+    const a = tabAnchor.current;
+    if (a) {
+      const top = a.getBoundingClientRect().top + window.scrollY - (window.matchMedia("(min-width: 640px)").matches ? 56 : 0);
+      if (window.scrollY > top) window.scrollTo({ top });
+    }
+  };
 
   useEffect(() => {
     setMode(loadSectionMode());
@@ -1734,6 +2293,8 @@ function CompanyView() {
   // The next results meeting, from the calendar the Calendar page reads
   // (8 KB on the wire). Undefined while loading, null if NSE lists none.
   const [nextResults, setNextResults] = useState<NextResults>(undefined);
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const [basisView, setBasisView] = useState<"consolidated" | "standalone">("consolidated");
   useEffect(() => {
     if (!symbol) return;
     const d = new Date();
@@ -1829,27 +2390,22 @@ function CompanyView() {
     : company?.basis === "consolidated" ? "Consolidated figures in ₹ Crores"
     : "Figures in ₹ Crores";
 
-  const exportCompanyCsv = () => {
+  const exportCompanyXlsx = () => {
     if (!company) return;
-    const esc = (v: unknown) => {
-      const sv = v === null || v === undefined ? "" : String(v);
-      return /[",\n]/.test(sv) ? `"${sv.replace(/"/g, '""')}"` : sv;
-    };
-    const lines: string[] = [`${symbol} — Rscreener export,${company.generated_at}`, ""];
-    lines.push("SNAPSHOT");
-    for (const [k, v] of Object.entries(company.snapshot)) lines.push(`${k},${esc(v)}`);
-    const pushStmt = (title: string, stmt: Stmt) => {
-      lines.push("", title.toUpperCase());
-      lines.push(`,${stmt.periods.join(",")}`);
-      for (const it of stmt.items) lines.push(`${esc(it.label)},${it.values.map(esc).join(",")}`);
-    };
-    if (company.trend?.annual) pushStmt("Track record annual", trendToStmt(company.trend.annual));
-    if (company.trend?.quarterly) pushStmt("Track record quarterly", trendToStmt(company.trend.quarterly));
+    // One workbook, a sheet per table - screener.in's "Export to Excel".
+    const sheets: { name: string; rows: Cell[][] }[] = [];
+    const sheetOf = (name: string, stmt: Stmt) => sheets.push({
+      name,
+      rows: [["", ...stmt.periods], ...stmt.items.map((it) => [it.parent ? `  ${it.label}` : it.label, ...it.values] as Cell[])],
+    });
+    sheets.push({ name: "Summary", rows: [[`${symbol} - Rscreener export`, company.generated_at], [], ...Object.entries(company.snapshot).map(([k, v]) => [k, typeof v === "number" ? v : v === null || v === undefined ? "" : String(v)] as Cell[])] });
     for (const [key, title] of Object.entries(STMT_TITLES)) {
-      if (company.statements[key]) pushStmt(title, company.statements[key]);
+      if (company.statements[key]) sheetOf(title, company.statements[key]);
     }
+    if (company.trend?.annual) sheetOf("Track record annual", trendToStmt(company.trend.annual));
+    if (company.trend?.quarterly) sheetOf("Track record quarterly", trendToStmt(company.trend.quarterly));
     if (company.shareholding && company.shareholding.dates.length > 0) {
-      pushStmt("Shareholding pattern", {
+      sheetOf("Shareholding", {
         periods: company.shareholding.dates,
         items: [
           { label: "Promoters %", values: company.shareholding.promoter },
@@ -1861,8 +2417,8 @@ function CompanyView() {
         ],
       });
     }
-    const bom = String.fromCharCode(0xfeff);
-    void saveFile(`${symbol}_rscreener.csv`, bom + lines.join("\r\n"));
+    sheets.push({ name: "Notes", rows: [["Figures from free sources (NSE / BSE filings, Yahoo); unverified until checked against the company's filing."], ["Rscreener screens; it never recommends."]] });
+    void saveFile(`${symbol}_rscreener.xlsx`, buildXlsx(sheets), XLSX_MIME);
   };
 
   if (!symbol) return <p className="text-[var(--ink3)] p-6">No company selected. <Link className="text-[var(--accent-ink)] underline" href="/">Back to screener</Link></p>;
@@ -1871,51 +2427,121 @@ function CompanyView() {
 
   const s = company.snapshot;
   const price = num(fullRow, "price") ?? num(s, "price");
+  const nseSector = (company.context?.nse_sector as string | undefined) ?? (fullRow?.["nse_sector"] as string | undefined);
+  const nseBasic = (company.context?.nse_basic as string | undefined) ?? (fullRow?.["nse_basic"] as string | undefined);
   const off = num(fullRow, "off_52w_high");
-  const quarterly = company.statements.quarterly_results ?? (company.trend?.quarterly ? trendToStmt(company.trend.quarterly) : null);
-  const pnl = company.statements.annual_pnl ?? (company.trend?.annual ? trendToStmt(company.trend.annual) : null);
+  // Consolidated / Standalone (the switch shows only where both are filed).
+  const hasSa = !!(company.statements.quarterly_results_sa || company.statements.annual_pnl_sa);
+  const sa = hasSa && basisView === "standalone";
+  const quarterly = (sa && company.statements.quarterly_results_sa) || company.statements.quarterly_results || (company.trend?.quarterly ? trendToStmt(company.trend.quarterly) : null);
+  const pnl = (sa && company.statements.annual_pnl_sa) || company.statements.annual_pnl || (company.trend?.annual ? trendToStmt(company.trend.annual) : null);
+  const tableCaption = sa ? "Standalone figures in ₹ Crores" : figuresCaption;
+  const basisSwitch = hasSa ? (
+    <div className="flex justify-end">
+      <div className="inline-flex gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs" role="radiogroup" aria-label="Figures basis">
+        {([["consolidated", "Consolidated"], ["standalone", "Standalone"]] as const).map(([k, label]) => (
+          <button key={k} type="button" role="radio" aria-checked={basisView === k} onClick={() => setBasisView(k)}
+            className={`rounded-md px-2.5 py-1 font-medium ${basisView === k ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>{label}</button>
+        ))}
+      </div>
+    </div>
+  ) : null;
   const balance = company.statements.balance_sheet;
   const cashflow = company.statements.cash_flow;
+
+  // Tabs show only when they have something in them; swipe mode keeps its
+  // one-section-per-pane pager and the section menu.
+  const hasHolding = Boolean(company.shareholding && company.shareholding.dates.length > 0);
+  const tabHas: Record<TabKey, boolean> = {
+    overview: true,
+    results: Boolean(quarterly || pnl),
+    accounts: Boolean(balance || cashflow || company.ratios),
+    owners: hasHolding || hasInst,
+    filings: true,
+  };
+  const activeTab: TabKey = tabHas[tab] ? tab : "overview";
+  const tabbed = mode !== "swipe";
+  const holders = company.shareholding?.holders_n?.filter((v): v is number => typeof v === "number").pop();
+  const badge: Partial<Record<TabKey, string>> = {
+    results: quarterly ? `${quarterly.periods.length}Q` : undefined,
+    owners: holders ? holdersShort(holders) : undefined,
+  };
 
   return (
     <div className="space-y-6">
       {/* Name, then the ticker and where it sits on one quiet line; the
           export is an icon beside the star, not a button above the price. */}
       <div className="flex items-start gap-2">
+        <CompanyMark name={String(s.name ?? symbol)} symbol={symbol} logo={company.logo} />
         <div className="flex-1 min-w-0">
-          <h1 className="text-2xl font-bold text-[var(--ink)] leading-tight">{titleCase(String(s.name ?? "")) || symbol}</h1>
-          <p className="text-sm text-[var(--ink3)] mt-0.5">
+          <h1 className="text-xl font-bold text-[var(--ink)] leading-tight line-clamp-2">{titleCase(String(s.name ?? "")) || symbol}</h1>
+          <p className="text-[13px] text-[var(--ink3)] mt-0.5">
             <span className="font-semibold text-[var(--ink2)]">{symbol}</span>
             {company.exchange ? ` · ${company.exchange}` : ""}
-            {" · "}
-            {s.sector ? (
-              <Link href={`/sectors?s=${encodeURIComponent(String(s.sector))}`} className="hover:text-[var(--accent-ink)] hover:underline">{String(s.sector)}</Link>
-            ) : "—"}
-            {s.industry ? ` · ${String(s.industry)}` : ""}
+            {company.fno && <span className="ml-1.5 align-middle text-[10px] font-bold rounded px-1.5 py-0.5 bg-[var(--accent-soft)] text-[var(--accent-ink)]" title="Trades in NSE's futures & options segment">F&amp;O</span>}
+            <IndexChips list={company.indices} />
           </p>
-          <IndexChips list={company.indices} />
+          {/* Sector on a line of its own, one line high: it wrapped the header
+              onto four lines when it shared the ticker's line. */}
+          <p className="text-[12px] text-[var(--ink3)] mt-0.5 truncate">
+            {/* NSE's own sector (and basic industry) where NSE's index files
+                carry it; the source's sector and industry otherwise. */}
+            {nseSector ? (
+              <span title="NSE's classification">{nseSector}{nseBasic ? ` · ${nseBasic}` : ""}</span>
+            ) : (
+              <>
+                {s.sector ? (
+                  <Link href={`/sectors?s=${encodeURIComponent(String(s.sector))}`} className="hover:text-[var(--accent-ink)] hover:underline">{String(s.sector)}</Link>
+                ) : "—"}
+                {s.industry ? ` · ${String(s.industry)}` : ""}
+              </>
+            )}
+            {typeof s.website === "string" && /^https?:\/\//.test(s.website) && (
+              <>
+                {" · "}
+                <a href={s.website} target="_blank" rel="noopener noreferrer" className="hover:text-[var(--accent-ink)] hover:underline">
+                  {s.website.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}
+                </a>
+              </>
+            )}
+          </p>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
-          <IconButton name="download" label="Export to Excel (CSV)" onClick={exportCompanyCsv} />
+      </div>
+      {alertsOpen && <PriceAlerts symbol={symbol} price={price} onClose={() => setAlertsOpen(false)} />}
+      <AboutCompany about={company.about} />
+
+      {/* No price: the icons still need a home. */}
+      {price === null && (
+        <div className="flex justify-end">
+        <div className="flex items-center gap-1 shrink-0 self-center">
+          <IconButton name="bell" label="Price alerts" onClick={() => setAlertsOpen(true)} />
+          <IconButton name="download" label="Export to Excel" onClick={exportCompanyXlsx} />
           <RefetchButton symbol={symbol} />
           <WatchStar symbol={symbol} />
         </div>
-      </div>
-      <AboutCompany about={company.about} />
-
+        </div>
+      )}
       {price !== null && (() => {
         // The day's move first, as a broker shows it; the distance from the
         // year's high is the second line.
         const chg = num(fullRow, "ret_1d");
         return (
           <div>
-            <div className="flex flex-wrap items-baseline gap-x-2.5">
-              <span className="text-3xl font-bold text-[var(--ink)] tabular-nums">₹ {fmtNum(price)}</span>
-              {chg !== null && (
-                <span className={`text-[15px] font-semibold tabular-nums ${tone(chg)}`}>
-                  {signedNum(dayMove(price, chg))} ({signedNum(chg)}%)
-                </span>
-              )}
+            <div className="flex items-center gap-2">
+              <div className="min-w-0 flex flex-wrap items-baseline gap-x-2.5">
+                <span className="text-3xl font-bold text-[var(--ink)] tabular-nums">₹ {fmtNum(price)}</span>
+                {chg !== null && (
+                  <span className={`text-[15px] font-semibold tabular-nums ${tone(chg)}`}>
+                    {signedNum(dayMove(price, chg))} ({signedNum(chg)}%)
+                  </span>
+                )}
+              </div>
+            <div className="ml-auto flex items-center gap-1 shrink-0 self-center">
+              <IconButton name="bell" label="Price alerts" onClick={() => setAlertsOpen(true)} />
+              <IconButton name="download" label="Export to Excel" onClick={exportCompanyXlsx} />
+              <RefetchButton symbol={symbol} />
+              <WatchStar symbol={symbol} />
+            </div>
             </div>
             <p className="flex flex-wrap items-baseline gap-x-2 mt-0.5">
               {off !== null && (
@@ -1930,6 +2556,26 @@ function CompanyView() {
       })()}
 
       {/* Built once: four tables share it, and they must not disagree. */}
+      {tabbed ? (
+        <>
+          <div ref={tabAnchor} aria-hidden="true" />
+          <div role="tablist" aria-label="Company sections"
+            className="sticky top-0 sm:top-14 z-20 -mx-4 px-4 !mt-3 bg-[var(--card)] border-b border-[var(--line)] flex justify-between sm:justify-start gap-3 sm:gap-7 overflow-x-auto [scrollbar-width:none] text-[13px] sm:text-[14px]">
+            {TABS.filter((t) => tabHas[t.key]).map((t) => (
+              <button key={t.key} type="button" role="tab" aria-selected={activeTab === t.key} onClick={() => pickTab(t.key)}
+                className={`shrink-0 whitespace-nowrap pt-2.5 pb-2 border-b-2 ${activeTab === t.key
+                  ? "border-[var(--accent)] text-[var(--ink)] font-semibold"
+                  : "border-transparent text-[var(--ink3)] hover:text-[var(--ink2)]"}`}>
+                {t.label}
+                {badge[t.key] && <span className="ml-0.5 text-[10px] font-normal text-[var(--ink3)]">{badge[t.key]}</span>}
+              </button>
+            ))}
+          </div>
+          {/* Sections outside the open tab are hidden, not unmounted, so each
+              keeps its state (a table's switches, an open row) across tabs. */}
+          <style>{`${TABS.filter((t) => t.key !== activeTab).flatMap((t) => t.sections).map((id) => `.rs-stack > #${id}`).join(",")}{display:none}`}</style>
+        </>
+      ) : (
       <nav ref={sectionNav} className="sticky top-0 sm:top-14 z-20 -mx-4 px-4 bg-[var(--card)] border-y border-[var(--line)] flex gap-1 overflow-x-auto text-sm font-medium py-2 sm:py-1.5 [scrollbar-width:none]">
         {/* Built from what this company ACTUALLY has. Five of these sections are
             conditionally rendered - quarters, P&L, balance sheet, cash flow and
@@ -1948,9 +2594,10 @@ function CompanyView() {
           ["peers", "Peers", true],
           ["quarters", "Quarters", Boolean(quarterly)],
           ["profit-loss", "Profit & Loss", Boolean(pnl)],
-          ["balance-sheet", "Balance Sheet", Boolean(balance)],
-          ["cash-flows", "Cash Flow", Boolean(cashflow)],
+          ["balance-sheet", "Balance sheet", Boolean(balance)],
+          ["cash-flows", "Cash flow", Boolean(cashflow)],
           ["ratios", "Ratios", Boolean(company.ratios)],
+          ["institutions", "Institutions", hasInst],
           ["shareholding", "Investors", Boolean(company.shareholding)],
           ["documents", "Documents", true],
           ["notes", "Notes", true],
@@ -1979,6 +2626,7 @@ function CompanyView() {
           </a>
         ))}
       </nav>
+      )}
 
       {/* Every section below is a child of this one div, which is the whole
           mechanism: in scroll mode it stacks them with a gap, in swipe mode CSS
@@ -1996,8 +2644,17 @@ function CompanyView() {
 
       <div ref={pager} className={mode === "swipe" ? "rs-pager" : "rs-stack"}>
 
-      <div id="summary" className="scroll-mt-32">
-        <RatioGrid snapshot={s} row={fullRow} cohort={cohort} next={nextResults} />
+      {/* Notices sit INSIDE a section. A bare child of the pager has no id, so
+          a saved section order gave it CSS order 0 and it jumped to the top,
+          and in swipe mode it was a nameless pane of its own (17-Oct-2026). */}
+      <div id="summary" className="scroll-mt-32 space-y-4">
+        <RatioGrid snapshot={s} row={fullRow} cohort={cohort} next={nextResults} updates={company.updates} faceValue={company.face_value} />
+        {Object.keys(company.statements).length === 0 && !company.trend?.annual && (
+          <div className="bg-[var(--warn-soft)] border border-[var(--warn-line)] text-[var(--warn-ink)] rounded-xl p-4 text-sm">
+            Financial statements haven&apos;t been fetched for this company yet — showing the snapshot only.
+            Statements coverage grows as the pipeline runs.
+          </div>
+        )}
       </div>
 
       <div id="chart" className="scroll-mt-32 space-y-4">
@@ -2039,8 +2696,24 @@ function CompanyView() {
         <PriceHistory row={fullRow} snapshot={s} />
       </div>
 
-      <div id="analysis" className="scroll-mt-32">
+      <div id="analysis" className="scroll-mt-32 space-y-4">
         <ProsCons row={fullRow} />
+        {/* 2,766 of 4,746 companies have no valuation chart and the page said
+            nothing about any of them, so every one looked like a fault. None is:
+            each is the app declining to publish a P/E that would not mean
+            anything. An unexplained absence is indistinguishable from a bug. */}
+        {company.no_pe_reason && (
+          <p className="text-[13px] leading-relaxed text-[var(--ink3)] border border-[var(--line)] rounded-xl px-3 py-2 bg-[var(--card2)]">
+            <span className="font-semibold text-[var(--ink2)]">No price-to-earnings chart for this company.</span>
+            <InfoTip title="No price-to-earnings chart" className="ml-1">
+              <p>{company.no_pe_reason}</p>
+              <p>
+                The chart is withheld rather than missing: a P/E built on these numbers would
+                not mean anything, so none is published.
+              </p>
+            </InfoTip>
+          </p>
+        )}
       </div>
 
       {company.fscore && (
@@ -2054,62 +2727,26 @@ function CompanyView() {
       )}
 
       {peers.length > 0 && (
-        <section id="peers" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
-          <div className="px-4 pt-3.5 pb-2">
-            <h2 className="text-base font-semibold text-[var(--ink)]">Peer comparison</h2>
-            <p className="text-xs text-[var(--ink3)] mt-0.5">{String(s.industry)}</p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse">
-              <thead>
-                <tr className="text-xs text-[var(--ink3)] border-y border-[var(--line)]">
-                  <th className="px-3 py-2 text-left font-medium">Name</th>
-                  <th className="px-3 py-2 text-right font-medium">CMP ₹</th>
-                  <th className="px-3 py-2 text-right font-medium">P/E</th>
-                  <th className="px-3 py-2 text-right font-medium">MCap ₹Cr</th>
-                  <th className="px-3 py-2 text-right font-medium">Div Yld %</th>
-                  <th className="px-3 py-2 text-right font-medium">ROCE %</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="border-b border-[var(--line)] bg-[var(--card2)]">
-                  <td className="px-3 py-1.5"><span className="font-semibold text-[var(--ink)]">{symbol}</span></td>
-                  <td className="px-3 py-1.5 text-right tabular-nums font-semibold">{fmtNum(price)}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums font-semibold">{fmtNum(num(fullRow, "pe"))}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums font-semibold">{fmtNum(num(fullRow, "mcap"), 0)}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums font-semibold">{fmtNum(num(fullRow, "div_yield"))}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums font-semibold">{fmtNum(num(fullRow, "roce"))}</td>
-                </tr>
-                {peers.map((p) => (
-                  <tr key={String(p.symbol)} className="border-b border-[var(--line)] hover:bg-[var(--card2)]">
-                    <td className="px-3 py-1.5"><Link className="font-medium text-[var(--accent-ink)] hover:underline" href={`/company?s=${encodeURIComponent(String(p.symbol))}`}>{shortName(String(p.name ?? ""), String(p.symbol)) || String(p.symbol)}</Link></td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.price as number)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.pe as number)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.mcap as number, 0)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.div_yield as number)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(p.roce as number)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+        <PeerTable symbol={symbol} self={{ ...(fullRow ?? {}), price }} peers={peers} industry={String(company.context?.peer_group ?? s.industry)} />
       )}
-
       {/* The caption says what the figures ACTUALLY are. It read "Consolidated"
           on every company, hardcoded, and 1,347 of the 3,198 with filed results
           file standalone - which excludes subsidiaries, so for a holding company
           the label named a different business from the one in the table. */}
       {quarterly && (
         <div id="quarters" className="scroll-mt-32 space-y-6">
-          <StatementTable title="Quarterly results" stmt={quarterly} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} next={nextResults} kind="quarterly" symbol={symbol} />
+          {basisSwitch}
+          <StatementTable title="Quarterly results" stmt={quarterly} subtitle={tableCaption} boldRows={["Net Profit", "Net profit"]} next={nextResults} kind="quarterly" symbol={symbol}
+            pdfs={sa ? undefined : quarterly.periods.map((p) => company.quarters?.find((q) => q.end === p)?.pdf ?? null)} />
+          {company.segments && <SegmentsTable segs={company.segments} symbol={symbol} />}
           <SeasonsCard seasons={company.seasons} />
         </div>
       )}
 
       {pnl && (
         <div id="profit-loss" className="scroll-mt-32 space-y-6">
-          <StatementTable title="Profit & loss" stmt={pnl} subtitle={figuresCaption} boldRows={["Net Profit", "Net profit"]} kind="pnl" symbol={symbol} />
+          {basisSwitch}
+          <StatementTable title="Profit & loss" stmt={pnl} subtitle={tableCaption} boldRows={["Net Profit", "Net profit"]} kind="pnl" symbol={symbol} />
           <CompoundedGrowth trend={company.trend} prices={company.prices} />
         </div>
       )}
@@ -2117,55 +2754,16 @@ function CompanyView() {
       {balance && <div id="balance-sheet" className="scroll-mt-32"><StatementTable title="Balance sheet" stmt={balance} subtitle={figuresCaption} boldRows={["Total Assets", "Total Liabilities"]} kind="balance" symbol={symbol} /></div>}
       {cashflow && <div id="cash-flows" className="scroll-mt-32"><StatementTable title="Cash flows" stmt={cashflow} subtitle={figuresCaption} boldRows={["Free Cash Flow"]} kind="cash" symbol={symbol} /></div>}
 
-      {Object.keys(company.statements).length === 0 && !company.trend?.annual && (
-        <div className="bg-[var(--warn-soft)] border border-[var(--warn-line)] text-[var(--warn-ink)] rounded-xl p-4 text-sm">
-          Financial statements haven&apos;t been fetched for this company yet — showing the snapshot only.
-          Statements coverage grows as the pipeline runs.
-        </div>
-      )}
+      {company.ratios && <RatiosTable r={company.ratios} symbol={symbol} />}
 
-      {/* 2,766 of 4,746 companies have no valuation chart and the page said
-          nothing about any of them, so every one looked like a fault. None is:
-          each is the app declining to publish a P/E that would not mean
-          anything. An unexplained absence is indistinguishable from a bug. */}
-      {company.no_pe_reason && (
-        <p className="text-[13px] leading-relaxed text-[var(--ink3)] border border-[var(--line)] rounded-xl px-3 py-2 bg-[var(--card2)]">
-          <span className="font-semibold text-[var(--ink2)]">No price-to-earnings chart for this company.</span>
-          <InfoTip title="No price-to-earnings chart" className="ml-1">
-            <p>{company.no_pe_reason}</p>
-            <p>
-              The chart is withheld rather than missing: a P/E built on these numbers would
-              not mean anything, so none is published.
-            </p>
-          </InfoTip>
-        </p>
-      )}
-
-      {company.ratios && <RatiosTable r={company.ratios} />}
-
-      <InstitutionsCard symbol={symbol} />
+      <InstitutionsCard symbol={symbol} onLoad={setHasInst} />
 
       {company.shareholding && company.shareholding.dates.length > 0 && (
-        <div id="shareholding" className="scroll-mt-32"><StatementTable
-          title="Shareholding pattern"
-          subtitle="Figures in %"
-          kind="shareholding"
-          symbol={symbol}
-          stmt={{
-            periods: company.shareholding.dates,
-            items: [
-              { label: "Promoters %", values: company.shareholding.promoter },
-              ...(company.shareholding.fii ? [{ label: "FIIs %", values: company.shareholding.fii }] : []),
-              ...(company.shareholding.dii ? [{ label: "DIIs %", values: company.shareholding.dii }] : []),
-              ...(company.shareholding.mf ? [{ label: "Mutual funds %", values: company.shareholding.mf }] : []),
-              { label: "Public %", values: company.shareholding.public },
-              { label: "Employee trusts %", values: company.shareholding.employee },
-            ],
-          }}
-        />
+        <div id="shareholding" className="scroll-mt-32"><ShareholdingTable sh={company.shareholding} symbol={symbol} />
           <div className="bg-[var(--card)] rounded-b-xl border border-t-0 border-[var(--line)] -mt-px">
             <HoldingTrend s={company.shareholding} />
           </div>
+          {(company.insider?.length ?? 0) > 0 && <div className="mt-4"><InsiderTrades list={company.insider!} /></div>}
         </div>
       )}
 
@@ -2179,6 +2777,7 @@ function CompanyView() {
             </p>
           </InfoTip>
         </h2>
+        {(company.documents?.announcements?.length ?? 0) > 0 && <Announcements list={company.documents!.announcements!} />}
         {company.documents && <DocumentsByYear docs={company.documents} />}
         <div className="flex gap-4 flex-wrap text-sm">
           <a href={`https://www.nseindia.com/get-quotes/equity?symbol=${encodeURIComponent(symbol)}`} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-ink)] font-semibold hover:underline">
@@ -2216,6 +2815,82 @@ function CompanyView() {
         </InfoTip>
       </footer>
     </div>
+  );
+}
+
+/** The company's own icon (fetch_logos.py), else its initials on a colour
+ *  taken from the ticker - every company gets the same tile every time. */
+function CompanyMark({ name, symbol, logo }: { name: string; symbol: string; logo?: string | null }) {
+  const [broken, setBroken] = useState(false);
+  const words = name.replace(/\b(limited|ltd|india|industries|corporation|company|the)\b\.?/gi, " ").trim().split(/\s+/).filter(Boolean);
+  const initials = ((words[0]?.[0] ?? symbol[0] ?? "") + (words[1]?.[0] ?? symbol[1] ?? "")).toUpperCase();
+  let h = 0;
+  for (const c of symbol) h = (h * 31 + c.charCodeAt(0)) % 360;
+  if (logo && !broken) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={`${BASE}/${logo}`} alt="" width={44} height={44} onError={() => setBroken(true)}
+        className="w-11 h-11 rounded-xl bg-white object-contain p-1 border border-[var(--line)] shrink-0" />
+    );
+  }
+  return (
+    <span aria-hidden="true" className="w-11 h-11 rounded-xl shrink-0 inline-flex items-center justify-center text-[15px] font-bold text-white"
+      style={{ background: `hsl(${h} 45% 42%)` }}>{initials}</span>
+  );
+}
+
+/** Price alerts for this company (alerts/price_alerts.py): a push when the
+ *  price crosses a level, checked every twenty minutes in market hours on a
+ *  quote about fifteen minutes behind NSE. Kept as rs_price_alerts, synced -
+ *  the cloud check reads them from the signed-in account. */
+type PriceAlert = { s: string; op: ">" | "<"; p: number };
+function loadAlerts(): PriceAlert[] {
+  try {
+    const v = JSON.parse(localStorage.getItem("rs_price_alerts") ?? "[]");
+    return Array.isArray(v) ? v.filter((a) => a && typeof a.s === "string" && (a.op === ">" || a.op === "<") && typeof a.p === "number") : [];
+  } catch { return []; }
+}
+function PriceAlerts({ symbol, price, onClose }: { symbol: string; price: number | null; onClose: () => void }) {
+  const [all, setAll] = useState<PriceAlert[]>([]);
+  const [op, setOp] = useState<">" | "<">(">");
+  const [level, setLevel] = useState("");
+  useEffect(() => { setAll(loadAlerts()); }, []);
+  const save = (next: PriceAlert[]) => {
+    setAll(next);
+    try { localStorage.setItem("rs_price_alerts", JSON.stringify(next)); } catch { /* not remembered */ }
+  };
+  const mine = all.filter((a) => a.s === symbol);
+  const n = Number(level.replace(/,/g, ""));
+  const ok = Number.isFinite(n) && n > 0;
+  return (
+    <InfoDialog title="Price alerts" onClose={onClose}>
+      <div className="space-y-3 text-sm">
+        <p className="text-[var(--ink3)] text-xs">A push to your phone when {symbol} crosses a price, once a day per alert. Checked every 20 minutes in market hours on a quote about 15 minutes behind NSE.{price ? ` Now ₹${fmtNum(price)}.` : ""}</p>
+        <div className="flex items-center gap-2">
+          <div className="inline-flex gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs" role="radiogroup" aria-label="Direction">
+            {([[">", "Above"], ["<", "Below"]] as const).map(([k, label]) => (
+              <button key={k} type="button" role="radio" aria-checked={op === k} onClick={() => setOp(k)}
+                className={`rounded-md px-2.5 py-1.5 font-medium ${op === k ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>{label}</button>
+            ))}
+          </div>
+          <input inputMode="decimal" value={level} onChange={(e) => setLevel(e.target.value)} placeholder="₹ price"
+            className="min-w-0 flex-1 rounded-lg border border-[var(--line)] bg-[var(--card2)] px-3 py-2 text-[var(--ink)]" />
+          <button type="button" disabled={!ok} onClick={() => { save([...all, { s: symbol, op, p: n }]); setLevel(""); }}
+            className="rounded-lg px-3 py-2 font-semibold bg-[var(--accent-fill)] text-[var(--accent-fill-ink)] disabled:opacity-40">Add</button>
+        </div>
+        {mine.length > 0 && (
+          <ul className="divide-y divide-[var(--line)]">
+            {mine.map((a, i) => (
+              <li key={i} className="py-1.5 flex items-center justify-between">
+                <span>{a.op === ">" ? "Above" : "Below"} ₹{fmtNum(a.p)}</span>
+                <button type="button" onClick={() => save(all.filter((x) => x !== a))} className="text-xs text-[var(--ink3)]">Remove</button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="text-[11px] text-[var(--ink3)]">Pushes reach your phone once you are signed in (the cloud check reads your account) and the ntfy app is subscribed - Settings › Phone alerts.</p>
+      </div>
+    </InfoDialog>
   );
 }
 

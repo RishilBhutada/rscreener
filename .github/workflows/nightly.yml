@@ -135,6 +135,11 @@ jobs:
           echo "Run plan: scope=$SCOPE symbols=${SYMS:-all}"
           echo "Fetching stops at $(date -u -d '+260 minutes' '+%H:%M UTC'), leaving 90 minutes to publish."
       - run: python pipeline/fetch_universe.py
+      - name: Which stocks trade in F&O
+        # NSE's public market-lot file: the "F&O" tag and the in_fno screen
+        # field (pipeline/fetch_fno.py). One small CSV; a failure keeps the
+        # last list.
+        run: python pipeline/fetch_fno.py
       - name: Write the symbol lists every fetcher works from
         # TWO lists, because the sources do not cover the same companies.
         # Yahoo answers for both exchanges once the universe carries the right
@@ -183,6 +188,14 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "20"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_fundamentals.py --symbols "${{ steps.plan.outputs.target }}" --statements --max-age-hours 720 --limit 500 --sleep 0.4
+      - name: Company icons from their own websites
+        if: steps.plan.outputs.prices == '1'
+        # pipeline/fetch_logos.py: robots.txt first, raster images only, the
+        # company's own site then public favicon services; once a year per
+        # company, 450 a night until every company has been asked (~10 nights).
+        env:
+          RSCREENER_STEP_MINUTES: "20"
+        run: python pipeline/fetch_logos.py --limit 450 --sleep 0.2
       - name: Refresh upcoming events calendar
         # On EVERY run, publish-only included: two NSE calls, seconds. Events
         # are stored in the database and the page is exported from it, so a
@@ -194,9 +207,12 @@ jobs:
       - name: Record when each company's results came out
         # NSE's announcements list, one call a day: the time each results
         # announcement was published, which the calendar shows and dates
-        # results by (pipeline/fetch_result_times.py). The last three days on
-        # every run, and any day of the past year not held yet - the whole
-        # year the first time, about six minutes, then nothing.
+        # results by (pipeline/fetch_result_times.py), and the quarterly
+        # business updates some companies file before results
+        # (pipeline/business_updates.py). The last three days on every run,
+        # and any day of the past year not held yet - the whole year the
+        # first time (again from 27-Oct-2026, for the updates), about six
+        # minutes, then nothing.
         env:
           RSCREENER_STEP_MINUTES: "12"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_result_times.py --days 3 --backfill
@@ -400,6 +416,15 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "40"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols "${{ steps.plan.outputs.nse_target }}" --max-age-hours 168 --limit 800 --quarters-back ${{ steps.plan.outputs.qb }} --sleep 0.25
+      - name: Standalone figures for consolidated filers (rotating)
+        if: steps.plan.outputs.earnings == '1'
+        # The company page's Consolidated / Standalone switch: each company's
+        # standalone filings, recent 12 quarters and 6 years, into their own
+        # table (results_history_sa) so the main one keeps one basis per period.
+        # 200 a night, each company again after two weeks.
+        env:
+          RSCREENER_STEP_MINUTES: "25"
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols @data/nse_symbols.txt --standalone --max-age-hours 336 --limit 200 --quarters-back 12 --sleep 0.25 --max-minutes 25
       - name: Refresh corporate actions (dividends, bonuses, splits, rights)
         if: steps.plan.outputs.actions == '1'
         # One index call per symbol against the same NSE host as the filing dates,
