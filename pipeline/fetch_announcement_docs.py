@@ -34,6 +34,12 @@ API = "https://www.nseindia.com/api/corporate-announcements?index=equities&symbo
 # TCS's 2022 (27-Oct-2026); a market-wide dated query came back empty. Kept as
 # NSE lists them, labelled as possibly incomplete on the page.
 PIT_API = "https://www.nseindia.com/api/corporates-pit?index=equities&symbol={sym}"
+# Insider trades are extra. One quick try per company - nse_session.get's
+# three tries with backoff cost 10-15 s a company whenever the endpoint was
+# down, across 500 companies a night - and after this many failures in a row
+# the call is left out for the rest of the run (stored trades are kept).
+PIT_TIMEOUT = 15
+PIT_GIVE_UP = 3
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     "Accept": "*/*",
@@ -118,6 +124,7 @@ def main() -> None:
         pass
 
     ok = err = 0
+    pit_fails = 0
     for i, sym in enumerate(symbols, 1):
         if budget.stop(i - 1, len(symbols)):
             break
@@ -163,8 +170,11 @@ def main() -> None:
             con.executemany("INSERT INTO announcement_docs VALUES (?,?,?,?,?)", recs)
             trades = []
             try:
+                if pit_fails >= PIT_GIVE_UP:
+                    raise RuntimeError("insider trades left out for the rest of this run")
                 time.sleep(args.sleep)
-                pit = nse_session.get(s, PIT_API.format(sym=nse_session.q(sym)), timeout=30).json()
+                pit = nse_session.get(s, PIT_API.format(sym=nse_session.q(sym)), tries=1, timeout=PIT_TIMEOUT).json()
+                pit_fails = 0
                 for t in (pit.get("data") or []) if isinstance(pit, dict) else []:
                     try:
                         day = datetime.strptime((t.get("acqfromDt") or t.get("date") or "")[:11], "%d-%b-%Y").strftime("%Y-%m-%d")
@@ -176,6 +186,10 @@ def main() -> None:
                                    num("secAcq"), num("secVal"), num("afterAcqSharesPer"), (t.get("secType") or "")[:40]))
             except Exception:  # noqa: BLE001 - insider trades are extra; never cost the announcements
                 trades = None
+                if pit_fails < PIT_GIVE_UP:
+                    pit_fails += 1
+                    if pit_fails == PIT_GIVE_UP:
+                        print(f"insider trades: {PIT_GIVE_UP} failures in a row - not asked again this run")
             if trades is not None:
                 con.execute("DELETE FROM insider_trades WHERE symbol=?", (sym,))
                 con.executemany("INSERT INTO insider_trades VALUES (?,?,?,?,?,?,?,?,?,?)", trades)
