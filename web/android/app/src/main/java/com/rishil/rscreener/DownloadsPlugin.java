@@ -30,12 +30,14 @@ import java.io.OutputStream;
  * to 9 would need a storage permission for that, so there it goes to the share
  * sheet - Drive, Files, WhatsApp, email.
  *
- * Writes only the one file it is given: a cleaned-up name, text types, 20 MB.
+ * Writes only the one file it is given: a cleaned-up name, text types or an
+ * Excel workbook (the company page's "Export to Excel"), 20 MB.
  */
 @CapacitorPlugin(name = "RsDownloads")
 public class DownloadsPlugin extends Plugin {
 
     private static final int MAX_BYTES = 20 * 1024 * 1024;
+    private static final String XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
     @PluginMethod
     public void save(PluginCall call) {
@@ -43,7 +45,7 @@ public class DownloadsPlugin extends Plugin {
         String mime = call.getString("mime", "text/csv");
         String name = call.getString("name", "rscreener.csv").replaceAll("[^A-Za-z0-9._&-]", "_");
         if (name.length() > 80) name = name.substring(name.length() - 80);
-        if (data == null || !mime.startsWith("text/")) {
+        if (data == null || !(mime.startsWith("text/") || mime.equals(XLSX))) {
             call.reject("nothing to save");
             return;
         }
