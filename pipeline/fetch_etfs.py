@@ -254,7 +254,7 @@ def load_history(session: requests.Session, con: sqlite3.Connection, limit: int,
     print(f"NAV history: {ok} read, {bad} failed")
 
 
-def yahoo_bars(session: requests.Session, ticker: str, rng: str, itv: str = "1d") -> list[tuple]:
+def yahoo_bars(session: requests.Session, ticker: str, rng: str, itv: str = "1d", day_of=None) -> list[tuple]:
     """(date, open, high, low, close, volume) per bar, dated in the market's
     own time zone (Yahoo stamps a bar by its opening instant) - so a monthly
     bar is dated the 1st of its month, not the last day of the one before."""
@@ -268,7 +268,8 @@ def yahoo_bars(session: requests.Session, ticker: str, rng: str, itv: str = "1d"
     out = {}
     for ts, o, h, lo, c, v in zip(res.get("timestamp") or [], col("open"), col("high"), col("low"), col("close"), col("volume")):
         if c:
-            out[(datetime.fromtimestamp(ts, timezone.utc) + off).strftime("%Y-%m-%d")] = (o, h, lo, c, v or 0)
+            d = day_of(ts) if day_of else (datetime.fromtimestamp(ts, timezone.utc) + off).strftime("%Y-%m-%d")
+            out[d] = (o, h, lo, c, v or 0)
     return [(d, *vals) for d, vals in sorted(out.items())]
 
 

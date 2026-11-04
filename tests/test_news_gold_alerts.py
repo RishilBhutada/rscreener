@@ -198,3 +198,20 @@ def test_back_adjust_without_a_previous_close_invents_no_move():
     days = [(("d1", 1, 1, 1, 100.0, 0, None), None), (("d2", 1, 1, 1, 120.0, 0, None), None)]
     out = back_adjust(days)
     assert out[0][4] == pytest.approx(120.0) and out[1][4] == 120.0
+
+
+# ── commodities_lib.futures_day: one date per COMEX session ─────────────────
+
+def test_futures_day_is_the_new_york_trading_day_in_summer_and_winter():
+    from datetime import datetime, timezone
+    from commodities_lib import futures_day
+    ts = lambda s: int(datetime.fromisoformat(s).replace(tzinfo=timezone.utc).timestamp())  # noqa: E731
+    # Tuesday 27-Oct-2026's session, stamped at its 6 pm New York open the
+    # evening before (summer time) or at midnight New York:
+    assert futures_day(ts("2026-10-26T22:00:00")) == "2026-10-27"
+    assert futures_day(ts("2026-10-27T04:00:00")) == "2026-10-27"
+    # Tuesday 3-Nov-2026, after the clocks went back:
+    assert futures_day(ts("2026-11-02T23:00:00")) == "2026-11-03"
+    assert futures_day(ts("2026-11-03T05:00:00")) == "2026-11-03"
+    # A Monday session opened on Sunday evening is Monday's, never a Sunday row.
+    assert futures_day(ts("2026-11-01T23:00:00")) == "2026-11-02"

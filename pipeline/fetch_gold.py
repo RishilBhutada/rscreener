@@ -45,7 +45,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-import price_periods
+from commodities_lib import futures_day
 from gold_lib import ANNOUNCE, ECB_PAST, INDIA_EVENTS, clean_title, family_of, rate_headline
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -679,12 +679,15 @@ def comex(con) -> None:
     r.raise_for_status()
     res = (r.json().get("chart", {}).get("result") or [None])[0] or {}
     closes = ((res.get("indicators", {}).get("quote") or [{}])[0]).get("close") or []
-    rows = [("GC=F", price_periods.ist_date(ts), round(c, 2))
+    # One dating rule with fetch_commodities, which stores the same ticker
+    # (commodities_lib.futures_day); a bar for today is a session still trading.
+    rows = [("GC=F", futures_day(ts), round(c, 2))
             for ts, c in zip(res.get("timestamp") or [], closes) if c]
-    # Yahoo dates a COMEX session by its start; a bar for today is a session
-    # still trading.
     today = datetime.now(NY).date().isoformat()
     rows = [x for x in rows if x[1] < today]
+    if rows:
+        con.execute("DELETE FROM commodity_world WHERE ticker='GC=F' AND date BETWEEN ? AND ?",
+                    (rows[0][1], rows[-1][1]))
     con.executemany("INSERT OR REPLACE INTO commodity_world VALUES (?,?,?)", rows)
     con.commit()
     print(f"COMEX gold: {len(rows)} daily closes")
