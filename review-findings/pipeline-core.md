@@ -45,3 +45,17 @@ view and the "already adjusted" test; `fund_units`; `check_prices` age and media
 logic; `check_sources` per-period-type rule; `screen_fields.technicals`,
 `quarter_growth`, `promoter_changes`; `export_json` units (crore, percent, D/E ÷100),
 negative-equity and negative-revenue withholding, and the TTM rule in `filed_ttm`.
+
+## Checked against the stored database (4-Nov-2026, later the same day)
+
+The PLAUSIBLE rows above were tested on the `data-db` release, opened read-only.
+
+| # | Verdict | What the data shows |
+|---|---|---|
+| 6 (currency of debt/cash) | **CONFIRMED** | Yahoo's `total_debt` / `total_cash` for INFY are 8.9e8 / 3.98e9 and for HCLTECH 6.28e8 / 2.44e9 - US dollars (TCS, an India-only listing: 1.18e11 / 5.1e11 rupees). The rebuilt EV/EBITDA subtracts Infosys' cash about 85x too small, so EV is overstated by roughly the whole cash pile (~₹30,000 Cr on ~₹4.65 lakh Cr). Fix: check these two figures against the filed balance sheet's scale, as P/S was. |
+| 10 (ROCE inputs from mismatched dates) | CONFIRMED, tiny | 3 of 4,911 companies have a newer income statement than balance sheet; 2 (NIRAJISPAT, SUNRINV) lose their balance-sheet ratios. Low priority. |
+| 13 (price seasons skip "other" actions) | **CONFIRMED, large** | 8,872 corporate actions are kind "other": 7,707 "Annual General Meeting", 305 "AGM", 143 EGMs - only 89 demergers and 49 schemes of arrangement. 1,487 companies have AGM-type rows, 6,000+ of them dated July-September. The price-season test drops every such quarter, so Jul-Sep is mostly missing and many companies fail the "4 of each quarter" bar or get a biased season. **The same rule voids results "moves" on the calendar** (`export_calendar_json.py:64`, `RESHAPES` includes "other") whenever an AGM ex-date falls in the two-session window - common in the August results season. Fix: treat only demerger / amalgamation / scheme / capital-reduction subjects as reshaping, in both places. |
+| 16 (split ratio missing) | **CONFIRMED** | All 477 split rows have no ratio: NSE writes "Fv Split Rs.10/- To Re.1/" or "Face Value Split (Sub-Division) - From Rs 10/- Per Share To Rs 2/- Per Share". 13 rows combining a dividend with a split or bonus are filed as the split and lose the dividend amount. Fix: read "Rs X ... To Re/Rs Y" as X:Y; record the dividend part as well. |
+| 17 (corrected actions never removed) | CONFIRMED, small | 17 pairs of the same kind and amount stored under two ex-dates within 14 days (e.g. GILLETTE 19 and 24 Aug 2026, PGHL 21 and 27 Aug 2026) - most likely an ex-date NSE corrected. They show twice on charts/calendar. |
+| 19 (split dates a day early) | **NOT REAL** | 912 of 913 Yahoo split dates match NSE's ex-date exactly. Drop this row. |
+| 12, 15, 18 | not testable from the database | Need Yahoo/BSE live data or a run spanning a split. |
