@@ -547,6 +547,12 @@ def asfiled_table(trend: dict | None, announced: dict | None = None, payout: lis
         ("Other Cost %", trend.get("other_cost_pct"), "Expenses"),
         ("Operating Profit", trend.get("ebitda"), None),
         ("OPM %", trend.get("opm"), None),
+        # Operating profit plus other income, except where the filing's own
+        # operating profit already holds it (banks) - trend_lib._derive.
+        ("EBITDA", trend.get("ebitda_oi"), None),
+        ("EBITDA margin %", [round(e / r * 100, 2) if (e is not None and r) else None
+                             for e, r in zip(trend.get("ebitda_oi") or [], trend.get("revenue") or [])]
+                            if trend.get("ebitda_oi") else None, "EBITDA"),
         ("Other Income", trend.get("other_income"), None),
         ("Interest", trend.get("interest"), None),
         ("Depreciation", trend.get("depreciation"), None),
@@ -569,6 +575,10 @@ def asfiled_table(trend: dict | None, announced: dict | None = None, payout: lis
     out = {"periods": per, "items": items}
     if any(declared):
         out["declared"] = declared   # shown in brackets after each period
+    if any(trend.get("basis") or []):
+        # consolidated / standalone per period, so the page's TTM column never
+        # adds the two together (web/src/lib/ttm.ts)
+        out["basis"] = trend["basis"]
     return out
 
 

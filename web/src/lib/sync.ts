@@ -29,11 +29,25 @@ export const SYNCED_KEYS = [
   "rs_others_custom",
   "rs_chart_ui",
   "rs_peer_cols",
+  "rs_peer_cols_at",
   "rs_grid_pins",
+  "rs_grid_pins_at",
   "rs_price_alerts",
+  "rs_price_alerts_at",
   "rs_chart_presets",
   "rs_chart_presets_at",
 ] as const;
+
+/** Lists edited as a whole - entries removed, renamed, updated - where a union
+ *  of two devices' copies would bring a removed entry back. A deleted price
+ *  alert came back on the next sync and the phone kept being told about it.
+ *  Each is saved with `<key>_at` (markSaved) and the copy saved last wins. */
+const WHOLE = new Set<string>(["rs_chart_presets", "rs_price_alerts", "rs_grid_pins", "rs_peer_cols"]);
+
+/** Record when a WHOLE list was saved on this device. */
+export function markSaved(key: string): void {
+  try { localStorage.setItem(`${key}_at`, String(Date.now())); } catch { /* private mode */ }
+}
 
 type Profile = Record<string, unknown>;
 
@@ -91,15 +105,15 @@ function merge(local: Profile, remote: Profile): Profile {
       out[k] = mergeStates(l as WatchState, r as WatchState);
       continue;
     }
-    // Chart presets are edited as a whole - renamed, updated, deleted - so a
-    // union would bring deleted ones back and keep both names of a renamed
-    // one. The list saved last, on whichever device, wins outright.
-    if (k === "rs_chart_presets") {
-      const la = Number(local.rs_chart_presets_at ?? 0), ra = Number(remote.rs_chart_presets_at ?? 0);
+    // Chart presets, price alerts, pinned ratios and peer columns are edited
+    // as a whole, so a union would bring removed entries back. The list saved
+    // last, on whichever device, wins outright.
+    if (WHOLE.has(k)) {
+      const la = Number(local[`${k}_at`] ?? 0), ra = Number(remote[`${k}_at`] ?? 0);
       out[k] = ra > la ? r : l;
       continue;
     }
-    if (k === "rs_chart_presets_at") {
+    if (k.endsWith("_at") && WHOLE.has(k.slice(0, -3))) {
       out[k] = Math.max(Number(l ?? 0), Number(r ?? 0));
       continue;
     }

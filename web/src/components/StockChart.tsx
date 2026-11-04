@@ -12,6 +12,7 @@ import { canonKey, companyKey, rangeToCompany, rangeToFull, readPick, writePick,
 import ChartPresets from "@/components/ChartPresets";
 import Hint from "@/components/Hint";
 import Link from "next/link";
+import { fourInRow } from "@/lib/ttm";
 
 type Pt = [string, number] | [string, number, number | null];
 export type ChartPrices = { monthly?: Pt[]; weekly?: Pt[]; daily?: Pt[] };
@@ -101,6 +102,11 @@ export type ChartTrendQ = {
   expenses?: (number | null)[];
   ebitda?: (number | null)[];
   other_income?: (number | null)[];
+  /** Operating profit plus other income, as the EBITDA row shows it; a bank's
+   *  filed operating profit already holds its other income (pipeline). */
+  ebitda_oi?: (number | null)[];
+  /** consolidated / standalone per period */
+  basis?: (string | null)[];
   book_value?: (number | null)[];
   opm?: (number | null)[];
   gpm?: (number | null)[];
@@ -573,10 +579,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       const out: XY[] = [];
       for (let i = 3; i < trendQ.periods.length; i++) {
         const w = arr.slice(i - 3, i + 1);
-        // Four CONSECUTIVE quarters: across a missing quarter the window spans
-        // five or more and is not a trailing twelve months (as the pipeline
-        // checks for the ratio lines, trend_lib.ratio_bands).
-        if ((toT(trendQ.periods[i]) - toT(trendQ.periods[i - 3])) / 86400000 > 300) continue;
+        if (!fourInRow(trendQ.periods, i, trendQ.basis)) continue;   // lib/ttm.ts
         if (w.length === 4 && w.every((v) => v !== null && v !== undefined)) {
           const t = toT(trendQ.periods[i]);
           if (t >= cutoff) out.push({ t, v: (w as number[]).reduce((a, b) => a + b, 0) });
@@ -785,7 +788,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       }
     }
 
-    if (view === "ev") bandView(evBand, "EV / EBITDA", "Median EV Multiple", "plain", ttmBars(trendQ?.ebitda), "EBITDA (TTM)", "cr");
+    if (view === "ev") bandView(evBand, "EV / EBITDA", "Median EV Multiple", "plain", ttmBars(trendQ?.ebitda), "Operating profit (TTM, before other income)", "cr");
     if (view === "pb") bandView(pbBand, "Price to BV", "Median PBV", "plain", qBars(trendQ?.book_value), "Book Value", "rupee");
     if (view === "ps") bandView(psBand, "Market Cap / Sales", "Median Market Cap to Sales", "plain", ttmBars(trendQ?.revenue), "Sales (TTM)", "cr");
 
@@ -809,7 +812,10 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     // with both on they share each quarter (EBITDA left, EPS right), each on a
     // scale of its own.
     if (view === "ebitda" && trendQ?.ebitda) {
-      const eb = trendQ.ebitda.map((v, i) => (v === null || v === undefined ? null : v + (trendQ.other_income?.[i] ?? 0)));
+      // The pipeline's own figure where the file has it (it leaves a bank's
+      // other income out, which its filed operating profit already holds).
+      const eb = trendQ.ebitda_oi
+        ?? trendQ.ebitda.map((v, i) => (v === null || v === undefined ? null : v + (trendQ.other_income?.[i] ?? 0)));
       const pp = priceLine();
       if (pp.length > 1) defs.push({ key: "eb_price", label: `Price on ${exchange === "BSE" ? "BSE" : "NSE"}`, color: "var(--accent)", kind: "line", axis: "R", zone: [0, 0.56], data: pp, fmt: "rupee" });
       // The lines' points stand over the MIDDLE of each quarter's bar (owner,

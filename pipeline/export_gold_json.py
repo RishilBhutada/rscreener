@@ -70,18 +70,46 @@ class Closes:
 
 
 def front_series(con, root: str) -> Closes:
-    """The nearest contract not yet in its last days, each day it traded."""
+    """The nearest contract not yet in its last days, each day it traded -
+    back-adjusted, so every day's move is ONE contract's move.
+
+    Stitched raw, the day the series rolled to the next contract compared two
+    contracts two months apart, and the carry between them showed as a move of
+    its own: a fake MCX day change, and fake "MCX moved x%" figures on events
+    that fell on roll days. Each day's change is now that day's contract
+    against its own previous close, and the levels are chained back from the
+    newest close - which stays the real price on the snapshot."""
     exp = dict(con.execute("SELECT key, expiry FROM commodity_contracts WHERE root=?", (root,)))
-    by_day: dict[str, tuple[str, float]] = {}
+    by_day: dict[str, tuple[str, str, float]] = {}
+    last_close: dict[str, float] = {}       # each contract's previous traded close
+    prev_of: dict[tuple[str, str], float] = {}
     for key, d, c in con.execute(
-            "SELECT key, date, close FROM commodity_bars WHERE volume > 0 AND key IN "
+            "SELECT key, date, close FROM commodity_bars WHERE volume > 0 AND close > 0 AND key IN "
             "(SELECT key FROM commodity_contracts WHERE root=?) ORDER BY date", (root,)):
+        if key in last_close:
+            prev_of[(key, d)] = last_close[key]
+        last_close[key] = c
         e = exp.get(key)
         if not e or (date.fromisoformat(e) - date.fromisoformat(d)).days < EXPIRING_DAYS:
             continue
         if d not in by_day or e < by_day[d][0]:
-            by_day[d] = (e, c)
-    return Closes([(d, v[1]) for d, v in by_day.items()])
+            by_day[d] = (e, key, c)
+    days = sorted(by_day)
+    if not days:
+        return Closes([])
+    level = by_day[days[-1]][2]
+    rows = [(days[-1], level)]
+    for i in range(len(days) - 1, 0, -1):
+        _, key, c = by_day[days[i]]
+        prev = prev_of.get((key, days[i]))
+        if prev:
+            level = level / (c / prev)       # this contract's own move that day
+        else:
+            # No earlier close for this contract: the move cannot be told, so
+            # none is invented - the level carries over unchanged.
+            pass
+        rows.append((days[i - 1], level))
+    return Closes(rows)
 
 
 def reaction_days(when_utc: datetime) -> tuple[str, str]:

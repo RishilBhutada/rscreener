@@ -25,12 +25,14 @@ import { applyOrder, loadOrder } from "@/lib/order";
 import InfoTip, { InfoDialog, InfoPart } from "@/components/InfoTip";
 import { TableKind, TableView, arrange, change, changeText, usePct, useRowOrder, useView } from "@/lib/tableprefs";
 import { move } from "@/lib/order";
+import { fourInRow } from "@/lib/ttm";
+import { markSaved } from "@/lib/sync";
 import { IconButton, dayMove, signed as signedNum, tone } from "@/components/QuoteUI";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 /** `parent`: a breakdown row, folded under that row's "+" (Material Cost % under Expenses). */
-type Stmt = { periods: string[]; items: { label: string; values: (number | null)[]; parent?: string }[]; declared?: (string | null)[] };
+type Stmt = { periods: string[]; items: { label: string; values: (number | null)[]; parent?: string }[]; declared?: (string | null)[]; basis?: (string | null)[] };
 type AnnualReport = { from: string; to: string; url: string };
 type AnnDoc = { date: string; title: string; url: string; kind?: string };
 type Trend = {
@@ -264,7 +266,7 @@ function ttmOf(annual: Stmt | null, quarterly: Stmt | null): { asOf: string; val
   if (!annual || !quarterly) return null;
   const qp = quarterly.periods, n = qp.length;
   if (n < 4 || !annual.periods.length || qp[n - 1] <= annual.periods[annual.periods.length - 1]) return null;
-  if ((new Date(qp[n - 1]).getTime() - new Date(qp[n - 4]).getTime()) / 86400000 > 300) return null;
+  if (!fourInRow(qp, n - 1, quarterly.basis)) return null;   // consecutive, one basis (lib/ttm.ts)
   const q = (label: string, parent?: string) => quarterly.items.find((it) => it.label === label && (it.parent ?? undefined) === parent);
   const last4 = (label: string, parent?: string) => {
     const v = q(label, parent)?.values.slice(n - 4);
@@ -424,7 +426,7 @@ function PeerTable({ symbol, self, peers, industry }: { symbol: string; self: Ro
   const pick = (k: string) => {
     const next = cols.includes(k) ? cols.filter((x) => x !== k) : PEER_COLS.map((c) => c.key).filter((x) => x === k || cols.includes(x));
     setCols(next);
-    try { localStorage.setItem("rs_peer_cols", JSON.stringify(next)); } catch { /* not remembered */ }
+    try { localStorage.setItem("rs_peer_cols", JSON.stringify(next)); markSaved("rs_peer_cols"); } catch { /* not remembered */ }
   };
   const shownCols = PEER_COLS.filter((c) => cols.includes(c.key));
   const all = [self, ...peers];
@@ -512,7 +514,7 @@ function PinnedRatios({ row }: { row: Row | null }) {
   }, []);
   const save = (next: string[]) => {
     setPins(next);
-    try { localStorage.setItem("rs_grid_pins", JSON.stringify(next)); } catch { /* not remembered */ }
+    try { localStorage.setItem("rs_grid_pins", JSON.stringify(next)); markSaved("rs_grid_pins"); } catch { /* not remembered */ }
   };
   const byKey = new Map(FIELD_CATALOG.map((f) => [f.key, f]));
   const hits = q.trim().length < 1 ? [] : FIELD_CATALOG
@@ -2976,7 +2978,7 @@ function PriceAlerts({ symbol, price, onClose }: { symbol: string; price: number
   useEffect(() => { setAll(loadAlerts()); }, []);
   const save = (next: PriceAlert[]) => {
     setAll(next);
-    try { localStorage.setItem("rs_price_alerts", JSON.stringify(next)); } catch { /* not remembered */ }
+    try { localStorage.setItem("rs_price_alerts", JSON.stringify(next)); markSaved("rs_price_alerts"); } catch { /* not remembered */ }
   };
   const mine = all.filter((a) => a.s === symbol);
   const n = Number(level.replace(/,/g, ""));

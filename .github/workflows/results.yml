@@ -100,6 +100,13 @@ jobs:
             gh run download "$NOW" -n github-pages -D base
             tar -xf base/artifact.tar -C site
             rm -rf base
+            # The newer site's data.json, with the reporting companies' rows
+            # patched in again - copying this run's own copy over it would put
+            # every other company back on the previous publish's figures.
+            cp site/data.json web/public/data.json
+            if [ -s data/just_reported_results.txt ]; then
+              python pipeline/export_json.py --symbols @data/just_reported_results.txt
+            fi
           fi
           cp web/public/calendar.json web/public/calendar-past.json web/public/data.json site/
           n=$(find web/public/companies -maxdepth 1 -name '*.json' | tee /dev/stderr | wc -l)

@@ -107,6 +107,22 @@ def rating_of(text: str) -> tuple[str, str] | None:
         return "Buy", "top pick"
     return None
 TARGET = re.compile(r"target(?:\s+price)?(?:\s+(?:of|to|at))?\s*(?:Rs\.?|₹|INR)\s*([\d,]+(?:\.\d+)?)", re.I)
+# "raises target from Rs 400 to Rs 500": the new target is the one after "to".
+TARGET_MOVE = re.compile(r"target(?:\s+price)?[^;|\d₹]{0,40}?\bfrom\s+(?:Rs\.?|₹|INR)\s*[\d,]+(?:\.\d+)?\s+to\s+(?:Rs\.?|₹|INR)\s*([\d,]+(?:\.\d+)?)", re.I)
+
+
+def target_of(text: str) -> float | None:
+    m = TARGET_MOVE.search(text) or TARGET.search(text)
+    return float(m.group(1).replace(",", "")) if m else None
+
+
+def bare_rating(text: str) -> tuple[str, str] | None:
+    """A rating word opening a part of a headline: "..., sell on Wipro"."""
+    for words, bucket in RATING_WORDS:
+        m = re.match(rf"\s*({words})\b", text, re.I)
+        if m:
+            return bucket, m.group(1).lower()
+    return None
 SUFFIX = re.compile(r"[\s,]+(limited|ltd\.?|ltd)$", re.I)
 COMMON = {"india", "indian", "bharat", "hindustan", "national", "global", "united", "general", "new", "first", "tata",
           "adani", "bajaj", "reliance", "mahindra", "birla", "jindal", "power", "gold", "future", "capital", "steel",
@@ -219,8 +235,25 @@ def calls_in(title: str, tag: Tagger) -> list[dict]:
         rest = BROKER_RE.sub(" ", clause)          # a broker is never the stock (Motilal Oswal is both)
         got = rating_of(rest)
         bucket, rating = got if got else (None, None)
-        tm = TARGET.search(clause)
-        target = float(tm.group(1).replace(",", "")) if tm else None
+        target = target_of(clause)
+        # Several companies with DIFFERENT ratings in one clause ("maintains buy
+        # on TCS, sell on Wipro"): each company takes the rating of its own
+        # part, and a part with no rating of its own is left out rather than
+        # given its neighbour's - which recorded "Buy on Wipro".
+        syms = tag(rest)
+        if len(syms) > 1:
+            parts = []
+            for part in re.split(r",|\band\b", rest, flags=re.I):
+                ps = tag(part)
+                if ps:
+                    parts.append((ps, rating_of(part) or bare_rating(part), part))
+            if len({g for _, g, _ in parts if g}) > 1:
+                for ps, g, part in parts:
+                    if g:
+                        for sym in ps:
+                            out.append({"broker": broker, "symbol": sym, "rating": g[1], "bucket": g[0],
+                                        "target": target_of(part)})
+                continue
         move = re.search(r"\b(raises|hikes|ups|cuts|trims|lowers|reduces)\b[^;]*?\btarget", clause, re.I)
         if bucket is None and target is None and not move:
             continue

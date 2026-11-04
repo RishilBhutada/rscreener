@@ -96,13 +96,26 @@ def snapshot(c: dict, when: date) -> list | None:
         arr = q.get(name) or []
         return arr[i] if i < len(arr) else None
 
-    def ttm(name: str, back: int = 0) -> float | None:
-        """Four consecutive known quarters, `back` quarters before the latest."""
+    basis = q.get("basis") or [None] * len(periods)
+
+    def same_basis(idx: list[int]) -> bool:
+        """Consolidated and standalone quarters describe different sets of
+        companies; the screener refuses to add or compare across them."""
+        return len({basis[i] for i in idx if i < len(basis) and basis[i]}) <= 1
+
+    def window(back: int = 0) -> list[int] | None:
+        """Four consecutive known quarters on one basis, `back` before the latest."""
         idx = known[: len(known) - back] if back else known
         if len(idx) < 4:
             return None
         win = idx[-4:]
-        if (d(periods[win[-1]]) - d(periods[win[0]])).days > 300:
+        if (d(periods[win[-1]]) - d(periods[win[0]])).days > 300 or not same_basis(win):
+            return None
+        return win
+
+    def ttm(name: str, back: int = 0) -> float | None:
+        win = window(back)
+        if win is None:
             return None
         vals = [col(name, i) for i in win]
         return sum(vals) if all(v is not None for v in vals) else None
@@ -126,15 +139,22 @@ def snapshot(c: dict, when: date) -> list | None:
     # The screener's op_margin is Yahoo's operatingMargins: operating income
     # (EBIT, after depreciation) over revenue. trend "ebitda" is operating
     # profit before depreciation, so depreciation comes off to match.
-    ebitda, dep = ttm("ebitda"), ttm("depreciation")
-    ebit = ebitda - dep if ebitda is not None and dep is not None else None
+    # A quarter with no depreciation line (most banks and NBFCs) already has
+    # it inside its expenses - trend_lib._derive counts it as 0 - so nothing
+    # comes off, rather than the whole margin going blank.
+    win = window()
+    ebit = None
+    if win is not None:
+        parts = [(col("ebitda", i), col("depreciation", i)) for i in win]
+        if all(e is not None for e, _ in parts):
+            ebit = sum(e - (dp or 0.0) for e, dp in parts)
     last = known[-1] if known else None
     year_ago = None
     if last is not None:
         tgt = d(periods[last]) - timedelta(days=365)
         year_ago = next((i for i in known if abs((d(periods[i]) - tgt).days) <= 20), None)
 
-    both = last is not None and year_ago is not None
+    both = last is not None and year_ago is not None and same_basis([last, year_ago])
     q_rev_yoy = pct(col("revenue", last), col("revenue", year_ago)) if both else None
     q_pat_yoy = pct(col("pat", last), col("pat", year_ago)) if both else None
 

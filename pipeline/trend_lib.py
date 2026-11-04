@@ -557,8 +557,9 @@ def _derive(slot: dict) -> dict:
     # figure drawn under it disagreed by 0.8% over a year.
     filed = slot.get("op_profit_direct")
     second = slot.get("ebitda_direct")
+    op_filed = False
     if filed is not None and (computed is None or computed == 0 or 0.2 <= abs(filed / computed) <= 5.0):
-        ebitda = filed
+        ebitda, op_filed = filed, True
     elif computed is not None:
         ebitda = computed
     else:
@@ -571,7 +572,14 @@ def _derive(slot: dict) -> dict:
             if any(p is not None for p in parts):
                 cogs = sum(p for p in parts if p is not None)
         gp = (rev - cogs) if (rev is not None and cogs is not None) else None
-    return {"ebitda": ebitda, "gross_profit": gp}
+    # EBITDA as companies and brokers quote it: operating profit plus other
+    # income. A bank's FILED operating profit ("before provisions") already
+    # holds its other income, so nothing is added to it - adding it again
+    # overstated a bank's EBITDA by its whole fee income.
+    oi = slot.get("other_income")
+    oi = oi if (oi is not None and pd.notna(oi)) else None
+    ebitda_oi = None if ebitda is None else (ebitda if op_filed else ebitda + (oi or 0.0))
+    return {"ebitda": ebitda, "gross_profit": gp, "ebitda_oi": ebitda_oi}
 
 
 # A filing and the second source may differ by this much before the pair is
@@ -903,7 +911,7 @@ def _months_back(iso: str, n: int) -> str:
     return f"{y:04d}-{m:02d}-{last:02d}"
 
 
-def years_from_quarters(comps: dict, splits: dict | None = None) -> None:
+def years_from_quarters(comps: dict, splits: dict | None = None, skip: set | None = None) -> None:
     """A financial year with no annual filing on record, taken as the sum of its
     four filed quarters.
 
@@ -931,6 +939,8 @@ def years_from_quarters(comps: dict, splits: dict | None = None) -> None:
         fy_month = filed_years[-1][5:7] if filed_years else "03"
         ends = set(years) | {p for p in filed_q if p[5:7] == fy_month}
         for fy in sorted(ends):
+            if skip and (sym, fy) in skip:
+                continue
             slot = years.get(fy)
             if slot and slot.get("_source") == "nse":
                 continue
@@ -997,6 +1007,8 @@ def standalone_tables(con: sqlite3.Connection, only: set | None = None) -> dict[
             "revenue": [_cr(v) for v in rev],
             "opex": [_cr(rev[i] - ebitda[i]) if (rev[i] is not None and ebitda[i] is not None) else None for i in range(len(ordered))],
             "ebitda": [_cr(v) for v in ebitda],
+            # operating profit plus other income, as the EBITDA row and chart show it
+            "ebitda_oi": [_cr(d["ebitda_oi"]) for d in deriv],
             "opm": [pct(ebitda[i], rev[i]) for i in range(len(ordered))],
             "interest": [_cr(per[p].get("finance_cost")) for p in ordered],
             "depreciation": [_cr(per[p].get("depreciation")) for p in ordered],
@@ -1019,6 +1031,7 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None,
     # implausible_quarters never reached - TNTELE's FY2023 and FY2024 were a
     # thousand times their true size and nothing in the pipeline could see it.
     cross = cross_source_outliers(con)
+    condemned: set[tuple[str, str]] = set()     # (symbol, year end) dropped as a whole
     for (sym_, ptype_), periods_ in comps.items():
         if ptype_ == "quarterly":
             for bad_ in suspect.get(sym_, set()):
@@ -1028,16 +1041,20 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None,
         for bad_, items_ in cross.get((sym_, ptype_), {}).items():
             if items_ is None:
                 periods_.pop(bad_, None)
+                if ptype_ == "annual":
+                    condemned.add((sym_, bad_))
             else:
                 row_ = periods_.get(bad_)
                 if row_:
                     for item_ in items_:
                         row_.pop(item_, None)
     splits = split_factors(con)
-    years_from_quarters(comps, splits)
+    # ...and a year dropped as a whole is not rebuilt from its quarters: that
+    # would publish it anyway, against a filing check_sources still compares.
+    years_from_quarters(comps, splits, skip=condemned)
     price_adjust.ensure(con)
     dmg = price_adjust.events(con)   # demergers, applied as the prices are
-    known = splits_trustworthy(con, shares)
+    known = splits_trustworthy(con, shares, suspect)
     bal = balance_equity(con)
     out: dict[str, dict] = {}
     for (symbol, ptype), periods in comps.items():
@@ -1100,6 +1117,8 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None,
             "sps": sps,
             "expenses": [_cr(v) for v in exp],
             "ebitda": [_cr(v) for v in ebitda],
+            # operating profit plus other income, as the EBITDA row and chart show it
+            "ebitda_oi": [_cr(d["ebitda_oi"]) for d in deriv],
             # carried so the quarterly table can show the same rows screener does
             # without falling back to a second source for them
             "interest": [_cr(periods[p2].get("finance_cost")) for p2 in ordered],
@@ -1141,7 +1160,7 @@ def split_factors(con: sqlite3.Connection) -> dict[str, list[tuple[str, float]]]
     return out
 
 
-def splits_trustworthy(con: sqlite3.Connection, shares: dict) -> set[str]:
+def splits_trustworthy(con: sqlite3.Connection, shares: dict, suspect: dict | None = None) -> set[str]:
     """Symbols whose recorded split history actually explains their share growth.
 
     Yahoo's corporate-action feed can silently omit events: it lists only the
@@ -1161,7 +1180,8 @@ def splits_trustworthy(con: sqlite3.Connection, shares: dict) -> set[str]:
     """
     out = set()
     sp = split_factors(con)
-    suspect = implausible_quarters(con)
+    if suspect is None:                 # callers that already have it pass it in
+        suspect = implausible_quarters(con)
     rows = con.execute(
         "SELECT symbol, period_end, "
         "MAX(CASE WHEN item='pat' THEN value END), MAX(CASE WHEN item='eps' THEN value END) "
@@ -1247,7 +1267,8 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
     netdebt = netdebt or {}
     price_adjust.ensure(con)
     splits = split_factors(con)
-    known = splits_trustworthy(con, shares)
+    suspect = implausible_quarters(con)  # filings whose own PAT and EPS contradict each other
+    known = splits_trustworthy(con, shares, suspect)
     q = pd.read_sql(
         "SELECT symbol, basis, period_end, item, value FROM results_history "
         "WHERE period_type='quarterly' AND item IN "
@@ -1276,7 +1297,6 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
     equity_by_sym: dict[str, list] = {}
     filed = filed_net_worth(con)
     announced = filing_dates(con)   # when the market could first read each quarter
-    suspect = implausible_quarters(con)  # filings whose own PAT and EPS contradict each other
     cross_q = cross_source_outliers(con)  # ...and those a second source and their own history both accuse
     for sym, g in q.groupby("symbol"):
         by_pe: dict[str, dict] = {}

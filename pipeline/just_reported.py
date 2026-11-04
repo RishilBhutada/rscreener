@@ -62,9 +62,17 @@ def main() -> None:
             if not sym or (nse and sym not in nse):
                 continue
             q = quarter_before(day)
+            # A company that files consolidated figures still needs its new
+            # quarter while only the STANDALONE one is stored: the consolidated
+            # filing often follows hours later, and fetch_results_history
+            # --only-missing swaps it in once it appears. Asked within this
+            # window only, so a company that stopped consolidating costs a few
+            # extra checks, not a fetch every night.
             if "results_history" in tables and not con.execute(
-                    "SELECT 1 FROM results_history WHERE symbol=? AND period_type='quarterly' AND period_end >= ? LIMIT 1",
-                    (sym, q)).fetchone():
+                    "SELECT 1 FROM results_history WHERE symbol=? AND period_type='quarterly' AND period_end >= ?"
+                    " AND (basis='consolidated' OR NOT EXISTS (SELECT 1 FROM results_history"
+                    "      WHERE symbol=? AND period_type='quarterly' AND basis='consolidated')) LIMIT 1",
+                    (sym, q, sym)).fetchone():
                 need_results.append(sym)
             if "filing_dates" in tables and not con.execute(
                     "SELECT 1 FROM filing_dates WHERE symbol=? AND period_end >= ? LIMIT 1", (sym, q)).fetchone():

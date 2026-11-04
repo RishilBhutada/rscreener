@@ -17,6 +17,7 @@ import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { useBackClose } from "@/lib/backclose";
 import { readPick, writePick, type ChartPick } from "@/lib/chartpick";
 import ChartPresets from "@/components/ChartPresets";
+import { fourInRow } from "@/lib/ttm";
 import {
   workingFor, growth, growthText, PE_WINDOWS, CA_LABEL, CA_ORDER, Q_LABEL,
   type ChartBand, type ChartTrendQ, type Quarter, type CorpAction, type Growth, type Working,
@@ -203,10 +204,6 @@ function quarterMids(qd: number[], onto: number[]): number[] {
     return Math.abs(onto[j] - mid) < Math.abs(onto[i] - mid) ? onto[j] : onto[i];
   });
 }
-
-/** Whether quarters i-3..i are consecutive (span at most ~300 days): a four-
- *  quarter sum across a missing quarter is not a trailing twelve months. */
-const fourInRow = (days: number[], i: number) => i >= 3 && days[i] - days[i - 3] <= 300;
 
 /** Index of the last time at or before `day`; 0 when every time is later. */
 function atOrBefore(times: number[], day: number): number {
@@ -1252,7 +1249,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
       if (!tq?.ebitda) { chart.remove(); chartRef.current = null; return; }
       keyWin = "ebitda";
       const qd = tq.periods.map(dayOf);
-      const eb = tq.ebitda.map((v, i) => (v === null || v === undefined ? null : v + (tq.other_income?.[i] ?? 0)));
+      const eb = tq.ebitda_oi ?? tq.ebitda.map((v, i) => (v === null || v === undefined ? null : v + (tq.other_income?.[i] ?? 0)));
       const rows = file.w?.length ? file.w : file.d?.length ? file.d : file.m ?? [];
       if (!rows.length) { chart.remove(); chartRef.current = null; return; }
       const pdays = rows.map((r) => r[0]);
@@ -1263,7 +1260,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
       });
       pr.setData(rows.map((r) => ({ time: toTime(r[0]), value: r[4] })));
       const ttm4 = qd.map((_, i) => {
-        if (!fourInRow(qd, i)) return null;
+        if (!fourInRow(tq.periods, i, tq.basis)) return null;
         const w = eb.slice(i - 3, i + 1);
         return w.every((x) => x !== null && x !== undefined) ? (w as number[]).reduce((a, b) => a + b, 0) : null;
       });
@@ -1406,7 +1403,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
         const ttm = (arr?: (number | null)[]) => {
           if (!arr) return;
           for (let i = 3; i < periods.length; i++) {
-            if (!fourInRow(periods.map(dayOf), i)) continue;
+            if (!fourInRow(periods, i, tq.basis)) continue;
             const w = arr.slice(i - 3, i + 1);
             if (w.every((x) => x !== null && x !== undefined)) bars.push({ day: dayOf(periods[i]), v: (w as number[]).reduce((a, b) => a + b, 0) });
           }
@@ -1509,9 +1506,9 @@ export default function FullChart({ symbol }: { symbol: string }) {
                 lines.push({ k, label, days: qd, vals: tq[k] ?? [], f: (x) => `${x.toFixed(1)}%`, scale: "pct", curved: true });
               }
             } else if (tq.ebitda) {
-              const eb = tq.ebitda.map((v, i) => (v === null || v === undefined ? null : v + (tq.other_income?.[i] ?? 0)));
+              const eb = tq.ebitda_oi ?? tq.ebitda.map((v, i) => (v === null || v === undefined ? null : v + (tq.other_income?.[i] ?? 0)));
               const t4 = qd.map((_, i) => {
-                const w = fourInRow(qd, i) ? eb.slice(i - 3, i + 1) : [];
+                const w = fourInRow(tq.periods, i, tq.basis) ? eb.slice(i - 3, i + 1) : [];
                 return w.length === 4 && w.every((x) => x !== null && x !== undefined) ? (w as number[]).reduce((a, b) => a + b, 0) : null;
               });
               const mids = quarterMids(qd, anchorDays);
