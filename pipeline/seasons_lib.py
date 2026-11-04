@@ -49,6 +49,8 @@ from collections import defaultdict
 
 import numpy as np
 
+from fetch_corporate_actions import reshapes
+
 QUARTERS = ("Apr–Jun", "Jul–Sep", "Oct–Dec", "Jan–Mar")   # the financial year's Q1..Q4
 RESHAPES = ("bonus", "split", "rights", "other")
 SHUFFLES = 499
@@ -179,9 +181,10 @@ def price(con: sqlite3.Connection, only: set | None = None) -> dict[str, dict]:
     skip = set()
     if _has(con, "corporate_actions"):
         where, args = _in(only)
-        for sym, ex in con.execute(f"SELECT symbol, ex_date FROM corporate_actions WHERE kind IN ({','.join('?' * len(RESHAPES))})"
-                                   + where, (*RESHAPES, *args)):
-            if ex:
+        for sym, ex, kind, subj in con.execute(
+                f"SELECT symbol, ex_date, kind, subject FROM corporate_actions WHERE kind IN ({','.join('?' * len(RESHAPES))})"
+                + where, (*RESHAPES, *args)):
+            if ex and reshapes(kind, subj):     # an AGM is not a share-count change
                 m = int(ex[5:7])
                 skip.add((sym, f"{ex[:4]}-{((m - 1) // 3 + 1) * 3:02d}"))
     where, args = _in(only)

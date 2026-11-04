@@ -50,6 +50,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import business_updates
+from fetch_corporate_actions import reshapes, split_detail
 import ipo_lib
 import seasons_lib
 
@@ -61,8 +62,6 @@ IST = timezone(timedelta(hours=5, minutes=30))
 NSE_DOCS = "https://nsearchives.nseindia.com/corporate/"
 # Equity IPOs only; NSE's list also carries bonds and debt issues.
 IPO_SEGMENT = {"EQ": "Mainboard", "BE": "Mainboard", "SME": "SME"}
-# An ex-date that changes the share count makes a price move meaningless.
-RESHAPES = {"bonus", "split", "rights", "other"}
 
 
 def quarter(period_end: str) -> str:
@@ -200,8 +199,8 @@ def main() -> None:
     actions = con.execute("SELECT symbol, ex_date, kind, detail, subject FROM corporate_actions WHERE ex_date >= ?",
                           (lo,)).fetchall() if has("corporate_actions") else []
     reshaped = defaultdict(list)
-    for sym, d, kind, _, _ in actions:
-        if kind in RESHAPES:
+    for sym, d, kind, _, subject in actions:
+        if reshapes(kind, subject):     # an AGM notice is not a share-count change
             reshaped[sym].append(d)
 
     past: list[dict] = []
@@ -318,6 +317,8 @@ def main() -> None:
                 b = closes.before(sym, d)
                 if b and gap(b[0], d) <= 7 and b[1] > 0:
                     e["yld"] = round(amt / b[1] * 100, 2)
+        elif kind == "split" and (sd := split_detail(subject or "") or detail):
+            e["r"] = sd
         elif detail and kind != "other":
             e["r"] = detail
         past.append(e)
