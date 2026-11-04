@@ -1,6 +1,7 @@
 """Logos for the Others page (web/public/sites/<id>.png), by the same rules as company
 logos in fetch_logos.py: the site's own declared icon first (robots.txt respected),
-else DuckDuckGo's icon service, else Google's gstatic one; raster only. Each is saved
+else DuckDuckGo's icon service, else Google's gstatic one (never for a site whose robots.txt
+disallows us); raster only. Each is saved
 as a 64x64 PNG. Run by hand when the Others list changes; not part of the nightly."""
 import io
 from pathlib import Path
@@ -26,7 +27,8 @@ def main() -> None:
     for sid, site in SITES.items():
         got = fl.fetch_icon(s, site)
         how = "own site"
-        if isinstance(got, str):
+        # A site whose robots.txt says no keeps its initials (as in fetch_logos.py).
+        if isinstance(got, str) and got != "robots":
             got = fl.from_service(s, site)
             how = "service"
         if not got or isinstance(got, str):

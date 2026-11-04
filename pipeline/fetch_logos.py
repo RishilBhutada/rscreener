@@ -11,9 +11,14 @@ When the company's own site refuses programs (TCS answers 403 to anything
 that is not a browser - a bot check, never worked around) or publishes no
 raster icon, the icon is taken from a public favicon service that serves site
 icons for anyone to show: DuckDuckGo's, then Google's icon CDN (gstatic,
-size 128). Both are read only where their robots.txt allows it (checked
-27-Oct-2026; google.com/s2 does not, so it is not used), and only a real
-200 answer counts - their "unknown site" placeholder comes back as a 404.
+size 128). Each service's own robots.txt is read once a run and a service it
+disallows is skipped (google.com/s2 disallows, so it is not listed), and only
+a real 200 answer counts - their "unknown site" placeholder comes back as a
+404. Never for a company whose robots.txt disallows us: a site that says no
+gets its initials, not someone else's copy of its icon. A site whose
+robots.txt cannot be read at all (it is down, or answers with a server
+error) is not contacted further - RFC 9309 says to treat that as "no" for
+the site itself - but nothing says it objects, so the services are asked.
 
 Kept only when it is a raster image the browser draws as an <img>: PNG, JPEG,
 WebP, GIF or ICO, at most 80 KB. Never SVG: an SVG served from our own address
@@ -34,6 +39,7 @@ from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
 import requests
+import urllib3
 
 import budget
 
@@ -54,17 +60,31 @@ def kind(data: bytes) -> str | None:
     return None
 
 
-def allowed(s: requests.Session, base: str, path: str) -> bool:
-    """robots.txt, read with requests (RobotFileParser.read() can hang)."""
+# What reading a response body can raise besides requests' own errors: a
+# streamed body is read through urllib3 (r.raw), whose ProtocolError,
+# ReadTimeoutError and DecodeError are not requests.RequestException.
+NET_ERRORS = (requests.RequestException, urllib3.exceptions.HTTPError, OSError)
+
+
+def read_robots(s: requests.Session, base: str) -> RobotFileParser | None:
+    """robots.txt, read with requests (RobotFileParser.read() can hang).
+    None when it cannot be read - a network error or a server error - which
+    RFC 9309 says to treat as "everything disallowed" for that site."""
     try:
         r = s.get(urljoin(base, "/robots.txt"), timeout=15)
-        if r.status_code >= 400:
-            return True          # no robots.txt: nothing is disallowed
-        rp = RobotFileParser()
-        rp.parse(r.text.splitlines())
-        return rp.can_fetch(UA, urljoin(base, path)) and rp.can_fetch("*", urljoin(base, path))
-    except requests.RequestException:
-        return False
+        text = r.text
+    except NET_ERRORS:
+        return None
+    if r.status_code >= 500:
+        return None
+    rp = RobotFileParser()
+    # A 4xx means no robots.txt: nothing is disallowed (RFC 9309).
+    rp.parse([] if r.status_code >= 400 else text.splitlines())
+    return rp
+
+
+def may_fetch(rp: RobotFileParser, url: str) -> bool:
+    return rp.can_fetch(UA, url) and rp.can_fetch("*", url)
 
 
 def icon_links(html: str, base: str) -> list[str]:
@@ -86,21 +106,26 @@ def fetch_icon(s: requests.Session, site: str) -> tuple[str, bytes, str] | str:
     if u.scheme not in ("http", "https") or not u.netloc:
         return "bad url"
     base = f"{u.scheme}://{u.netloc}/"
-    if not allowed(s, base, "/"):
+    rp = read_robots(s, base)
+    if rp is None:
+        return "unreachable"
+    if not may_fetch(rp, base):
         return "robots"
     try:
         home = s.get(base, timeout=20)
         cands = icon_links(home.text, home.url) if home.ok else []
-    except requests.RequestException:
+    except NET_ERRORS:
         cands = []
     cands += [urljoin(base, "/apple-touch-icon.png"), urljoin(base, "/favicon.ico")]
     for url in dict.fromkeys(cands):
+        if not may_fetch(rp, url):
+            continue
         try:
-            r = s.get(url, timeout=20, stream=True)
-            if not r.ok:
-                continue
-            data = r.raw.read(MAX_BYTES + 1, decode_content=True)
-        except requests.RequestException:
+            with s.get(url, timeout=20, stream=True) as r:
+                if not r.ok:
+                    continue
+                data = r.raw.read(MAX_BYTES + 1, decode_content=True)
+        except NET_ERRORS:
             continue
         if not data or len(data) > MAX_BYTES:
             continue
@@ -117,16 +142,28 @@ SERVICES = [
 ]
 
 
+_service_robots: dict[str, RobotFileParser | None] = {}
+
+
 def from_service(s: requests.Session, site: str) -> tuple[str, bytes, str] | None:
+    """The icon from a public favicon service, each read only where its own
+    robots.txt allows (read once a run per service; unreadable = skipped)."""
     host = urlparse(site if "://" in site else f"https://{site}").netloc.lower()
     host = host[4:] if host.startswith("www.") else host
     if not host:
         return None
     for tpl in SERVICES:
         url = tpl.format(host=host)
+        su = urlparse(url)
+        sbase = f"{su.scheme}://{su.netloc}/"
+        if sbase not in _service_robots:
+            _service_robots[sbase] = read_robots(s, sbase)
+        rp = _service_robots[sbase]
+        if rp is None or not may_fetch(rp, url):
+            continue
         try:
             r = s.get(url, timeout=20)
-        except requests.RequestException:
+        except NET_ERRORS:
             continue
         if r.status_code != 200 or not r.content or len(r.content) > MAX_BYTES:
             continue
@@ -164,7 +201,8 @@ def main() -> None:
         if budget.stop(i, len(due)):
             break
         res = fetch_icon(s, sites[sym])
-        if not isinstance(res, tuple):
+        # Never for "robots": the company said no, so it keeps its initials.
+        if not isinstance(res, tuple) and res != "robots":
             res = from_service(s, sites[sym]) or res
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         if isinstance(res, tuple):

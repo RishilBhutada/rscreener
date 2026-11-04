@@ -146,7 +146,7 @@ jobs:
         # NSE's public market-lot file: the "F&O" tag and the in_fno screen
         # field (pipeline/fetch_fno.py). One small CSV; a failure keeps the
         # last list.
-        run: python pipeline/fetch_fno.py
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_fno.py
       - name: Write the symbol lists every fetcher works from
         # TWO lists, because the sources do not cover the same companies.
         # Yahoo answers for both exchanges once the universe carries the right
@@ -202,7 +202,7 @@ jobs:
         # company, 450 a night until every company has been asked (~10 nights).
         env:
           RSCREENER_STEP_MINUTES: "20"
-        run: python pipeline/fetch_logos.py --limit 450 --sleep 0.2
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_logos.py --limit 450 --sleep 0.2
       - name: Refresh upcoming events calendar
         # On EVERY run, publish-only included: two NSE calls, seconds. Events
         # are stored in the database and the page is exported from it, so a
