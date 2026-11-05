@@ -19,7 +19,7 @@ a real bug is marked `xfail` with a reason rather than the code being changed al
 | `review/findings-web-markets` | ETF, index, commodity, gold, calendar, news pages |
 | `review/findings-results-history` | the filings reader, checked against the stored database |
 | `review/findings-company-page` | company page export and display - 7 CONFIRMED, 1 PLAUSIBLE (pushed 5-Nov) |
-| `review/findings-alerts-workflows` | alert scripts and workflow data safety (if pushed) |
+| `review/findings-alerts-workflows` | alert scripts and workflow data safety - 11 CONFIRMED, 8 PLAUSIBLE (pushed 5-Nov) |
 
 ## Fixed on `main` (commit subjects say which finding)
 
@@ -35,19 +35,27 @@ day changes only against the previous session; bad prints dropped both ways;
 Piotroski debt gap; portfolio import asks replace/add; index breadth, calendar day
 and holdings checks say what they cover; partial BSE list carried forward; MCX event
 day by its real close; gold parity dated; quarterly sales/profit shown in Cr;
-notes safe in private mode.
+notes safe in private mode; growth rates never measured across a consolidated/standalone
+switch (company-page #1, CAGR part); company-page Piotroski adjusts for splits (#3);
+Consolidated/Standalone choice stays with its company (#8); nightly stops if the stored
+database cannot be downloaded (alerts #1); ETF premium alert sent once per crossing and
+only counted when ntfy accepted it (alerts #3, #17); results alert pushes "FAILED" (alerts #6).
 
 ## Still open (confirmed, not fixed)
 
 From `review/findings-company-page` (not yet looked at by anyone):
-- #1 the yearly results table can switch from consolidated to standalone at FY25/FY26 (years rebuilt
-  from quarters on the other basis), with growth worked out across the switch - 88 companies in the
-  data (CERA, JYOTHYLAB, SANOFI, TIMKEN, AGI...). Highest priority.
+- #1 (rest) the yearly results table still carries one caption although its newest years can be on the
+  other basis (88 companies); growth across the switch is now refused, but the table should mark it.
 - #2 "CFO / EBITDA %" divides by operating profit without other income, and mixes Yahoo's group
   cash flow with a possibly parent-only filed profit.
-- #3 the page's Piotroski "owners not diluted" test counts a bonus or split as dilution.
 - #4-#8 P/E tooltip EPS not split-adjusted; peers vs industry medians from different groupings;
-  payout % before a demerger; Consolidated/Standalone choice carried to the next company.
+  payout % before a demerger.
+
+From `review/findings-alerts-workflows`:
+- #2 every database save deletes the stored copy before uploading (no backup if an upload dies).
+- #4 ETF and screen alerts run before the publish guards; #5 the depth baseline is committed before
+  check_depth raises it; #8 the nightly's state push fails if main moved; #9 guarded_fetch.sh hides
+  exit 1 crashes; #19 a refused refetch save exits green; plus the PLAUSIBLE rows in the file.
 
 From the earlier reviews:
 - web-screens #5 Magic Formula / exclude-sector screens drop companies with no sector.
