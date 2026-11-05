@@ -33,3 +33,12 @@ def test_piotroski_debt_free_both_years_still_scores(con):
     con.execute("DELETE FROM statements WHERE item='Long Term Debt'")
     con.commit()
     assert "S" in screen_fields.piotroski(con)
+
+
+def test_cfo_over_the_ebitda_shown_and_consolidated_years_only():
+    from export_company_json import cfo_ebitda
+    cf = {"periods": ["2025-03-31", "2026-03-31"], "items": [{"label": "Cash from Operations", "values": [90.0, 120.0]}]}
+    an = {"periods": ["2025-03-31", "2026-03-31"], "ebitda": [100.0, 100.0], "ebitda_oi": [120.0, 150.0],
+          "basis": ["consolidated", "standalone"]}
+    cfo_ebitda(cf, an)
+    assert cf["items"][-1] == {"label": "CFO / EBITDA %", "values": [75, None]}

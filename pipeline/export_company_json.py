@@ -657,14 +657,21 @@ def cfo_ebitda(cash_flow: dict | None, annual: dict | None) -> None:
     arrived as cash. Matched by financial year (periods end on the same date)."""
     if not cash_flow or not annual or not annual.get("periods"):
         return
-    eb = dict(zip(annual["periods"], annual.get("ebitda") or []))
+    # Divided by the EBITDA the results table shows (operating profit plus
+    # other income), not operating profit alone; and only for a year filed on
+    # the consolidated basis, which is the basis of Yahoo's cash flow - a
+    # standalone year against group cash is two different businesses
+    # (review 5-Nov-2026).
+    ebs = annual.get("ebitda_oi") or annual.get("ebitda") or []
+    bases = annual.get("basis") or [None] * len(annual["periods"])
+    eb = {p_: e for p_, e, b in zip(annual["periods"], ebs, bases) if b != "standalone"}
     cfo = next((it for it in cash_flow.get("items", []) if it.get("label") == "Cash from Operations"), None)
     if not cfo:
         return
     vals = []
     for p_, v in zip(cash_flow.get("periods", []), cfo.get("values", [])):
         e = eb.get(str(p_)[:10])
-        vals.append(round(v / e * 100) if (v is not None and e) else None)
+        vals.append(round(v / e * 100) if (v is not None and e and e > 0) else None)
     if any(v is not None for v in vals):
         cash_flow["items"].append({"label": "CFO / EBITDA %", "values": vals})
 
