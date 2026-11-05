@@ -27,6 +27,9 @@ export type ChartBand = {
    *  pe [price, ttmEps, quarters[]] · pb [mcapCr, netWorthCr]
    *  ps [mcapCr, ttmSalesCr]        · ev [mcapCr, netDebtCr, ttmEbitdaCr] */
   parts?: (number | string[])[][];
+  /** pe only: each quarter's EPS as it went into the trailing figure (split- and
+   *  demerger-adjusted), keyed by quarter end. */
+  q_eps?: Record<string, number>;
 } | null;
 
 /** How a ratio was arrived at, in the units it was arrived in. */
@@ -58,9 +61,12 @@ export function workingFor(view: View, band: ChartBand, idx: number, qs?: Quarte
     const ends = Array.isArray(p[2]) ? (p[2] as string[]) : [];
     for (const end of ends) {
       const q = qs?.find((x) => x.end === end);
+      // The EPS that went into the trailing figure, so the four add up to it
+      // after a split; the as-filed one only for files from before q_eps.
+      const used = band?.q_eps?.[end] ?? q?.eps;
       out.push({
         label: `      ${new Date(end).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}`,
-        value: q ? `₹ ${n(q.eps)}` : "—",
+        value: used !== undefined && used !== null ? `₹ ${n(used)}` : "—",
         note: q?.announced ? `declared ${new Date(q.announced).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" })}` : undefined,
       });
     }

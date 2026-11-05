@@ -357,3 +357,10 @@ def test_cagr_never_starts_on_the_other_basis():
     same = ["consolidated"] * 7
     assert tl.cagr_pct(vals, periods, 5, same) is not None
     assert tl.cagr_pct(vals, periods, 5, [None] * 7) is not None  # unknown basis: not judged
+
+
+def test_ratio_bands_quarter_eps_adds_up_to_the_ttm(con):
+    _band_db(con, "A", [(p, float(i + 1), "consolidated") for i, p in enumerate(QS)])
+    b = tl.ratio_bands(con, {"A": 100.0})["A"]["pe"]
+    for _price, ttm, quarters in b["parts"]:
+        assert sum(b["q_eps"][q] for q in quarters) == pytest.approx(ttm, abs=0.02)

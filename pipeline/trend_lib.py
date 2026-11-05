@@ -1569,12 +1569,20 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                 pb_s.append([date, round(mcap_cr / (eq / 1e7), 2)])
                 pb_p.append([round(mcap_cr, 1), round(eq / 1e7, 1)])
         bands = {}
+        # The EPS each quarter contributed, on the price's share base - what
+        # the four quarters in a P/E point's tooltip must add up to. The
+        # tooltip showed as-filed EPS, which after a split does not sum to the
+        # trailing EPS beside it (review company-page #4, 5-Nov-2026).
+        q_eps = {f[0]: round(f[1], 2) for f in flows if f[1] is not None}
         for key, ser, rnd, parts in (("pe", pe_s, 1, pe_p), ("ev", ev_s, 1, ev_p),
                                      ("pb", pb_s, 2, pb_p), ("ps", ps_s, 2, ps_p)):
             b = _band(ser, rnd)
             if b:
                 if len(parts) == len(ser):
                     b["parts"] = parts
+                    if key == "pe":
+                        used = {q for pt in parts for q in pt[2]}
+                        b["q_eps"] = {q: v for q, v in q_eps.items() if q in used}
                 bands[key] = b
         for bkey, ser, alts, rnd in (("pe", pe_s, pe_alt, 1), ("ps", ps_s, ps_alt, 2)):
             if bkey not in bands or not ser:
