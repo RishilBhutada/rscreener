@@ -248,7 +248,10 @@ def price_returns(con: sqlite3.Connection) -> dict[str, dict]:
             if base:
                 res[key] = round((last_c / base - 1) * 100, 1)
         # The watchlist's day change, close on close, as a broker shows it.
-        if use_daily and dc[-2] and newest is not None and last_d >= newest - pd.Timedelta(days=7):
+        # ...and against the PREVIOUS SESSION: a thinly traded share's previous
+        # bar can be weeks old, and that move is not the day's (review 4-Nov-2026).
+        if (use_daily and dc[-2] and newest is not None and last_d >= newest - pd.Timedelta(days=7)
+                and (dd[-1] - dd[-2]).days <= 5):
             res["ret_1d"] = round((last_c / dc[-2] - 1) * 100, 2)
         if res:
             out[sym] = res
@@ -643,6 +646,12 @@ def main() -> None:
     df["sales_cagr_10y"] = df["symbol"].map(lambda s: growth(s, "revenue", 10))
     df["profit_cagr_5y"] = df["symbol"].map(lambda s: growth(s, "pat", 5))
     df["profit_cagr_10y"] = df["symbol"].map(lambda s: growth(s, "pat", 10))
+    # PEG on five years of filed profit growth. It was P/E over Yahoo's
+    # earningsGrowth - the latest QUARTER against the same quarter a year
+    # earlier - so one strong quarter made a tiny PEG (review 4-Nov-2026).
+    df["peg"] = [round(pe_ / g_, 2) if (pe_ is not None and pe_ == pe_ and pe_ > 0
+                                         and g_ is not None and g_ == g_ and g_ > 0) else None
+                 for pe_, g_ in zip(pd.to_numeric(df["pe"], errors="coerce"), df["profit_cagr_5y"])]
 
     # Fill ROE where the source omitted it, from the company's own statements.
     # Runs while roe is still a fraction, so it lands in the same units as every
@@ -865,6 +874,10 @@ def main() -> None:
             ev_new.append(round(ev / eb, 2)); rebuilt_ev += 1
         else:
             ev_new.append(ev_old if known else None)
+    # A negative EV/EBITDA (a loss at the EBITDA line, or more cash than the
+    # company is valued at) sorts to the top of a cheapest-first screen, the
+    # trap already closed for P/E and P/B (review 4-Nov-2026: NECLIFE -1.14).
+    ev_new = [None if (v is not None and v == v and v < 0) else v for v in ev_new]
     df["ps"], df["ev_ebitda"] = ps_new, ev_new
     print(f"  rebuilt from filed figures: P/S {rebuilt_ps}, EV/EBITDA {rebuilt_ev}")
     df = df.rename(columns=RENAME)

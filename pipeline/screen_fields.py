@@ -224,6 +224,11 @@ def piotroski(con: sqlite3.Connection) -> dict[str, dict]:
             continue
         (ni, ni0), (rev, rev0), (gp, gp0), (ta, ta0) = v["ni"], v["rev"], v["gp"], v["ta"]
         (ca, ca0), (cl, cl0), (sh, sh0) = v["ca"], v["cl"], v["sh"]
+        # Debt missing in BOTH years is a debt-free company; missing in one
+        # year only is a gap in the data, and reading it as zero scored "debt
+        # went down" on nothing (review 4-Nov-2026) - no score then.
+        if (v["ltd"][0] is None) != (v["ltd"][1] is None):
+            continue
         ltd, ltd0 = (v["ltd"][0] or 0.0), (v["ltd"][1] or 0.0)
         cfo = v["cfo"][0]
         if not (ta and ta0 and rev and rev0 and cl and cl0):

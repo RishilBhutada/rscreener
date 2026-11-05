@@ -159,7 +159,9 @@ def main() -> None:
             row = {
                 "key": c["key"], "expiry": c["expiry"], "days": day_no(c["expiry"]) - day_no(asof),
                 "date": d, "fresh": d == asof, "expiring": day_no(c["expiry"]) - day_no(asof) < EXPIRING_DAYS, "open": o, "high": h, "low": lo, "close": close,
-                "chg": r2((close / prev[4] - 1) * 100) if prev else None,
+                # Against the previous SESSION only: a far month's last trade can
+                # be weeks old, and that move is not the day's (review 4-Nov-2026).
+                "chg": r2((close / prev[4] - 1) * 100) if prev and day_no(d) - day_no(prev[0]) <= 5 else None,
                 # Open interest is None where the source has none (Angel's
                 # daily candles), not zero.
                 "vol": vol if d == asof else 0, "oi": oi,
