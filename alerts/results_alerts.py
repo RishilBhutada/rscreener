@@ -151,4 +151,12 @@ if __name__ == "__main__":
         main()
     except Exception as e:  # noqa: BLE001 - an alert failing must never stop a publish
         print(f"results alerts FAILED: {type(e).__name__}: {e}")
+        # Still exit 0 (the publish must go on), but say so on the phone like
+        # every other alert script: a silent failure here looked exactly like
+        # "no results out today" (review 5-Nov-2026).
+        try:
+            post("Results alert check FAILED", f"{type(e).__name__}: {e}"[:300], tags="warning",
+                 click=f"{SITE}/calendar/", priority="high")
+        except Exception:  # noqa: BLE001 - never let the failure report fail the run
+            pass
         sys.exit(0)
