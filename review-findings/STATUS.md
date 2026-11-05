@@ -48,7 +48,7 @@ refused refetch save fails the run (alerts #19); filings dated by first broadcas
 
 ## Still open (confirmed, not fixed)
 
-From `review/findings-company-page` (not yet looked at by anyone):
+From `review/findings-company-page` (the rest; #1-#4 and #8 are fixed):
 - #5 (PLAUSIBLE) an older file can show the previous company's peers; #6 peers and industry
   medians from different groupings; #7 payout % before a demerger.
 
