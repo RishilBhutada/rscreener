@@ -247,6 +247,7 @@ def piotroski(con) -> dict[str, dict]:
             return None
         return a / b
 
+    splits_all = split_factors(con)
     out: dict[str, dict] = {}
     for sym, periods in by.items():
         pers = sorted(periods)
@@ -271,6 +272,13 @@ def piotroski(con) -> dict[str, dict]:
         cr_c = div(cur.get("Current Assets"), cur.get("Current Liabilities"))
         cr_p = div(prev.get("Current Assets"), prev.get("Current Liabilities"))
         sh_c, sh_p = cur.get("Ordinary Shares Number"), prev.get("Ordinary Shares Number")
+        # Last year's count on this year's share base: a bonus or split
+        # multiplies the count with no money raised, and failed "Owners not
+        # diluted" as "+100% shares outstanding" (review 5-Nov-2026; the
+        # screener's own F-score had the same fix on 4-Nov).
+        if sh_p is not None:
+            ev_ = splits_all.get(sym)
+            sh_p = sh_p * adj_factor(ev_, pers[-2]) / adj_factor(ev_, pers[-1])
         gm_c = div(cur.get("Gross Profit"), cur.get("Total Revenue"))
         gm_p = div(prev.get("Gross Profit"), prev.get("Total Revenue"))
         at_c = div(cur.get("Total Revenue"), cur.get("Total Assets"))
