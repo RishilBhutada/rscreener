@@ -1616,7 +1616,7 @@ def avg_npm_5y(trend_annual: dict | None) -> float | None:
     return round(sum(margins) / len(margins), 2)
 
 
-def cagr_pct(values: list, periods: list[str], years: int) -> float | None:
+def cagr_pct(values: list, periods: list[str], years: int, basis: list | None = None) -> float | None:
     """Compound annual growth over `years` CALENDAR years; None when not computable.
 
     It used to count backwards `years + 1` positions in the array and call the
@@ -1633,7 +1633,16 @@ def cagr_pct(values: list, periods: list[str], years: int) -> float | None:
     the span that ACTUALLY separates them. Nothing within nine months of the
     target and the figure is withheld rather than stretched.
     """
-    pairs = [(p, v) for p, v in zip(periods, values) if v is not None]
+    # One basis end to end: a start year on the other basis (standalone years
+    # under consolidated ones) compares two different businesses. 88
+    # companies' years switch basis at FY25/FY26, where the newest years are
+    # rebuilt from quarters on the other basis (review 5-Nov-2026).
+    bases = list(basis) if basis and len(basis) == len(periods) else [None] * len(periods)
+    triples = [(p, v, b) for p, v, b in zip(periods, values, bases) if v is not None]
+    if len(triples) < 2:
+        return None
+    end_basis = triples[-1][2]
+    pairs = [(p, v) for p, v, b in triples if not (end_basis and b and b != end_basis)]
     if len(pairs) < 2:
         return None
 

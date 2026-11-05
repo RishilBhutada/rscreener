@@ -345,3 +345,15 @@ def test_ratio_bands_ttm_eps_is_the_sum_of_the_four(con):
         want = sum(QS.index(q) + 1 for q in quarters)
         assert ttm_eps == pytest.approx(want)
         assert price == 100.0
+
+
+def test_cagr_never_starts_on_the_other_basis():
+    # Consolidated years to FY24, FY25-26 rebuilt from standalone quarters.
+    periods = [f"{y}-03-31" for y in range(2020, 2027)]
+    vals = [100, 110, 120, 130, 140, 60, 70]
+    basis = ["consolidated"] * 5 + ["standalone"] * 2
+    assert tl.cagr_pct(vals, periods, 5, basis) is None          # FY21 start is consolidated
+    assert tl.cagr_pct(vals, periods, 1, basis) == pytest.approx((70 / 60 - 1) * 100, abs=0.05)
+    same = ["consolidated"] * 7
+    assert tl.cagr_pct(vals, periods, 5, same) is not None
+    assert tl.cagr_pct(vals, periods, 5, [None] * 7) is not None  # unknown basis: not judged

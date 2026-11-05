@@ -49,6 +49,8 @@ type Trend = {
   /** Return on equity per year, % (annual trend). */
   roe?: (number | null)[];
   source: string[];
+  /** consolidated / standalone per period (pipeline trend_lib), null where not filed. */
+  basis?: (string | null)[];
 };
 type Shareholding = {
   /** Central and state governments, %; number of shareholders; holders the
@@ -1065,13 +1067,21 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
  *  ACTUALLY separates them, and withhold when nothing sits within nine months
  *  of the target rather than calling a six-year gap five years.
  */
-function cagr(values: (number | null)[], years: number, periods?: string[]): number | null {
+function cagr(values: (number | null)[], years: number, periods?: string[], basis?: (string | null)[]): number | null {
   const yearsBetween = (a: string, b: string) =>
     (Date.parse(String(b).slice(0, 10)) - Date.parse(String(a).slice(0, 10))) / (365.25 * 864e5);
 
+  // One basis end to end, as cagr_pct: a start year on the other basis
+  // (standalone under consolidated) is another business (review 5-Nov-2026).
+  let endBasis: string | null = null;
+  for (let i = values.length - 1; i >= 0; i--) {
+    const v = values[i];
+    if (v !== null && v !== undefined && Number.isFinite(v)) { endBasis = basis?.[i] ?? null; break; }
+  }
   const pairs: [string, number][] = [];
   values.forEach((v, i) => {
-    if (v !== null && v !== undefined && Number.isFinite(v) && periods?.[i]) {
+    const b = basis?.[i] ?? null;
+    if (v !== null && v !== undefined && Number.isFinite(v) && periods?.[i] && !(endBasis && b && b !== endBasis)) {
       pairs.push([String(periods[i]), v]);
     }
   });
@@ -1133,8 +1143,8 @@ function CompoundedGrowth({ trend, prices }: { trend?: { annual?: Trend }; price
     return Math.round((Math.pow(last / start, 12 / months) - 1) * 100);
   };
   const cards: [string, [string, number | null][]][] = [
-    ["Compounded sales growth", [["10 years", cagr(a.revenue, 10, a.periods)], ["5 years", cagr(a.revenue, 5, a.periods)], ["3 years", cagr(a.revenue, 3, a.periods)], ["1 year", cagr(a.revenue, 1, a.periods)]]],
-    ["Compounded profit growth", [["10 years", cagr(a.pat, 10, a.periods)], ["5 years", cagr(a.pat, 5, a.periods)], ["3 years", cagr(a.pat, 3, a.periods)], ["1 year", cagr(a.pat, 1, a.periods)]]],
+    ["Compounded sales growth", [["10 years", cagr(a.revenue, 10, a.periods, a.basis)], ["5 years", cagr(a.revenue, 5, a.periods, a.basis)], ["3 years", cagr(a.revenue, 3, a.periods, a.basis)], ["1 year", cagr(a.revenue, 1, a.periods, a.basis)]]],
+    ["Compounded profit growth", [["10 years", cagr(a.pat, 10, a.periods, a.basis)], ["5 years", cagr(a.pat, 5, a.periods, a.basis)], ["3 years", cagr(a.pat, 3, a.periods, a.basis)], ["1 year", cagr(a.pat, 1, a.periods, a.basis)]]],
     ["Stock price CAGR", [["10 years", stockCagr(120)], ["5 years", stockCagr(60)], ["3 years", stockCagr(36)], ["1 year", stockCagr(12)]]],
   ];
   // Return on equity, averaged over the years (as screener.in shows it): the

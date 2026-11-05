@@ -640,7 +640,7 @@ def main() -> None:
         t = trends.get(sym, {}).get("annual")
         if not t:
             return None
-        return cagr_pct(t[item], t["periods"], years)
+        return cagr_pct(t[item], t["periods"], years, t.get("basis"))
 
     df["sales_cagr_5y"] = df["symbol"].map(lambda s: growth(s, "revenue", 5))
     df["sales_cagr_10y"] = df["symbol"].map(lambda s: growth(s, "revenue", 10))
