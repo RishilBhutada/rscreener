@@ -759,6 +759,13 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
   /** The "i" beside the title, where a table has one. */
   info?: import("react").ReactNode;
 }) {
+  // The basis most of the table's periods are on; any other period is marked.
+  const mainBasis = (() => {
+    const n: Record<string, number> = {};
+    for (const b of stmt.basis ?? []) if (b) n[b] = (n[b] ?? 0) + 1;
+    const top = Object.entries(n).sort((x, y) => y[1] - x[1])[0];
+    return top ? top[0] : null;
+  })();
   const [all, setAll] = useState(false);
   const [showPct, setShowPct] = usePct(kind);
   const [view, setView] = useView(kind);
@@ -932,10 +939,17 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
               )}
               {cols.map((at) => {
                 const dec = declaredLabel(stmt.declared?.[at]);
+                // A period on the other basis from most of the table says so in
+                // its header: the newest years can be rebuilt from quarters on
+                // the other basis, and one caption for all of them misled
+                // (review 5-Nov-2026: 88 companies).
+                const b = stmt.basis?.[at];
+                const odd = b && mainBasis && b !== mainBasis;
                 return (
                   <th key={stmt.periods[at]} className="px-3 py-2 text-right font-medium whitespace-nowrap">
                     {periodLabel(stmt.periods[at])}
                     {dec && <span className="block font-normal text-[11px] text-[var(--ink3)]">({dec})</span>}
+                    {odd && <span className="block font-normal text-[11px] text-[var(--warn-ink)]">{b === "standalone" ? "Standalone" : "Consolidated"}</span>}
                   </th>
                 );
               })}
