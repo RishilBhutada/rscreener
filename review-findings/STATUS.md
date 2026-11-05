@@ -18,7 +18,7 @@ a real bug is marked `xfail` with a reason rather than the code being changed al
 | `review/findings-web-screens` | screener, watchlists, portfolio, home page |
 | `review/findings-web-markets` | ETF, index, commodity, gold, calendar, news pages |
 | `review/findings-results-history` | the filings reader, checked against the stored database |
-| `review/findings-company-page` | company page export and display (if pushed) |
+| `review/findings-company-page` | company page export and display - 7 CONFIRMED, 1 PLAUSIBLE (pushed 5-Nov) |
 | `review/findings-alerts-workflows` | alert scripts and workflow data safety (if pushed) |
 
 ## Fixed on `main` (commit subjects say which finding)
@@ -37,6 +37,17 @@ and holdings checks say what they cover; partial BSE list carried forward; MCX e
 day by its real close; gold parity dated.
 
 ## Still open (confirmed, not fixed)
+
+From `review/findings-company-page` (not yet looked at by anyone):
+- #1 the yearly results table can switch from consolidated to standalone at FY25/FY26 (years rebuilt
+  from quarters on the other basis), with growth worked out across the switch - 88 companies in the
+  data (CERA, JYOTHYLAB, SANOFI, TIMKEN, AGI...). Highest priority.
+- #2 "CFO / EBITDA %" divides by operating profit without other income, and mixes Yahoo's group
+  cash flow with a possibly parent-only filed profit.
+- #3 the page's Piotroski "owners not diluted" test counts a bonus or split as dilution.
+- #4-#8 P/E tooltip EPS not split-adjusted; peers vs industry medians from different groupings;
+  payout % before a demerger; Consolidated/Standalone choice carried to the next company.
+
 
 - web-screens #5 Magic Formula / exclude-sector screens drop companies with no sector.
 - web-screens #6 money filters compared in rupees, shown in crore.
