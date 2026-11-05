@@ -663,6 +663,7 @@ jobs:
           # On its own line: it does not exist until a screen is listed, and a
           # missing path makes git add refuse the other two as well.
           git add alerts/screen_state.json 2>/dev/null || true
+          git add alerts/etf_premium_state.json 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "no change to the scoreboard or the ratchet"
           else

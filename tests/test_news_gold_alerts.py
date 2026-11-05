@@ -215,3 +215,19 @@ def test_futures_day_is_the_new_york_trading_day_in_summer_and_winter():
     assert futures_day(ts("2026-11-03T05:00:00")) == "2026-11-03"
     # A Monday session opened on Sunday evening is Monday's, never a Sunday row.
     assert futures_day(ts("2026-11-01T23:00:00")) == "2026-11-02"
+
+
+# ── alerts/etf_premium: one push per crossing ───────────────────────────────
+
+def test_etf_premium_crossing_is_pushed_once(tmp_path, monkeypatch):
+    import etf_premium
+    (tmp_path / "MON100.json").write_text(json.dumps({"rows": [[20390, 100.0, 99.0, None], [20391, 105.0, 100.0, None]]}))
+    monkeypatch.setattr(etf_premium, "ETF_DIR", tmp_path)
+    monkeypatch.setattr(etf_premium, "STATE", tmp_path / "state.json")
+    monkeypatch.setattr(etf_premium, "load_lines", lambda: {"MON100": 3.0})
+    answers, pushed = [False, True, True], []
+    monkeypatch.setattr(etf_premium, "post", lambda *a, **k: pushed.append(a[0]) or answers[len(pushed) - 1])
+    etf_premium.main()          # Friday night: ntfy refuses - not recorded
+    etf_premium.main()          # next night, same data: tried again, accepted
+    etf_premium.main()          # the night after, same data: not sent again
+    assert len(pushed) == 2 and all("above NAV" in t for t in pushed)
