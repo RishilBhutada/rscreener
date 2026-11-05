@@ -34,7 +34,8 @@ converted; EV needs both debt and cash; PEG on 5-year growth; no negative EV/EBI
 day changes only against the previous session; bad prints dropped both ways;
 Piotroski debt gap; portfolio import asks replace/add; index breadth, calendar day
 and holdings checks say what they cover; partial BSE list carried forward; MCX event
-day by its real close; gold parity dated.
+day by its real close; gold parity dated; quarterly sales/profit shown in Cr;
+notes safe in private mode.
 
 ## Still open (confirmed, not fixed)
 
@@ -48,12 +49,10 @@ From `review/findings-company-page` (not yet looked at by anyone):
 - #4-#8 P/E tooltip EPS not split-adjusted; peers vs industry medians from different groupings;
   payout % before a demerger; Consolidated/Standalone choice carried to the next company.
 
-
+From the earlier reviews:
 - web-screens #5 Magic Formula / exclude-sector screens drop companies with no sector.
 - web-screens #6 money filters compared in rupees, shown in crore.
-- web-screens #7 `qtr_sales` / `qtr_profit` shown without "₹ Cr".
 - web-screens #8 `%` silently ignored on ratio fields (`de < 50%`).
-- web-screens #11 company notes not saved in private mode.
 - pipeline-core #8 / results-history #5 filings dated by revised, not broadcast, date.
 - pipeline-core #10, #11 ROCE / payout / debtor days period mismatches (small).
 - pipeline-core #17 corrected corporate actions stored twice (17 pairs).
