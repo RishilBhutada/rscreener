@@ -1,3 +1,5 @@
+import { FIELD_CATALOG } from "./fields";
+
 export type Row = Record<string, string | number | null>;
 
 export class QueryError extends Error {
@@ -111,7 +113,7 @@ export function substituteRatios(src: string, ratios: Record<string, string>): s
 }
 
 type Tok =
-  | { kind: "ident" | "num" | "op" | "arith"; value: string; pos: number }
+  | { kind: "ident" | "num" | "op" | "arith"; value: string; pos: number; pct?: boolean }
   | { kind: "lparen" | "rparen" | "and" | "or"; value: string; pos: number };
 
 function tokenize(src: string): Tok[] {
@@ -138,9 +140,10 @@ function tokenize(src: string): Tok[] {
     }
     const num = /^\d+(\.\d+)?/.exec(src.slice(i));
     if (num) {
-      toks.push({ kind: "num", value: num[0], pos: i });
+      const pct = src[i + num[0].length] === "%";
+      toks.push({ kind: "num", value: num[0], pos: i, pct });
       i += num[0].length;
-      if (src[i] === "%") i++; // "20%" - the % is decorative
+      if (pct) i++; // "20%" - decorative on a percent field; refused on any other (see compile)
       continue;
     }
     const word = /^[A-Za-z_][A-Za-z0-9_]*/.exec(src.slice(i));
@@ -157,7 +160,7 @@ function tokenize(src: string): Tok[] {
 }
 
 type Arith =
-  | { a: "num"; v: number }
+  | { a: "num"; v: number; pct?: boolean; pos?: number }
   | { a: "field"; name: string }
   | { a: "neg"; v: Arith }
   | { a: "bin"; op: string; l: Arith; r: Arith };
@@ -252,7 +255,7 @@ class Parser {
   parseArithAtom(): Arith {
     const tok = this.next();
     if (!tok) throw new QueryError("query ended unexpectedly", 0);
-    if (tok.kind === "num") return { a: "num", v: parseFloat(tok.value) };
+    if (tok.kind === "num") return { a: "num", v: parseFloat(tok.value), pct: tok.pct, pos: tok.pos };
     if (tok.kind === "ident") {
       const field = ALIASES[tok.value] ?? tok.value;
       if (!this.allowed.has(field)) {
@@ -325,6 +328,23 @@ function evalNode(node: Node, row: Row): boolean | null {
   return false;
 }
 
+/** A "%" written after a number compared with a field that is not a
+ *  percentage: "de < 50%" read as D/E below 50 and passed nearly every
+ *  company (review 4-Nov-2026). Refused, saying what to write instead. */
+const UNIT_OF = new Map(FIELD_CATALOG.map((f) => [f.key, f.unit]));
+const PCT_UNITS = new Set(["%", "%/yr", "pts"]);
+function checkPercents(node: Node): void {
+  if (node.t !== "cmp") { checkPercents(node.l); checkPercents(node.r); return; }
+  for (const [side, other] of [[node.l, node.r], [node.r, node.l]] as const) {
+    if (side.a === "num" && side.pct && other.a === "field") {
+      const unit = UNIT_OF.get(other.name);
+      if (unit !== undefined && !PCT_UNITS.has(unit)) {
+        throw new QueryError(`'${other.name}' is not a percentage - write ${side.v / 100} for ${side.v}%`, side.pos ?? 0);
+      }
+    }
+  }
+}
+
 export function compile(
   src: string,
   customRatios: Record<string, string> = {},
@@ -340,5 +360,6 @@ export function compile(
     const extra = p.toks[p.i];
     throw new QueryError(`unexpected '${extra.value}' - did you forget 'and' / 'or'?`, extra.pos);
   }
+  checkPercents(ast);
   return { run: (row) => evalNode(ast, row), fields: [...p.fields] };
 }
