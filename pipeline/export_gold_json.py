@@ -120,7 +120,9 @@ def reaction_days(when_utc: datetime) -> tuple[str, str]:
     ny = when_utc.astimezone(NY)
     comex = ny.date() + timedelta(days=1 if (ny.hour, ny.minute) >= (13, 30) else 0)
     ist = when_utc.astimezone(IST)
-    mcx = ist.date() + timedelta(days=1 if (ist.hour, ist.minute) >= (23, 0) else 0)
+    # MCX trades until 23:30 IST (23:55 in the US winter); an event before the
+    # close belongs to that session, not the next (review 4-Nov-2026).
+    mcx = ist.date() + timedelta(days=1 if (ist.hour, ist.minute) >= (23, 30) else 0)
     return comex.isoformat(), mcx.isoformat()
 
 

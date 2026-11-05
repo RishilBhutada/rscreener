@@ -128,6 +128,18 @@ def main() -> None:
     keep["BSE_GROUP"] = None
 
     extra = bse_only(keep)
+    # A partial BSE answer is as bad as none: accepting one shorter than the
+    # stored list by more than a fifth would drop real companies for the
+    # night (review 4-Nov-2026). Carried forward like an empty answer.
+    try:
+        with sqlite3.connect(DB) as con_:
+            stored_bse = con_.execute("SELECT COUNT(*) FROM universe WHERE EXCHANGE='BSE'").fetchone()[0]
+    except Exception:  # noqa: BLE001 - first ever run has no table yet
+        stored_bse = 0
+    if len(extra) and stored_bse and len(extra) < 0.8 * stored_bse:
+        print(f"  BSE list came back with {len(extra)} companies against {stored_bse} stored - "
+              f"treating it as a partial answer")
+        extra = extra.iloc[0:0]
     if not len(extra):
         # BSE unreachable. The universe is written with if_exists="replace", so
         # accepting an empty result would swap the 5,069-company universe for an

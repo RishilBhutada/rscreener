@@ -156,7 +156,7 @@ export default function GoldPage() {
                 </div>
               </div>
               <div className="mt-3 pt-3 border-t border-[var(--line)] grid grid-cols-3 gap-x-2 gap-y-3">
-                <Stat label="World in ₹" value={s.parity ? `₹${s.parity.toLocaleString("en-IN")}` : "—"} />
+                <Stat label={s.parity_date ? `World in ₹ · ${istDay(`${s.parity_date}T12:00:00Z`)}` : "World in ₹"} value={s.parity ? `₹${s.parity.toLocaleString("en-IN")}` : "—"} />
                 <Stat label={s.duty !== undefined ? `+ ${s.duty}% duty` : "With duty"} value={s.landed ? `₹${s.landed.toLocaleString("en-IN")}` : "—"} />
                 <Stat label="MCX vs that" value={s.mcx_vs_landed !== undefined ? `${signed(s.mcx_vs_landed, 1)}%` : "—"} />
                 <Stat label="MCX over world" value={s.mcx_prem !== undefined ? `${signed(s.mcx_prem, 1)}%` : "—"} />
