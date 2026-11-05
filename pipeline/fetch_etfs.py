@@ -279,7 +279,13 @@ def load_prices(session: requests.Session, con: sqlite3.Connection, sleep: float
     once per ETF, its monthly bars back to listing, for the long view of the
     full-screen chart (NIFTYBEES reaches 2002)."""
     syms = [s for (s,) in con.execute("SELECT symbol FROM etfs ORDER BY symbol")]
-    have_monthly = {s for (s,) in con.execute("SELECT DISTINCT symbol FROM etf_prices_monthly")}
+    # Monthly bars are re-read once the stored ones are over 40 days old:
+    # read once and never again, the long view would stop where the first
+    # read did and, five years on, leave a gap before the daily window
+    # (review 4-Nov-2026).
+    month_cut = (datetime.now(timezone.utc) - timedelta(days=40)).strftime("%Y-%m-%d")
+    have_monthly = {s for (s,) in con.execute(
+        "SELECT symbol FROM etf_prices_monthly GROUP BY symbol HAVING MAX(date) >= ?", (month_cut,))}
     ok = bad = 0
     for i, sym in enumerate(syms):
         if budget.stop(i, len(syms), "ETF price histories"):
