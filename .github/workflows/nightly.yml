@@ -87,7 +87,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p data
-          if gh release download data-db --pattern rscreener.db.gz --dir data; then
+          # Retried, and a stored database that cannot be downloaded STOPS the
+          # run. It used to start from an empty database, fetch for hours, and
+          # then have the save step refuse the small file while the run showed
+          # green - the whole night lost without a word (review 5-Nov-2026).
+          got=0
+          for attempt in 1 2 3; do
+            if gh release download data-db --pattern rscreener.db.gz --dir data --clobber; then got=1; break; fi
+            echo "database download attempt $attempt failed"
+            sleep $((attempt * 30))
+          done
+          if [ "$got" = 1 ]; then
             # Kept as downloaded: before saving, pipeline/merge_newest.sh
             # compares it with the stored copy to see whether another run
             # (Publish new results, a refetch, a publish-only run) stored
@@ -96,7 +106,13 @@ jobs:
             gunzip -f data/rscreener.db.gz
             echo "DB restored from release"
           else
-            echo "no data-db release yet - starting from empty DB (historical depth will be missing)"
+            view=$(gh release view data-db 2>&1) || true
+            if echo "$view" | grep -qi "not found"; then
+              echo "no data-db release yet - starting from empty DB (historical depth will be missing)"
+            else
+              echo "::error::The stored database exists but could not be downloaded after 3 attempts - stopping instead of fetching into an empty database the save step would refuse."
+              exit 1
+            fi
           fi
       - name: Re-date stored weekly and monthly prices (one-time, then a no-op)
         # Rows written before pipeline/price_periods.py were dated a period
