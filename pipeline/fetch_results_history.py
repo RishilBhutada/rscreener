@@ -265,6 +265,11 @@ def parse_xbrl(xml_bytes: bytes, period_type: str) -> dict[str, float]:
         name = TAGS.get(tag) or OLD_TAGS.get(tag) or INSTANT_TAGS.get(tag)
         if not name:
             continue
+        # An older-taxonomy tag only fills an item the Ind-AS tags have not:
+        # whichever came last in the file used to win (review 5-Nov-2026).
+        older = tag not in TAGS and tag in OLD_TAGS
+        if older and name in by_ctx.get(cref, {}):
+            continue
         try:
             val = float(el.text.strip())
         except ValueError:
@@ -444,7 +449,7 @@ def integrated_filings(session, sym: str, want: str = "consolidated") -> list[di
             "_ptype": "quarterly",
             "_cons": cons,
             # the day NSE broadcast it, for filing_dates (--only-missing)
-            "_ann": str(r.get("revised_Date") or r.get("broadcast_Date") or "").split(" ")[0],
+            "_ann": str(r.get("broadcast_Date") or r.get("revised_Date") or "").split(" ")[0],   # first broadcast
         }
     return sorted(best.values(), key=lambda r: r["toDate"], reverse=True)
 

@@ -61,9 +61,12 @@ def rows_from_integrated(session, sym: str) -> list[tuple]:
     out = []
     for r in rows:
         period = _iso(r.get("qe_Date"))
-        # revised_Date wins where a company restated: the market learned the
-        # corrected figure then, not at the original broadcast
-        announced = _iso(r.get("revised_Date")) or _iso(r.get("broadcast_Date")) or _iso(r.get("creation_Date"))
+        # The first broadcast: that is when the market learned the quarter's
+        # figures. The revised date used to win, so a restated quarter was
+        # dated weeks or months late in the P/E chart and the backtest -
+        # and "earliest wins" below could not undo it, the original date
+        # being already gone (review 4-Nov-2026).
+        announced = _iso(r.get("broadcast_Date")) or _iso(r.get("revised_Date")) or _iso(r.get("creation_Date"))
         if period and announced:
             out.append((period, announced))
     return out

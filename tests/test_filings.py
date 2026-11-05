@@ -122,3 +122,13 @@ def test_store_refuses_a_units_mistake_between_stored_years(con):
     assert frh.units_wrong(con, "results_history", "C", "annual", "2013-03-31", 61.5e7)
     assert not frh.units_wrong(con, "results_history", "C", "annual", "2013-03-31", 5900e7)
     assert not frh.units_wrong(con, "results_history", "C", "annual", "2017-03-31", 70e7)   # newest: not judged
+
+
+def test_ind_as_tag_wins_over_an_older_one_whatever_the_order():
+    ctx = '<xbrli:context id="OneD"><xbrli:period><xbrli:startDate>2015-01-01</xbrli:startDate><xbrli:endDate>2015-03-31</xbrli:endDate></xbrli:period></xbrli:context>'
+    for body in ('<f:ProfitLossForPeriod contextRef="OneD">10</f:ProfitLossForPeriod>'
+                 '<f:ProfitLossForThePeriod contextRef="OneD">99</f:ProfitLossForThePeriod>',
+                 '<f:ProfitLossForThePeriod contextRef="OneD">99</f:ProfitLossForThePeriod>'
+                 '<f:ProfitLossForPeriod contextRef="OneD">10</f:ProfitLossForPeriod>'):
+        x = (f'<xbrli:xbrl xmlns:xbrli="http://www.xbrl.org/2003/instance" xmlns:f="http://x">{ctx}{body}</xbrli:xbrl>').encode()
+        assert frh.parse_xbrl(x, "quarterly")["pat"] == 10.0
