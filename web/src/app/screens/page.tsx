@@ -75,6 +75,8 @@ function fmtVal(key: string, v: unknown, by: ByKey = COMPANY_BY): string {
   if (typeof v !== "number" || !Number.isFinite(v)) return "—";
   const crore = (cr: number) => (Math.abs(cr) >= 1e5 ? `₹${(cr / 1e5).toFixed(2)}L Cr` : `₹${Math.round(cr).toLocaleString("en-IN")} Cr`);
   if (key === "mcap") return crore(v);
+  // Already in crore (qtr_sales, qtr_profit): they printed as bare numbers (review 4-Nov-2026).
+  if (by.get(key)?.unit === "₹ Cr") return crore(v);
   if (MONEY.has(key)) return crore(v / 1e7);
   const u = by.get(key)?.unit ?? "";
   if (u === "₹" || ["wk52_high", "wk52_low", "book_value"].includes(key)) return `₹${v.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
