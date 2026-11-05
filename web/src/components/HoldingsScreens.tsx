@@ -60,6 +60,11 @@ export default function HoldingsScreens({ symbols, nameOf }: { symbols: string[]
     });
   }, [rows, screens, symbols]);
 
+  // Holdings the company table does not hold (ETFs, unpriced BSE scrips) are
+  // not in any count; say how many, so the counts are not read as the whole
+  // portfolio (review 4-Nov-2026).
+  const notChecked = rows ? new Set(symbols).size - rows.filter((r) => symbols.includes(String(r.symbol))).length : 0;
+
   if (!screens.length) {
     return (
       <div className="py-8 text-center">
@@ -84,6 +89,7 @@ export default function HoldingsScreens({ symbols, nameOf }: { symbols: string[]
     <div className="pt-2">
       <p className="text-[11px] text-[var(--ink3)] flex items-center gap-1 mb-2">
         Your holdings against each saved screen, on today&apos;s figures
+        {notChecked > 0 && <> · {notChecked} not checked (ETFs or not in the company data)</>}
         <InfoTip title="Holdings and screens">
           <p>Each saved screen is run on today&apos;s data and your holdings are sorted into those that pass, those that do not, and those missing a figure the screen needs.</p>
           <p>It shows where each holding stands against your own rules; what to do about it is yours to decide.</p>

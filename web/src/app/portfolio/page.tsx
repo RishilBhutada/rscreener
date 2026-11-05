@@ -69,6 +69,7 @@ export default function PortfolioPage() {
   // import
   const [pasteText, setPasteText] = useState("");
   const [importError, setImportError] = useState("");
+  const [importMode, setImportMode] = useState<"replace" | "add">("replace");
   const [confirmClear, setConfirmClear] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -202,8 +203,13 @@ export default function PortfolioPage() {
     const res = parseHoldings(text);
     if (res.error) { setImportError(res.error); return; }
     if (res.holdings.length === 0) { setImportError("No holdings rows found in that file"); return; }
-    savePortfolio(res.holdings);
-    setHoldings(res.holdings);
+    // Replace, or add to what is here: importing a second broker's file used
+    // to wipe the first broker's holdings without a word (review 4-Nov-2026).
+    const next = importMode === "add" && holdings.length
+      ? [...holdings.filter((h) => !res.holdings.some((x) => x.symbol === h.symbol)), ...res.holdings]
+      : res.holdings;
+    savePortfolio(next);
+    setHoldings(next);
     setImportError(""); setPasteText(""); setSheet(null);
   };
 
@@ -492,9 +498,24 @@ export default function PortfolioPage() {
               <p><strong>Zerodha</strong>: Console › Portfolio › Holdings › Download CSV.</p>
               <p><strong>Angel One</strong>: Portfolio › Holdings › export.</p>
               <p><strong>Groww</strong>: the holdings statement.</p>
-              <p>Any CSV with a symbol, a quantity and an average-price column works. Importing replaces the holdings you have here.</p>
+              <p>Any CSV with a symbol, a quantity and an average-price column works. With holdings already here, choose whether the file replaces them or adds to them.</p>
             </InfoTip>
           </p>
+          {holdings.length > 0 && (
+            <div role="radiogroup" aria-label="What the import does" className="grid grid-cols-2 gap-2">
+              {([["replace", `Replace all ${holdings.length}`], ["add", "Add to them"]] as const).map(([k, label]) => (
+                <button key={k} type="button" role="radio" aria-checked={importMode === k} onClick={() => setImportMode(k)}
+                  className={`rs-press min-h-[40px] rounded-xl border text-[13px] font-semibold ${importMode === k ? "border-[var(--accent-line)] bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "border-[var(--line)] text-[var(--ink2)]"}`}>
+                  {label}
+                </button>
+              ))}
+              <p className="col-span-2 text-[12px] text-[var(--ink3)]">
+                {importMode === "add"
+                  ? "Holdings in the file are added; a symbol you already hold takes the file's quantity and average."
+                  : "The file's holdings replace everything here - use this for a full export from your only broker."}
+              </p>
+            </div>
+          )}
           <input ref={fileRef} type="file" accept=".csv,.txt" className="hidden"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) f.text().then(doImport).catch((err) => setImportError(String(err))); e.target.value = ""; }} />
           <button type="button" onClick={() => fileRef.current?.click()}

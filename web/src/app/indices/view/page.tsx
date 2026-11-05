@@ -119,9 +119,12 @@ function IndexView() {
       .sort((a, b) => (b.w ?? -1) - (a.w ?? -1));
   }, [doc, bySym]);
   const breadth = useMemo(() => {
-    const up = members.filter((m) => (m.r?.ret_1d ?? 0) > 0).length;
-    const down = members.filter((m) => (m.r?.ret_1d ?? 0) < 0).length;
-    return { up, down, flat: members.length - up - down };
+    // A member with no day change (not in today's data) is not "flat"
+    // (review 4-Nov-2026): it is counted apart.
+    const known = members.filter((m) => typeof m.r?.ret_1d === "number");
+    const up = known.filter((m) => (m.r?.ret_1d as number) > 0).length;
+    const down = known.filter((m) => (m.r?.ret_1d as number) < 0).length;
+    return { up, down, flat: known.length - up - down, unknown: members.length - known.length };
   }, [members]);
   const sectors = useMemo(() => {
     const by = new Map<string, number>();
@@ -234,7 +237,8 @@ function IndexView() {
             <span className="text-[var(--pos)] font-semibold">{breadth.up} up</span>
             <span className="text-[var(--ink3)]"> · </span>
             <span className="text-[var(--neg)] font-semibold">{breadth.down} down</span>
-            {breadth.flat > 0 && <span className="text-[var(--ink3)]"> · {breadth.flat} unchanged or no price</span>}
+            {breadth.flat > 0 && <span className="text-[var(--ink3)]"> · {breadth.flat} unchanged</span>}
+            {breadth.unknown > 0 && <span className="text-[var(--ink3)]"> · {breadth.unknown} no price today</span>}
           </p>
           {sectors.length > 1 && (
             <div className="px-3 pb-3 space-y-1.5">

@@ -189,8 +189,9 @@ export default function CalendarPage() {
       .then(setPast)
       .catch((e) => setPastError(String(e.message ?? e)));
     setMine(new Set([...allWatched(), ...loadPortfolio().map((h) => h.symbol)]));
-    const d = new Date();
-    setToday(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+    // Today in INDIA: every event date is an Indian date, and a phone in
+    // another time zone moved the upcoming/past line by a day (review 4-Nov-2026).
+    setToday(new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }));
     // A link can open the page on a company: /calendar?q=TCS
     try { if (localStorage.getItem(BASIS_KEY) === "q") setBasis("q"); } catch { /* default: yearly */ }
     const fromUrl = new URLSearchParams(window.location.search).get("q");
