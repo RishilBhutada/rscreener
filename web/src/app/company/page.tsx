@@ -2378,7 +2378,12 @@ function CompanyView() {
   // (8 KB on the wire). Undefined while loading, null if NSE lists none.
   const [nextResults, setNextResults] = useState<NextResults>(undefined);
   const [alertsOpen, setAlertsOpen] = useState(false);
-  const [basisView, setBasisView] = useState<"consolidated" | "standalone">("consolidated");
+  // The choice belongs to the company it was made on: opening another one
+  // starts on consolidated again instead of carrying "Standalone" over
+  // (review 5-Nov-2026).
+  const [basisPick, setBasisPick] = useState<{ sym: string; view: "consolidated" | "standalone" }>({ sym: "", view: "consolidated" });
+  const basisView = basisPick.sym === symbol ? basisPick.view : "consolidated";
+  const setBasisView = (view: "consolidated" | "standalone") => setBasisPick({ sym: symbol, view });
   useEffect(() => {
     if (!symbol) return;
     const d = new Date();
