@@ -202,7 +202,7 @@ jobs:
           fi
           gzip -c newest/rscreener.db > rscreener.db.gz
           for attempt in 1 2 3; do
-            gh release upload data-db rscreener.db.gz --clobber && exit 0
+            bash pipeline/store_db.sh rscreener.db.gz && exit 0
             echo "upload attempt $attempt failed; retrying in 30s"; sleep 30
           done
           echo "could not store the database after three attempts"; exit 1

@@ -159,7 +159,8 @@ jobs:
           gzip -c data/rscreener.db > rscreener.db.gz
           ok=0
           for attempt in 1 2 3; do
-            if gh release upload data-db rscreener.db.gz --clobber; then ok=1; break; fi
+            # never leaves the release without a copy (pipeline/store_db.sh)
+            if bash pipeline/store_db.sh rscreener.db.gz; then ok=1; break; fi
             echo "upload attempt $attempt failed; retrying in 30s"
             sleep 30
           done

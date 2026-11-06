@@ -97,6 +97,12 @@ jobs:
             echo "database download attempt $attempt failed"
             sleep $((attempt * 30))
           done
+          # The stored copy missing but last night's backup there (a store that
+          # died between its two renames, pipeline/store_db.sh): start from it.
+          if [ "$got" = 0 ] && gh release download data-db --pattern rscreener.db.gz.prev --dir data --clobber; then
+            mv data/rscreener.db.gz.prev data/rscreener.db.gz
+            echo "::warning::started from the backup copy (rscreener.db.gz.prev)"; got=1
+          fi
           if [ "$got" = 1 ]; then
             # Kept as downloaded: before saving, pipeline/merge_newest.sh
             # compares it with the stored copy to see whether another run
@@ -405,7 +411,7 @@ jobs:
           bash pipeline/guarded_fetch.sh python pipeline/fetch_news.py --names-from data/rscreener.db --deal-days $DD
           if [ -f data/news.db ]; then
             bash pipeline/merge_newest.sh news.db.gz data/news.db "$RUNNER_TEMP/news-base.db.gz"
-            gzip -c data/news.db > news.db.gz && gh release upload data-db news.db.gz --clobber || echo "::warning::news.db not stored"
+            gzip -c data/news.db > news.db.gz && bash pipeline/store_db.sh news.db.gz || echo "::warning::news.db not stored"
           fi
       - name: Find what each company does (Wikipedia articles, rotating)
         if: steps.plan.outputs.earnings == '1'
@@ -560,10 +566,11 @@ jobs:
           # starting database. Three attempts with a pause between them; a real
           # problem still fails all three and still reports.
           ok=0
+          # pipeline/store_db.sh: the new copy is uploaded beside the stored one
+          # and swapped in by rename, so the release is never left empty and
+          # last night's copy stays as rscreener.db.gz.prev.
           for attempt in 1 2 3; do
-            if gh release upload data-db rscreener.db.gz --clobber \
-               || gh release create data-db rscreener.db.gz --title 'Data DB' \
-                  --notes 'SQLite data snapshot used and refreshed by the nightly workflow.'; then
+            if bash pipeline/store_db.sh rscreener.db.gz; then
               ok=1; break
             fi
             echo "upload attempt $attempt failed; retrying in 30s"
@@ -612,26 +619,6 @@ jobs:
         # web/public/indices.json, idx/<SYM>.json, their valuation and chart
         # files, and a row each in the search index.
         run: python pipeline/export_indices_json.py
-      - name: Tell the owner's phone about ETF premiums crossing his lines
-        # alerts/etf_premium.txt holds the lines. Scheduled runs only: they are
-        # the ones with a new day's NAVs, and a code publish re-running the
-        # same day would repeat the same crossing.
-        # A failed alert must never hold back the night's data: the script
-        # pushes its own "check FAILED" message, and the run carries on.
-        if: github.event_name == 'schedule'
-        continue-on-error: true
-        env:
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: python alerts/etf_premium.py
-      - name: Tell the owner's phone which companies entered or left his saved screens
-        # alerts/screens.txt holds the screens; alerts/screen_state.json holds
-        # last night's matches and is committed with the scoreboard below.
-        # Scheduled runs only, for the same reason as the ETF alert.
-        if: github.event_name == 'schedule'
-        continue-on-error: true
-        env:
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: python alerts/screen_alerts.py
       - name: Build the yearly snapshots the screener's history test runs on
         # web/public/backtest/: each 30 June since 2008, every company's
         # screener fields as known that day, and the next year's return (P10).
@@ -649,27 +636,6 @@ jobs:
         run: python pipeline/scorecard.py
       - name: Publish the data-freshness report the app shows on /status
         run: python pipeline/export_status.py
-      - name: Keep the scoreboard and the depth ratchet across runs
-        # scorecard_history.json and depth_baseline.json are WRITTEN by the steps
-        # above and then discarded with the runner, so the trend the /status page
-        # draws could never accumulate past one point and the depth ratchet never
-        # rose. A scoreboard that forgets every night cannot show whether
-        # anything is improving, which is the only reason it exists.
-        if: always()
-        run: |
-          git config user.name  "rscreener-nightly"
-          git config user.email "actions@github.com"
-          git add pipeline/scorecard_history.json pipeline/depth_baseline.json 2>/dev/null || true
-          # On its own line: it does not exist until a screen is listed, and a
-          # missing path makes git add refuse the other two as well.
-          git add alerts/screen_state.json 2>/dev/null || true
-          git add alerts/etf_premium_state.json 2>/dev/null || true
-          if git diff --cached --quiet; then
-            echo "no change to the scoreboard or the ratchet"
-          else
-            git commit -m "Nightly: record the data-quality score and depth ratchet [skip ci]"
-            git push origin HEAD:main || echo "push failed - the run continues, the history waits for tomorrow"
-          fi
       - name: Refuse to publish if chart history went backwards
         # Guards the failure that shipped for weeks: a stale restored DB exports
         # ~7 years of ratio history in place of ~20, and deploys it silently.
@@ -689,6 +655,62 @@ jobs:
         # weeks against a real Rs 750. A wrong price looks exactly like a right
         # one on screen, so it has to be caught here rather than by eye.
         run: python pipeline/check_prices.py
+      - name: Tell the owner's phone about ETF premiums crossing his lines
+        # alerts/etf_premium.txt holds the lines. Scheduled runs only: they are
+        # the ones with a new day's NAVs, and a code publish re-running the
+        # same day would repeat the same crossing.
+        # A failed alert must never hold back the night's data: the script
+        # pushes its own "check FAILED" message, and the run carries on.
+        # After the three publish guards (review alerts-workflows #4): an alert
+        # never goes out on data the site itself refused to publish.
+        if: success() && github.event_name == 'schedule'
+        continue-on-error: true
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python alerts/etf_premium.py
+      - name: Tell the owner's phone which companies entered or left his saved screens
+        # alerts/screens.txt holds the screens; alerts/screen_state.json holds
+        # last night's matches and is committed with the scoreboard below.
+        # Scheduled runs only, for the same reason as the ETF alert.
+        if: success() && github.event_name == 'schedule'
+        continue-on-error: true
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python alerts/screen_alerts.py
+      - name: Keep the scoreboard and the depth ratchet across runs
+        # scorecard_history.json and depth_baseline.json are WRITTEN by the steps
+        # above and then discarded with the runner, so the trend the /status page
+        # draws could never accumulate past one point and the depth ratchet never
+        # rose. A scoreboard that forgets every night cannot show whether
+        # anything is improving, which is the only reason it exists.
+        # Placed AFTER check_depth.py, which is what writes the raised ratchet;
+        # before it, the raise was thrown away every night (review
+        # alerts-workflows #5). always(): a failed guard still keeps the score.
+        if: always()
+        run: |
+          git config user.name  "rscreener-nightly"
+          git config user.email "actions@github.com"
+          git add pipeline/scorecard_history.json pipeline/depth_baseline.json 2>/dev/null || true
+          # On its own line: it does not exist until a screen is listed, and a
+          # missing path makes git add refuse the other two as well.
+          git add alerts/screen_state.json 2>/dev/null || true
+          git add alerts/etf_premium_state.json 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "no change to the scoreboard or the ratchet"
+          else
+            git commit -m "Nightly: record the data-quality score and depth ratchet [skip ci]"
+            # HEAD is main as it was when this run STARTED, hours ago; anything
+            # pushed since made a plain push fail and the night's scoreboard and
+            # screen memory were lost (review alerts-workflows #8). Rebase onto
+            # main as it is now, and retry.
+            pushed=0
+            for attempt in 1 2 3; do
+              if git pull --rebase --autostash -q origin main && git push origin HEAD:main; then pushed=1; break; fi
+              git rebase --abort 2>/dev/null || true
+              sleep $((attempt * 10))
+            done
+            [ "$pushed" = 1 ] || echo "::warning::scoreboard push failed three times - the history waits for tomorrow"
+          fi
       - name: Build the site from the LATEST code, not the checkout from hours ago
         # This job checks out main and then spends two to four hours fetching. The
         # code it builds at the end is therefore whatever main was when it STARTED,
