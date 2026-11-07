@@ -12,6 +12,7 @@ import { canonKey, companyKey, rangeToCompany, rangeToFull, readPick, writePick,
 import ChartPresets from "@/components/ChartPresets";
 import Hint from "@/components/Hint";
 import Link from "next/link";
+import { fourInRow } from "@/lib/ttm";
 
 type Pt = [string, number] | [string, number, number | null];
 export type ChartPrices = { monthly?: Pt[]; weekly?: Pt[]; daily?: Pt[] };
@@ -26,6 +27,9 @@ export type ChartBand = {
    *  pe [price, ttmEps, quarters[]] · pb [mcapCr, netWorthCr]
    *  ps [mcapCr, ttmSalesCr]        · ev [mcapCr, netDebtCr, ttmEbitdaCr] */
   parts?: (number | string[])[][];
+  /** pe only: each quarter's EPS as it went into the trailing figure (split- and
+   *  demerger-adjusted), keyed by quarter end. */
+  q_eps?: Record<string, number>;
 } | null;
 
 /** How a ratio was arrived at, in the units it was arrived in. */
@@ -57,9 +61,12 @@ export function workingFor(view: View, band: ChartBand, idx: number, qs?: Quarte
     const ends = Array.isArray(p[2]) ? (p[2] as string[]) : [];
     for (const end of ends) {
       const q = qs?.find((x) => x.end === end);
+      // The EPS that went into the trailing figure, so the four add up to it
+      // after a split; the as-filed one only for files from before q_eps.
+      const used = band?.q_eps?.[end] ?? q?.eps;
       out.push({
         label: `      ${new Date(end).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}`,
-        value: q ? `₹ ${n(q.eps)}` : "—",
+        value: used !== undefined && used !== null ? `₹ ${n(used)}` : "—",
         note: q?.announced ? `declared ${new Date(q.announced).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" })}` : undefined,
       });
     }
@@ -101,6 +108,11 @@ export type ChartTrendQ = {
   expenses?: (number | null)[];
   ebitda?: (number | null)[];
   other_income?: (number | null)[];
+  /** Operating profit plus other income, as the EBITDA row shows it; a bank's
+   *  filed operating profit already holds its other income (pipeline). */
+  ebitda_oi?: (number | null)[];
+  /** consolidated / standalone per period */
+  basis?: (string | null)[];
   book_value?: (number | null)[];
   opm?: (number | null)[];
   gpm?: (number | null)[];
@@ -573,6 +585,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       const out: XY[] = [];
       for (let i = 3; i < trendQ.periods.length; i++) {
         const w = arr.slice(i - 3, i + 1);
+        if (!fourInRow(trendQ.periods, i, trendQ.basis)) continue;   // lib/ttm.ts
         if (w.length === 4 && w.every((v) => v !== null && v !== undefined)) {
           const t = toT(trendQ.periods[i]);
           if (t >= cutoff) out.push({ t, v: (w as number[]).reduce((a, b) => a + b, 0) });
@@ -781,7 +794,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       }
     }
 
-    if (view === "ev") bandView(evBand, "EV / EBITDA", "Median EV Multiple", "plain", ttmBars(trendQ?.ebitda), "EBITDA (TTM)", "cr");
+    if (view === "ev") bandView(evBand, "EV / EBITDA", "Median EV Multiple", "plain", ttmBars(trendQ?.ebitda), "Operating profit (TTM, before other income)", "cr");
     if (view === "pb") bandView(pbBand, "Price to BV", "Median PBV", "plain", qBars(trendQ?.book_value), "Book Value", "rupee");
     if (view === "ps") bandView(psBand, "Market Cap / Sales", "Median Market Cap to Sales", "plain", ttmBars(trendQ?.revenue), "Sales (TTM)", "cr");
 
@@ -805,7 +818,10 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     // with both on they share each quarter (EBITDA left, EPS right), each on a
     // scale of its own.
     if (view === "ebitda" && trendQ?.ebitda) {
-      const eb = trendQ.ebitda.map((v, i) => (v === null || v === undefined ? null : v + (trendQ.other_income?.[i] ?? 0)));
+      // The pipeline's own figure where the file has it (it leaves a bank's
+      // other income out, which its filed operating profit already holds).
+      const eb = trendQ.ebitda_oi
+        ?? trendQ.ebitda.map((v, i) => (v === null || v === undefined ? null : v + (trendQ.other_income?.[i] ?? 0)));
       const pp = priceLine();
       if (pp.length > 1) defs.push({ key: "eb_price", label: `Price on ${exchange === "BSE" ? "BSE" : "NSE"}`, color: "var(--accent)", kind: "line", axis: "R", zone: [0, 0.56], data: pp, fmt: "rupee" });
       // The lines' points stand over the MIDDLE of each quarter's bar (owner,
@@ -1844,21 +1860,23 @@ function ChartShell({
     if (l < row.scrollLeft || r > row.scrollLeft + row.clientWidth) row.scrollLeft = Math.max(0, l - 24);
   }, [view]);
   const timer = useRef<number | null>(null);
-  const firedAt = useRef(0), downAt = useRef(0);
+  // Set when a finger HOLD fires, so the click its release makes is not also
+  // taken as a tap. Keyboard Enter/Space never sets it, so it always works.
+  const swallow = useRef(false);
   const stop = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } };
-  const hold = (v: View) => { firedAt.current = Date.now(); stop(); setHeld(v); setMoreOpen(false); };
+  const hold = (v: View) => { stop(); setHeld(v); setMoreOpen(false); };
   // One set of listeners on each row of tabs; the tab pressed is found from its data-view.
   const viewOf = (e: React.SyntheticEvent) => (e.target as HTMLElement).closest<HTMLElement>("[data-view]")?.dataset.view as View | undefined;
   const tabDown = (e: React.PointerEvent) => {
     const v = viewOf(e);
-    stop(); downAt.current = Date.now();
-    if (v) timer.current = window.setTimeout(() => hold(v), 480);
+    stop(); swallow.current = false;
+    if (v) timer.current = window.setTimeout(() => { swallow.current = true; hold(v); }, 480);
   };
   const tabMenu = (e: React.MouseEvent) => { const v = viewOf(e); if (v) { e.preventDefault(); hold(v); } };
   const tabClick = (e: React.MouseEvent) => {
     const v = viewOf(e);
     if (!v) return;
-    if (firedAt.current >= downAt.current) return; // the click that ends a hold
+    if (swallow.current) { swallow.current = false; return; } // the click that ends a hold
     setHeld(null); pick(v);
   };
   const press = (v: View) => ({ "data-view": v, "data-active": v === view ? "true" : undefined });

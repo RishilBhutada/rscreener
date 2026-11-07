@@ -70,6 +70,51 @@ def dividend_detail(s: str) -> str | None:
     return f"₹{txt} ({' + '.join('₹' + a for a in amounts)})"
 
 
+# "Fv Split Rs.10/- To Re.1/", "Face Value Split (Sub-Division) - From Rs 10/-
+# Per Share To Rs 2/- Per Share": NSE writes a split as the face value before
+# and after, never as "a:b", so all 477 stored splits had no ratio (review
+# 4-Nov-2026).
+FACE_VALUE = re.compile(r"(?:rs\.?|re\.?|₹)\s*(\d+(?:\.\d+)?)\s*/?-?\s*(?:per\s+share\s*)?to\s*"
+                        r"(?:rs\.?|re\.?|₹)\s*(\d+(?:\.\d+)?)", re.I)
+
+
+def split_detail(subject: str) -> str | None:
+    """"Face value ₹10 → ₹1" for a split, plus the dividend when the same
+    notice declares one (13 stored notices did, and lost the amount)."""
+    s = subject or ""
+    m = RATIO.search(s)
+    fv = FACE_VALUE.search(s)
+    if fv:
+        out = f"Face value ₹{fv.group(1)} → ₹{fv.group(2)}"
+    elif m:
+        out = f"{m.group(1)}:{m.group(2)}"
+    else:
+        return None
+    if re.search(r"\bdividend\b", s, re.I):
+        div = dividend_detail(re.split(r"face\s*value|\bsplit\b|sub-?division|\bbonus\b", s, flags=re.I)[0])
+        if div:
+            out += f" · dividend {div}"
+    return out
+
+
+# What changes the number of shares - the events a price series cannot be
+# compared across. "other" is not one of them: of 8,872 stored "other"
+# actions, 7,707 are Annual General Meetings (and 305 "AGM"), mostly in
+# July-September, and treating them as reshaping dropped those quarters from
+# every price season and blanked results moves on the calendar (review
+# 4-Nov-2026). Only these "other" subjects reshape.
+RESHAPING_OTHER = re.compile(
+    r"demerg|amalgamat|scheme\s+of\s+arrangement|capital\s+reduction|reduction\s+(?:of|in)\s+(?:share\s+)?capital|"
+    r"consolidation\s+of\s+(?:equity\s+)?shares|share\s+consolidation", re.I)
+
+
+def reshapes(kind: str | None, subject: str | None) -> bool:
+    """Whether a corporate action changes what one share is."""
+    if kind in ("bonus", "split", "rights"):
+        return True
+    return kind == "other" and bool(RESHAPING_OTHER.search(subject or ""))
+
+
 def classify(subject: str) -> tuple[str, str | None]:
     """(kind, short detail) for a corporate-action subject line."""
     s = (subject or "").strip()
@@ -77,7 +122,9 @@ def classify(subject: str) -> tuple[str, str | None]:
         if rx.search(s):
             if kind == "dividend":
                 return kind, dividend_detail(s)
-            if kind in ("bonus", "rights", "split"):
+            if kind == "split":
+                return kind, split_detail(s)
+            if kind in ("bonus", "rights"):
                 m = RATIO.search(s)
                 return kind, (f"{m.group(1)}:{m.group(2)}" if m else None)
             return kind, None

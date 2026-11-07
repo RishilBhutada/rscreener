@@ -189,8 +189,9 @@ export default function CalendarPage() {
       .then(setPast)
       .catch((e) => setPastError(String(e.message ?? e)));
     setMine(new Set([...allWatched(), ...loadPortfolio().map((h) => h.symbol)]));
-    const d = new Date();
-    setToday(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+    // Today in INDIA: every event date is an Indian date, and a phone in
+    // another time zone moved the upcoming/past line by a day (review 4-Nov-2026).
+    setToday(new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }));
     // A link can open the page on a company: /calendar?q=TCS
     try { if (localStorage.getItem(BASIS_KEY) === "q") setBasis("q"); } catch { /* default: yearly */ }
     const fromUrl = new URLSearchParams(window.location.search).get("q");
@@ -242,6 +243,12 @@ export default function CalendarPage() {
     ...nextList.filter((e) => e.date <= win[6]),
   ] : [], [win, history, nextList, today, group, mineOnly, mine]); // eslint-disable-line react-hooks/exhaustive-deps
   const strip: [string, number][] = win.map((d) => [d, windowEvents.filter((e) => e.date === d).length]);
+  // A day before today is only counted once its source has arrived: the last
+  // few days come from calendar.json (from recent_from on), older ones only
+  // from calendar-past.json. Until then the strip shows "…" (or "–" if that
+  // file failed), never a 0 that reads as "nothing happened".
+  const recentFrom = next?.recent ? next.recent_from ?? "" : "";
+  const dayKnown = (d: string) => d >= today || !!past || (!!recentFrom && d >= recentFrom);
   const stripOn = when === "next" && !searching && win.length === 7;
   const pickedDay = stripOn ? (day && win.includes(day) ? day : today) : null;
   const nextShown = pickedDay ? windowEvents.filter((e) => e.date === pickedDay) : nextList;
@@ -343,9 +350,9 @@ export default function CalendarPage() {
                     </span>
                     <span className={`text-[14px] font-semibold tabular-nums ${on ? "text-[var(--accent-ink)]" : "text-[var(--ink)]"}`}>{dt.getDate()}</span>
                     <span className="h-7 flex items-end mt-0.5" aria-hidden="true">
-                      <span className="w-3.5 rounded-sm" style={{ height: `${c ? Math.max(3, (c / top) * 28) : 2}px`, background: on ? "var(--accent)" : "var(--line2)" }} />
+                      <span className="w-3.5 rounded-sm" style={{ height: `${c && dayKnown(d) ? Math.max(3, (c / top) * 28) : 2}px`, background: on ? "var(--accent)" : "var(--line2)" }} />
                     </span>
-                    <span className="text-[10.5px] tabular-nums text-[var(--ink3)]">{c}</span>
+                    <span className="text-[10.5px] tabular-nums text-[var(--ink3)]">{dayKnown(d) ? c : pastError ? "–" : "…"}</span>
                   </button>
                 );
               })}
@@ -372,7 +379,12 @@ export default function CalendarPage() {
             {s.title && (
               <h2 className="pt-2 text-[13px] font-bold">{s.title} <span className="font-normal text-[var(--ink3)]">· {s.total.toLocaleString("en-IN")}</span></h2>
             )}
-            {s.total === 0 && (
+            {s.total === 0 && pickedDay && !searching && !dayKnown(pickedDay) && (
+              <p className={`py-6 text-center text-[13px] ${pastError ? "text-[var(--neg)]" : "text-[var(--ink3)]"}`}>
+                {pastError ? `This day's past events did not load (${pastError}).` : "Loading this day…"}
+              </p>
+            )}
+            {s.total === 0 && !(pickedDay && !searching && !dayKnown(pickedDay)) && (
               <p className="py-6 text-center text-[13px] text-[var(--ink3)]">
                 Nothing{searching ? ` for “${q.trim()}”` : ""}{mineOnly ? " in your stocks" : ""}{group !== "all" ? " of this type" : ""}{pickedDay && !searching ? " on this day" : (searching ? s.title === "Coming up" : when === "next") ? " coming up" : " in the past year"}
               </p>

@@ -25,7 +25,7 @@ export default function PullToRefresh() {
   useEffect(() => {
     const skip = (t: EventTarget | null) => {
       const el = t as Element | null;
-      return !!el?.closest?.("svg.touch-none, [role='dialog'], input, textarea, select, [data-no-pull]");
+      return !!el?.closest?.(".touch-none, canvas, [role='dialog'], input, textarea, select, [data-no-pull]");
     };
     const down = (e: TouchEvent) => {
       if (e.touches.length !== 1 || window.scrollY > 0 || skip(e.target)) { start.current = null; return; }

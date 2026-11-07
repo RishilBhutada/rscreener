@@ -164,7 +164,9 @@ def main() -> None:
         days = [day_no(r[0]) for r in rows]
         closes = [r[4] for r in rows]
         ld, close = days[-1], closes[-1]
-        prev = closes[-2] if len(closes) > 1 else None
+        # The previous SESSION's close: after a day the file could not be read,
+        # the stored close before is two sessions back (review 4-Nov-2026).
+        prev = closes[-2] if len(closes) > 1 and days[-1] - days[-2] <= 5 else None
         year = [r for r in rows if day_no(r[0]) >= ld - 365]
         hi52 = max(r[2] or r[4] for r in year)
         lo52 = min(r[3] or r[4] for r in year)

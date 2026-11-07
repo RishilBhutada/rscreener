@@ -112,12 +112,15 @@ def quarter_growth(trends: dict[str, dict]) -> dict[str, dict]:
         # The quarter's own figures (Rs crore), for the peer table's "Sales
         # Qtr" and "NP Qtr" columns.
         res: dict[str, float | None] = {"qtr_sales": rev[i], "qtr_profit": pat[i]}
+        # Consolidated against standalone compares different sets of companies.
+        basis = q.get("basis") or [None] * len(per)
+        same = lambda a, b: not (basis[a] and basis[b] and basis[a] != basis[b])  # noqa: E731
         year_ago = f"{int(p[:4]) - 1}{p[4:]}"
-        if year_ago in per:
+        if year_ago in per and same(i, per.index(year_ago)):
             j = per.index(year_ago)
             res["qtr_sales_yoy"] = _growth(rev[i], rev[j])
             res["qtr_profit_yoy"] = _growth(pat[i], pat[j])
-        if i > 0 and (date.fromisoformat(p) - date.fromisoformat(per[i - 1])).days <= 100:
+        if i > 0 and same(i, i - 1) and (date.fromisoformat(p) - date.fromisoformat(per[i - 1])).days <= 100:
             res["qtr_sales_qoq"] = _growth(rev[i], rev[i - 1])
             res["qtr_profit_qoq"] = _growth(pat[i], pat[i - 1])
         res = {k: x for k, x in res.items() if x is not None}
@@ -202,6 +205,8 @@ def piotroski(con: sqlite3.Connection) -> dict[str, dict]:
     for s, pe, item, v in rows:
         by.setdefault(s, {}).setdefault(str(pe)[:10], {})[item] = float(v)
     cutoff = (date.today() - timedelta(days=730)).isoformat()
+    from trend_lib import adj_factor, split_factors
+    splits = split_factors(con)
     out: dict[str, dict] = {}
     for s, years in by.items():
         def get(y: dict, key: str) -> float | None:
@@ -219,10 +224,19 @@ def piotroski(con: sqlite3.Connection) -> dict[str, dict]:
             continue
         (ni, ni0), (rev, rev0), (gp, gp0), (ta, ta0) = v["ni"], v["rev"], v["gp"], v["ta"]
         (ca, ca0), (cl, cl0), (sh, sh0) = v["ca"], v["cl"], v["sh"]
+        # Debt missing in BOTH years is a debt-free company; missing in one
+        # year only is a gap in the data, and reading it as zero scored "debt
+        # went down" on nothing (review 4-Nov-2026) - no score then.
+        if (v["ltd"][0] is None) != (v["ltd"][1] is None):
+            continue
         ltd, ltd0 = (v["ltd"][0] or 0.0), (v["ltd"][1] or 0.0)
         cfo = v["cfo"][0]
         if not (ta and ta0 and rev and rev0 and cl and cl0):
             continue
+        # A split or bonus between the two year-ends multiplies the count with
+        # no money raised; last year's count is put on this year's base first.
+        ev = splits.get(s)
+        sh0 = sh0 * adj_factor(ev, full[-2]) / adj_factor(ev, full[-1])
         score = sum([
             ni / ta > 0,
             cfo > 0,

@@ -50,9 +50,21 @@ export function premClass(p: number | null | undefined): string {
   return p > 0 ? "text-[var(--warn-ink)]" : "text-[var(--chart-alt)]";
 }
 
-/** The premium as a sentence, for the ETF page's headline. */
-export function premSentence(p: number | null | undefined): string {
+/** Whether the newest premium is older than the newest NAV - a thin ETF, or
+ *  a day with a NAV but no trade, leaves the last same-day pair behind. */
+export function premIsStale(premDate: string | null | undefined, latest: string | null | undefined): boolean {
+  return !!premDate && !!latest && premDate < latest;
+}
+
+/** The premium as a sentence, for the ETF page's headline. `staleOn` is the
+ *  premium's day, written out, when it is not the latest: then it is told as
+ *  what was, not what is. */
+export function premSentence(p: number | null | undefined, staleOn?: string | null): string {
   if (p === null || p === undefined) return "No same-day NAV to compare with";
+  if (staleOn) {
+    if (Math.abs(p) < NEAR_NAV) return `In line with its NAV on ${staleOn}, the last day it traded with a NAV`;
+    return `${Math.abs(p).toFixed(1)}% ${p > 0 ? "above" : "below"} its NAV on ${staleOn}, the last day it traded with a NAV`;
+  }
   if (Math.abs(p) < NEAR_NAV) return "Trading in line with its NAV";
   return `Trading ${Math.abs(p).toFixed(1)}% ${p > 0 ? "above" : "below"} its NAV`;
 }

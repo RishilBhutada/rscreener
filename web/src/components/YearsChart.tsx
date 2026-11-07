@@ -210,7 +210,15 @@ async function loadCloses(file: string): Promise<{ weekly: Pt[]; monthly: Pt[] }
   if (!r.ok) return null;
   const d = await r.json() as { d?: Candle[]; w?: Candle[]; m?: Candle[] };
   const byWeek = new Map<number, [number, number]>();
-  for (const c of [...(d.w ?? []), ...(d.d ?? [])]) {
+  // A weekly candle is dated its Monday but closes on the week's last day, so
+  // it is placed on the Friday: dated Monday, a week running over New Year put
+  // an early-January price at the end of December, and each year's return was
+  // measured from the wrong close. Daily candles, later in the list, replace
+  // their week's entry with the real last day.
+  for (const c of d.w ?? []) {
+    if (typeof c[4] === "number" && c[4] > 0) byWeek.set(Math.floor((c[0] + 3) / 7), [c[0] + 4, c[4]]);
+  }
+  for (const c of d.d ?? []) {
     if (typeof c[4] === "number" && c[4] > 0) byWeek.set(Math.floor((c[0] + 3) / 7), [c[0], c[4]]);
   }
   const weekly = [...byWeek.values()].sort((a, b) => a[0] - b[0]).map(([day, v]) => [isoOf(day), v] as Pt);
@@ -222,8 +230,11 @@ async function loadCloses(file: string): Promise<{ weekly: Pt[]; monthly: Pt[] }
  *  `files` are tried in order; the first with two years of closes is used. */
 export function YearsSwitch({ files, children }: { files: string[]; children: import("react").ReactNode }) {
   const [view, setView] = useState<"chart" | "years">("chart");
-  const [prices, setPrices] = useState<{ weekly: Pt[]; monthly: Pt[] } | null | undefined>(undefined);
   const key = files.join("|");
+  // Kept with the files they came from: moving to a peer ETF keeps this
+  // component, and the previous ETF's years showed under the new name.
+  const [loaded, setLoaded] = useState<{ key: string; prices: { weekly: Pt[]; monthly: Pt[] } | null } | null>(null);
+  const prices = loaded && loaded.key === key ? loaded.prices : undefined;
   useEffect(() => {
     if (view !== "years" || prices !== undefined) return;
     let live = true;
@@ -231,10 +242,10 @@ export function YearsSwitch({ files, children }: { files: string[]; children: im
       for (const f of key.split("|").filter(Boolean)) {
         try {
           const got = await loadCloses(f);
-          if (got && (got.weekly.length > 60 || got.monthly.length > 24)) { if (live) setPrices(got); return; }
+          if (got && (got.weekly.length > 60 || got.monthly.length > 24)) { if (live) setLoaded({ key, prices: got }); return; }
         } catch { /* next file */ }
       }
-      if (live) setPrices(null);
+      if (live) setLoaded({ key, prices: null });
     })();
     return () => { live = false; };
   }, [view, prices, key]);

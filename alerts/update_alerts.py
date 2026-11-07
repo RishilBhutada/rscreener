@@ -8,8 +8,11 @@ apart from the rest of NSE's announcements). Run by the news watcher
 because GitHub drops most of this repository's timed runs.
 
 One push per company per quarter: each push carries the tag
-rs-upd-<symbol>-<quarter end>, and the topic's messages of the last day and a
-bit are read before sending, so twenty-minute runs never repeat one. Facts
+rs-upd-<symbol>-<quarter end>, and the topic's recent messages are read before
+sending, so twenty-minute runs never repeat one. ntfy.sh keeps messages about
+twelve hours, so only updates filed in the last WINDOW_H hours are considered -
+an older one could no longer be checked and would be sent again. If the topic
+cannot be read, nothing is sent that run. Facts
 only: the time, the subject line, the PDF. The owner's study (17-Oct-2026)
 found the share's move on an update day did not tell which way the results
 day would go; the push says so rather than inviting a guess.
@@ -19,8 +22,6 @@ account (account_list.py) - the same list every other alert uses.
 
 Usage:  python alerts/update_alerts.py     (NTFY_TOPIC unset = print only)
 """
-import json
-import os
 import re
 import sys
 from datetime import datetime, timedelta, timezone
@@ -32,33 +33,36 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pipeline"))
 import business_updates  # noqa: E402
 import nse_session  # noqa: E402
 from account_list import alert_symbols  # noqa: E402
+from ntfy_lib import WINDOW_H, post, sent_tags  # noqa: E402
 
 IST = timezone(timedelta(hours=5, minutes=30))
-TOPIC = os.environ.get("NTFY_TOPIC", "")
 DAY = nse_session.HOME + "/api/corporate-announcements?index=equities&from_date={d:%d-%m-%Y}&to_date={d:%d-%m-%Y}"
 DOCS = "https://nsearchives.nseindia.com/corporate/"
-
-
-def sent_keys() -> set[str]:
-    """Update tags on the topic's messages of the last day and a bit."""
-    if not TOPIC:
-        return set()
-    try:
-        r = requests.get(f"https://ntfy.sh/{TOPIC}/json", params={"poll": "1", "since": "30h"}, timeout=30)
-    except requests.RequestException:
-        return set()
-    keys = set()
-    for line in r.text.splitlines():
-        try:
-            keys.update(t for t in json.loads(line).get("tags") or [] if t.startswith("rs-upd-"))
-        except ValueError:
-            continue
-    return keys
 
 
 def clock(hms: str) -> str:
     h, m = int(hms[:2]), hms[3:5]
     return f"{h % 12 or 12}:{m} {'am' if h < 12 else 'pm'}"
+
+
+def tag(sym: str, qe: str) -> str:
+    """The tag that marks a company's update for a quarter as pushed."""
+    return "rs-upd-" + re.sub(r"[^A-Za-z0-9]", "", sym) + "-" + qe
+
+
+def push(sym: str, qe: str, day: str, at: str, doc: str, subject: str, extra_tags: str = "") -> bool:
+    """One business-update push. Also used by alerts/check_announcements.py
+    when this script has not pushed the update (it runs only inside the news
+    watcher); the same tag then stops either script sending it again."""
+    q = business_updates.quarter_label(datetime.strptime(qe, "%Y-%m-%d").date())
+    url = doc if doc.startswith("http") else DOCS + doc
+    title = f"{sym}: {q} business update"
+    # No database here to check the results day against, so the push
+    # never claims "before its results"; the calendar does that check.
+    body = (f"Out {clock(at)} IST. {subject[:220]}\n"
+            "Past update-day moves did not tell which way results day would go.")
+    tags = f"newspaper,{tag(sym, qe)}" + (f",{extra_tags}" if extra_tags else "")
+    return post(title, body, tags=tags, click=url)
 
 
 def main() -> None:
@@ -84,25 +88,24 @@ def main() -> None:
             print(f"updates: NSE {type(e).__name__} for {d} - next run")
     found = business_updates.found(rows)
     mine = {k: v for k, v in found.items() if k[0] in watch}
-    sent = sent_keys()
+    sent = sent_tags("rs-upd-")
+    if sent is None:
+        print("updates: ntfy topic unreadable - nothing sent, next run")
+        return
+    oldest = now - timedelta(hours=WINDOW_H)
     pushed = 0
     for (sym, qe), (day, at, doc, subject) in sorted(mine.items(), key=lambda x: x[1][:2]):
-        key = "rs-upd-" + re.sub(r"[^A-Za-z0-9]", "", sym) + "-" + qe
+        key = tag(sym, qe)
         if key in sent:
             continue
-        q = business_updates.quarter_label(datetime.strptime(qe, "%Y-%m-%d").date())
-        url = doc if doc.startswith("http") else DOCS + doc
-        title = f"{sym}: {q} business update"
-        # No database here to check the results day against, so the push
-        # never claims "before its results"; the calendar does that check.
-        body = (f"Out {clock(at)} IST. {subject[:220]}\n"
-                "Past update-day moves did not tell which way results day would go.")
-        if not TOPIC:
-            print(f"(no NTFY_TOPIC) would push: {title} | {body} | {url}")
-        else:
-            requests.post(f"https://ntfy.sh/{TOPIC}", data=body.encode("utf-8"), timeout=15,
-                          headers={"Title": title.encode("utf-8"), "Tags": f"newspaper,{key}", "Click": url})
-        pushed += 1
+        try:
+            if datetime.strptime(f"{day} {at}", "%Y-%m-%d %H:%M:%S").replace(tzinfo=IST) < oldest:
+                continue        # older than ntfy remembers: could no longer tell if it was sent
+        except ValueError:
+            continue
+        if push(sym, qe, day, at, doc, subject):
+            sent.add(key)
+            pushed += 1
     print(f"updates: {len(found)} business updates on NSE today, {len(mine)} for the alert list, {pushed} pushed")
 
 

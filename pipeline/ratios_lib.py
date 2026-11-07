@@ -70,28 +70,36 @@ def derived_roe(con: sqlite3.Connection) -> dict[str, float]:
     """
     if not con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='statements'").fetchone():
         return {}
-    ni: dict[str, float] = {}
-    for sym, _p, v in con.execute(
+    from datetime import date, timedelta
+    ni: dict[str, tuple[str, float]] = {}
+    for sym, p, v in con.execute(
         """SELECT symbol, period_end, value FROM statements
            WHERE stmt_type='income' AND item='Net Income Common Stockholders'
              AND period_type='annual' AND value IS NOT NULL
            ORDER BY symbol, period_end"""
     ):
-        ni[sym] = v                                  # ordered by date, so last wins
-    eq: dict[str, list[float]] = {}
-    for sym, _p, v in con.execute(
+        ni[sym] = (str(p)[:10], v)                   # ordered by date, so last wins
+    eq: dict[str, list[tuple[str, float]]] = {}
+    for sym, p, v in con.execute(
         """SELECT symbol, period_end, value FROM statements
            WHERE stmt_type='balance' AND item='Stockholders Equity'
              AND period_type='annual' AND value IS NOT NULL
            ORDER BY symbol, period_end"""
     ):
-        eq.setdefault(sym, []).append(v)
+        eq.setdefault(sym, []).append((str(p)[:10], v))
+    # The profit's year must be the closing-equity year, the opening equity the
+    # year before it, and the year recent - else a 2026 profit was divided by
+    # 2022-23 equity and published as today's ROE.
+    cutoff = (date.today() - timedelta(days=730)).isoformat()
     out: dict[str, float] = {}
-    for sym, profit in ni.items():
+    for sym, (p_end, profit) in ni.items():
         years = eq.get(sym, [])
-        if len(years) < 2:
+        if len(years) < 2 or years[-1][0] != p_end or p_end < cutoff:
             continue
-        avg = (years[-1] + years[-2]) / 2
+        gap = (date.fromisoformat(years[-1][0]) - date.fromisoformat(years[-2][0])).days
+        if not 300 <= gap <= 430:
+            continue
+        avg = (years[-1][1] + years[-2][1]) / 2
         # Negative equity makes the ratio meaningless rather than merely large:
         # a loss over negative equity reads as a healthy positive return. Those
         # companies keep their dash.

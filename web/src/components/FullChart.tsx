@@ -17,6 +17,7 @@ import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { useBackClose } from "@/lib/backclose";
 import { readPick, writePick, type ChartPick } from "@/lib/chartpick";
 import ChartPresets from "@/components/ChartPresets";
+import { fourInRow } from "@/lib/ttm";
 import {
   workingFor, growth, growthText, PE_WINDOWS, CA_LABEL, CA_ORDER, Q_LABEL,
   type ChartBand, type ChartTrendQ, type Quarter, type CorpAction, type Growth, type Working,
@@ -978,18 +979,21 @@ export default function FullChart({ symbol }: { symbol: string }) {
   // Hold a view's name (or right-click it) to lay it over the chart on screen;
   // tap to switch. The company chart's gesture, the same way.
   const holdTimer = useRef<number | null>(null);
-  const firedAt = useRef(0), downAt = useRef(0);
+  // Set when a finger HOLD fires, so the click its release makes is not also
+  // taken as a tap. Keyboard Enter/Space never sets it, so it always works.
+  const swallow = useRef(false);
   const stopHold = () => { if (holdTimer.current) { clearTimeout(holdTimer.current); holdTimer.current = null; } };
   const viewOf = (e: React.SyntheticEvent) => (e.target as HTMLElement).closest<HTMLElement>("[data-view]")?.dataset.view as View | undefined;
   const tabDown = (e: React.PointerEvent) => {
     const v = viewOf(e);
-    stopHold(); downAt.current = Date.now();
-    if (v) holdTimer.current = window.setTimeout(() => { firedAt.current = Date.now(); holdTimer.current = null; setHeld(v); }, 480);
+    stopHold(); swallow.current = false;
+    if (v) holdTimer.current = window.setTimeout(() => { swallow.current = true; holdTimer.current = null; setHeld(v); }, 480);
   };
-  const tabMenu = (e: React.MouseEvent) => { const v = viewOf(e); if (v) { e.preventDefault(); stopHold(); firedAt.current = Date.now(); setHeld(v); } };
+  const tabMenu = (e: React.MouseEvent) => { const v = viewOf(e); if (v) { e.preventDefault(); stopHold(); setHeld(v); } };
   const tabClick = (e: React.MouseEvent) => {
     const v = viewOf(e);
-    if (!v || firedAt.current >= downAt.current) return; // the click that ends a hold
+    if (swallow.current) { swallow.current = false; return; } // the click that ends a hold
+    if (!v) return;
     setHeld(null); pickView(v);
   };
 
@@ -1245,7 +1249,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
       if (!tq?.ebitda) { chart.remove(); chartRef.current = null; return; }
       keyWin = "ebitda";
       const qd = tq.periods.map(dayOf);
-      const eb = tq.ebitda.map((v, i) => (v === null || v === undefined ? null : v + (tq.other_income?.[i] ?? 0)));
+      const eb = tq.ebitda_oi ?? tq.ebitda.map((v, i) => (v === null || v === undefined ? null : v + (tq.other_income?.[i] ?? 0)));
       const rows = file.w?.length ? file.w : file.d?.length ? file.d : file.m ?? [];
       if (!rows.length) { chart.remove(); chartRef.current = null; return; }
       const pdays = rows.map((r) => r[0]);
@@ -1256,7 +1260,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
       });
       pr.setData(rows.map((r) => ({ time: toTime(r[0]), value: r[4] })));
       const ttm4 = qd.map((_, i) => {
-        if (i < 3) return null;
+        if (!fourInRow(tq.periods, i, tq.basis)) return null;
         const w = eb.slice(i - 3, i + 1);
         return w.every((x) => x !== null && x !== undefined) ? (w as number[]).reduce((a, b) => a + b, 0) : null;
       });
@@ -1399,6 +1403,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
         const ttm = (arr?: (number | null)[]) => {
           if (!arr) return;
           for (let i = 3; i < periods.length; i++) {
+            if (!fourInRow(periods, i, tq.basis)) continue;
             const w = arr.slice(i - 3, i + 1);
             if (w.every((x) => x !== null && x !== undefined)) bars.push({ day: dayOf(periods[i]), v: (w as number[]).reduce((a, b) => a + b, 0) });
           }
@@ -1501,9 +1506,9 @@ export default function FullChart({ symbol }: { symbol: string }) {
                 lines.push({ k, label, days: qd, vals: tq[k] ?? [], f: (x) => `${x.toFixed(1)}%`, scale: "pct", curved: true });
               }
             } else if (tq.ebitda) {
-              const eb = tq.ebitda.map((v, i) => (v === null || v === undefined ? null : v + (tq.other_income?.[i] ?? 0)));
+              const eb = tq.ebitda_oi ?? tq.ebitda.map((v, i) => (v === null || v === undefined ? null : v + (tq.other_income?.[i] ?? 0)));
               const t4 = qd.map((_, i) => {
-                const w = i >= 3 ? eb.slice(i - 3, i + 1) : [];
+                const w = fourInRow(tq.periods, i, tq.basis) ? eb.slice(i - 3, i + 1) : [];
                 return w.length === 4 && w.every((x) => x !== null && x !== undefined) ? (w as number[]).reduce((a, b) => a + b, 0) : null;
               });
               const mids = quarterMids(qd, anchorDays);

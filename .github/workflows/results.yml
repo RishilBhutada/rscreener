@@ -54,6 +54,9 @@ jobs:
         run: |
           mkdir -p data site web/public/companies
           gh release download data-db --pattern rscreener.db.gz --dir data
+          # Kept as downloaded: before saving, pipeline/merge_newest.sh takes in
+          # whatever a nightly or refetch stored meanwhile instead of overwriting it.
+          cp data/rscreener.db.gz "$RUNNER_TEMP/rscreener-base.db.gz"
           gunzip -f data/rscreener.db.gz
           RUN=$(python pipeline/live_site.py)
           echo "run=$RUN" >> "$GITHUB_OUTPUT"
@@ -100,6 +103,13 @@ jobs:
             gh run download "$NOW" -n github-pages -D base
             tar -xf base/artifact.tar -C site
             rm -rf base
+            # The newer site's data.json, with the reporting companies' rows
+            # patched in again - copying this run's own copy over it would put
+            # every other company back on the previous publish's figures.
+            cp site/data.json web/public/data.json
+            if [ -s data/just_reported_results.txt ]; then
+              python pipeline/export_json.py --symbols @data/just_reported_results.txt
+            fi
           fi
           cp web/public/calendar.json web/public/calendar-past.json web/public/data.json site/
           n=$(find web/public/companies -maxdepth 1 -name '*.json' | tee /dev/stderr | wc -l)
@@ -143,10 +153,14 @@ jobs:
           if [ "$SIZE" -lt 100000000 ]; then
             echo "database is only $SIZE bytes - refusing to overwrite the stored copy"; exit 0
           fi
+          # A nightly or refetch may have stored the database while this ran
+          # (different concurrency groups): take its work in, don't overwrite it.
+          bash pipeline/merge_newest.sh rscreener.db.gz data/rscreener.db "$RUNNER_TEMP/rscreener-base.db.gz"
           gzip -c data/rscreener.db > rscreener.db.gz
           ok=0
           for attempt in 1 2 3; do
-            if gh release upload data-db rscreener.db.gz --clobber; then ok=1; break; fi
+            # never leaves the release without a copy (pipeline/store_db.sh)
+            if bash pipeline/store_db.sh rscreener.db.gz; then ok=1; break; fi
             echo "upload attempt $attempt failed; retrying in 30s"
             sleep 30
           done

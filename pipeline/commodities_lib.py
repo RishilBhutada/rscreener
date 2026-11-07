@@ -13,7 +13,8 @@ where FACTOR turns the world unit into the MCX quoted amount (troy ounces into
 10 g, pounds into kg...). What is left between MCX and that number is import
 duty, local supply and demand, and the hour between the two closes.
 """
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 TROY_OZ_G = 31.1034768
 LB_KG = 0.45359237
@@ -164,3 +165,49 @@ def world_front(root: str) -> str | None:
     """Yahoo's rolling front-month series for the root - the long view."""
     w = WORLD.get(root)
     return f"{w['code']}=F" if w else None
+
+
+def back_adjust(days: list[tuple[tuple, float | None]]) -> list[tuple]:
+    """A continuous front-month series in which every day's move is ONE
+    contract's own move, as export_gold_json.front_series does for gold.
+
+    `days` is [(bar, prev)] oldest first: bar = (date, open, high, low, close,
+    volume, oi) of that day's front contract, prev = that same contract's
+    previous traded close (None if it has none). The newest close stays the
+    real price; earlier bars are scaled so the roll from one contract to the
+    next - the carry between them - is not drawn as a day's move. With no
+    previous close the move cannot be told, so none is invented."""
+    if not days:
+        return []
+    out = [days[-1][0]]
+    level = days[-1][0][4]                       # adjusted close of the newer day
+    for i in range(len(days) - 1, 0, -1):
+        bar, prev = days[i]
+        older = days[i - 1][0]
+        if prev:
+            level = level * prev / bar[4]
+        f = level / older[4] if older[4] else 1.0
+        d, o, h, lo, c, v, oi = older
+        out.append((d, *(None if x is None else x * f for x in (o, h, lo, c)), v, oi))
+    out.reverse()
+    return out
+
+
+NY = ZoneInfo("America/New_York")
+
+
+def futures_day(ts: int) -> str:
+    """The New York trading day a COMEX/NYMEX daily bar belongs to.
+
+    Yahoo stamps a futures session near its start - the evening before, in
+    New York - and the two scripts that stored COMEX gold dated that stamp
+    differently (exchange clock against Indian date), so the stored series
+    had 158 Sunday rows, repeated closes and a one-day shift that came and
+    went with US daylight saving (review 4-Nov-2026). Twelve hours past the
+    stamp is inside the trading day whether the stamp is the 6 pm open or
+    midnight, in summer time or winter."""
+    return (datetime.fromtimestamp(ts, timezone.utc) + timedelta(hours=12)).astimezone(NY).date().isoformat()
+
+
+def is_futures(ticker: str) -> bool:
+    return ticker.endswith(("=F", ".CMX", ".NYM"))

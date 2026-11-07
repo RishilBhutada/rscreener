@@ -9,7 +9,9 @@ export function prefetchCompany(sym: string | null | undefined) {
   if (!sym || asked.has(sym) || sym.startsWith("^")) return;
   asked.add(sym);
   try {
-    void fetch(`${BASE}/companies/${encodeURIComponent(sym)}.json`, { priority: "low" } as RequestInit).catch(() => asked.delete(sym));
+    // Built exactly as the company page builds it (app/company/page.tsx) - a
+    // differently encoded address is a different cache entry.
+    void fetch(`${BASE}/companies/${sym}.json`, { priority: "low" } as RequestInit).catch(() => asked.delete(sym));
   } catch { asked.delete(sym); }
 }
 

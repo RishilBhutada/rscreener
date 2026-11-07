@@ -75,6 +75,8 @@ function fmtVal(key: string, v: unknown, by: ByKey = COMPANY_BY): string {
   if (typeof v !== "number" || !Number.isFinite(v)) return "—";
   const crore = (cr: number) => (Math.abs(cr) >= 1e5 ? `₹${(cr / 1e5).toFixed(2)}L Cr` : `₹${Math.round(cr).toLocaleString("en-IN")} Cr`);
   if (key === "mcap") return crore(v);
+  // Already in crore (qtr_sales, qtr_profit): they printed as bare numbers (review 4-Nov-2026).
+  if (by.get(key)?.unit === "₹ Cr") return crore(v);
   if (MONEY.has(key)) return crore(v / 1e7);
   const u = by.get(key)?.unit ?? "";
   if (u === "₹" || ["wk52_high", "wk52_low", "book_value"].includes(key)) return `₹${v.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
@@ -399,16 +401,20 @@ function ScreensInner() {
 
   // The spread of the figure being set in the value sheet: every value across
   // the rows, so the sheet can draw where the cut-off falls (Step 4, B's bars).
+  // Within the chosen sectors, like the "N pass" beside each filter: the two
+  // counts used to disagree whenever a sector was picked.
   const spread = useMemo(() => {
     if (sheet?.kind !== "cond" || !rows) return null;
-    const vs = rows.map((r) => r[sheet.field]).filter((x): x is number => typeof x === "number" && Number.isFinite(x)).sort((a, b) => a - b);
+    const sec = sectors.length ? new Set(sectors) : null;
+    const pool = sec ? rows.filter((r) => sec.has(String(r.sector ?? ""))) : rows;
+    const vs = pool.map((r) => r[sheet.field]).filter((x): x is number => typeof x === "number" && Number.isFinite(x)).sort((a, b) => a - b);
     if (vs.length < 10) return null;
     const lo = vs[Math.floor(vs.length * 0.02)], hi = vs[Math.floor(vs.length * 0.98)];
     if (!(hi > lo)) return null;
     const n = 24, w = (hi - lo) / n, bins = new Array(n).fill(0);
     for (const v of vs) if (v >= lo && v <= hi) bins[Math.min(n - 1, Math.floor((v - lo) / w))]++;
     return { vs, lo, hi, w, bins };
-  }, [sheet, rows]);
+  }, [sheet, rows, sectors]);
 
   const pickList = useMemo(() => {
     const q = pickText.trim().toLowerCase();
@@ -593,7 +599,7 @@ function ScreensInner() {
                             {head(uni === "indices" ? "name" : "symbol", "Name", true)}
                             {head("price", "Price")}
                             {head("ret_1d", "Day")}
-                            {cols.map((f) => head(f, f === "mcap" ? "MCap" : labelOf(f, by)))}
+                            {cols.map((f) => head(f, f === "mcap" ? "MCap ₹" : labelOf(f, by)))}
                           </tr>
                         </thead>
                         <tbody>
@@ -615,7 +621,7 @@ function ScreensInner() {
                                   <span className={tone(chg)}>{chg === null ? "—" : `${chg > 0 ? "+" : chg < 0 ? "−" : ""}${Math.abs(chg).toFixed(1)}%`}</span>
                                 </td>
                                 {cols.map((f) => (
-                                  <td key={f} className="px-1.5 py-2 text-right text-[var(--ink2)] whitespace-nowrap">{f === "mcap" && typeof r[f] === "number" ? ((r[f] as number) >= 1e5 ? `${((r[f] as number) / 1e5).toFixed(2)}L` : Math.round(r[f] as number).toLocaleString("en-IN")) : fmtVal(f, r[f], by)}</td>
+                                  <td key={f} className="px-1.5 py-2 text-right text-[var(--ink2)] whitespace-nowrap">{f === "mcap" && typeof r[f] === "number" ? ((r[f] as number) >= 1e5 ? `${((r[f] as number) / 1e5).toFixed(2)}L Cr` : `${Math.round(r[f] as number).toLocaleString("en-IN")} Cr`) : fmtVal(f, r[f], by)}</td>
                                 ))}
                               </tr>
                             );
@@ -705,7 +711,7 @@ function ScreensInner() {
               className="rs-press flex-1 min-h-[42px] rounded-xl border border-[var(--line)] text-[13.5px] font-medium text-[var(--ink2)]">Link, CSV, formula</button>
           </div>
           {uni === "companies" && (
-            <a href={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/backtest?q=${encodeURIComponent(query)}`}
+            <a href={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/backtest?q=${encodeURIComponent(query)}${sectors.length ? `&sec=${encodeURIComponent(sectors.join(","))}` : ""}`}
               className="rs-press flex items-center justify-center min-h-[42px] rounded-xl border border-[var(--line)] text-[13.5px] font-medium text-[var(--ink2)]">Test this screen on history</a>
           )}
         </InfoDialog>

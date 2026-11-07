@@ -41,6 +41,16 @@ def issue_price_of(row: dict) -> float | None:
     return hi
 
 
+def split_factor(events: list[tuple[str, float]] | None, day: str) -> float:
+    """How many of today's shares one share on `day` became (splits and
+    bonuses after it multiplied together) - as trend_lib.adj_factor."""
+    f = 1.0
+    for d, r in events or []:
+        if d > day:
+            f *= r
+    return f
+
+
 def _norm_name(s: str) -> str:
     s = (s or "").lower()
     s = re.sub(r"\b(limited|ltd|private|pvt|india|ipo)\b", " ", s)
@@ -56,6 +66,11 @@ def listing_gains(con: sqlite3.Connection) -> dict[str, dict]:
         "SELECT symbol, company, listing_date, price_band, issue_price, security_type "
         "FROM ipos WHERE listing_date IS NOT NULL"
     ).fetchall()
+    splits: dict[str, list[tuple[str, float]]] = {}
+    if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='splits'").fetchone():
+        for s_, d_, r_ in con.execute("SELECT symbol, date, ratio FROM splits"):
+            if r_ and r_ > 0:
+                splits.setdefault(s_, []).append((d_, float(r_)))
     out: dict[str, dict] = {}
     for sym, company, listing, band, iprice, stype in rows:
         if stype and stype.upper() not in EQUITY_TYPES:
@@ -94,15 +109,19 @@ def listing_gains(con: sqlite3.Connection) -> dict[str, dict]:
             if reused:
                 rec["basis"] = "excluded: symbol reused"
             elif r and r[1]:
-                gain = (float(r[1]) / issue - 1) * 100
-                # Yahoo prices are split/bonus-adjusted but the issue price is not,
-                # so a later corporate action deflates the whole history and shows
-                # a listing "loss" no market ever produced. Worse than -60% in one
-                # session is an adjustment artifact, not a price move.
+                # Yahoo prices are split/bonus-adjusted but the issue price is
+                # not: a later 1:1 bonus halves the stored listing close. The
+                # close is put back on the listing day's own share basis with the
+                # split history (Yahoo files a bonus as a split). The -60% guard
+                # alone let a 1:1 bonus or 2:1 split through as a -50% listing
+                # "loss" (review 4-Nov-2026); it stays as a backstop for an
+                # event missing from the split history.
+                close = float(r[1]) * split_factor(splits.get(sym), listing)
+                gain = (close / issue - 1) * 100
                 if gain < -60:
                     rec["basis"] = "excluded: corporate-action adjusted"
                 else:
-                    rec["listing_close"] = round(float(r[1]), 2)
+                    rec["listing_close"] = round(close, 2)
                     rec["listing_gain_pct"] = round(gain, 2)
                     rec["basis"] = "daily"
                 rec["price_date"] = r[0]

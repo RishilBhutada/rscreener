@@ -24,10 +24,18 @@ export default function HoldingsScreens({ symbols, nameOf }: { symbols: string[]
   const [rows, setRows] = useState<Row[] | null>(null);
   const [screens] = useState<SavedScreen[]>(() => (typeof window === "undefined" ? [] : loadSaved()));
   const [open, setOpen] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
-    dataCache ??= fetch(`${BASE}/data.json`).then((r) => r.json()).then((d) => d.rows as Row[]);
+    dataCache ??= fetch(`${BASE}/data.json`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d) => d.rows as Row[]);
     let live = true;
-    dataCache.then((r) => { if (live) setRows(r); }).catch(() => { if (live) setRows([]); });
+    dataCache.then((r) => { if (live) setRows(r); }).catch(() => {
+      // Not kept: the next visit tries again rather than showing "none pass"
+      // from a download that never arrived.
+      dataCache = null;
+      if (live) setFailed(true);
+    });
     return () => { live = false; };
   }, []);
 
@@ -52,6 +60,11 @@ export default function HoldingsScreens({ symbols, nameOf }: { symbols: string[]
     });
   }, [rows, screens, symbols]);
 
+  // Holdings the company table does not hold (ETFs, unpriced BSE scrips) are
+  // not in any count; say how many, so the counts are not read as the whole
+  // portfolio (review 4-Nov-2026).
+  const notChecked = rows ? new Set(symbols).size - rows.filter((r) => symbols.includes(String(r.symbol))).length : 0;
+
   if (!screens.length) {
     return (
       <div className="py-8 text-center">
@@ -60,6 +73,7 @@ export default function HoldingsScreens({ symbols, nameOf }: { symbols: string[]
       </div>
     );
   }
+  if (failed) return <p className="py-6 text-sm text-[var(--ink3)]">Could not load today&apos;s figures. Pull down from the top to try again.</p>;
   if (!rows) return <p className="py-6 text-sm text-[var(--ink3)]">Checking holdings...</p>;
 
   const list = (title: string, syms: string[]) => syms.length ? (
@@ -75,6 +89,7 @@ export default function HoldingsScreens({ symbols, nameOf }: { symbols: string[]
     <div className="pt-2">
       <p className="text-[11px] text-[var(--ink3)] flex items-center gap-1 mb-2">
         Your holdings against each saved screen, on today&apos;s figures
+        {notChecked > 0 && <> · {notChecked} not checked (ETFs or not in the company data)</>}
         <InfoTip title="Holdings and screens">
           <p>Each saved screen is run on today&apos;s data and your holdings are sorted into those that pass, those that do not, and those missing a figure the screen needs.</p>
           <p>It shows where each holding stands against your own rules; what to do about it is yours to decide.</p>

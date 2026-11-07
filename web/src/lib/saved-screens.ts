@@ -10,6 +10,7 @@
  *  and screens synced from another device keep working. */
 
 import { Row, compile } from "./query";
+import { markSaved } from "./saved-at";
 
 const KEY = "rscreener_screens";
 
@@ -42,7 +43,10 @@ export function loadSaved(): SavedScreen[] {
 }
 
 export function storeSaved(list: SavedScreen[]): SavedScreen[] {
-  try { localStorage.setItem(KEY, JSON.stringify(list)); } catch { /* private mode or quota */ }
+  try {
+    localStorage.setItem(KEY, JSON.stringify(list));
+    markSaved(KEY);   // the copy saved last wins a sync (lib/merge-profile.ts)
+  } catch { /* private mode or quota */ }
   return list;
 }
 

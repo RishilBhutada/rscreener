@@ -94,10 +94,35 @@ const GROUPS: Section[] = [
   },
 ];
 
+/** Only well-formed sites survive: the value is synced to the account, so one
+ *  bad entry (a site with no name, a group that is not a list) used to throw
+ *  and blank this page on every device. Bad entries are dropped, not fatal. */
+function cleanSites(v: unknown): Site[] {
+  if (!Array.isArray(v)) return [];
+  return v.flatMap((x) => {
+    if (!x || typeof x !== "object") return [];
+    const { name, url, what } = x as Record<string, unknown>;
+    if (typeof name !== "string" || !name.trim() || typeof url !== "string" || !cleanUrl(url)) return [];
+    return [{ name, url, ...(typeof what === "string" ? { what } : {}) }];
+  });
+}
+
 function readCustom(): Custom {
   try {
     const v = JSON.parse(localStorage.getItem(KEY) ?? "null");
-    if (v && Array.isArray(v.sections) && v.extra && typeof v.extra === "object") return v as Custom;
+    if (v && typeof v === "object") {
+      const sections = (Array.isArray(v.sections) ? v.sections : []).flatMap((x: unknown) => {
+        if (!x || typeof x !== "object") return [];
+        const { id, title, sites } = x as Record<string, unknown>;
+        if (typeof id !== "string" || !id || typeof title !== "string") return [];
+        return [{ id, title, sites: cleanSites(sites) }];
+      });
+      const extra: Record<string, Site[]> = {};
+      if (v.extra && typeof v.extra === "object" && !Array.isArray(v.extra)) {
+        for (const [k, list] of Object.entries(v.extra as Record<string, unknown>)) extra[k] = cleanSites(list);
+      }
+      return { sections, extra };
+    }
   } catch { /* none yet */ }
   return { sections: [], extra: {} };
 }
@@ -112,12 +137,14 @@ function cleanUrl(raw: string): string | null {
   } catch { return null; }
 }
 
-/** A site's tile: its logo (the stored file, else the site's own icon, else
- *  its initials) above its name. Opens the site in a new tab. */
+/** A site's tile: its logo (the stored file) or else its initials, above its
+ *  name. Opens the site in a new tab. A site added by hand shows initials:
+ *  its icon used to be fetched in the browser straight from the site's
+ *  /favicon.ico on every visit, skipping the agreed logo route (robots.txt
+ *  first, then an icon service - pipeline/fetch_site_logos.py, run by hand). */
 function Tile({ s, onRemove }: { s: Site; onRemove?: () => void }) {
   const [broken, setBroken] = useState(false);
-  const host = (() => { try { return new URL(s.url).hostname; } catch { return ""; } })();
-  const src = s.logo ? `${BASE}/sites/${s.logo}.png` : host ? `https://${host}/favicon.ico` : "";
+  const src = s.logo ? `${BASE}/sites/${s.logo}.png` : "";
   const initials = s.name.replace(/[^A-Za-z0-9 ]/g, " ").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
   return (
     <div className="relative">

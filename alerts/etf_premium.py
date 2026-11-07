@@ -7,35 +7,31 @@ through the line pushes "now X% above NAV", falling back under pushes "back
 within X%". Only crossings - an ETF that sits above its line for a month sends
 one message, not thirty.
 
-Stateless, like check_announcements.py: the two days come from the data, so a
-re-run of the same night can repeat an alert but never lose one. Runs only on
-the scheduled nightly (see nightly.yml), once the day's NAVs are out. A data
-alert, not a signal - it says where the price is against what the ETF holds.
+Each crossing is sent once: alerts/etf_premium_state.json (committed by the
+nightly with the screen state) remembers the last crossing sent per ETF - its
+trading day and direction. Without it the nightly, which runs every day, sent a
+Friday crossing again on Saturday and Sunday, and on any day the next NAV was
+late (review 5-Nov-2026). A crossing is recorded only once ntfy accepted it, so
+a refused push is tried again the next night. Runs only on the scheduled
+nightly (see nightly.yml), once the day's NAVs are out. A data alert, not a
+signal - it says where the price is against what the ETF holds.
 """
 import json
-import os
 import sys
 from pathlib import Path
 
-import requests
+from ntfy_lib import post
 
 ROOT = Path(__file__).resolve().parents[1]
 ETF_DIR = ROOT / "web" / "public" / "etf"
+STATE = Path(__file__).with_name("etf_premium_state.json")
 SITE = "https://rishilbhutada.github.io/rscreener"
-TOPIC = os.environ.get("NTFY_TOPIC", "")
 
 
-def push(title: str, message: str, click: str, priority: str = "default") -> None:
-    if not TOPIC:
-        print(f"no NTFY_TOPIC set; would have pushed: {title} - {message}")
-        return
-    requests.post(
-        f"https://ntfy.sh/{TOPIC}",
-        data=message.encode("utf-8"),
-        # Header values must be plain ASCII: the rupee sign goes in the body.
-        headers={"Title": title, "Priority": priority, "Tags": "bar_chart", "Click": click},
-        timeout=15,
-    )
+def push(title: str, message: str, click: str, priority: str = "default") -> bool:
+    """True only when ntfy accepted it (ntfy_lib.post) - the old push never
+    looked at the answer, so a refused push counted as sent."""
+    return post(title, message, tags="bar_chart", click=click, priority=priority)
 
 
 def load_lines() -> dict[str, float]:
@@ -64,6 +60,10 @@ def last_two(doc: dict) -> list[tuple[int, float, float, float]]:
 def main() -> None:
     lines = load_lines()
     print(f"ETF premium lines: {lines}")
+    try:
+        state = json.loads(STATE.read_text(encoding="utf-8")) if STATE.exists() else {}
+    except ValueError:
+        state = {}
     sent = 0
     for sym, line in lines.items():
         f = ETF_DIR / f"{sym}.json"
@@ -73,18 +73,26 @@ def main() -> None:
         two = last_two(json.loads(f.read_text(encoding="utf-8")))
         if len(two) < 2:
             continue
-        (_, now, px, nav), (_, before, _, _) = two
+        (day, now, px, nav), (_, before, _, _) = two
         click = f"{SITE}/etf/?s={sym}"
-        if now >= line > before:
-            push(f"{sym}: {now:.1f}% above NAV",
-                 f"Price ₹{px:,.2f} against NAV ₹{nav:,.2f} - through your {line:g}% line (was {before:+.1f}%).", click)
-            sent += 1
-        elif before >= line > now:
-            push(f"{sym}: back within {line:g}% of NAV",
-                 f"Now {now:+.1f}% (was {before:+.1f}%). Price ₹{px:,.2f}, NAV ₹{nav:,.2f}.", click, "low")
-            sent += 1
+        up, down = now >= line > before, before >= line > now
+        key = f"{day}:{line:g}:{'up' if up else 'down'}"
+        if (up or down) and state.get(sym) == key:
+            print(f"  {sym}: crossing of day {day} already sent")
+            continue
+        ok = False
+        if up:
+            ok = push(f"{sym}: {now:.1f}% above NAV",
+                      f"Price ₹{px:,.2f} against NAV ₹{nav:,.2f} - through your {line:g}% line (was {before:+.1f}%).", click)
+        elif down:
+            ok = push(f"{sym}: back within {line:g}% of NAV",
+                      f"Now {now:+.1f}% (was {before:+.1f}%). Price ₹{px:,.2f}, NAV ₹{nav:,.2f}.", click, "low")
         else:
             print(f"  {sym}: {now:+.1f}% (was {before:+.1f}%), line {line:g}% - no crossing")
+        if ok:
+            sent += 1
+            state[sym] = key
+            STATE.write_text(json.dumps(state, indent=1, sort_keys=True), encoding="utf-8")
     print(f"ETF premium alerts sent: {sent}")
 
 

@@ -12,19 +12,20 @@ recorded silently. A data alert, not a signal: it says which companies now
 pass a filter the owner chose.
 """
 import json
-import os
 import re
 import sys
 from pathlib import Path
 from urllib.parse import quote
 
-import requests
+from ntfy_lib import post
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "web" / "public" / "data.json"
 STATE = Path(__file__).with_name("screen_state.json")
 SITE = "https://rishilbhutada.github.io/rscreener"
-TOPIC = os.environ.get("NTFY_TOPIC", "")
+# How many nights in a row a member may be kept on a missing figure before it
+# counts as having left.
+UNKNOWN_NIGHTS = 3
 
 # The screener's field aliases (web/src/lib/query.ts), the ones a hand-written
 # line is likely to use; any other name is read as the field itself.
@@ -36,18 +37,8 @@ ALIASES = {
 }
 
 
-def push(title: str, message: str, click: str, priority: str = "default") -> None:
-    if not TOPIC:
-        print(f"no NTFY_TOPIC set; would have pushed: {title} - {message}")
-        return
-    requests.post(
-        f"https://ntfy.sh/{TOPIC}",
-        data=message.encode("utf-8"),
-        # Header values must be plain ASCII.
-        headers={"Title": title.encode("ascii", "replace").decode(), "Priority": priority,
-                 "Tags": "mag", "Click": click},
-        timeout=15,
-    )
+def push(title: str, message: str, click: str, priority: str = "default") -> bool:
+    return post(title, message, tags="mag", click=click, priority=priority)
 
 
 # ── the query language, as web/src/lib/query.ts parses it ──
@@ -236,15 +227,40 @@ def main() -> None:
             print(f"  {name}: cannot read the query ({e})")
             continue
         sec = set(sectors)
-        now = sorted(r["symbol"] for r in rows if (not sec or r.get("sector") in sec) and test(tree, r) is True)
-        before = state.get(name, {}).get("symbols")
-        state[name] = {"asof": asof, "query": query, "symbols": now}
+        prev = state.get(name, {})
+        before = prev.get("symbols")
+        # Members are carried over a missing figure only while the screen is
+        # the one they passed: same query, same sectors. (A state saved
+        # before sectors were stored has none; it is taken as the same.)
+        same = prev.get("query") == query and prev.get("sectors", sectors) == sectors
+        had = set(before or []) if same else set()
+        streak = prev.get("unknown_nights", {}) if same else {}
+        now, unknown, nights = [], 0, {}
+        for r in rows:
+            if sec and r.get("sector") not in sec:
+                continue
+            res = test(tree, r)
+            sym = r["symbol"]
+            # A figure missing tonight is "unknown", not "fails": a member
+            # whose figure went blank stays a member rather than "leaving"
+            # tonight and "joining" again when the figure comes back - for
+            # UNKNOWN_NIGHTS nights at most, then it counts as gone.
+            if res is True:
+                now.append(sym)
+            elif res is None and sym in had and streak.get(sym, 0) < UNKNOWN_NIGHTS:
+                now.append(sym)
+                nights[sym] = streak.get(sym, 0) + 1
+                unknown += 1
+        now.sort()
+        new_state = {"asof": asof, "query": query, "sectors": sectors, "symbols": now, "unknown_nights": nights}
         if before is None:
+            state[name] = new_state
             print(f"  {name}: {len(now)} today - recorded, nothing to compare with yet")
             continue
         added = [s for s in now if s not in set(before)]
         removed = [s for s in before if s not in set(now)]
-        print(f"  {name}: {len(now)} today, +{len(added)} -{len(removed)}")
+        print(f"  {name}: {len(now)} today, +{len(added)} -{len(removed)}"
+              + (f", {unknown} kept on a missing figure" if unknown else ""))
         if added or removed:
             body = []
             if added:
@@ -252,8 +268,13 @@ def main() -> None:
             if removed:
                 body.append(f"Left: {names(removed)}")
             click = f"{SITE}/screens/?q={quote(query)}" + (f"&sec={quote(','.join(sectors))}" if sectors else "")
-            push(f"{name}: +{len(added)} / -{len(removed)}", "\n".join(body) + f"\n{len(now)} pass it now.", click)
+            if not push(f"{name}: +{len(added)} / -{len(removed)}", "\n".join(body) + f"\n{len(now)} pass it now.", click):
+                continue    # not delivered: keep last night's list, so tomorrow tells these changes again
             sent += 1
+        state[name] = new_state
+        # Saved after every screen: a failure further down cannot make the
+        # screens already told repeat themselves tomorrow.
+        STATE.write_text(json.dumps(state, indent=1, sort_keys=True), encoding="utf-8")
     STATE.write_text(json.dumps(state, indent=1, sort_keys=True), encoding="utf-8")
     print(f"screen alerts sent: {sent}")
 

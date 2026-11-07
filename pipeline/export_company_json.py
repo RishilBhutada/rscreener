@@ -17,7 +17,7 @@ import price_adjust
 import pandas as pd
 
 from export_json import freshen_prices
-from fetch_corporate_actions import dividend_detail
+from fetch_corporate_actions import dividend_detail, split_detail
 from trend_lib import adj_factor, build_trends, net_debt_series, ratio_bands, split_factors, standalone_tables
 import fund_units
 import business_updates
@@ -247,6 +247,7 @@ def piotroski(con) -> dict[str, dict]:
             return None
         return a / b
 
+    splits_all = split_factors(con)
     out: dict[str, dict] = {}
     for sym, periods in by.items():
         pers = sorted(periods)
@@ -271,6 +272,13 @@ def piotroski(con) -> dict[str, dict]:
         cr_c = div(cur.get("Current Assets"), cur.get("Current Liabilities"))
         cr_p = div(prev.get("Current Assets"), prev.get("Current Liabilities"))
         sh_c, sh_p = cur.get("Ordinary Shares Number"), prev.get("Ordinary Shares Number")
+        # Last year's count on this year's share base: a bonus or split
+        # multiplies the count with no money raised, and failed "Owners not
+        # diluted" as "+100% shares outstanding" (review 5-Nov-2026; the
+        # screener's own F-score had the same fix on 4-Nov).
+        if sh_p is not None:
+            ev_ = splits_all.get(sym)
+            sh_p = sh_p * adj_factor(ev_, pers[-2]) / adj_factor(ev_, pers[-1])
         gm_c = div(cur.get("Gross Profit"), cur.get("Total Revenue"))
         gm_p = div(prev.get("Gross Profit"), prev.get("Total Revenue"))
         at_c = div(cur.get("Total Revenue"), cur.get("Total Assets"))
@@ -496,6 +504,8 @@ def corporate_actions(con: sqlite3.Connection) -> dict[str, list[dict]]:
         if ex:
             if kind == "dividend" and subject:
                 detail = dividend_detail(subject) or detail
+            elif kind == "split" and subject:
+                detail = split_detail(subject) or detail   # stored splits had no ratio
             # A demerger the charts were adjusted for says so on its own marker -
             # a smooth line with a "Demerger" tag on it otherwise reads as a
             # contradiction.
@@ -547,6 +557,12 @@ def asfiled_table(trend: dict | None, announced: dict | None = None, payout: lis
         ("Other Cost %", trend.get("other_cost_pct"), "Expenses"),
         ("Operating Profit", trend.get("ebitda"), None),
         ("OPM %", trend.get("opm"), None),
+        # Operating profit plus other income, except where the filing's own
+        # operating profit already holds it (banks) - trend_lib._derive.
+        ("EBITDA", trend.get("ebitda_oi"), None),
+        ("EBITDA margin %", [round(e / r * 100, 2) if (e is not None and r) else None
+                             for e, r in zip(trend.get("ebitda_oi") or [], trend.get("revenue") or [])]
+                            if trend.get("ebitda_oi") else None, "EBITDA"),
         ("Other Income", trend.get("other_income"), None),
         ("Interest", trend.get("interest"), None),
         ("Depreciation", trend.get("depreciation"), None),
@@ -569,6 +585,10 @@ def asfiled_table(trend: dict | None, announced: dict | None = None, payout: lis
     out = {"periods": per, "items": items}
     if any(declared):
         out["declared"] = declared   # shown in brackets after each period
+    if any(trend.get("basis") or []):
+        # consolidated / standalone per period, so the page's TTM column never
+        # adds the two together (web/src/lib/ttm.ts)
+        out["basis"] = trend["basis"]
     return out
 
 
@@ -637,14 +657,21 @@ def cfo_ebitda(cash_flow: dict | None, annual: dict | None) -> None:
     arrived as cash. Matched by financial year (periods end on the same date)."""
     if not cash_flow or not annual or not annual.get("periods"):
         return
-    eb = dict(zip(annual["periods"], annual.get("ebitda") or []))
+    # Divided by the EBITDA the results table shows (operating profit plus
+    # other income), not operating profit alone; and only for a year filed on
+    # the consolidated basis, which is the basis of Yahoo's cash flow - a
+    # standalone year against group cash is two different businesses
+    # (review 5-Nov-2026).
+    ebs = annual.get("ebitda_oi") or annual.get("ebitda") or []
+    bases = annual.get("basis") or [None] * len(annual["periods"])
+    eb = {p_: e for p_, e, b in zip(annual["periods"], ebs, bases) if b != "standalone"}
     cfo = next((it for it in cash_flow.get("items", []) if it.get("label") == "Cash from Operations"), None)
     if not cfo:
         return
     vals = []
     for p_, v in zip(cash_flow.get("periods", []), cfo.get("values", [])):
         e = eb.get(str(p_)[:10])
-        vals.append(round(v / e * 100) if (v is not None and e) else None)
+        vals.append(round(v / e * 100) if (v is not None and e and e > 0) else None)
     if any(v is not None for v in vals):
         cash_flow["items"].append({"label": "CFO / EBITDA %", "values": vals})
 

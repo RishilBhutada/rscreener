@@ -18,7 +18,8 @@ export function saveNote(symbol: string, text: string): void {
   const all = read<Record<string, string>>(NOTES_KEY, {});
   if (text.trim()) all[symbol] = text;
   else delete all[symbol];
-  localStorage.setItem(NOTES_KEY, JSON.stringify(all));
+  // Private mode or a full quota throws; the page must not break over a note.
+  try { localStorage.setItem(NOTES_KEY, JSON.stringify(all)); } catch { /* not saved */ }
 }
 
 /** Companies looked at recently, newest first.

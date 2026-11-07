@@ -20,40 +20,45 @@ Facts from the filings only - growth figures, never an opinion on them.
 
 Usage:  python alerts/results_alerts.py     (NTFY_TOPIC unset = print only)
 """
-import os
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import requests
-
 from account_list import alert_symbols
+from ntfy_lib import post
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
 SITE = "https://rishilbhutada.github.io/rscreener"
 NSE_DOCS = "https://nsearchives.nseindia.com/corporate/"
 IST = timezone(timedelta(hours=5, minutes=30))
-TOPIC = os.environ.get("NTFY_TOPIC", "")
 
 
 def watchlist() -> list[str]:
     return alert_symbols()
 
 
-def push(title: str, message: str, click: str) -> None:
-    if not TOPIC:
-        print(f"(no NTFY_TOPIC) would push: {title} | {message}")
-        return
-    requests.post(f"https://ntfy.sh/{TOPIC}", data=message.encode("utf-8"), timeout=15,
-                  headers={"Title": title.encode("utf-8"), "Tags": "bar_chart", "Click": click})
+def push(title: str, message: str, click: str) -> bool:
+    return post(title, message, tags="bar_chart", click=click)
 
 
 def quarter_before(day: str) -> str:
     """The quarter a results announcement on `day` reports: the last to end before it."""
     y, m = int(day[:4]), int(day[5:7])
     return [f"{y - 1}-12-31", f"{y}-03-31", f"{y}-06-30", f"{y}-09-30"][(m - 1) // 3]
+
+
+def quarter_reported(con, sym: str, day: str) -> str:
+    """The quarter whose results came out on `day`: the one NSE's filing record
+    dates to that day where it has one (a late filer's March results in July
+    are March results), else the last quarter to end before the day."""
+    try:
+        hit = con.execute("SELECT MAX(period_end) FROM filing_dates WHERE symbol=? AND announced_on=?",
+                          (sym, day)).fetchone()
+    except sqlite3.OperationalError:
+        hit = None
+    return hit[0] if hit and hit[0] else quarter_before(day)
 
 
 def quarter_label(pe: str) -> str:
@@ -109,8 +114,16 @@ def main() -> None:
     out = con.execute(f"SELECT symbol, day, at, doc FROM result_times WHERE day >= ? AND symbol IN ({marks})",
                       (since, *syms)).fetchall() if has("result_times") else []
     n = 0
+    def log(sym: str, day: str, stages: tuple[str, ...]) -> None:
+        # Committed per push: a failure later in the run must not erase the
+        # record of what already reached the phone, or the next run resends it.
+        for stage in stages:
+            con.execute("INSERT OR IGNORE INTO alert_log VALUES (?,?,?,?)",
+                        (sym, day, stage, datetime.now(timezone.utc).isoformat(timespec="seconds")))
+        con.commit()
+
     for sym, day, at, doc in out:
-        pe = quarter_before(day)
+        pe = quarter_reported(con, sym, day)
         f = figures(con, sym, pe) if has("results_history") else None
         page = f"{SITE}/company/?s={sym}"
         if f and (sym, day, "figures") not in sent:
@@ -120,19 +133,15 @@ def main() -> None:
                 parts.append(f"Sales {crore(now['revenue'])}{growth(now['revenue'], ago.get('revenue'))}")
             if now.get("pat") is not None:
                 parts.append(f"{'Profit' if now['pat'] >= 0 else 'Loss'} {crore(abs(now['pat']))}{growth(now['pat'], ago.get('pat'))}")
-            push(f"{sym} {quarter_label(pe)} results", f"{' · '.join(parts)}\nOut at {clock(at)} IST, from the filing.", page)
-            for stage in ("out", "figures"):
-                con.execute("INSERT OR IGNORE INTO alert_log VALUES (?,?,?,?)",
-                            (sym, day, stage, datetime.now(timezone.utc).isoformat(timespec="seconds")))
-            n += 1
+            if push(f"{sym} {quarter_label(pe)} results", f"{' · '.join(parts)}\nOut at {clock(at)} IST, from the filing.", page):
+                log(sym, day, ("out", "figures"))
+                n += 1
         elif not f and (sym, day, "out") not in sent:
             link = NSE_DOCS + doc if doc and "://" not in doc else (doc or page)
-            push(f"{sym} {quarter_label(pe)} results are out",
-                 f"Announced at {clock(at)} IST. Figures follow when the company files its data (often hours later).\n{link}", page)
-            con.execute("INSERT OR IGNORE INTO alert_log VALUES (?,?,?,?)",
-                        (sym, day, "out", datetime.now(timezone.utc).isoformat(timespec="seconds")))
-            n += 1
-    con.commit()
+            if push(f"{sym} {quarter_label(pe)} results are out",
+                    f"Announced at {clock(at)} IST. Figures follow when the company files its data (often hours later).\n{link}", page):
+                log(sym, day, ("out",))
+                n += 1
     con.close()
     print(f"results alerts: {len(syms)} watched, {len(out)} results out since {since}, {n} pushed")
 
@@ -142,4 +151,12 @@ if __name__ == "__main__":
         main()
     except Exception as e:  # noqa: BLE001 - an alert failing must never stop a publish
         print(f"results alerts FAILED: {type(e).__name__}: {e}")
+        # Still exit 0 (the publish must go on), but say so on the phone like
+        # every other alert script: a silent failure here looked exactly like
+        # "no results out today" (review 5-Nov-2026).
+        try:
+            post("Results alert check FAILED", f"{type(e).__name__}: {e}"[:300], tags="warning",
+                 click=f"{SITE}/calendar/", priority="high")
+        except Exception:  # noqa: BLE001 - never let the failure report fail the run
+            pass
         sys.exit(0)

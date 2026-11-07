@@ -25,20 +25,24 @@ const tone = (b: string | null | undefined) =>
 /** A section as a grid: the stock fixed on the left, any heading sorts (high
  *  to low, then low to high), a row per item (Step 5). */
 type Col<T> = { key: string; label: string; get?: (r: T) => number | string | null | undefined; cell: (r: T) => ReactNode; left?: boolean };
-function Grid<T>({ rows, cols, first, sortBy }: { rows: T[]; cols: Col<T>[]; first: (r: T) => ReactNode; sortBy?: string }) {
+// `limit` caps the rows drawn AFTER sorting, so sorting by size shows the
+// biggest of all of them, not of whichever came first in the file.
+function Grid<T>({ rows, cols, first, sortBy, limit }: { rows: T[]; cols: Col<T>[]; first: (r: T) => ReactNode; sortBy?: string; limit?: number }) {
   const [sort, setSort] = useState<{ key: string; desc: boolean } | null>(sortBy ? { key: sortBy, desc: true } : null);
   const shown = useMemo(() => {
     const c = sort && cols.find((x) => x.key === sort.key);
-    if (!c?.get) return rows;
-    return [...rows].sort((a, b) => {
+    if (!c?.get) return limit ? rows.slice(0, limit) : rows;
+    const sorted = [...rows].sort((a, b) => {
       const va = c.get!(a), vb = c.get!(b);
       if (va === null || va === undefined) return 1;
       if (vb === null || vb === undefined) return -1;
       const d = typeof va === "number" && typeof vb === "number" ? va - vb : String(va).localeCompare(String(vb));
       return sort!.desc ? -d : d;
     });
-  }, [rows, cols, sort]);
+    return limit ? sorted.slice(0, limit) : sorted;
+  }, [rows, cols, sort, limit]);
   return (
+    <>
     <div className="overflow-x-auto rounded-xl border border-[var(--line)] bg-[var(--card)] [scrollbar-width:none]">
       <table className="w-full text-[13px] border-collapse tabular-nums">
         <thead>
@@ -67,6 +71,12 @@ function Grid<T>({ rows, cols, first, sortBy }: { rows: T[]; cols: Col<T>[]; fir
         </tbody>
       </table>
     </div>
+    {limit && rows.length > limit && (
+      <p className="mt-2 px-1 text-[11px] text-[var(--ink3)]">
+        Showing {limit.toLocaleString("en-IN")} of {rows.length.toLocaleString("en-IN")}{sort ? ", after sorting" : ", newest first in the file"}.
+      </p>
+    )}
+    </>
   );
 }
 
@@ -154,7 +164,7 @@ export default function NewsPage() {
         ))}
 
         {doc && tab === "deals" && (deals.length === 0 ? empty("deals") : (
-          <Grid rows={deals.slice(0, 300)}
+          <Grid rows={deals} limit={300}
             first={(d) => d.sym ? <Link href={symbolHref(d.sym)} className="text-[var(--accent-ink)]">{d.sym}</Link> : "—"}
             cols={[
               { key: "side", label: "Side", get: (d) => d.side, cell: (d) => <span className={`font-semibold ${d.side === "BUY" ? "text-[var(--pos)]" : "text-[var(--neg)]"}`}>{d.side === "BUY" ? "Buy" : "Sell"}</span>, left: true },

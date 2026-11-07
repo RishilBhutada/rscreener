@@ -50,6 +50,8 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import business_updates
+from fetch_corporate_actions import reshapes, split_detail
+import ipo_lib
 import seasons_lib
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,8 +62,6 @@ IST = timezone(timedelta(hours=5, minutes=30))
 NSE_DOCS = "https://nsearchives.nseindia.com/corporate/"
 # Equity IPOs only; NSE's list also carries bonds and debt issues.
 IPO_SEGMENT = {"EQ": "Mainboard", "BE": "Mainboard", "SME": "SME"}
-# An ex-date that changes the share count makes a price move meaningless.
-RESHAPES = {"bonus", "split", "rights", "other"}
 
 
 def quarter(period_end: str) -> str:
@@ -100,15 +100,31 @@ def crore(v: float | None) -> float | None:
     return round(c) if abs(c) >= 1000 else round(c, 1)
 
 
+RUPEES = re.compile(r"(?:₹|\bR[se]\.?)\s*([\d]+(?:\.\d+)?)")
+
+
 def money(text: str | None) -> float | None:
-    """"₹2.20", "Dividend - Rs 2.20 Per Share", "Re 0.10" -> the rupee amount."""
-    m = re.search(r"(?:₹|\bR[se]\.?)\s*([\d]+(?:\.\d+)?)", text or "")
+    """"₹2.20", "Dividend - Rs 2.20 Per Share", "Re 0.10" -> the first rupee
+    amount. For the stored detail, whose first figure is already the total
+    ("₹75 (₹8 + ₹67)", fetch_corporate_actions.dividend_detail)."""
+    m = RUPEES.search(text or "")
     return float(m.group(1)) if m else None
 
 
-def price(text: str | None) -> float | None:
-    m = re.search(r"\d+(?:\.\d+)?", (text or "").replace(",", ""))
-    return float(m.group()) if m else None
+def dividend_amount(text: str | None) -> float | None:
+    """The dividend per share in a corporate action's own wording, counting
+    every dividend it names: "Interim Dividend - Rs 10 Per Share And Special
+    Dividend - Rs 5 Per Share" is 15, not 10. Same rule as
+    fetch_corporate_actions.dividend_detail: one amount is that amount, and
+    wording that says one INCLUDES the other ("Rs 8.50 (Including Special
+    Dividend Of Rs 2)") takes the first. A face value is never a dividend."""
+    t = re.sub(r"face\s*value\s*(?:of\s*)?(?:₹|\bR[se]\.?)\s*[\d.]+", " ", text or "", flags=re.I)
+    amounts = [float(a) for a in RUPEES.findall(t)]
+    if not amounts:
+        return None
+    if len(amounts) == 1 or re.search(r"\bincl(?:uding|usive|\.)?\b", t, re.I):
+        return amounts[0]
+    return round(sum(amounts), 4)
 
 
 def ca_kind(subject: str) -> str:
@@ -183,8 +199,8 @@ def main() -> None:
     actions = con.execute("SELECT symbol, ex_date, kind, detail, subject FROM corporate_actions WHERE ex_date >= ?",
                           (lo,)).fetchall() if has("corporate_actions") else []
     reshaped = defaultdict(list)
-    for sym, d, kind, _, _ in actions:
-        if kind in RESHAPES:
+    for sym, d, kind, _, subject in actions:
+        if reshapes(kind, subject):     # an AGM notice is not a share-count change
             reshaped[sym].append(d)
 
     past: list[dict] = []
@@ -295,18 +311,21 @@ def main() -> None:
         e = {"d": d, "k": kind if kind in ("dividend", "bonus", "split", "rights", "buyback") else "other",
              "s": sym, "x": (subject or "").strip()}
         if kind == "dividend":
-            amt = money(detail) or money(subject)
+            amt = money(detail) or dividend_amount(subject)
             if amt:
                 e["amt"] = amt
                 b = closes.before(sym, d)
                 if b and gap(b[0], d) <= 7 and b[1] > 0:
                     e["yld"] = round(amt / b[1] * 100, 2)
+        elif kind == "split" and (sd := split_detail(subject or "") or detail):
+            e["r"] = sd
         elif detail and kind != "other":
             e["r"] = detail
         past.append(e)
 
     # ── IPO listings ──
     if has("ipos"):
+        gains = ipo_lib.listing_gains(con)
         for sym, company, listing, issue, seg in con.execute(
                 "SELECT symbol, company, listing_date, issue_price, security_type FROM ipos"
                 " WHERE listing_date >= ? AND listing_date < ?", (lo, today)):
@@ -314,13 +333,17 @@ def main() -> None:
                 continue
             names.setdefault(sym, company)
             e = {"d": listing, "k": "ipo", "s": sym, "seg": IPO_SEGMENT[seg]}
-            if (ip := price(issue)) and ip < 1e6:
-                e["ip"] = ip
-                first = closes.on_or_after(sym, listing)
-                if first and gap(listing, first[0]) <= 5:
-                    e["lc"] = round(first[1], 2)
-                    if (g := pct(first[1], ip)) is not None:
-                        e["lg"] = g
+            # The IPO page's own figures (ipo_lib): the issue price checked
+            # against its band, a reused symbol refused, the listing close put
+            # back on the listing day's share basis. This read NSE's raw issue
+            # price and the split-adjusted close, so the two pages could
+            # disagree on the same IPO (review 4-Nov-2026).
+            g = gains.get(sym)
+            if g and g["listing_date"] == listing:
+                e["ip"] = g["issue_price"]
+                if g["listing_gain_pct"] is not None:
+                    e["lc"] = g["listing_close"]
+                    e["lg"] = round(g["listing_gain_pct"], 1)
             past.append(e)
 
     # ── other board meetings (results meetings are covered above) ──
@@ -438,7 +461,7 @@ def main() -> None:
                              "purpose": f"Ex-date: {subject}", "date": d, "desc": "",
                              "type": kind if kind in ("dividend", "bonus", "split", "rights", "buyback") else "other"})
     for e in upcoming:
-        if e["kind"] == "exdate" and e["type"] == "dividend" and (amt := money(e["purpose"])):
+        if e["kind"] == "exdate" and e["type"] == "dividend" and (amt := dividend_amount(e["purpose"])):
             e["amt"] = amt
             last = closes.latest(e["symbol"])
             if last and last[1] > 0:

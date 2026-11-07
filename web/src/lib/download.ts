@@ -45,8 +45,11 @@ export async function saveFile(name: string, text: string | Uint8Array, mime = "
       note(`Saved to Downloads: ${name}`);
     } catch {
       // An app installed before the plugin existed: nothing on this side can
-      // make its WebView download, so say what will.
-      note("This version of the app cannot save files. Install the latest app, or open Rscreener in your browser.");
+      // make its WebView download, so say what will. An app built before the
+      // plugin took Excel files refuses those alone - CSV still works there.
+      note(mime.startsWith("text/")
+        ? "This version of the app cannot save files. Install the latest app, or open Rscreener in your browser."
+        : "This version of the app cannot save Excel files yet. Use CSV, install the latest app, or open Rscreener in your browser.");
     }
     return;
   }

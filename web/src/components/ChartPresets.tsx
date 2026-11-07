@@ -24,22 +24,25 @@ export default function ChartPresets({ current, apply, sameRange, className = "-
 
   // Hold to manage, tap to apply - one set of listeners on the row.
   const timer = useRef<number | null>(null);
-  const firedAt = useRef(0), downAt = useRef(0);
+  // Set when a finger HOLD fires, so the click its release makes is not also
+  // taken as a tap. Keyboard Enter/Space never sets it, so it always works.
+  const swallow = useRef(false);
   const stop = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } };
   const idxOf = (e: React.SyntheticEvent) => {
     const v = (e.target as HTMLElement).closest<HTMLElement>("[data-preset]")?.dataset.preset;
     return v === undefined ? null : Number(v);
   };
-  const manage = (i: number) => { firedAt.current = Date.now(); stop(); setName(list[i].name); setDialog({ mode: "manage", i, renaming: false }); };
+  const manage = (i: number) => { stop(); setName(list[i].name); setDialog({ mode: "manage", i, renaming: false }); };
   const down = (e: React.PointerEvent) => {
     const i = idxOf(e);
-    stop(); downAt.current = Date.now();
-    if (i !== null) timer.current = window.setTimeout(() => manage(i), 480);
+    stop(); swallow.current = false;
+    if (i !== null) timer.current = window.setTimeout(() => { swallow.current = true; manage(i); }, 480);
   };
   const menu = (e: React.MouseEvent) => { const i = idxOf(e); if (i !== null) { e.preventDefault(); manage(i); } };
   const click = (e: React.MouseEvent) => {
     const i = idxOf(e);
-    if (i === null || firedAt.current >= downAt.current) return;
+    if (swallow.current) { swallow.current = false; return; }
+    if (i === null) return;
     apply(list[i].pick);
   };
 

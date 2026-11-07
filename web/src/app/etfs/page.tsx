@@ -5,7 +5,7 @@ import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import InfoTip from "@/components/InfoTip";
 import { Segmented } from "@/components/ListUI";
-import { premClass, premText, type EtfListItem } from "@/lib/etf";
+import { premClass, premIsStale, premText, type EtfListItem } from "@/lib/etf";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -39,15 +39,17 @@ export default function EtfsPage() {
       (klass === "all" || e.class === klass) &&
       (!needle || e.s.toLowerCase().includes(needle) || e.name.toLowerCase().includes(needle) ||
         e.underlying.toLowerCase().includes(needle)));
-    const val = (e: EtfListItem): number => {
-      if (sort === "prem") return e.prem ?? -Infinity;
-      if (sort === "r1y") return e.r1y_price ?? -Infinity;
-      return e.turnover_cr ?? -Infinity;
-    };
-    return sort === "name" ? list.sort((a, b) => a.s.localeCompare(b.s)) : list.sort((a, b) => val(b) - val(a));
+    if (sort === "name") return list.sort((a, b) => a.s.localeCompare(b.s));
+    const val = (e: EtfListItem): number | null =>
+      sort === "prem" ? e.prem : sort === "r1y" ? e.r1y_price : e.turnover_cr;
+    // Missing figures last; by premium, a premium older than the list's NAV
+    // day after every current one - it is not today's gap.
+    const tier = (e: EtfListItem) =>
+      val(e) === null ? 2 : sort === "prem" && premIsStale(e.prem_date, data.nav_asof) ? 1 : 0;
+    return list.sort((a, b) => tier(a) - tier(b) || ((val(b) ?? 0) - (val(a) ?? 0)));
   }, [data, klass, sort, q]);
 
-  const above = data ? data.etfs.filter((e) => (e.prem ?? 0) >= 2 && !e.thin).length : 0;
+  const above = data ? data.etfs.filter((e) => (e.prem ?? 0) >= 2 && !e.thin && !premIsStale(e.prem_date, data.nav_asof)).length : 0;
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
@@ -106,7 +108,13 @@ export default function EtfsPage() {
                       <p className="text-xs text-[var(--ink3)] truncate">{e.name}</p>
                     </div>
                     <div className="text-right shrink-0 tabular-nums">
-                      <p className={`text-[15px] font-semibold ${premClass(e.prem)}`}>{premText(e.prem)}</p>
+                      <p className={`text-[15px] font-semibold ${premClass(e.prem)}`}>{premText(e.prem)}
+                        {premIsStale(e.prem_date, data?.nav_asof) && e.prem_date && (
+                          <span className="ml-1 text-[11px] font-normal text-[var(--ink3)]">
+                            {new Date(`${e.prem_date}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" })}
+                          </span>
+                        )}
+                      </p>
                       <p className="text-[11px] text-[var(--ink3)]">
                         {sort === "r1y" ? `1Y ${e.r1y_price === null ? "—" : `${e.r1y_price > 0 ? "+" : ""}${e.r1y_price.toFixed(1)}%`}`
                           : sort === "liq" ? `₹${e.turnover_cr.toLocaleString("en-IN")} Cr/day`

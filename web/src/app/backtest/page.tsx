@@ -15,7 +15,9 @@ import { FIELD_CATALOG } from "@/lib/fields";
  *  happened, not a forecast and not a recommendation. */
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
-type Index = { generated_at: string; fields: string[]; dates: string[]; counts: Record<string, number>; nifty: Record<string, number> };
+type Index = { generated_at: string; fields: string[]; dates: string[]; counts: Record<string, number>; nifty: Record<string, number>;
+  /** symbol -> sector, so a screen's sector filter applies here too */
+  sectors?: Record<string, string> };
 type YearResult = {
   year: string; universe: number; passed: number; unknown: number;
   /** Too few companies had the figures this screen needs for the year to mean
@@ -27,6 +29,10 @@ type YearResult = {
 
 /** A year counts only when at least this many companies could be judged. */
 const MIN_JUDGED = 100;
+/** How many companies need every figure before a year counts. A whole-market
+ *  screen needs MIN_JUDGED; a sector screen, with fewer companies to start
+ *  from, needs half its sector - and never fewer than ten. */
+const minJudged = (inScope: number) => Math.min(MIN_JUDGED, Math.max(10, Math.ceil(inScope / 2)));
 const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 const med = (xs: number[]) => {
   if (!xs.length) return null;
@@ -50,6 +56,9 @@ function BacktestInner() {
   const params = useSearchParams();
   const router = useRouter();
   const q = params.get("q") ?? "pe < 20 and roe > 15";
+  // The screen's sector filter, as the screener passes it (?sec=A,B).
+  const secParam = params.get("sec") ?? "";
+  const secs = useMemo(() => secParam.split(",").filter(Boolean), [secParam]);
   const [index, setIndex] = useState<Index | null>(null);
   const [years, setYears] = useState<Record<string, (string | number | null)[][]> | null>(null);
   const [err, setErr] = useState("");
@@ -87,10 +96,15 @@ function BacktestInner() {
       const y = dt.slice(0, 4);
       const list = years[y] ?? [];
       const pass: number[] = [], every: number[] = [], picks: [string, number | null][] = [];
-      let passed = 0, unknown = 0, complete = 0;
+      let passed = 0, unknown = 0, complete = 0, inScope = 0;
       for (const r of list) {
         const fwd = r[F.length + 1] as number | null;
         if (fwd !== null) every.push(fwd);
+        // Outside the screen's sectors: not a pick, as on the screener - and
+        // not counted towards whether the year can be judged either, or a
+        // Banks screen was called "tested" on the strength of the whole market.
+        if (secs.length && index.sectors && !secs.includes(index.sectors[r[0] as string] ?? "")) continue;
+        inScope++;
         const row: Row = { symbol: r[0] as string };
         F.forEach((f, i) => { row[f] = r[i + 1] as number | null; });
         if (used.every((f) => row[f] !== null && row[f] !== undefined)) complete++;
@@ -106,14 +120,14 @@ function BacktestInner() {
       // ROE > 15" is false for any P/E of 15 or more whatever ROE is, so a year
       // with no ROE at all would otherwise pass as tested.
       rows.push({
-        year: y, universe: list.length, passed, unknown,
-        untestable: complete < MIN_JUDGED,
+        year: y, universe: inScope, passed, unknown,
+        untestable: complete < minJudged(inScope),
         screenAvg: avg(pass), screenMed: med(pass), allAvg: avg(every), allMed: med(every),
         nifty: index.nifty[y] ?? null, picks,
       });
     }
     return { rows };
-  }, [q, index, years]);
+  }, [q, index, years, secs]);
 
   const rows = result.rows;
   // Only years the screen could be judged in, for all three columns alike, so
@@ -153,7 +167,7 @@ function BacktestInner() {
         <form key={q} onSubmit={(e) => {
           e.preventDefault();
           const v = String(new FormData(e.currentTarget).get("q") ?? "").trim();
-          router.replace(`/backtest?q=${encodeURIComponent(v)}`);
+          router.replace(`/backtest?q=${encodeURIComponent(v)}${secParam ? `&sec=${encodeURIComponent(secParam)}` : ""}`);
         }}
           className="flex gap-2">
           <input name="q" defaultValue={q} aria-label="Screen"
@@ -167,8 +181,13 @@ function BacktestInner() {
               <p>{[...history].map((k) => `${label(k)} (${k})`).join(", ")}.</p>
             </InfoTip>
           )}
-          <Link href={`/screens?q=${encodeURIComponent(q)}`} className="ml-auto underline">Open in Screener</Link>
+          <Link href={`/screens?q=${encodeURIComponent(q)}${secParam ? `&sec=${encodeURIComponent(secParam)}` : ""}`} className="ml-auto underline">Open in Screener</Link>
         </p>
+        {secs.length > 0 && (
+          <p className="text-[12px] text-[var(--ink2)]">
+            Only {secs.join(", ")}{index && !index.sectors ? " - not applied: this history was built before sectors were added; it applies after the next nightly run" : ""}
+          </p>
+        )}
 
         {err && <p className="text-sm text-[var(--neg)]">{err}</p>}
         {result.error && (
@@ -241,7 +260,7 @@ function BacktestInner() {
                                 {r.picks.length > 60 && <span className="text-[var(--ink3)]">and {r.picks.length - 60} more</span>}
                               </div>
                             ) : <p className="text-[12px] text-[var(--ink3)]">Nothing passed this year.</p>}
-                            {(r.unknown > 0 || r.untestable) && <p className="mt-1 text-[11px] text-[var(--ink3)]">{r.untestable ? `Fewer than ${MIN_JUDGED} companies had every figure this screen uses, so this year is not counted.` : `${r.unknown} of ${r.universe} companies lacked a figure the screen needs and were left out.`}</p>}
+                            {(r.unknown > 0 || r.untestable) && <p className="mt-1 text-[11px] text-[var(--ink3)]">{r.untestable ? `Fewer than ${minJudged(r.universe)} companies had every figure this screen uses, so this year is not counted.` : `${r.unknown} of ${r.universe} companies lacked a figure the screen needs and were left out.`}</p>}
                           </td>
                         </tr>
                       )}
@@ -255,7 +274,7 @@ function BacktestInner() {
               <InfoTip title="Average and median">
                 <p>The average is what equal amounts in every passing company would have returned. A few small companies that multiplied can lift it a long way, so the median, the middle company, is shown beside it.</p>
                 <p>&quot;All companies&quot; holds thousands of very small companies, and only the ones still listed today: its average is lifted twice over and is not a fair yardstick. So the summary compares medians with medians, and the screen&apos;s average with the Nifty 50.</p>
-                <p>A year where fewer than {MIN_JUDGED} companies had every figure the screen uses is shown as &quot;Too few figures&quot; and left out of all three totals. Book value, and so P/B and ROE, is missing for most companies from 2018 to 2022, when filings carried no balance sheet.</p>
+                <p>A year where fewer than {MIN_JUDGED} companies (half the sector, at least ten, for a sector screen) had every figure the screen uses is shown as &quot;Too few figures&quot; and left out of all three totals. Book value, and so P/B and ROE, is missing for most companies from 2018 to 2022, when filings carried no balance sheet.</p>
               </InfoTip>
             </p>
           </>

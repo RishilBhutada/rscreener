@@ -57,7 +57,10 @@ def drop_spikes(rows: list[tuple]) -> tuple[list[tuple], int]:
     keep, dropped = [rows[0]], 0
     for i in range(1, len(rows) - 1):
         prev, cur, nxt = rows[i - 1][4], rows[i][4], rows[i + 1][4]
-        if prev and nxt and cur and cur / prev > SPIKE and cur / nxt > SPIKE:
+        # Both ways: a print that collapses and recovers is as false as one that
+        # spikes (review 4-Nov-2026), and the neighbours must agree.
+        if prev and nxt and cur and 1 / SPIKE <= prev / nxt <= SPIKE and (
+                (cur / prev > SPIKE and cur / nxt > SPIKE) or (cur / prev < 1 / SPIKE and cur / nxt < 1 / SPIKE)):
             dropped += 1
             continue
         keep.append(rows[i])

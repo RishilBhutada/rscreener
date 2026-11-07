@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 import OpeningPill from "@/components/OpeningPill";
 import TabIndicator from "@/components/TabIndicator";
 import { listAround, prefetchCompany } from "@/lib/prefetch";
-import { loadIndex as loadSearchIndex } from "@/lib/index-data";
+import { loadIndex as loadSearchIndex, symbolHref } from "@/lib/index-data";
 import Link from "next/link";
 import { saveFile } from "@/lib/download";
 import { buildXlsx, Cell, XLSX_MIME } from "@/lib/xlsx";
@@ -25,12 +25,14 @@ import { applyOrder, loadOrder } from "@/lib/order";
 import InfoTip, { InfoDialog, InfoPart } from "@/components/InfoTip";
 import { TableKind, TableView, arrange, change, changeText, usePct, useRowOrder, useView } from "@/lib/tableprefs";
 import { move } from "@/lib/order";
+import { fourInRow } from "@/lib/ttm";
+import { markSaved } from "@/lib/sync";
 import { IconButton, dayMove, signed as signedNum, tone } from "@/components/QuoteUI";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 /** `parent`: a breakdown row, folded under that row's "+" (Material Cost % under Expenses). */
-type Stmt = { periods: string[]; items: { label: string; values: (number | null)[]; parent?: string }[]; declared?: (string | null)[] };
+type Stmt = { periods: string[]; items: { label: string; values: (number | null)[]; parent?: string }[]; declared?: (string | null)[]; basis?: (string | null)[] };
 type AnnualReport = { from: string; to: string; url: string };
 type AnnDoc = { date: string; title: string; url: string; kind?: string };
 type Trend = {
@@ -47,6 +49,8 @@ type Trend = {
   /** Return on equity per year, % (annual trend). */
   roe?: (number | null)[];
   source: string[];
+  /** consolidated / standalone per period (pipeline trend_lib), null where not filed. */
+  basis?: (string | null)[];
 };
 type Shareholding = {
   /** Central and state governments, %; number of shareholders; holders the
@@ -172,12 +176,19 @@ function monthYear(iso?: string | null): string {
 let checksCache: Promise<Record<string, [string, string, string][]>> | null = null;
 function DataChecks({ symbol }: { symbol: string }) {
   const [fails, setFails] = useState<[string, string, string][] | null>(null);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
-    checksCache ??= fetch(`${BASE}/checks.json`).then((r) => (r.ok ? r.json() : { fails: {} })).then((d) => d.fails ?? {}).catch(() => ({}));
+    // A file that did not arrive is not "every check passed": it is not kept,
+    // and the page says the checks could not be read.
+    checksCache ??= fetch(`${BASE}/checks.json`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d) => d.fails ?? {});
     let live = true;
-    checksCache.then((all) => { if (live) setFails(all[symbol] ?? []); });
+    checksCache.then((all) => { if (live) setFails(all[symbol] ?? []); })
+      .catch(() => { checksCache = null; if (live) setFailed(true); });
     return () => { live = false; };
   }, [symbol]);
+  if (failed) return <p className="mt-1 text-[11px] text-[var(--ink3)]">Data checks could not be loaded.</p>;
   if (!fails?.length) return null;
   return (
     <p className="mt-1 text-[11px] text-[var(--ink3)]">
@@ -257,7 +268,7 @@ function ttmOf(annual: Stmt | null, quarterly: Stmt | null): { asOf: string; val
   if (!annual || !quarterly) return null;
   const qp = quarterly.periods, n = qp.length;
   if (n < 4 || !annual.periods.length || qp[n - 1] <= annual.periods[annual.periods.length - 1]) return null;
-  if ((new Date(qp[n - 1]).getTime() - new Date(qp[n - 4]).getTime()) / 86400000 > 300) return null;
+  if (!fourInRow(qp, n - 1, quarterly.basis)) return null;   // consecutive, one basis (lib/ttm.ts)
   const q = (label: string, parent?: string) => quarterly.items.find((it) => it.label === label && (it.parent ?? undefined) === parent);
   const last4 = (label: string, parent?: string) => {
     const v = q(label, parent)?.values.slice(n - 4);
@@ -280,7 +291,7 @@ function ttmOf(annual: Stmt | null, quarterly: Stmt | null): { asOf: string; val
     else if (it.label === "Tax %") v = weighted(last4("Tax %"), last4("Profit before tax"));
     else if (it.parent && it.label.endsWith("%")) v = weighted(last4(it.label, it.parent), revs);
     else if (it.label.includes("%")) v = null;
-    else if (!it.parent) { const x = last4(it.label); v = x ? Math.round(x.reduce((a, b) => a + b, 0) * 100) / 100 : null; }
+    else { const x = last4(it.label, it.parent); v = x ? Math.round(x.reduce((a, b) => a + b, 0) * 100) / 100 : null; }
     values[key] = v;
   }
   return { asOf: qp[n - 1], values };
@@ -417,7 +428,7 @@ function PeerTable({ symbol, self, peers, industry }: { symbol: string; self: Ro
   const pick = (k: string) => {
     const next = cols.includes(k) ? cols.filter((x) => x !== k) : PEER_COLS.map((c) => c.key).filter((x) => x === k || cols.includes(x));
     setCols(next);
-    try { localStorage.setItem("rs_peer_cols", JSON.stringify(next)); } catch { /* not remembered */ }
+    try { localStorage.setItem("rs_peer_cols", JSON.stringify(next)); markSaved("rs_peer_cols"); } catch { /* not remembered */ }
   };
   const shownCols = PEER_COLS.filter((c) => cols.includes(c.key));
   const all = [self, ...peers];
@@ -505,7 +516,7 @@ function PinnedRatios({ row }: { row: Row | null }) {
   }, []);
   const save = (next: string[]) => {
     setPins(next);
-    try { localStorage.setItem("rs_grid_pins", JSON.stringify(next)); } catch { /* not remembered */ }
+    try { localStorage.setItem("rs_grid_pins", JSON.stringify(next)); markSaved("rs_grid_pins"); } catch { /* not remembered */ }
   };
   const byKey = new Map(FIELD_CATALOG.map((f) => [f.key, f]));
   const hits = q.trim().length < 1 ? [] : FIELD_CATALOG
@@ -748,6 +759,13 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
   /** The "i" beside the title, where a table has one. */
   info?: import("react").ReactNode;
 }) {
+  // The basis most of the table's periods are on; any other period is marked.
+  const mainBasis = (() => {
+    const n: Record<string, number> = {};
+    for (const b of stmt.basis ?? []) if (b) n[b] = (n[b] ?? 0) + 1;
+    const top = Object.entries(n).sort((x, y) => y[1] - x[1])[0];
+    return top ? top[0] : null;
+  })();
   const [all, setAll] = useState(false);
   const [showPct, setShowPct] = usePct(kind);
   const [view, setView] = useView(kind);
@@ -921,10 +939,17 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
               )}
               {cols.map((at) => {
                 const dec = declaredLabel(stmt.declared?.[at]);
+                // A period on the other basis from most of the table says so in
+                // its header: the newest years can be rebuilt from quarters on
+                // the other basis, and one caption for all of them misled
+                // (review 5-Nov-2026: 88 companies).
+                const b = stmt.basis?.[at];
+                const odd = b && mainBasis && b !== mainBasis;
                 return (
                   <th key={stmt.periods[at]} className="px-3 py-2 text-right font-medium whitespace-nowrap">
                     {periodLabel(stmt.periods[at])}
                     {dec && <span className="block font-normal text-[11px] text-[var(--ink3)]">({dec})</span>}
+                    {odd && <span className="block font-normal text-[11px] text-[var(--warn-ink)]">{b === "standalone" ? "Standalone" : "Consolidated"}</span>}
                   </th>
                 );
               })}
@@ -1056,13 +1081,21 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
  *  ACTUALLY separates them, and withhold when nothing sits within nine months
  *  of the target rather than calling a six-year gap five years.
  */
-function cagr(values: (number | null)[], years: number, periods?: string[]): number | null {
+function cagr(values: (number | null)[], years: number, periods?: string[], basis?: (string | null)[]): number | null {
   const yearsBetween = (a: string, b: string) =>
     (Date.parse(String(b).slice(0, 10)) - Date.parse(String(a).slice(0, 10))) / (365.25 * 864e5);
 
+  // One basis end to end, as cagr_pct: a start year on the other basis
+  // (standalone under consolidated) is another business (review 5-Nov-2026).
+  let endBasis: string | null = null;
+  for (let i = values.length - 1; i >= 0; i--) {
+    const v = values[i];
+    if (v !== null && v !== undefined && Number.isFinite(v)) { endBasis = basis?.[i] ?? null; break; }
+  }
   const pairs: [string, number][] = [];
   values.forEach((v, i) => {
-    if (v !== null && v !== undefined && Number.isFinite(v) && periods?.[i]) {
+    const b = basis?.[i] ?? null;
+    if (v !== null && v !== undefined && Number.isFinite(v) && periods?.[i] && !(endBasis && b && b !== endBasis)) {
       pairs.push([String(periods[i]), v]);
     }
   });
@@ -1124,8 +1157,8 @@ function CompoundedGrowth({ trend, prices }: { trend?: { annual?: Trend }; price
     return Math.round((Math.pow(last / start, 12 / months) - 1) * 100);
   };
   const cards: [string, [string, number | null][]][] = [
-    ["Compounded sales growth", [["10 years", cagr(a.revenue, 10, a.periods)], ["5 years", cagr(a.revenue, 5, a.periods)], ["3 years", cagr(a.revenue, 3, a.periods)], ["1 year", cagr(a.revenue, 1, a.periods)]]],
-    ["Compounded profit growth", [["10 years", cagr(a.pat, 10, a.periods)], ["5 years", cagr(a.pat, 5, a.periods)], ["3 years", cagr(a.pat, 3, a.periods)], ["1 year", cagr(a.pat, 1, a.periods)]]],
+    ["Compounded sales growth", [["10 years", cagr(a.revenue, 10, a.periods, a.basis)], ["5 years", cagr(a.revenue, 5, a.periods, a.basis)], ["3 years", cagr(a.revenue, 3, a.periods, a.basis)], ["1 year", cagr(a.revenue, 1, a.periods, a.basis)]]],
+    ["Compounded profit growth", [["10 years", cagr(a.pat, 10, a.periods, a.basis)], ["5 years", cagr(a.pat, 5, a.periods, a.basis)], ["3 years", cagr(a.pat, 3, a.periods, a.basis)], ["1 year", cagr(a.pat, 1, a.periods, a.basis)]]],
     ["Stock price CAGR", [["10 years", stockCagr(120)], ["5 years", stockCagr(60)], ["3 years", stockCagr(36)], ["1 year", stockCagr(12)]]],
   ];
   // Return on equity, averaged over the years (as screener.in shows it): the
@@ -2359,7 +2392,12 @@ function CompanyView() {
   // (8 KB on the wire). Undefined while loading, null if NSE lists none.
   const [nextResults, setNextResults] = useState<NextResults>(undefined);
   const [alertsOpen, setAlertsOpen] = useState(false);
-  const [basisView, setBasisView] = useState<"consolidated" | "standalone">("consolidated");
+  // The choice belongs to the company it was made on: opening another one
+  // starts on consolidated again instead of carrying "Standalone" over
+  // (review 5-Nov-2026).
+  const [basisPick, setBasisPick] = useState<{ sym: string; view: "consolidated" | "standalone" }>({ sym: "", view: "consolidated" });
+  const basisView = basisPick.sym === symbol ? basisPick.view : "consolidated";
+  const setBasisView = (view: "consolidated" | "standalone") => setBasisPick({ sym: symbol, view });
   useEffect(() => {
     if (!symbol) return;
     const d = new Date();
@@ -2522,6 +2560,14 @@ function CompanyView() {
   const sa = hasSa && basisView === "standalone";
   const quarterly = withEbitda((sa && company.statements.quarterly_results_sa) || company.statements.quarterly_results || (company.trend?.quarterly ? trendToStmt(company.trend.quarterly) : null));
   const pnl = withEbitda((sa && company.statements.annual_pnl_sa) || company.statements.annual_pnl || (company.trend?.annual ? trendToStmt(company.trend.annual) : null));
+  // The TTM column adds four quarters onto a year's table, so both must be the
+  // same basis from the same source: standalone years with consolidated
+  // quarters (a company filing standalone yearly only) would be a figure for
+  // two different businesses in one row.
+  const srcOf = (saStmt: Stmt | null | undefined, conStmt: Stmt | null | undefined, tr: unknown) =>
+    sa && saStmt ? "sa" : conStmt ? "con" : tr ? "trend" : null;
+  const sameBasis = srcOf(company.statements.quarterly_results_sa, company.statements.quarterly_results, company.trend?.quarterly)
+    === srcOf(company.statements.annual_pnl_sa, company.statements.annual_pnl, company.trend?.annual);
   const tableCaption = sa ? "Standalone · ₹ Cr" : figuresCaption;
   const basisSwitch = hasSa ? (
     <div className="flex justify-end">
@@ -2560,12 +2606,12 @@ function CompanyView() {
       {around && (around.prev || around.next) && (
         <nav aria-label={`Companies in ${around.name}`} className="flex items-center gap-2 text-[12.5px]">
           {around.prev ? (
-            <Link href={`/company?s=${encodeURIComponent(around.prev)}`} onPointerEnter={() => prefetchCompany(around.prev)}
+            <Link href={symbolHref(around.prev)} onPointerEnter={() => { if (symbolHref(around.prev!).startsWith("/company")) prefetchCompany(around.prev); }}
               className="rs-press inline-flex items-center gap-1 rounded-full border border-[var(--line2)] px-3 py-1.5 text-[var(--ink2)]">&lsaquo; {around.prev}</Link>
           ) : <span />}
           <span className="flex-1 text-center text-[var(--ink3)] truncate">{around.at} of {around.of} in {around.name}</span>
           {around.next ? (
-            <Link href={`/company?s=${encodeURIComponent(around.next)}`} onPointerEnter={() => prefetchCompany(around.next)}
+            <Link href={symbolHref(around.next)} onPointerEnter={() => { if (symbolHref(around.next!).startsWith("/company")) prefetchCompany(around.next); }}
               className="rs-press inline-flex items-center gap-1 rounded-full border border-[var(--line2)] px-3 py-1.5 text-[var(--ink2)]">{around.next} &rsaquo;</Link>
           ) : <span />}
         </nav>
@@ -2850,7 +2896,7 @@ function CompanyView() {
       {pnl && (
         <div id="profit-loss" className="scroll-mt-32 space-y-6">
           {basisSwitch}
-          <StatementTable title="Profit & loss" stmt={pnl} subtitle={tableCaption} boldRows={["Net Profit", "Net profit"]} kind="pnl" symbol={symbol} ttm={ttmOf(pnl, quarterly)} />
+          <StatementTable title="Profit & loss" stmt={pnl} subtitle={tableCaption} boldRows={["Net Profit", "Net profit"]} kind="pnl" symbol={symbol} ttm={sameBasis ? ttmOf(pnl, quarterly) : null} />
           <CompoundedGrowth trend={company.trend} prices={company.prices} />
         </div>
       )}
@@ -2961,7 +3007,7 @@ function PriceAlerts({ symbol, price, onClose }: { symbol: string; price: number
   useEffect(() => { setAll(loadAlerts()); }, []);
   const save = (next: PriceAlert[]) => {
     setAll(next);
-    try { localStorage.setItem("rs_price_alerts", JSON.stringify(next)); } catch { /* not remembered */ }
+    try { localStorage.setItem("rs_price_alerts", JSON.stringify(next)); markSaved("rs_price_alerts"); } catch { /* not remembered */ }
   };
   const mine = all.filter((a) => a.s === symbol);
   const n = Number(level.replace(/,/g, ""));

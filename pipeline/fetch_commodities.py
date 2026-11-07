@@ -36,7 +36,7 @@ from pathlib import Path
 import requests
 
 import budget
-from commodities_lib import FX, WORLD, world_front, world_ticker
+from commodities_lib import FX, NY, WORLD, futures_day, is_futures, world_front, world_ticker
 from fetch_etfs import HEADERS, yahoo_bars
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -137,8 +137,17 @@ def load_world(session: requests.Session, con: sqlite3.Connection, sleep: float)
         if budget.stop(i, len(months) + len(fronts) + 1, "world contracts"):
             break
         try:
-            rows = [(t, d, c) for d, _o, _h, _l, c, _v in yahoo_bars(session, t, rng)]
+            fut = is_futures(t)
+            rows = [(t, d, c) for d, _o, _h, _l, c, _v in yahoo_bars(session, t, rng, day_of=futures_day if fut else None)]
+            if fut:
+                # The New York session still trading is not a close.
+                ny_today = datetime.now(NY).date().isoformat()
+                rows = [r for r in rows if r[1] < ny_today]
             if rows:
+                # The span read replaces what is stored for it, so rows dated
+                # by an older rule do not linger beside the new ones.
+                con.execute("DELETE FROM commodity_world WHERE ticker=? AND date BETWEEN ? AND ?",
+                            (t, rows[0][1], rows[-1][1]))
                 con.executemany("INSERT OR REPLACE INTO commodity_world VALUES (?,?,?)", rows)
                 con.commit()
             print(f"  {t}: {len(rows)} days" + (f" to {rows[-1][1]}" if rows else " - Yahoo has none"))

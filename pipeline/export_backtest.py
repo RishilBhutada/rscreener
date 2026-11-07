@@ -96,19 +96,31 @@ def snapshot(c: dict, when: date) -> list | None:
         arr = q.get(name) or []
         return arr[i] if i < len(arr) else None
 
-    def ttm(name: str, back: int = 0) -> float | None:
-        """Four consecutive known quarters, `back` quarters before the latest."""
+    basis = q.get("basis") or [None] * len(periods)
+
+    def same_basis(idx: list[int]) -> bool:
+        """Consolidated and standalone quarters describe different sets of
+        companies; the screener refuses to add or compare across them."""
+        return len({basis[i] for i in idx if i < len(basis) and basis[i]}) <= 1
+
+    def window(back: int = 0) -> list[int] | None:
+        """Four consecutive known quarters on one basis, `back` before the latest."""
         idx = known[: len(known) - back] if back else known
         if len(idx) < 4:
             return None
         win = idx[-4:]
-        if (d(periods[win[-1]]) - d(periods[win[0]])).days > 300:
+        if (d(periods[win[-1]]) - d(periods[win[0]])).days > 300 or not same_basis(win):
+            return None
+        return win
+
+    def ttm(name: str, back: int = 0) -> float | None:
+        win = window(back)
+        if win is None:
             return None
         vals = [col(name, i) for i in win]
         return sum(vals) if all(v is not None for v in vals) else None
 
-    rev, rev_1y = ttm("revenue"), ttm("revenue", 4)
-    pat, pat_1y = ttm("pat"), ttm("pat", 4)
+    rev, pat = ttm("revenue"), ttm("pat")
     # Five-year growth from the filed YEARS: a single missing quarter breaks a
     # twenty-quarter chain, and annual filings are complete far more often. A
     # year counts once its March quarter was announced.
@@ -124,12 +136,27 @@ def snapshot(c: dict, when: date) -> list | None:
             return None
         arr = a.get(name) or []
         return arr[j] if j < len(arr) else None
-    ebitda = ttm("ebitda")
+    # The screener's op_margin is Yahoo's operatingMargins: operating income
+    # (EBIT, after depreciation) over revenue. trend "ebitda" is operating
+    # profit before depreciation, so depreciation comes off to match.
+    # A quarter with no depreciation line (most banks and NBFCs) already has
+    # it inside its expenses - trend_lib._derive counts it as 0 - so nothing
+    # comes off, rather than the whole margin going blank.
+    win = window()
+    ebit = None
+    if win is not None:
+        parts = [(col("ebitda", i), col("depreciation", i)) for i in win]
+        if all(e is not None for e, _ in parts):
+            ebit = sum(e - (dp or 0.0) for e, dp in parts)
     last = known[-1] if known else None
     year_ago = None
     if last is not None:
         tgt = d(periods[last]) - timedelta(days=365)
         year_ago = next((i for i in known if abs((d(periods[i]) - tgt).days) <= 20), None)
+
+    both = last is not None and year_ago is not None and same_basis([last, year_ago])
+    q_rev_yoy = pct(col("revenue", last), col("revenue", year_ago)) if both else None
+    q_pat_yoy = pct(col("pat", last), col("pat", year_ago)) if both else None
 
     pe = at((c.get("pe_band") or {}).get("series") or [], when)
     pb = at((c.get("pb_band") or {}).get("series") or [], when)
@@ -144,11 +171,16 @@ def snapshot(c: dict, when: date) -> list | None:
         # ROE = EPS / book value per share = (price/PE) / (price/PB)
         "roe": pb / pe * 100 if pe and pb and pe > 0 else None,
         "net_margin": pat / rev * 100 if pat is not None and rev else None,
-        "op_margin": ebitda / rev * 100 if ebitda is not None and rev else None,
-        "rev_growth": pct(rev, rev_1y),
-        "earn_growth": pct(pat, pat_1y),
-        "qtr_sales_yoy": pct(col("revenue", last), col("revenue", year_ago)) if last is not None and year_ago is not None else None,
-        "qtr_profit_yoy": pct(col("pat", last), col("pat", year_ago)) if last is not None and year_ago is not None else None,
+        "op_margin": ebit / rev * 100 if ebit is not None and rev else None,
+        # rev_growth / earn_growth on the screener are Yahoo's revenueGrowth /
+        # earningsGrowth (export_json.py RENAME): the latest quarter against the
+        # same quarter a year earlier - not trailing twelve months against the
+        # twelve before. Worked out the same way here, so a saved screen tests
+        # the rule it applies today.
+        "rev_growth": q_rev_yoy,
+        "earn_growth": q_pat_yoy,
+        "qtr_sales_yoy": q_rev_yoy,
+        "qtr_profit_yoy": q_pat_yoy,
         "sales_cagr_5y": cagr(a_val("revenue", 0), a_val("revenue", 5), 5),
         "profit_cagr_5y": cagr(a_val("pat", 0), a_val("pat", 5), 5),
         "ret_6m": pct(price, at(monthly, when - timedelta(days=182))),
@@ -162,12 +194,18 @@ def main() -> None:
     files = sorted(COMPANIES.glob("*.json"))
     years = list(range(FIRST_YEAR, date.today().year))
     rows: dict[int, list] = {y: [] for y in years}
+    # Each company's sector, once, so a screen's sector filter can be applied
+    # to its history (today's sector; companies rarely change it).
+    sectors: dict[str, str] = {}
     for f in files:
         try:
             c = json.loads(f.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
             continue
         sym = f.stem
+        sec = (c.get("snapshot") or {}).get("sector")
+        if sec:
+            sectors[sym] = sec
         for y in years:
             when = date(y, 6, 30)
             if date(y + 1, 6, 30) > date.today():
@@ -196,6 +234,7 @@ def main() -> None:
         "dates": [f"{y}-06-30" for y in done],
         "counts": {str(y): len(rows[y]) for y in done},
         "nifty": {str(y): v for y, v in nifty.items()},
+        "sectors": sectors,
     }, separators=(",", ":")), encoding="utf-8")
     total = sum((OUT / f"{y}.json").stat().st_size for y in done)
     print(f"backtest: {len(done)} years, {sum(len(rows[y]) for y in done):,} company-years, {total / 1e6:.1f} MB")

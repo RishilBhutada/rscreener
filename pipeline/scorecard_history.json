@@ -2541,5 +2541,140 @@
    "fresh"
   ],
   "companies": 4989
+ },
+ {
+  "at": "2026-11-03 18:27 UTC",
+  "overall": 91.4,
+  "complete": 81.0,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 85.7,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4989
+ },
+ {
+  "at": "2026-11-03 22:55 UTC",
+  "overall": 91.2,
+  "complete": 81.0,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 83.3,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4989
+ },
+ {
+  "at": "2026-11-04 13:20 UTC",
+  "overall": 91.2,
+  "complete": 81.0,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 83.3,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4990
+ },
+ {
+  "at": "2026-11-04 15:04 UTC",
+  "overall": 91.2,
+  "complete": 81.0,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 83.3,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4990
+ },
+ {
+  "at": "2026-11-04 20:21 UTC",
+  "overall": 91.2,
+  "complete": 81.0,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 83.3,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4990
+ },
+ {
+  "at": "2026-11-05 02:38 UTC",
+  "overall": 91.1,
+  "complete": 80.8,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 83.3,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4991
+ },
+ {
+  "at": "2026-11-06 02:53 UTC",
+  "overall": 91.0,
+  "complete": 80.2,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 83.3,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4995
+ },
+ {
+  "at": "2026-11-06 20:38 UTC",
+  "overall": 91.0,
+  "complete": 80.2,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 83.3,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4995
+ },
+ {
+  "at": "2026-11-07 02:03 UTC",
+  "overall": 91.0,
+  "complete": 80.2,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 83.3,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4995
  }
 ]

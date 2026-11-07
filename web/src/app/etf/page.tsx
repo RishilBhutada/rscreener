@@ -7,7 +7,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import InfoTip from "@/components/InfoTip";
-import { CLASS_LABEL, pctRankText, pctText, premClass, premSentence, premText, type EtfDoc, type Returns } from "@/lib/etf";
+import { CLASS_LABEL, pctRankText, pctText, premClass, premIsStale, premSentence, premText, type EtfDoc, type Returns } from "@/lib/etf";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 // The chart library touches the window, so it loads in the browser only.
@@ -148,7 +148,7 @@ function EtfView() {
       </header>
 
       <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] px-3 py-3">
-        <p className={`text-lg font-bold ${premClass(doc.prem)}`}>{premSentence(doc.prem)}</p>
+        <p className={`text-lg font-bold ${premClass(doc.prem)}`}>{premSentence(doc.prem, premIsStale(doc.prem_date, doc.nav_date) ? when(doc.prem_date) : null)}</p>
         <div className="mt-2 grid grid-cols-3 gap-2 tabular-nums">
           <div>
             <p className="text-xs text-[var(--ink3)]">Price</p>

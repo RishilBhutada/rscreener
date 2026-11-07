@@ -254,7 +254,7 @@ def load_history(session: requests.Session, con: sqlite3.Connection, limit: int,
     print(f"NAV history: {ok} read, {bad} failed")
 
 
-def yahoo_bars(session: requests.Session, ticker: str, rng: str, itv: str = "1d") -> list[tuple]:
+def yahoo_bars(session: requests.Session, ticker: str, rng: str, itv: str = "1d", day_of=None) -> list[tuple]:
     """(date, open, high, low, close, volume) per bar, dated in the market's
     own time zone (Yahoo stamps a bar by its opening instant) - so a monthly
     bar is dated the 1st of its month, not the last day of the one before."""
@@ -268,7 +268,8 @@ def yahoo_bars(session: requests.Session, ticker: str, rng: str, itv: str = "1d"
     out = {}
     for ts, o, h, lo, c, v in zip(res.get("timestamp") or [], col("open"), col("high"), col("low"), col("close"), col("volume")):
         if c:
-            out[(datetime.fromtimestamp(ts, timezone.utc) + off).strftime("%Y-%m-%d")] = (o, h, lo, c, v or 0)
+            d = day_of(ts) if day_of else (datetime.fromtimestamp(ts, timezone.utc) + off).strftime("%Y-%m-%d")
+            out[d] = (o, h, lo, c, v or 0)
     return [(d, *vals) for d, vals in sorted(out.items())]
 
 
@@ -278,7 +279,13 @@ def load_prices(session: requests.Session, con: sqlite3.Connection, sleep: float
     once per ETF, its monthly bars back to listing, for the long view of the
     full-screen chart (NIFTYBEES reaches 2002)."""
     syms = [s for (s,) in con.execute("SELECT symbol FROM etfs ORDER BY symbol")]
-    have_monthly = {s for (s,) in con.execute("SELECT DISTINCT symbol FROM etf_prices_monthly")}
+    # Monthly bars are re-read once the stored ones are over 40 days old:
+    # read once and never again, the long view would stop where the first
+    # read did and, five years on, leave a gap before the daily window
+    # (review 4-Nov-2026).
+    month_cut = (datetime.now(timezone.utc) - timedelta(days=40)).strftime("%Y-%m-%d")
+    have_monthly = {s for (s,) in con.execute(
+        "SELECT symbol FROM etf_prices_monthly GROUP BY symbol HAVING MAX(date) >= ?", (month_cut,))}
     ok = bad = 0
     for i, sym in enumerate(syms):
         if budget.stop(i, len(syms), "ETF price histories"):

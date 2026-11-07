@@ -77,6 +77,16 @@ def connect() -> sqlite3.Connection:
         CREATE TABLE IF NOT EXISTS idx_members (
             name TEXT, symbol TEXT, company TEXT, industry TEXT, PRIMARY KEY (name, symbol));
     """)
+    # When the history was last asked for and came back empty, so an index
+    # niftyindices has no history for is asked weekly, not every night.
+    if "hist_tried" not in {r[1] for r in con.execute("PRAGMA table_info(idx_meta)")}:
+        con.execute("ALTER TABLE idx_meta ADD COLUMN hist_tried TEXT")
+        # Once, with the column: indices marked done with no history found
+        # (no niftyindices name stored) may have been marked on an error
+        # page. Ask for them again; a real "none" then waits a week.
+        con.execute("UPDATE idx_meta SET hist_done=NULL WHERE hist_done IS NOT NULL AND trading IS NULL AND name != ?",
+                    (SENSEX,))
+        con.commit()
     return con
 
 
@@ -126,22 +136,32 @@ def ni_session() -> requests.Session:
     return s
 
 
-def ni_call(s: requests.Session, url: str, trading: str, long: str, start: str, end: str) -> list[dict]:
+def ni_call(s: requests.Session, url: str, trading: str, long: str, start: str, end: str) -> list[dict] | None:
+    """The rows niftyindices returns, [] when it answered with an empty list,
+    and None when it did not answer with data at all (a network error, an
+    HTTP error, or an error or block page instead of JSON)."""
     cinfo = "{'name':'%s','startDate':'%s','endDate':'%s','indexName':'%s'}" % (trading.upper(), start, end, long)
-    r = s.post(url, data=json.dumps({"cinfo": cinfo}), timeout=120)
+    try:
+        r = s.post(url, data=json.dumps({"cinfo": cinfo}), timeout=120)
+    except requests.RequestException:
+        return None
+    if r.status_code != 200:
+        return None
     try:
         j = r.json()
+        d = j.get("d", j) if isinstance(j, dict) else j
+        d = json.loads(d) if isinstance(d, str) else d
     except ValueError:
-        return []
-    d = j.get("d", j) if isinstance(j, dict) else j
-    d = json.loads(d) if isinstance(d, str) else d
-    return d if isinstance(d, list) else []
+        return None
+    return d if isinstance(d, list) else None
 
 
 def history(con: sqlite3.Connection) -> None:
     """Each index's candles since it began, and its valuation history - once."""
+    week_ago = (datetime.now(IST).date() - timedelta(days=7)).isoformat()
     todo = [n for (n,) in con.execute(
-        "SELECT name FROM idx_meta WHERE hist_done IS NULL AND name != ? ORDER BY name", (SENSEX,))]
+        "SELECT name FROM idx_meta WHERE hist_done IS NULL AND name != ? AND (hist_tried IS NULL OR hist_tried < ?) "
+        "ORDER BY name", (SENSEX, week_ago))]
     if not todo:
         print("index history: every index already has its history")
         return
@@ -158,12 +178,15 @@ def history(con: sqlite3.Connection) -> None:
         base = re.sub(r"\s+index$", "", name, flags=re.I)
         m = mapping.get(norm(name)) or mapping.get(norm(base))
         tries = ([(m["Trading_Index_Name"], m["Index_long_name"])] if m else []) + [(name, name), (base, base)]
-        ohlc, used = [], None
+        ohlc, used, failed = [], None, False
         for trading, long in dict.fromkeys(tries):
-            ohlc = ni_call(s, NI_OHLC, trading, long, "01-Jan-1990", end)
+            got = ni_call(s, NI_OHLC, trading, long, "01-Jan-1990", end)
             time.sleep(SLEEP)
-            if ohlc:
-                used = (trading, long)
+            if got is None:
+                failed = True
+                continue
+            if got:
+                ohlc, used = got, (trading, long)
                 break
         rows = []
         for x in ohlc:
@@ -176,10 +199,10 @@ def history(con: sqlite3.Connection) -> None:
                 rows.append((name, d, num(x.get("OPEN")) or c, num(x.get("HIGH")) or c, num(x.get("LOW")) or c, c))
         # The daily file's rows stand; history only fills the days before.
         con.executemany("INSERT OR IGNORE INTO idx_bars (name, date, open, high, low, close) VALUES (?,?,?,?,?,?)", rows)
-        vals = ni_call(s, NI_PEPB, *(used or (name, name)), "01-Jan-1999", end) if used else []
+        vals = ni_call(s, NI_PEPB, *used, "01-Jan-1999", end) if used else []
         time.sleep(SLEEP)
         nv = 0
-        for x in vals:
+        for x in vals or []:
             try:
                 d = datetime.strptime(str(x.get("DATE", "")).strip(), "%d %b %Y").date().isoformat()
             except ValueError:
@@ -188,12 +211,25 @@ def history(con: sqlite3.Connection) -> None:
             cur = con.execute("UPDATE idx_bars SET pe=COALESCE(pe,?), pb=COALESCE(pb,?), dy=COALESCE(dy,?) WHERE name=? AND date=?",
                               (pe, pb, dy, name, d))
             nv += cur.rowcount
-        con.execute("UPDATE idx_meta SET trading=?, long_name=?, hist_done=? WHERE name=?",
-                    (used[0] if used else None, used[1] if used else None, datetime.now(IST).date().isoformat(), name))
+        today = datetime.now(IST).date().isoformat()
+        # Done for good only when real candles came back and the valuation
+        # call answered. An error or block page used to count as "no history"
+        # and the index was never asked again: its all-time high, 3/5/10-year
+        # returns and P/E percentile then rested on a few weeks of daily files.
+        if rows and vals is not None:
+            con.execute("UPDATE idx_meta SET trading=?, long_name=?, hist_done=? WHERE name=?",
+                        (used[0], used[1], today, name))
+            done += 1
+            note = ""
+        elif rows or failed or vals is None:
+            note = " - niftyindices did not answer properly; asked again next run"
+        else:
+            # A clean empty answer under every name tried: ask again in a week.
+            con.execute("UPDATE idx_meta SET hist_tried=? WHERE name=?", (today, name))
+            note = " - asked again in a week"
         con.commit()
-        done += 1
         print(f"  {name}: {len(rows)} days of candles" + (f" from {min(r[1] for r in rows)}" if rows else " - none found")
-              + f", {nv} days of valuation")
+              + f", {nv} days of valuation" + note)
     print(f"index history: {done} of {len(todo)} indices fetched this run")
 
 

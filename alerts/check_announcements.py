@@ -1,12 +1,24 @@
 """Rscreener alerts - checks NSE corporate announcements for watchlist symbols
 and pushes matches to the owner's phone via ntfy.sh.
 
-Runs on GitHub Actions (see .github/workflows/alerts.yml). Stateless by design:
-each run looks back LOOKBACK_MIN minutes (default 70, cron is hourly), so a
-delayed cron can rarely duplicate an alert but never lose one silently - and
-any crash sends a high-priority "checker FAILED" push (the heartbeat).
+Run every twenty minutes by the news watcher (pipeline/news_watch.py), with
+the hourly alerts.yml as a backup - GitHub drops most of this repository's
+timed runs, and a checker that only looked back an hour lost every
+announcement of an hour it skipped. Each run looks back LOOKBACK_MIN minutes
+(default ten hours, inside ntfy's twelve-hour memory), and each push carries a
+tag rs-ann-<symbol>-<id> that is read back before sending, so overlapping
+runs never repeat one. If the topic cannot be read, nothing is sent that run.
+A crash sends a high-priority "checker FAILED" push, at most once every twelve
+hours (as long as ntfy remembers the last one).
+
+A quarterly business update is left to alerts/update_alerts.py, which says
+what it is - but that runs only inside the news watcher. When its tag
+(rs-upd-<symbol>-<quarter end>) is not on the topic, this sends the same push
+itself, with that tag, so neither script repeats it.
 """
+import hashlib
 import os
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -14,30 +26,14 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pipeline"))
-from business_updates import is_update  # noqa: E402
+import business_updates  # noqa: E402
+import nse_session  # noqa: E402
+import update_alerts  # noqa: E402
+from ntfy_lib import WINDOW_H, post, sent_tags  # noqa: E402
 
 IST = timezone(timedelta(hours=5, minutes=30))
-API = "https://www.nseindia.com/api/corporate-announcements?index=equities"
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-    "Accept": "*/*",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.nseindia.com/",
-}
-TOPIC = os.environ.get("NTFY_TOPIC", "")
-LOOKBACK_MIN = int(os.environ.get("LOOKBACK_MIN", "70"))
-
-
-def push(title: str, message: str, priority: str = "default", tags: str = "chart_with_upwards_trend") -> None:
-    if not TOPIC:
-        print(f"no NTFY_TOPIC set; would have pushed: {title}")
-        return
-    requests.post(
-        f"https://ntfy.sh/{TOPIC}",
-        data=message.encode("utf-8"),
-        headers={"Title": title, "Priority": priority, "Tags": tags},
-        timeout=15,
-    )
+API = nse_session.HOME + "/api/corporate-announcements?index=equities"
+LOOKBACK_MIN = int(os.environ.get("LOOKBACK_MIN", str(WINDOW_H * 60)))
 
 
 def load_watchlist() -> set[str]:
@@ -46,21 +42,38 @@ def load_watchlist() -> set[str]:
     return set(alert_symbols())
 
 
+def tag_for(sym: str, a: dict) -> str:
+    ident = f"{sym}|{a.get('an_dt')}|{a.get('desc')}|{a.get('attchmntFile')}"
+    return f"rs-ann-{re.sub(r'[^A-Za-z0-9]', '', sym)}-{hashlib.sha1(ident.encode()).hexdigest()[:10]}"
+
+
 def main() -> None:
     if os.environ.get("TEST_PUSH") == "1":
-        push("Rscreener alerts are wired", "One-time test notification. If you can read this, the pipeline works end-to-end.", tags="white_check_mark")
+        post("Rscreener alerts are wired", "One-time test notification. If you can read this, the pipeline works end-to-end.",
+             tags="white_check_mark")
         print("test push sent")
         return
 
     watch = load_watchlist()
-    print(f"watchlist ({len(watch)}): {sorted(watch)}")
+    print(f"announcements: watching {len(watch)} symbols")
 
+    # NSE's API refuses a cold session: the homepage sets the cookies it wants.
     s = requests.Session()
-    s.headers.update(HEADERS)
+    s.headers.update(nse_session.HEADERS)
+    try:
+        s.get(nse_session.HOME, timeout=20)
+    except requests.RequestException:
+        pass
     r = s.get(API, timeout=25)
     r.raise_for_status()
-    announcements = r.json()
+    body = r.json()
+    announcements = body if isinstance(body, list) else body.get("data", [])
 
+    # Both prefixes: this script's own tags and update_alerts.py's.
+    sent = sent_tags("rs-")
+    if sent is None:
+        print("announcements: ntfy topic unreadable - nothing sent, next run")
+        return
     cutoff = datetime.now(IST) - timedelta(minutes=LOOKBACK_MIN)
     hits = 0
     for a in announcements:
@@ -74,22 +87,45 @@ def main() -> None:
             continue
         if ts < cutoff:
             continue
-        if is_update(a):
-            continue  # update_alerts.py pushes these, with what they are
+        tag = tag_for(sym, a)
+        if tag in sent:
+            continue
+        if business_updates.is_update(a):
+            # update_alerts.py pushes these, saying what they are. If it has
+            # not (the news watcher is not running), send its push from here.
+            for (usym, qe), (day, at, doc, subject) in business_updates.found([a]).items():
+                key = update_alerts.tag(usym, qe)
+                if key in sent:
+                    continue
+                if update_alerts.push(usym, qe, day, at, doc, subject, extra_tags=tag):
+                    sent.update((key, tag))
+                    hits += 1
+                    print(f"alert: {sym} | {raw_ts} | business update (update_alerts.py had not sent it)")
+            continue
         desc = (a.get("desc") or "announcement").strip()
         detail = (a.get("attchmntText") or desc).strip()
         link = a.get("attchmntFile") or "https://www.nseindia.com/companies-listing/corporate-filings-announcements"
-        push(f"{sym}: {desc[:70]}", f"{raw_ts} IST\n{detail[:300]}\n{link}")
-        hits += 1
-        print(f"alert: {sym} | {raw_ts} | {desc[:70]}")
+        if post(f"{sym}: {desc[:70]}", f"{raw_ts} IST\n{detail[:300]}\n{link}",
+                tags=f"chart_with_upwards_trend,{tag}"):
+            sent.add(tag)
+            hits += 1
+            print(f"alert: {sym} | {raw_ts} | {desc[:70]}")
 
-    print(f"done: {len(announcements)} announcements scanned, {hits} watchlist hits")
+    print(f"announcements: {len(announcements)} scanned, {hits} pushed")
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:  # noqa: BLE001 - heartbeat: NEVER fail silently
-        push("Rscreener checker FAILED", f"{type(e).__name__}: {e}"[:300], priority="high", tags="warning")
-        print(f"CHECKER FAILED: {e}")
+        print(f"announcements: FAILED {type(e).__name__}: {e}"[:300])
+        # At most once every twelve hours: run every twenty minutes, a broken
+        # NSE would otherwise send seventy a day. ntfy.sh keeps a message
+        # twelve hours, so that is as far back as "already sent" can be read;
+        # the tag used to carry the date, which read like "once a day" but
+        # repeated twelve hours later (and again just after midnight).
+        tag = "rs-annfail"
+        seen = sent_tags("rs-annfail")
+        if seen is not None and tag not in seen:
+            post("Rscreener checker FAILED", f"{type(e).__name__}: {e}"[:300], tags=f"warning,{tag}", priority="high")
         sys.exit(1)

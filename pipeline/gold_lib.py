@@ -181,9 +181,17 @@ def stars_from_ratio(ratio: float) -> int:
 # Headlines: (stars, reason, every pattern must match the title)
 NEWS_RULES: list[tuple[int, str, list[str]]] = [
     (5, "Central-bank buying has been the largest new source of gold demand since 2022",
-     [r"central bank|PBOC|People's Bank|RBI|reserve bank", r"gold", r"buy|bought|purchas|add|reserves|holdings"]),
+     # Whole words: "add" used to match "gold adds gains as central bank ...".
+     # "adds 1%" is the price, not the bank.
+     [r"central bank|PBOC|People's Bank|RBI|reserve bank", r"gold",
+      r"\b(?:buy(?:s|ing)?|bought|purchas\w*|reserves|holdings)\b"
+      r"|\badd(?:s|ed|ing)?\b(?!\s+(?:gains?|to (?:gains|losses)|[\d.]+\s*%))"]),
+    # India's own duty only. "Tariff value" is left out: the base price duty
+    # is charged on, revised routinely about every two weeks, not a change in
+    # the duty. Another country's "import duty" on gold is not India's.
     (5, "India's import duty sets the gap between MCX and the world price",
-     [r"import duty|customs duty|duty cut|duty hike|tariff value", r"gold"]),
+     [r"import duty|customs duty|duty cut|duty hike", r"gold",
+      r"India|Indian|Budget|CBIC|Sitharaman|finance ministry|New Delhi"]),
     (5, "A Fed decision resets the cost of holding gold",
      [r"\bFed\b|Federal Reserve|FOMC|Powell", r"rate (cut|hike|decision)|cuts rates|raises rates|holds rates"]),
     (4, "Geopolitical shocks send buyers to gold as a safe haven",

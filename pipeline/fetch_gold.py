@@ -45,7 +45,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-import price_periods
+from commodities_lib import futures_day
 from gold_lib import ANNOUNCE, ECB_PAST, INDIA_EVENTS, clean_title, family_of, rate_headline
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -222,9 +222,12 @@ def bea(con, today: str) -> None:
     """GDP and PCE inflation (BEA's Personal Income and Outlays), last year's
     schedule and this year's, past dates and coming ones."""
     n = 0
-    year = int(today[:4])
-    for url in BEA:
-        url = url.format(prev=year - 1, next=year + 1)
+    # The addresses come from today's year, fixed before the loop: the loop
+    # used to overwrite `year` with each page's year, so when this year's page
+    # failed, "next year" was built from last year's and asked for this
+    # year's page again - next year's dates went missing that night.
+    this_year = int(today[:4])
+    for url in [u.format(prev=this_year - 1, next=this_year + 1) for u in BEA]:
         try:
             page = get(url)
         except requests.RequestException as e:
@@ -234,7 +237,7 @@ def bea(con, today: str) -> None:
         if not y:
             print(f"BEA: no year on {url}")
             continue
-        year = int(y.group(1))
+        page_year = int(y.group(1))
         for row in re.findall(r'<tr class="scheduled-releases-type-press">(.*?)</tr>', page, flags=re.S):
             d = re.search(r'release-date">([^<]+)<', row)
             t = re.search(r"<small[^>]*>([^<]+)<", row)
@@ -250,7 +253,7 @@ def bea(con, today: str) -> None:
             else:
                 continue
             try:
-                day = datetime.strptime(f"{d.group(1).strip()} {year}", "%B %d %Y").date()
+                day = datetime.strptime(f"{d.group(1).strip()} {page_year}", "%B %d %Y").date()
                 when = ny_time(day, t.group(1))
             except ValueError:
                 continue
@@ -676,12 +679,15 @@ def comex(con) -> None:
     r.raise_for_status()
     res = (r.json().get("chart", {}).get("result") or [None])[0] or {}
     closes = ((res.get("indicators", {}).get("quote") or [{}])[0]).get("close") or []
-    rows = [("GC=F", price_periods.ist_date(ts), round(c, 2))
+    # One dating rule with fetch_commodities, which stores the same ticker
+    # (commodities_lib.futures_day); a bar for today is a session still trading.
+    rows = [("GC=F", futures_day(ts), round(c, 2))
             for ts, c in zip(res.get("timestamp") or [], closes) if c]
-    # Yahoo dates a COMEX session by its start; a bar for today is a session
-    # still trading.
     today = datetime.now(NY).date().isoformat()
     rows = [x for x in rows if x[1] < today]
+    if rows:
+        con.execute("DELETE FROM commodity_world WHERE ticker='GC=F' AND date BETWEEN ? AND ?",
+                    (rows[0][1], rows[-1][1]))
     con.executemany("INSERT OR REPLACE INTO commodity_world VALUES (?,?,?)", rows)
     con.commit()
     print(f"COMEX gold: {len(rows)} daily closes")

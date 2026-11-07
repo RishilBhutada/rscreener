@@ -1,3 +1,5 @@
+import { markSaved } from "./saved-at";
+
 export type Holding = { symbol: string; qty: number; avg: number };
 
 const PORTFOLIO_KEY = "rscreener_portfolio";
@@ -20,6 +22,7 @@ export function loadPortfolio(): Holding[] {
 export function savePortfolio(holdings: Holding[]): void {
   try {
     localStorage.setItem(PORTFOLIO_KEY, JSON.stringify(holdings));
+    markSaved(PORTFOLIO_KEY);   // the copy saved last wins a sync (lib/merge-profile.ts)
   } catch { /* private mode or quota - the page must not break over it */ }
 }
 

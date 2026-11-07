@@ -156,6 +156,14 @@ def fetch_one(symbol: str, snapshot_only: bool = False,
     return row, statements_long(tkr, symbol)
 
 
+# Carried forward whenever the new answer leaves them blank: what the company
+# is and how big it is, which do not stop applying.
+ALWAYS_KEEP = {"name", "sector", "industry", "website", "price", "market_cap", "shares_out"}
+# More than this share of previously known fields blank at once is a
+# half-built (throttled) answer, not a company whose ratios stopped applying.
+HALF_BUILT = 0.5
+
+
 def keep_known_values(con: sqlite3.Connection, table: str, df: pd.DataFrame) -> pd.DataFrame:
     """Carry forward any field the new payload left blank.
 
@@ -187,15 +195,23 @@ def keep_known_values(con: sqlite3.Connection, table: str, df: pd.DataFrame) -> 
     if not stored:
         return df
     df = df.copy()
+    blank = lambda v: v is None or (isinstance(v, float) and pd.isna(v))  # noqa: E731
     for i, sym in enumerate(df["symbol"]):
         old = stored.get(sym)
         if not old:
             continue
-        for c in df.columns:
-            if c == "symbol":
-                continue
-            new = df.iloc[i][c]
-            if (new is None or (isinstance(new, float) and pd.isna(new))) and old.get(c) is not None:
+        known = [c for c in df.columns if c not in ("symbol", "fetch_date") and old.get(c) is not None]
+        lost = [c for c in known if blank(df.iloc[i][c])]
+        # Which blanks to fill. A half-built answer drops many fields at once,
+        # and then everything known is kept. A single ratio going blank is
+        # usually Yahoo saying it no longer applies - no trailing P/E once a
+        # company makes a loss, no yield once it stops paying - and keeping
+        # the old figure showed a loss-maker on its old P/E, rescaled to
+        # today's price as if current (review 4-Nov-2026). Then only the
+        # company's identity and size are carried; the ratio stays blank.
+        half_built = len(lost) > HALF_BUILT * len(known)
+        for c in lost:
+            if half_built or c in ALWAYS_KEEP:
                 df.iloc[i, df.columns.get_loc(c)] = old[c]
     return df
 
@@ -222,6 +238,18 @@ def replace_symbol_rows(con: sqlite3.Connection, table: str, symbols: list[str],
         con.execute(f"DELETE FROM {table} WHERE symbol IN ({qmarks})", symbols)
     if not df.empty:
         df.to_sql(table, con, if_exists="append", index=False)
+
+
+def replace_statement_types(con: sqlite3.Connection, symbol: str, stmts: pd.DataFrame) -> None:
+    """Replace a company's statements only for the (statement, period) types
+    this answer carried. statements_long skips a type that fails, so an
+    answer with the income statement but a throttled balance sheet used to
+    delete the stored balance sheet and write nothing back (review
+    4-Nov-2026): ROCE, book value and Piotroski went with it."""
+    if _table_exists(con, "statements"):
+        for st, pt in stmts[["stmt_type", "period_type"]].drop_duplicates().itertuples(index=False):
+            con.execute("DELETE FROM statements WHERE symbol=? AND stmt_type=? AND period_type=?", (symbol, st, pt))
+    stmts.to_sql("statements", con, if_exists="append", index=False)
 
 
 def _table_exists(con: sqlite3.Connection, name: str) -> bool:
@@ -388,7 +416,7 @@ def main() -> None:
             # away. A genuinely empty company simply keeps its empty history.
             if not args.snapshot_only or args.statements:
                 if len(stmts):
-                    replace_symbol_rows(con, "statements", [sym], stmts)
+                    replace_statement_types(con, sym, stmts)
                 elif con.execute("SELECT 1 FROM statements WHERE symbol=? LIMIT 1",
                                  (sym,)).fetchone():
                     kept_stmts += 1
