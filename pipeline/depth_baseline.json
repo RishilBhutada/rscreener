@@ -1,91 +1,25 @@
 {
  "symbols": {
-  "TCS": {
+  "INFY": {
    "ev_band": {
     "n": 189,
     "start": "2023-03-31"
    },
+   "pb_band": {
+    "n": 899,
+    "start": "2005-04-01"
+   },
    "pe_band": {
-    "n": 772,
+    "n": 890,
+    "start": "2006-02-17"
+   },
+   "ps_band": {
+    "n": 959,
     "start": "2006-02-17"
    },
    "trend_quarters": {
-    "n": 81,
+    "n": 85,
     "start": "2005-03-31"
-   },
-   "pb_band": {
-    "n": 638,
-    "start": "2009-04-03"
-   },
-   "ps_band": {
-    "n": 846,
-    "start": "2006-02-17"
-   }
-  },
-  "BHARTIARTL": {
-   "ev_band": {
-    "n": 189,
-    "start": "2023-03-31"
-   },
-   "pe_band": {
-    "n": 720,
-    "start": "2006-05-19"
-   },
-   "trend_quarters": {
-    "n": 84,
-    "start": "2005-03-31"
-   },
-   "pb_band": {
-    "n": 873,
-    "start": "2005-09-30"
-   },
-   "ps_band": {
-    "n": 875,
-    "start": "2006-05-19"
-   }
-  },
-  "HINDUNILVR": {
-   "ev_band": {
-    "n": 189,
-    "start": "2023-03-31"
-   },
-   "pe_band": {
-    "n": 915,
-    "start": "2006-02-17"
-   },
-   "trend_quarters": {
-    "n": 86,
-    "start": "2005-03-31"
-   },
-   "pb_band": {
-    "n": 665,
-    "start": "2006-01-06"
-   },
-   "ps_band": {
-    "n": 999,
-    "start": "2006-02-17"
-   }
-  },
-  "RELIANCE": {
-   "ev_band": {
-    "n": 186,
-    "start": "2023-04-21"
-   },
-   "pe_band": {
-    "n": 895,
-    "start": "2006-02-17"
-   },
-   "trend_quarters": {
-    "n": 86,
-    "start": "2005-03-31"
-   },
-   "pb_band": {
-    "n": 742,
-    "start": "2008-04-04"
-   },
-   "ps_band": {
-    "n": 954,
-    "start": "2006-02-17"
    }
   },
   "SBIN": {
@@ -93,65 +27,21 @@
     "n": 171,
     "start": "2023-08-04"
    },
+   "pb_band": {
+    "n": 873,
+    "start": "2005-04-01"
+   },
    "pe_band": {
+    "n": 274,
+    "start": "2020-11-20"
+   },
+   "ps_band": {
     "n": 274,
     "start": "2020-11-20"
    },
    "trend_quarters": {
     "n": 83,
     "start": "2005-03-31"
-   },
-   "pb_band": {
-    "n": 873,
-    "start": "2005-04-01"
-   },
-   "ps_band": {
-    "n": 274,
-    "start": "2020-11-20"
-   }
-  },
-  "HDFCBANK": {
-   "ev_band": {
-    "n": 189,
-    "start": "2023-03-31"
-   },
-   "pe_band": {
-    "n": 992,
-    "start": "2006-02-17"
-   },
-   "trend_quarters": {
-    "n": 85,
-    "start": "2005-03-31"
-   },
-   "pb_band": {
-    "n": 824,
-    "start": "2005-04-01"
-   },
-   "ps_band": {
-    "n": 992,
-    "start": "2006-02-17"
-   }
-  },
-  "INFY": {
-   "ev_band": {
-    "n": 189,
-    "start": "2023-03-31"
-   },
-   "pe_band": {
-    "n": 890,
-    "start": "2006-02-17"
-   },
-   "trend_quarters": {
-    "n": 85,
-    "start": "2005-03-31"
-   },
-   "pb_band": {
-    "n": 899,
-    "start": "2005-04-01"
-   },
-   "ps_band": {
-    "n": 959,
-    "start": "2006-02-17"
    }
   },
   "LT": {
@@ -159,21 +49,87 @@
     "n": 149,
     "start": "2023-03-31"
    },
+   "pb_band": {
+    "n": 847,
+    "start": "2005-04-01"
+   },
    "pe_band": {
     "n": 914,
+    "start": "2006-02-17"
+   },
+   "ps_band": {
+    "n": 998,
     "start": "2006-02-17"
    },
    "trend_quarters": {
     "n": 86,
     "start": "2005-03-31"
+   }
+  },
+  "HINDUNILVR": {
+   "ev_band": {
+    "n": 189,
+    "start": "2023-03-31"
    },
    "pb_band": {
-    "n": 847,
-    "start": "2005-04-01"
+    "n": 665,
+    "start": "2006-01-06"
+   },
+   "pe_band": {
+    "n": 915,
+    "start": "2006-02-17"
    },
    "ps_band": {
-    "n": 998,
+    "n": 999,
     "start": "2006-02-17"
+   },
+   "trend_quarters": {
+    "n": 86,
+    "start": "2005-03-31"
+   }
+  },
+  "RELIANCE": {
+   "ev_band": {
+    "n": 186,
+    "start": "2023-04-21"
+   },
+   "pb_band": {
+    "n": 742,
+    "start": "2008-04-04"
+   },
+   "pe_band": {
+    "n": 895,
+    "start": "2006-02-17"
+   },
+   "ps_band": {
+    "n": 954,
+    "start": "2006-02-17"
+   },
+   "trend_quarters": {
+    "n": 86,
+    "start": "2005-03-31"
+   }
+  },
+  "BHARTIARTL": {
+   "ev_band": {
+    "n": 189,
+    "start": "2023-03-31"
+   },
+   "pb_band": {
+    "n": 873,
+    "start": "2005-09-30"
+   },
+   "pe_band": {
+    "n": 720,
+    "start": "2006-05-19"
+   },
+   "ps_band": {
+    "n": 875,
+    "start": "2006-05-19"
+   },
+   "trend_quarters": {
+    "n": 84,
+    "start": "2005-03-31"
    }
   },
   "ICICIBANK": {
@@ -181,21 +137,65 @@
     "n": 159,
     "start": "2023-10-27"
    },
+   "pb_band": {
+    "n": 768,
+    "start": "2005-07-01"
+   },
    "pe_band": {
+    "n": 317,
+    "start": "2016-05-27"
+   },
+   "ps_band": {
     "n": 317,
     "start": "2016-05-27"
    },
    "trend_quarters": {
     "n": 86,
     "start": "2005-03-31"
+   }
+  },
+  "TCS": {
+   "ev_band": {
+    "n": 189,
+    "start": "2023-03-31"
    },
    "pb_band": {
-    "n": 768,
-    "start": "2005-07-01"
+    "n": 638,
+    "start": "2009-04-03"
+   },
+   "pe_band": {
+    "n": 772,
+    "start": "2006-02-17"
    },
    "ps_band": {
-    "n": 317,
-    "start": "2016-05-27"
+    "n": 846,
+    "start": "2006-02-17"
+   },
+   "trend_quarters": {
+    "n": 81,
+    "start": "2005-03-31"
+   }
+  },
+  "HDFCBANK": {
+   "ev_band": {
+    "n": 189,
+    "start": "2023-03-31"
+   },
+   "pb_band": {
+    "n": 824,
+    "start": "2005-04-01"
+   },
+   "pe_band": {
+    "n": 992,
+    "start": "2006-02-17"
+   },
+   "ps_band": {
+    "n": 992,
+    "start": "2006-02-17"
+   },
+   "trend_quarters": {
+    "n": 85,
+    "start": "2005-03-31"
    }
   },
   "ITC": {
@@ -203,27 +203,27 @@
     "n": 189,
     "start": "2023-03-31"
    },
+   "pb_band": {
+    "n": 800,
+    "start": "2005-04-01"
+   },
    "pe_band": {
     "n": 950,
+    "start": "2006-02-17"
+   },
+   "ps_band": {
+    "n": 1035,
     "start": "2006-02-17"
    },
    "trend_quarters": {
     "n": 87,
     "start": "2005-03-31"
-   },
-   "pb_band": {
-    "n": 800,
-    "start": "2005-04-01"
-   },
-   "ps_band": {
-    "n": 1035,
-    "start": "2006-02-17"
    }
   }
  },
  "totals": {
-  "companies_with_pe_band": 2150,
-  "pe_bands_reaching_pre_2012": 786
+  "pe_bands_reaching_pre_2012": 787,
+  "companies_with_pe_band": 2150
  },
- "updated_at": "2026-11-06 20:39 UTC"
+ "updated_at": "2026-11-07 02:04 UTC"
 }
