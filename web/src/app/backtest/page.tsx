@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import InfoTip from "@/components/InfoTip";
+import { sectorTest } from "@/lib/saved-screens";
 import { compile, QueryError, Row } from "@/lib/query";
 import { FIELD_CATALOG } from "@/lib/fields";
 
@@ -59,6 +60,7 @@ function BacktestInner() {
   // The screen's sector filter, as the screener passes it (?sec=A,B).
   const secParam = params.get("sec") ?? "";
   const secs = useMemo(() => secParam.split(",").filter(Boolean), [secParam]);
+  const secTest = useMemo(() => sectorTest(secs), [secs]);
   const [index, setIndex] = useState<Index | null>(null);
   const [years, setYears] = useState<Record<string, (string | number | null)[][]> | null>(null);
   const [err, setErr] = useState("");
@@ -103,7 +105,7 @@ function BacktestInner() {
         // Outside the screen's sectors: not a pick, as on the screener - and
         // not counted towards whether the year can be judged either, or a
         // Banks screen was called "tested" on the strength of the whole market.
-        if (secs.length && index.sectors && !secs.includes(index.sectors[r[0] as string] ?? "")) continue;
+        if (secTest && index.sectors && !secTest(index.sectors[r[0] as string])) continue;
         inScope++;
         const row: Row = { symbol: r[0] as string };
         F.forEach((f, i) => { row[f] = r[i + 1] as number | null; });
@@ -127,7 +129,7 @@ function BacktestInner() {
       });
     }
     return { rows };
-  }, [q, index, years, secs]);
+  }, [q, index, years, secTest]);
 
   const rows = result.rows;
   // Only years the screen could be judged in, for all three columns alike, so
@@ -185,7 +187,7 @@ function BacktestInner() {
         </p>
         {secs.length > 0 && (
           <p className="text-[12px] text-[var(--ink2)]">
-            Only {secs.join(", ")}{index && !index.sectors ? " - not applied: this history was built before sectors were added; it applies after the next nightly run" : ""}
+            {secs.every((x) => x.startsWith("!")) ? `All sectors except ${secs.map((x) => x.slice(1)).join(", ")}` : `Only ${secs.join(", ")}`}{index && !index.sectors ? " - not applied: this history was built before sectors were added; it applies after the next nightly run" : ""}
           </p>
         )}
 

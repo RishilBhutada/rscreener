@@ -613,7 +613,7 @@ def main() -> None:
             print(f"time budget of {args.max_minutes:g} min reached - stopping after {i-1} "
                   f"of {len(symbols)} symbols; the rest come up on a later run", flush=True)
             break
-        n_periods = skipped = refused = 0
+        n_periods = skipped = refused = unread = 0
         err = None
         try:
             filings = []
@@ -670,9 +670,11 @@ def main() -> None:
                         facts = parse_old_html(get_retry(s, f["resultDetailedDataLink"], tries=3).text)
                 except Exception:
                     skipped += 1
+                    unread += 1
                     continue
                 if not facts:
                     skipped += 1
+                    unread += 1
                     continue
                 basis = "consolidated" if f.get("consolidated") == "Consolidated" else "standalone"
                 ps, pe = iso(f["fromDate"]), iso(f["toDate"])
@@ -700,12 +702,24 @@ def main() -> None:
                 n_periods += 1
                 time.sleep(0.15)
             if not args.only_missing:
+                # A filing that would not download or parse was logged as a
+                # clean fetch, so the deep pass left that quarter missing for 180
+                # days (review results-history #3). Logged with an error instead,
+                # the symbol is due again on the next run. Once only: if the last
+                # run hit the same, the document itself is broken, and the symbol
+                # goes back to its normal turn rather than jumping the queue nightly.
+                note = f"{unread} filings could not be read" if unread else None
+                if note:
+                    last = con.execute(f"SELECT error FROM {log_table} WHERE symbol=?", (sym,)).fetchone()
+                    if last and last[0] and last[0].endswith("filings could not be read"):
+                        note = None
                 db_retry(lambda: con.execute(
                     f"INSERT OR REPLACE INTO {log_table} VALUES (?,?,?,?)",
-                    (sym, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), None, n_periods),
+                    (sym, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), note, n_periods),
                 ))
             db_retry(con.commit)
             print(f"[{i}/{len(symbols)}] {sym}: {n_periods} periods parsed, {skipped} skipped"
+                  + (f" ({unread} unreadable - retried next run)" if unread else "")
                   + (f", {refused} refused as a units mistake" if refused else ""))
         except Exception as e:  # noqa: BLE001
             err = str(e)[:200]

@@ -285,6 +285,12 @@ def main() -> None:
         pts = []
         for d, v in zip(ds, vs):
             if fxtick:
+                # A US close is known in India only the next day, which is how
+                # the ETF page's own index line reads it (index_inr, strict).
+                # Dated on the US day here, the chart ran one session ahead of
+                # that line (review pipeline-markets #9): dated the day after,
+                # at that day's rupee rate, the two now agree.
+                d = (datetime.strptime(d, "%Y-%m-%d").date() + timedelta(days=1)).isoformat()
                 fx = at_or_before(*idx[fxtick], d)
                 if not fx:
                     continue

@@ -43,7 +43,18 @@ def push(title: str, message: str, click: str, priority: str = "default") -> boo
 
 # ── the query language, as web/src/lib/query.ts parses it ──
 
-TOKEN = re.compile(r"\s*(?:(\d+(?:\.\d+)?)%?|([A-Za-z_][A-Za-z0-9_]*)|(<=|>=|==|!=|<|>|=)|([-+*/])|(\()|(\)))")
+TOKEN = re.compile(r"\s*(?:(\d+(?:\.\d+)?)(%?)|([A-Za-z_][A-Za-z0-9_]*)|(<=|>=|==|!=|<|>|=)|([-+*/])|(\()|(\)))")
+
+# Each field's unit, read from the screener's own catalogue so the two cannot
+# drift. A "%" after a number is allowed only against a percent / points field:
+# "de < 50%" read as D/E below 50 and matched nearly every company.
+_FIELDS_TS = Path(__file__).resolve().parents[1] / "web" / "src" / "lib" / "fields.ts"
+try:
+    UNIT_OF = dict(re.findall(r'key:\s*"(\w+)".*?unit:\s*"([^"]*)"', _FIELDS_TS.read_text(encoding="utf-8")))
+except OSError:
+    UNIT_OF = {}
+PCT_UNITS = {"%", "%/yr", "pts"}
+MONEY_FIELDS = {"revenue", "net_income", "total_debt", "total_cash", "free_cashflow"}
 
 
 def tokenize(src: str) -> list[tuple[str, str]]:
@@ -55,9 +66,9 @@ def tokenize(src: str) -> list[tuple[str, str]]:
         m = TOKEN.match(src, i)
         if not m or m.end() == i:
             raise ValueError(f"unexpected character {src[i]!r}")
-        num, word, op, ar, lp, rp = m.groups()
+        num, pct, word, op, ar, lp, rp = m.groups()
         if num:
-            out.append(("num", num))
+            out.append(("pnum" if pct else "num", num))
         elif word:
             w = word.lower()
             out.append((w, w) if w in ("and", "or") else ("ident", ALIASES.get(w, w)))
@@ -138,6 +149,8 @@ class Parser:
         kind, val = self.take()
         if kind == "num":
             return ("num", float(val))
+        if kind == "pnum":
+            return ("num", float(val), "%")
         if kind == "ident":
             return ("field", val)
         if kind == "(":
@@ -148,11 +161,27 @@ class Parser:
         raise ValueError(f"expected a field or number, got {val!r}")
 
 
+def _check_percents(node) -> None:
+    if node[0] in ("and", "or"):
+        for sub in node[1:]:
+            _check_percents(sub)
+        return
+    if node[0] != "cmp":
+        return
+    _, _, left, right = node
+    for side, other in ((left, right), (right, left)):
+        if side[0] == "num" and len(side) > 2 and other[0] == "field":
+            unit = UNIT_OF.get(other[1])
+            if unit is not None and unit not in PCT_UNITS:
+                raise ValueError(f"'{other[1]}' is not a percentage - write {side[1] / 100:g} for {side[1]:g}%")
+
+
 def compile_query(src: str):
     p = Parser(tokenize(src))
     tree = p.expr()
     if p.i != len(p.t):
         raise ValueError(f"unexpected {p.t[p.i][1]!r}")
+    _check_percents(tree)
     return tree
 
 
@@ -162,7 +191,10 @@ def num(node, row):
         return node[1]
     if k == "field":
         v = row.get(node[1])
-        return v if isinstance(v, (int, float)) and v == v else None
+        if not (isinstance(v, (int, float)) and v == v):
+            return None
+        # Money figures read in crore, as the screener reads them (query.ts MONEY_FIELDS).
+        return v / 1e7 if node[1] in MONEY_FIELDS else v
     if k == "neg":
         v = num(node[1], row)
         return None if v is None else -v
@@ -226,7 +258,10 @@ def main() -> None:
         except ValueError as e:
             print(f"  {name}: cannot read the query ({e})")
             continue
-        sec = set(sectors)
+        # "A" keeps only listed sectors; "!A" leaves one out and keeps the rest,
+        # companies with no sector included (as web/src/lib/saved-screens.ts).
+        inc = {x for x in sectors if not x.startswith("!")}
+        exc = {x[1:] for x in sectors if x.startswith("!")}
         prev = state.get(name, {})
         before = prev.get("symbols")
         # Members are carried over a missing figure only while the screen is
@@ -237,7 +272,8 @@ def main() -> None:
         streak = prev.get("unknown_nights", {}) if same else {}
         now, unknown, nights = [], 0, {}
         for r in rows:
-            if sec and r.get("sector") not in sec:
+            sct = r.get("sector") or ""
+            if (inc and sct not in inc) or sct in exc:
                 continue
             res = test(tree, r)
             sym = r["symbol"]

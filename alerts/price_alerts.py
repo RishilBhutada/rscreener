@@ -58,7 +58,7 @@ def rules() -> list[tuple[str, str, float]]:
     return sorted(set(out))
 
 
-def price(sym: str) -> tuple[float, datetime] | None:
+def price(sym: str) -> tuple[float, datetime, float | None] | None:
     for suffix in (".NS", ".BO"):
         try:
             r = requests.get(CHART.format(sym=sym.replace("&", "%26") + suffix), headers={"User-Agent": UA}, timeout=30)
@@ -66,8 +66,9 @@ def price(sym: str) -> tuple[float, datetime] | None:
         except (requests.RequestException, ValueError):
             continue
         p, t = meta.get("regularMarketPrice"), meta.get("regularMarketTime")
+        prev = meta.get("chartPreviousClose") or meta.get("previousClose")
         if p and t:
-            return float(p), datetime.fromtimestamp(int(t), IST)
+            return float(p), datetime.fromtimestamp(int(t), IST), (float(prev) if prev else None)
     return None
 
 
@@ -84,17 +85,23 @@ def main() -> None:
     if sent is None:
         print("price alerts: ntfy topic unreadable - nothing sent, next run")
         return
-    quotes: dict[str, tuple[float, datetime] | None] = {}
+    quotes: dict[str, tuple[float, datetime, float | None] | None] = {}
     for sym, op, level in rs:
         if sym not in quotes:
             quotes[sym] = price(sym)
         q = quotes[sym]
         if not q:
             continue
-        px, at = q
+        px, at, prev = q
         if at.date() != now.date():
             continue        # yesterday's close (before the first trade, or a holiday) is not a crossing today
         if not ((op == ">" and px >= level) or (op == "<" and px <= level)):
+            continue
+        # A CROSSING, not a level: "RELIANCE > 1300" used to push every trading
+        # day for as long as RELIANCE stayed above 1300 (review alerts-workflows
+        # #16). It fires on the day the price goes past the level from the
+        # other side of yesterday's close; with no previous close known, as before.
+        if prev is not None and ((op == ">" and prev >= level) or (op == "<" and prev <= level)):
             continue
         key = f"rs-px-{re.sub(r'[^A-Za-z0-9]', '', sym)}-{'up' if op == '>' else 'dn'}-{level:g}-{now:%Y%m%d}".replace(".", "p")
         if key in sent:

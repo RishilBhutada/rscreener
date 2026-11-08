@@ -48,26 +48,30 @@ refused refetch save fails the run (alerts #19); filings dated by first broadcas
 
 ## Still open (confirmed, not fixed)
 
-From `review/findings-company-page` (the rest; #1-#4 and #8 are fixed):
-- #5 (PLAUSIBLE) an older file can show the previous company's peers; #6 peers and industry
-  medians from different groupings; #7 payout % before a demerger.
-
-From `review/findings-alerts-workflows`:
-- #2 every database save deletes the stored copy before uploading (no backup if an upload dies).
-- #4 ETF and screen alerts run before the publish guards; #5 the depth baseline is committed before
-  check_depth raises it; #8 the nightly's state push fails if main moved; #9 guarded_fetch.sh hides
-  exit 1 crashes (by design - a source crash is tolerated with a warning; owner's call); plus the
-  PLAUSIBLE rows in the file.
-
-From the earlier reviews:
-- web-screens #5 Magic Formula / exclude-sector screens drop companies with no sector.
-- web-screens #6 money filters compared in rupees, shown in crore.
-- pipeline-core #10, #11 ROCE / payout / debtor days period mismatches (small).
-- pipeline-core #17 corrected corporate actions stored twice (17 pairs).
-- pipeline-markets #9 foreign-index ETF chart vs page one session apart.
-- results-history #3 a failed filing waits up to 180 days in the deep pass.
-- alerts/screen_alerts.py has its own query parser: it still accepts "de < 50%".
+- alerts-workflows #9 `guarded_fetch.sh` lets exit 1 pass with a warning - by design (a source
+  crash is tolerated); owner's call. The other PLAUSIBLE rows of that file are unchanged.
 - Not testable without live data: pipeline-core #12 (rescale across a split), #18.
+
+## Fixed 8-Nov-2026 (the rest of the list above it)
+
+- alerts-workflows #2 database saves go through `pipeline/store_db.sh` (upload beside, then
+  rename; last copy kept as `.prev`; nightly restore falls back to it); #4 ETF / screen alerts run
+  only after the publish guards; #5 the ratchet commit runs after `check_depth.py`; #8 that push
+  rebases onto current main and retries (commit 095b18cd3). #16 price alerts fire on a crossing,
+  not every day beyond the level.
+- company-page #5 the old-file fallback is guarded and clears peers; #6 peers, industry medians
+  and industry rank from one pool (NSE basic industry with 5+ members, else the source's);
+  #7 payout % puts the dividend on the post-demerger base.
+- web-screens #5 sector exclusions stay exclusions (`!Sector`), keeping companies with no
+  sector (screener, saved screens, holdings, backtest, screen alerts); #6 money fields are read
+  in crore in a screen, as shown.
+- pipeline-core #10 ratio inputs from one year (newest with income and balance sheet); #11
+  payout and debtor days from that year's statement; #17 NSE's answer replaces corrected
+  corporate actions from its earliest date on.
+- pipeline-markets #9 foreign-index chart file dated the day a US close is known in India.
+- results-history #3 unreadable filings log the symbol as due again (once).
+- `alerts/screen_alerts.py` refuses "%" on a field that is not a percentage, from the
+  screener's own unit list.
 
 ## Watch on the next nightly run
 

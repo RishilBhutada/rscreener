@@ -616,7 +616,8 @@ def dividends_per_share(con: sqlite3.Connection) -> dict[str, list[tuple[str, fl
     return out
 
 
-def dividend_payout(trend: dict | None, dps: list | None, splits: list | None) -> list | None:
+def dividend_payout(trend: dict | None, dps: list | None, splits: list | None,
+                    demergers: list | None = None) -> list | None:
     """Dividend Payout % per financial year: dividends per share for the year over
     EPS, both on today's share base (EPS already is; a dividend is divided by the
     splits and bonuses since its ex-date).
@@ -642,7 +643,12 @@ def dividend_payout(trend: dict | None, dps: list | None, splits: list | None) -
     out = []
     for e, eps in zip(ends, trend.get("eps") or []):
         if e in seen and eps and eps > 0:
-            out.append(round(per_year[e] / eps * 100, 1))
+            # The year's EPS is on the continuing company's base after a
+            # demerger (trend_lib scales it by price_adjust.factor_at), so the
+            # dividend is put on the same base - else every year before the
+            # demerger is off by that factor (review company-page #7).
+            div = per_year[e] * price_adjust.factor_at(demergers, e)
+            out.append(round(div / eps * 100, 1))
         elif e in seen or not eps:
             out.append(None)
         else:
@@ -745,13 +751,6 @@ def screener_context(data_json: Path) -> tuple[dict, dict, dict]:
     with_cap = [r for r in rows if isinstance(r.get("mcap"), (int, float))]
     with_cap.sort(key=lambda r: -r["mcap"])
     rank_all = {r["symbol"]: i + 1 for i, r in enumerate(with_cap)}
-    rank_ind: dict[str, int] = {}
-    seen: dict[str, int] = {}
-    for r in with_cap:
-        ind = r.get("industry") or ""
-        seen[ind] = seen.get(ind, 0) + 1
-        rank_ind[r["symbol"]] = seen[ind]
-    ind_sizes = {ind: n for ind, n in seen.items()}
 
     def median(vals: list[float]) -> float | None:
         if len(vals) < 5:      # below five, a "median" is one firm in a hat
@@ -760,8 +759,7 @@ def screener_context(data_json: Path) -> tuple[dict, dict, dict]:
         m = len(vals) // 2
         return vals[m] if len(vals) % 2 else (vals[m - 1] + vals[m]) / 2
 
-    medians_by_industry: dict[str, dict] = {}
-    for ind, members in by_industry.items():
+    def medians_of(members: list) -> dict:
         out = {}
         for f in MEDIAN_FIELDS:
             vs = [r[f] for r in members
@@ -769,14 +767,32 @@ def screener_context(data_json: Path) -> tuple[dict, dict, dict]:
             m = median(vs)
             if m is not None:
                 out[f] = [round(m, 2), len(vs)]     # value, and how many it came from
-        medians_by_industry[ind] = out
+        return out
+
+    # Peers, the industry medians and the industry rank all come from ONE pool
+    # (review company-page #6): the peer table used NSE's basic industry while
+    # the medians and rank used the source's industry, so the bars beside the
+    # peers could describe a different set of companies. NSE's group is used
+    # when it has five members (a median needs five), the source's otherwise.
+    medians_cache: dict[tuple, dict] = {}
+    rank_cache: dict[tuple, dict] = {}
+
+    def pool_of(r) -> tuple[tuple, list]:
+        group = by_basic.get(r.get("nse_basic") or "", [])
+        if len(group) >= 5:
+            return ("basic", r["nse_basic"]), group
+        ind = r.get("industry") or ""
+        return ("ind", ind), by_industry.get(ind, [])
 
     row_by, peers_by, ctx_by = {}, {}, {}
     for r in rows:
         sym, ind = r["symbol"], (r.get("industry") or "")
         row_by[sym] = r
-        group = by_basic.get(r.get("nse_basic") or "", [])
-        pool = group if len(group) >= 4 else by_industry.get(ind, [])
+        key, pool = pool_of(r)
+        if key not in medians_cache:
+            medians_cache[key] = medians_of(pool)
+            sized = sorted((x for x in pool if isinstance(x.get("mcap"), (int, float))), key=lambda x: -x["mcap"])
+            rank_cache[key] = {x["symbol"]: i + 1 for i, x in enumerate(sized)}
         peers_by[sym] = [
             {k: p.get(k) for k in PEER_FIELDS}
             for p in sorted((x for x in pool if x["symbol"] != sym),
@@ -786,12 +802,12 @@ def screener_context(data_json: Path) -> tuple[dict, dict, dict]:
             "industry": ind,
             "nse_sector": r.get("nse_sector"),
             "nse_basic": r.get("nse_basic"),
-            "peer_group": r.get("nse_basic") if len(group) >= 4 else ind,
-            "medians": medians_by_industry.get(ind, {}),
+            "peer_group": key[1],
+            "medians": medians_cache[key],
             "rank": rank_all.get(sym),
             "rank_of": len(with_cap),
-            "ind_rank": rank_ind.get(sym),
-            "ind_rank_of": ind_sizes.get(ind, 0),
+            "ind_rank": rank_cache[key].get(sym),
+            "ind_rank_of": len(rank_cache[key]),
         }
     return row_by, peers_by, ctx_by
 
@@ -946,6 +962,8 @@ def main() -> None:
                 logos[s_] = (LOGO_EXT[mime], data)
     logo_dir = OUT_DIR.parent / "logos"
     splits_by_symbol = split_factors(con)
+    # Demergers the prices and EPS were put on the continuing company's base for.
+    demergers_by_symbol = price_adjust.events(con)
     # Quarterly business updates filed before the results (business_updates.py):
     # how often, how many days after the quarter, and the latest.
     updates_by_symbol: dict[str, dict] = {}
@@ -1164,7 +1182,8 @@ def main() -> None:
                                   ("annual_pnl", "annual", "_yf_annual")):
             tr = (trends.get(sym) or {}).get(tkey)
             asf = asfiled_table(tr, {q["end"]: q.get("announced") for q in (quarters_by_symbol.get(sym) or [])},
-                                dividend_payout(tr, dps_by_symbol.get(sym), splits_by_symbol.get(sym)) if tkey == "annual" else None)
+                                dividend_payout(tr, dps_by_symbol.get(sym), splits_by_symbol.get(sym),
+                                                demergers_by_symbol.get(sym)) if tkey == "annual" else None)
             fallback = payload["statements"].pop(yf_key, None)
             chosen = asf or fallback
             if chosen:

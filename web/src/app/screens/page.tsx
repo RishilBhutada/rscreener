@@ -7,10 +7,10 @@ import Link from "next/link";
 import { saveFile } from "@/lib/download";
 import TopNav from "@/components/TopNav";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
-import { Row, canonicalField, compile, isValidRatioName } from "@/lib/query";
+import { Row, canonicalField, compile, isValidRatioName, MONEY_FIELDS, CRORE } from "@/lib/query";
 import { FIELD_CATALOG, FieldDef, Universe, catalogFor } from "@/lib/fields";
 import { LIBRARY, LibraryScreen, libraryById } from "@/lib/screen-library";
-import { SavedScreen, diff, loadSaved, matchesOf, storeSaved } from "@/lib/saved-screens";
+import { SavedScreen, diff, loadSaved, matchesOf, storeSaved, sectorTest } from "@/lib/saved-screens";
 import { WatchState, loadLists, toggleIn } from "@/lib/watchlists";
 import { shortName } from "@/lib/names";
 import {
@@ -63,7 +63,10 @@ function roundTo(v: number, step: number): number {
   return Number(v.toFixed(d));
 }
 const OP_SYM: Record<string, string> = { ">": ">", ">=": "≥", "<": "<", "<=": "≤", "=": "=", "!=": "≠" };
-const MONEY = new Set(["revenue", "net_income", "total_debt", "total_cash", "free_cashflow"]);
+const MONEY = MONEY_FIELDS;
+/** A field's stored value in the units a screen is written in (money in crore). */
+const toQ = (key: string, v: number) => (MONEY.has(key) ? v / CRORE : v);
+const fromQ = (key: string, v: number) => (MONEY.has(key) ? v * CRORE : v);
 const UNIT_SUFFIX: Record<string, string> = { "%": "%", "%/yr": "%", "₹Cr": " Cr", pts: " pts", "×": "×" };
 
 function labelOf(key: string, by: ByKey = COMPANY_BY): string {
@@ -215,11 +218,11 @@ function ScreensInner() {
       const { run, fields } = query.trim()
         ? compile(query, uni === "companies" ? ratiosMap : {}, uni === "companies" ? undefined : catalog.map((f) => f.key))
         : { run: () => true as boolean | null, fields: [] as string[] };
-      const sec = sectors.length ? new Set(sectors) : null;
+      const sec = sectorTest(sectors);
       const matches: Row[] = [];
       let skipped = 0;
       for (const r of rows) {
-        if (sec && !sec.has(String(r.sector ?? ""))) continue;
+        if (sec && !sec(r.sector)) continue;
         const res = run(r);
         if (res === true) matches.push(r);
         else if (res === null) skipped++;
@@ -318,7 +321,9 @@ function ScreensInner() {
 
   const openLibrary = (l: LibraryScreen) => {
     setSort(null);
-    const sec = l.excludeSectors ? allSectors.filter((x) => !l.excludeSectors!.includes(x)) : [];
+    // Exclusions stay exclusions ("!Utilities"), so a company with no sector
+    // on record is kept and a sector added later is included.
+    const sec = l.excludeSectors ? l.excludeSectors.map((x) => `!${x}`) : [];
     afterClose(() => go({ q: l.query, sec, lib: l.id, u: "companies" }, true));
   };
 
@@ -369,7 +374,7 @@ function ScreensInner() {
     const c = index !== null ? parsed?.conds[index] : undefined;
     const med = medians(field);
     setOpText(c?.op ?? ">");
-    setValText(c?.value ?? (med === null ? "" : String(Math.round(med * 10) / 10)));
+    setValText(c?.value ?? (med === null ? "" : String(Math.round(toQ(field, med) * 10) / 10)));
     setSheet({ kind: "cond", index, field });
   };
 
@@ -387,8 +392,8 @@ function ScreensInner() {
   // How many pass each filter on its own (within the chosen sectors).
   const condCounts = useMemo(() => {
     if (!rows || !parsed) return [] as (number | null)[];
-    const sec = sectors.length ? new Set(sectors) : null;
-    const pool = sec ? rows.filter((r) => sec.has(String(r.sector ?? ""))) : rows;
+    const sec = sectorTest(sectors);
+    const pool = sec ? rows.filter((r) => sec(r.sector)) : rows;
     return parsed.conds.map((c) => {
       try {
         const { run } = compile(`${c.field} ${c.op} ${c.value}`, uni === "companies" ? ratiosMap : {}, uni === "companies" ? undefined : catalog.map((f) => f.key));
@@ -405,9 +410,11 @@ function ScreensInner() {
   // counts used to disagree whenever a sector was picked.
   const spread = useMemo(() => {
     if (sheet?.kind !== "cond" || !rows) return null;
-    const sec = sectors.length ? new Set(sectors) : null;
-    const pool = sec ? rows.filter((r) => sec.has(String(r.sector ?? ""))) : rows;
-    const vs = pool.map((r) => r[sheet.field]).filter((x): x is number => typeof x === "number" && Number.isFinite(x)).sort((a, b) => a - b);
+    const sec = sectorTest(sectors);
+    const pool = sec ? rows.filter((r) => sec(r.sector)) : rows;
+    // In the units the screen is written in, so the slider writes crore for money.
+    const vs = pool.map((r) => r[sheet.field]).filter((x): x is number => typeof x === "number" && Number.isFinite(x))
+      .map((x) => toQ(sheet.field, x)).sort((a, b) => a - b);
     if (vs.length < 10) return null;
     const lo = vs[Math.floor(vs.length * 0.02)], hi = vs[Math.floor(vs.length * 0.98)];
     if (!(hi > lo)) return null;
@@ -492,6 +499,7 @@ function ScreensInner() {
                   <button type="button" onClick={() => setSheet({ kind: "sectors" })}
                     className={`ml-auto text-[12.5px] font-semibold ${sectors.length ? "text-[var(--accent-ink)]" : "text-[var(--accent-ink)]"}`}>
                     {sectors.length === 0 ? (uni === "indices" ? "All groups" : uni === "commodities" ? "MCX and NCDEX" : "All sectors")
+                      : sectors.every((x) => x.startsWith("!")) ? `All but ${sectors.length}`
                       : sectors.length === 1 ? sectors[0] : `${sectors.length} ${uni === "indices" ? "groups" : uni === "commodities" ? "exchanges" : "sectors"}`}
                   </button>
                 </div>
@@ -506,7 +514,7 @@ function ScreensInner() {
                   };
                   const med = medians(c.field);
                   const n = condCounts[i];
-                  const unit = UNIT_SUFFIX[by.get(c.field)?.unit ?? ""] ?? "";
+                  const unit = MONEY.has(c.field) ? " Cr" : UNIT_SUFFIX[by.get(c.field)?.unit ?? ""] ?? "";
                   return (
                     <div key={`${c.field}-${i}`} className="grid grid-cols-[minmax(0,1fr)_30px_104px_70px_24px] items-center gap-1.5 px-3 py-1.5 border-t border-[var(--line)]">
                       <button type="button" onClick={() => openCond(i, c.field)} className="min-w-0 truncate text-left text-[13.5px] font-semibold text-[var(--ink)]">
@@ -547,7 +555,7 @@ function ScreensInner() {
                   <span className="truncate">{query}</span>
                 </button>
                 <button type="button" onClick={() => setSheet({ kind: "sectors" })} className={`${chip} border-[var(--line)] text-[var(--ink2)]`}>
-                  {sectors.length === 0 ? "All sectors" : `${sectors.length} sectors`}
+                  {sectors.length === 0 ? "All sectors" : sectors.every((x) => x.startsWith("!")) ? `All but ${sectors.length} sectors` : `${sectors.length} sectors`}
                 </button>
               </div>
             )}
@@ -769,7 +777,7 @@ function ScreensInner() {
               <label className="flex items-center gap-2 h-11 px-3 rounded-lg border border-[var(--line)] bg-[var(--card2)] focus-within:border-[var(--accent-line)]">
                 <input autoFocus value={valText} onChange={(e) => setValText(e.target.value)} inputMode="decimal" aria-label="Value"
                   className="flex-1 min-w-0 bg-transparent outline-none text-[16px] tabular-nums text-[var(--ink)]" />
-                <span className="text-[13px] text-[var(--ink3)]">{f?.unit}</span>
+                <span className="text-[13px] text-[var(--ink3)]">{MONEY.has(sheet.field) ? "₹ Cr" : f?.unit}</span>
               </label>
               {spread && (() => {
                 const v = parseFloat(valText);
@@ -790,16 +798,16 @@ function ScreensInner() {
                       value={cutAt ?? spread.lo} onChange={(e) => setValText(String(roundTo(parseFloat(e.target.value), stepOf((spread.hi - spread.lo) / 10))))}
                       aria-label="Cut-off" className="w-full mt-1 accent-[var(--accent)]" />
                     <div className="flex justify-between text-[11px] text-[var(--ink3)] tabular-nums">
-                      <span>{fmtVal(sheet.field, spread.lo, by)}</span>
+                      <span>{fmtVal(sheet.field, fromQ(sheet.field, spread.lo), by)}</span>
                       <span className="font-semibold text-[var(--ink)]">{n === null ? "" : `${n.toLocaleString("en-IN")} of ${spread.vs.length.toLocaleString("en-IN")} pass`}</span>
-                      <span>{fmtVal(sheet.field, spread.hi, by)}</span>
+                      <span>{fmtVal(sheet.field, fromQ(sheet.field, spread.hi), by)}</span>
                     </div>
                   </div>
                 );
               })()}
               {med !== null && (
                 <p className="text-[12px] text-[var(--ink3)]">
-                  Median across {uni === "companies" ? "companies" : uni}: <button type="button" onClick={() => setValText(String(Math.round(med * 10) / 10))}
+                  Median across {uni === "companies" ? "companies" : uni}: <button type="button" onClick={() => setValText(String(Math.round(toQ(sheet.field, med) * 10) / 10))}
                     className="font-semibold text-[var(--accent-ink)] tabular-nums">{fmtVal(sheet.field, med, by)}</button>
                 </p>
               )}
@@ -826,10 +834,16 @@ function ScreensInner() {
                 ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)] font-semibold" : "text-[var(--ink2)] border-[var(--line)]"}`}>
               All
             </button>
+            {sectors.some((x) => x.startsWith("!")) && (
+              <p className="w-full text-[12px] text-[var(--ink3)]">
+                All sectors except {sectors.filter((x) => x.startsWith("!")).map((x) => x.slice(1)).join(", ")} (companies with no sector are kept). Picking a sector below switches to only the ones you pick.
+              </p>
+            )}
             {allSectors.map((s) => {
               const on = sectors.includes(s);
+              const plain = sectors.filter((x) => !x.startsWith("!"));
               return (
-                <button key={s} type="button" onClick={() => go({ sec: on ? sectors.filter((x) => x !== s) : [...sectors, s] })}
+                <button key={s} type="button" onClick={() => go({ sec: on ? plain.filter((x) => x !== s) : [...plain, s] })}
                   className={`rs-press min-h-[34px] px-3 rounded-full text-[13px] border ${on
                     ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)] font-semibold" : "text-[var(--ink2)] border-[var(--line)]"}`}>
                   {s}

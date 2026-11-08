@@ -50,14 +50,29 @@ export function storeSaved(list: SavedScreen[]): SavedScreen[] {
   return list;
 }
 
+/** A screen's sector list as a test. "A" keeps only listed sectors; "!A"
+ *  leaves a sector out and keeps everything else - including companies with
+ *  no sector on record, which an include-list of "all the others" dropped
+ *  (Magic Formula lost every BSE-only company without a sector; review
+ *  web-screens #5). Null when the list sets no condition. */
+export function sectorTest(list: string[] | undefined | null): ((sector: unknown) => boolean) | null {
+  if (!list?.length) return null;
+  const inc = new Set(list.filter((s) => !s.startsWith("!")));
+  const exc = new Set(list.filter((s) => s.startsWith("!")).map((s) => s.slice(1)));
+  return (sector) => {
+    const s = String(sector ?? "");
+    return (!inc.size || inc.has(s)) && !exc.has(s);
+  };
+}
+
 /** The symbols a screen matches today. Null when the query no longer
  *  compiles (a custom ratio it used was deleted, say). */
 export function matchesOf(s: Pick<SavedScreen, "query" | "sectors">, rows: Row[], ratios: Record<string, string>): string[] | null {
   try {
     const { run } = compile(s.query, ratios);
-    const sec = s.sectors?.length ? new Set(s.sectors) : null;
+    const sec = sectorTest(s.sectors);
     return rows
-      .filter((r) => (!sec || sec.has(String(r.sector ?? ""))) && run(r) === true)
+      .filter((r) => (!sec || sec(r.sector)) && run(r) === true)
       .map((r) => String(r.symbol));
   } catch {
     return null;

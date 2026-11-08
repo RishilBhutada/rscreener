@@ -205,6 +205,20 @@ def main() -> None:
 
             def _write(rows_in=out, s=sym):
                 if rows_in:
+                    # NSE's answer is the truth for the dates it covers. A row it
+                    # no longer lists there - an ex-date or subject NSE corrected -
+                    # is removed, not kept beside the corrected one: 17 such pairs
+                    # were stored twice (review pipeline-core #17).
+                    # Its list runs from its earliest date to the newest -
+                    # upcoming ones included - so everything stored from that
+                    # earliest date on is covered; older history is left alone.
+                    lo = min(r[1] for r in rows_in)
+                    keep = {(r[1], r[4]) for r in rows_in}
+                    stale = [(s, ex, subj) for ex, subj in con.execute(
+                        "SELECT ex_date, subject FROM corporate_actions WHERE symbol=? AND ex_date >= ?",
+                        (s, lo)) if (ex, subj) not in keep]
+                    if stale:
+                        con.executemany("DELETE FROM corporate_actions WHERE symbol=? AND ex_date=? AND subject=?", stale)
                     con.executemany("INSERT OR REPLACE INTO corporate_actions VALUES (?,?,?,?,?)", rows_in)
                 con.execute("INSERT OR REPLACE INTO ca_fetch_log VALUES (?,?,?,?)",
                             (s, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), None, len(rows_in)))

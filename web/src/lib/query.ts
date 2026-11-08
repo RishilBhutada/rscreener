@@ -274,13 +274,21 @@ class Parser {
   }
 }
 
+/** Money figures stored in rupees but shown everywhere in crore. A screen
+ *  reads them in crore, so "total_debt < 1000" means Rs 1,000 Cr as it reads
+ *  on screen, not Rs 1,000 (review web-screens #6). A ratio of two of them is
+ *  unchanged. */
+export const MONEY_FIELDS = new Set(["revenue", "net_income", "total_debt", "total_cash", "free_cashflow"]);
+export const CRORE = 1e7;
+
 function evalArith(node: Arith, row: Row): number | null {
   switch (node.a) {
     case "num":
       return node.v;
     case "field": {
       const v = row[node.name];
-      return v === null || v === undefined || typeof v !== "number" || Number.isNaN(v) ? null : v;
+      if (v === null || v === undefined || typeof v !== "number" || Number.isNaN(v)) return null;
+      return MONEY_FIELDS.has(node.name) ? v / CRORE : v;
     }
     case "neg": {
       const v = evalArith(node.v, row);

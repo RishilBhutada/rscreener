@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { compile, Row } from "@/lib/query";
-import { loadSaved, SavedScreen } from "@/lib/saved-screens";
+import { loadSaved, SavedScreen, sectorTest } from "@/lib/saved-screens";
 import InfoTip from "@/components/InfoTip";
 
 /** Which holdings pass each saved screen, on today's figures (P10, 1-Nov-2026).
@@ -49,7 +49,8 @@ export default function HoldingsScreens({ symbols, nameOf }: { symbols: string[]
         const run = compile(s.query, ratios).run;
         const pass: string[] = [], fail: string[] = [], unknown: string[] = [];
         for (const r of held) {
-          if (s.sectors?.length && !s.sectors.includes(String(r.sector ?? ""))) { fail.push(String(r.symbol)); continue; }
+          const sec = sectorTest(s.sectors);
+          if (sec && !sec(r.sector)) { fail.push(String(r.symbol)); continue; }
           const ok = run(r);
           (ok === null ? unknown : ok ? pass : fail).push(String(r.symbol));
         }

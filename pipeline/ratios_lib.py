@@ -10,28 +10,44 @@ ITEMS_NEEDED = {
     # Cost Of Revenue is the denominator for inventory days; without it in this
     # list the ratio silently became null for every company.
     "income": ["Operating Income", "Pretax Income", "Interest Expense", "EBITDA",
-               "Total Revenue", "Cost Of Revenue"],
+               "Total Revenue", "Cost Of Revenue", "Net Income"],
     "balance": ["Invested Capital", "Total Assets", "Current Liabilities", "Accounts Receivable", "Inventory"],
     "cashflow": ["Cash Dividends Paid"],
 }
 
 
 def latest_annual_items(con: sqlite3.Connection) -> dict[str, dict[str, float]]:
-    """{symbol: {item: value}} from each symbol's most recent annual statement set."""
+    """{symbol: {item: value}} from ONE financial year per symbol: the newest
+    year for which both the income statement and the balance sheet are on file
+    (the newest income year when there is no such year).
+
+    It used to take every item at the newest date across ALL statement types.
+    When Yahoo had a newer income statement than balance sheet (or the reverse),
+    the lagging statement's items were simply missing at that date and ROCE,
+    debtor / inventory days and interest cover went blank with no hint why
+    (review pipeline-core #10) - and a ratio built across two years would be
+    worse than a blank."""
     if not con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='statements'").fetchone():
         return {}
     wanted = [i for items in ITEMS_NEEDED.values() for i in items]
     qmarks = ",".join("?" * len(wanted))
     rows = con.execute(
-        f"""SELECT s.symbol, s.item, s.value FROM statements s
-            JOIN (SELECT symbol, MAX(period_end) mx FROM statements WHERE period_type='annual' GROUP BY symbol) m
-              ON s.symbol = m.symbol AND s.period_end = m.mx
-            WHERE s.period_type='annual' AND s.item IN ({qmarks})""",
+        f"""SELECT symbol, period_end, stmt_type, item, value FROM statements
+            WHERE period_type='annual' AND item IN ({qmarks})""",
         wanted,
     ).fetchall()
+    by: dict[str, dict[str, dict[str, dict[str, float]]]] = {}
+    for sym, pe, typ, item, value in rows:
+        by.setdefault(sym, {}).setdefault(pe, {}).setdefault(typ, {})[item] = value
     out: dict[str, dict[str, float]] = {}
-    for sym, item, value in rows:
-        out.setdefault(sym, {})[item] = value
+    for sym, dates in by.items():
+        both = [d for d, t in dates.items() if "income" in t and "balance" in t]
+        income = [d for d, t in dates.items() if "income" in t]
+        pick = max(both) if both else (max(income) if income else max(dates))
+        merged: dict[str, float] = {}
+        for items in dates[pick].values():
+            merged.update(items)
+        out[sym] = merged
     return out
 
 
@@ -141,6 +157,8 @@ def compute_ratios(snap: dict, items: dict[str, float]) -> dict[str, float | Non
     # Cost of goods, not revenue, is the denominator for the stock-turn ratios.
     cogs = items.get("Cost Of Revenue")
     dividends = items.get("Cash Dividends Paid")  # negative in cash-flow terms
+    a_income = items.get("Net Income")
+    a_revenue = items.get("Total Revenue")
 
     ev = mcap + (debt or 0) - (cash or 0) if mcap is not None else None
     # No return on capital where there is no capital: with capital employed at
@@ -158,9 +176,13 @@ def compute_ratios(snap: dict, items: dict[str, float]) -> dict[str, float | Non
         "ps": rnd(_div(mcap, revenue)),
         "peg": rnd(peg),
         "int_coverage": rnd(_div(ebit, interest)),
-        "div_payout": rnd(_div(-dividends if dividends is not None else None, net_income) * 100
-                          if dividends is not None and net_income else None),
-        "debtor_days": rnd(_div(receivables, revenue) * 365 if receivables is not None and revenue else None, 1),
+        # Both from the SAME annual statement: dividends paid over that year's
+        # profit, year-end receivables over that year's revenue. They divided by
+        # the snapshot's trailing twelve months, a different period most of the
+        # year (review pipeline-core #11).
+        "div_payout": rnd(_div(-dividends if dividends is not None else None, a_income) * 100
+                          if dividends is not None and a_income else None),
+        "debtor_days": rnd(_div(receivables, a_revenue) * 365 if receivables is not None and a_revenue else None, 1),
         # Inventory days divides by COST OF GOODS SOLD, not revenue. Dividing by
         # revenue understates it by the gross margin - Reliance read 53.9 days
         # against a true 77.4 - and it disagreed with the per-year ratios table,

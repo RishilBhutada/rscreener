@@ -2472,12 +2472,17 @@ function CompanyView() {
     }
     // Older company files carry none of that. Rather than show a page with no
     // peers and no context, fall back to what this page used to do.
+    // Guarded like the main fetch: a slow download for the company left behind
+    // must not fill in the next one's row and peers (review company-page #5).
+    let live = true;
     fetch(`${BASE}/data.json`)
       .then((r) => r.json())
       .then((d: ScreenData) => {
+        if (!live) return;
         setFullRow(d.rows.find((r) => r.symbol === company.snapshot.symbol) ?? null);
         const ind = company.snapshot.industry;
-        if (!ind) return;
+        // No industry: no peers - not the last company's.
+        if (!ind) { setPeers([]); setCohort(null); return; }
         const sameIndustry = d.rows.filter((r) => r.industry === ind);
         setPeers(
           sameIndustry
@@ -2501,6 +2506,7 @@ function CompanyView() {
         });
       })
       .catch(() => { /* peers are optional */ });
+    return () => { live = false; };
   }, [company]);
 
   // "Consolidated" is not a safe default: say which one this company files, and
