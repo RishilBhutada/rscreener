@@ -19,7 +19,7 @@ export type ChartPick = {
   vis: Record<string, boolean>;
   win: string;            // "ttm" | "q1"
   cmp: "yoy" | "prev";
-  per: "eps" | "sps";
+  per: "eps" | "sps" | "debt";
   chg: boolean;
 };
 

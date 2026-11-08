@@ -53,6 +53,8 @@ type Company = {
   actions?: CorpAction[] | null;
   peers?: { symbol?: unknown; name?: unknown }[] | null;
   coverage?: { quarters: number; from?: string | null; gaps?: string[]; gap_count?: number } | null;
+  /** The yearly balance sheet - total debt and equity for the Debt choice. */
+  statements?: { balance_sheet?: { periods: string[]; items: { label: string; values: (number | null)[] }[] } | null };
 };
 
 type View = "price" | "pe" | "sales" | "ebitda" | "ev" | "pb" | "ps";
@@ -823,7 +825,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [peWin, setPeWin] = useState(() => pick0?.win ?? "ttm");
   /** EPS under the P/E line, or sales per share under the Price / Sales line -
    *  the company chart's switch (StockChart.tsx); the line follows the bars. */
-  const [perShare, setPerShare] = useState<"eps" | "sps">(() => pick0?.per ?? "eps");
+  const [perShare, setPerShare] = useState<"eps" | "sps" | "debt">(() => pick0?.per ?? "eps");
   // Events are on by default in the full view - the owner chose to see them.
   const [showDates, setShowDates] = useState(true);
   const [showChg, setShowChg] = useState(() => pick0?.chg ?? true);
@@ -930,6 +932,19 @@ export default function FullChart({ symbol }: { symbol: string }) {
   // The saved view where this chart has it (an ETF or index has Price only).
   const view: View = viewSel === "price" || avail[viewSel] ? viewSel : "price";
   const spsOn = view === "pe" && perShare === "sps" && spsAvail;
+  // Debt: total debt each year (Rs Cr) under a debt / equity line, as on the
+  // company chart. Yearly, from the balance sheet.
+  const debtRows = (() => {
+    const b = company?.statements?.balance_sheet;
+    const row = (l: string) => b?.items.find((it) => it.label === l)?.values;
+    const debt = row("Total Debt"), eq = row("Equity");
+    if (!b || !debt) return null;
+    const pts = b.periods.map((p0, i) => ({ day: dayOf(p0), d: debt[i] ?? null, e: eq?.[i] ?? null }))
+      .filter((x) => x.d !== null) as { day: number; d: number; e: number | null }[];
+    return pts.length >= 2 ? pts : null;
+  })();
+  const debtAvail = !!debtRows;
+  const debtOn = view === "pe" && perShare === "debt" && debtAvail;
 
   const rangeDays = (r: Range, last: number) => {
     if (r !== "YTD") return RANGE_DAYS[r];
@@ -1348,6 +1363,45 @@ export default function FullChart({ symbol }: { symbol: string }) {
         }
         return { date: dateOf(d), tag: j >= 0 ? `Quarter to ${dateOf(qd[j], "month")}` : undefined, items };
       };
+    } else if (debtOn && debtRows) {
+      keyWin = "pe:debt";
+      // Debt / equity is often below one: three decimals there (0.085, not 0.1).
+      const deFmt = (x: number) => (Math.abs(x) < 1 ? x.toFixed(3) : ratio(x));
+      const rf = fmt(deFmt);
+      const de = debtRows.filter((x) => x.e !== null && x.e > 0).map((x) => ({ day: x.day, v: Math.round((x.d / (x.e as number)) * 100) / 100 }));
+      const ln = chart.addSeries(AreaSeries, {
+        lineColor: p.accent, topColor: alpha(p.accent, 0.2), bottomColor: alpha(p.accent, 0), lineWidth: 2,
+        priceFormat: rf, lastValueVisible: true, priceLineVisible: false, visible: !isHidden("line"),
+      });
+      ln.setData(de.map((x) => ({ time: toTime(x.day), value: x.v })));
+      const dd = debtRows.map((x) => x.day);
+      if (!isHidden("bars")) {
+        const bs = chart.addSeries(HistogramSeries, {
+          priceLineVisible: false, lastValueVisible: false, priceFormat: fmt((x) => Math.round(x).toLocaleString("en-IN")),
+        }, 1);
+        bs.setData(debtRows.map((x) => ({ time: toTime(x.day), value: x.d, color: "rgba(0, 0, 0, 0)" })));
+        bs.attachPrimitive(new PeriodBars(debtRows.map((x, i) => {
+          const g = i > 0 ? growth(x.d, debtRows[i - 1].d) : undefined;
+          return {
+            from: i > 0 ? debtRows[i - 1].day : x.day - 365, to: x.day, v: x.d, color: alpha(p.bar, 0.85),
+            label: showChg && g && g.kind !== "none" ? growthText(g) : undefined, labelColor: growthCol(g, p),
+          };
+        }), dd, p.font));
+        chart.panes()[0]?.setStretchFactor(3);
+        chart.panes()[1]?.setStretchFactor(1.3);
+      }
+      anchor = ln; anchorDays = de.map((x) => x.day);
+      legendAt = (day) => {
+        const i = day === null ? debtRows.length - 1 : atOrBefore(dd, day);
+        const x = debtRows[i];
+        const items: LItem[] = [];
+        if (!isHidden("line") && x.e !== null && x.e > 0) items.push({ label: "Debt / Equity", value: deFmt(x.d / x.e), color: p.accent });
+        if (!isHidden("bars")) {
+          const g = i > 0 ? growth(x.d, debtRows[i - 1].d) : undefined;
+          items.push({ label: "Total debt", value: crore(x.d) + (g && g.kind !== "none" ? ` ${growthText(g)}` : ""), color: g ? growthCol(g, p) : undefined });
+        }
+        return { date: `Year to ${dateOf(x.day, "month")}`, items };
+      };
     } else {
       // A valuation band: the ratio, its five-year median, and the figure it
       // is a multiple of in its own pane underneath - the company chart's
@@ -1716,7 +1770,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
     };
     // `range` is applied below without a rebuild.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, company, view, interval, prefs, peWin, showDates, showChg, epsCmp, showCA, caOn, hidden, cmps, themeKey, symbol, etfDoc, spsOn, overlays]);
+  }, [file, company, view, interval, prefs, peWin, showDates, showChg, epsCmp, showCA, caOn, hidden, cmps, themeKey, symbol, etfDoc, spsOn, overlays, debtOn]);
 
   const applyRange = () => {
     const chart = chartRef.current, sp = spanRef.current;
@@ -1759,7 +1813,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
   // Ratio lines start where four consecutive filed quarters first exist, often
   // years after the price. Said, so a short line is not read as a young company.
   const ratioNote = (() => {
-    if (view === "price" || view === "sales" || view === "ebitda") return null;
+    if (view === "price" || view === "sales" || view === "ebitda" || debtOn) return null;
     const band = view === "pe" ? company?.pe_band : view === "ev" ? company?.ev_band : view === "pb" ? company?.pb_band : company?.ps_band;
     const start = band?.series?.[0]?.[0];
     const priceStart = file?.m?.[0]?.[0];
@@ -2016,10 +2070,14 @@ export default function FullChart({ symbol }: { symbol: string }) {
               </div>
               <button onClick={() => setSheet("type")} className={pill(prefs.log)}>{kindLabel}{prefs.log ? " · Log" : ""} <ChevronGlyph size={11} /></button>
             </>
-          ) : view === "pe" && (spsAvail || company?.pe_band?.alt?.q1) ? (
+          ) : view === "pe" && (spsAvail || debtAvail || company?.pe_band?.alt?.q1) ? (
             <>
-              {spsAvail && <Seg value={perShare} options={[["eps", "EPS"], ["sps", "SPS"]]} onChange={(v) => { kept.current = null; setPerShare(v as "eps" | "sps"); }} />}
-              {(spsOn ? company?.ps_band?.alt?.q1 : company?.pe_band?.alt?.q1) && (
+              {(spsAvail || debtAvail) && (
+                <Seg value={perShare}
+                  options={([["eps", "EPS"], ["sps", "SPS"], ["debt", "Debt"]] as [string, string][]).filter(([k]) => k === "eps" || (k === "sps" ? spsAvail : debtAvail))}
+                  onChange={(v) => { kept.current = null; setPerShare(v as "eps" | "sps" | "debt"); }} />
+              )}
+              {!debtOn && (spsOn ? company?.ps_band?.alt?.q1 : company?.pe_band?.alt?.q1) && (
                 <Seg value={peWin} options={PE_WINDOWS.map(([k, label]) => [k, label] as [string, string])} onChange={(v) => { kept.current = null; setPeWin(v); }} />
               )}
             </>
@@ -2118,7 +2176,8 @@ export default function FullChart({ symbol }: { symbol: string }) {
                     <Head>On this chart</Head>
                     {LAYERS[view].map(([k, label]) => (
                       <Toggle key={k} on={!isHidden(k)}
-                        label={spsOn ? ({ line: "Price / Sales", median: "Median P/S (5 years)", bars: "SPS bars" } as Record<string, string>)[k] ?? label : label}
+                        label={debtOn ? ({ line: "Debt / Equity", median: "Median (not drawn)", bars: "Total debt bars" } as Record<string, string>)[k] ?? label
+                          : spsOn ? ({ line: "Price / Sales", median: "Median P/S (5 years)", bars: "SPS bars" } as Record<string, string>)[k] ?? label : label}
                         onClick={() => setHidden({ ...hidden, [`${view}:${k}`]: !isHidden(k) })} />
                     ))}
                   </>

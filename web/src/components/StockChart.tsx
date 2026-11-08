@@ -269,6 +269,9 @@ function fmtVal(v: number, kind: FmtKind): string {
 /** Axis labels on a phone: at most five characters, so they fit the margin.
  *  The pop-up still gives the full figure. */
 function axisVal(v: number, kind: FmtKind, short: boolean): string {
+  // A ratio below one (debt / equity of 0.085-0.105) needs a third decimal,
+  // or its ticks all read "0.10".
+  if (kind === "plain" && v !== 0 && Math.abs(v) < 1) return v.toFixed(3).replace(/0$/, "");
   if (!short) return fmtVal(v, kind);
   const trim = (x: number, d: number) => x.toFixed(d).replace(/\.0$/, "");
   if (kind === "vol" && v >= 1e8) return `${Math.round(v / 1e7)}Cr`;
@@ -369,8 +372,11 @@ const Q_COLOUR: Record<number, string> = {
 };
 export const Q_LABEL: Record<number, string> = { 1: "Q1 Apr–Jun", 2: "Q2 Jul–Sep", 3: "Q3 Oct–Dec", 4: "Q4 Jan–Mar" };
 
-export default function StockChart({ prices, peBand, evBand, pbBand, psBand, trendQ, livePrice, quarters, actions, symbol, peers, coverage, exchange }: {
+export default function StockChart({ prices, peBand, evBand, pbBand, psBand, trendQ, livePrice, quarters, actions, symbol, peers, coverage, exchange, balance }: {
   prices: ChartPrices;
+  /** The yearly balance sheet, for the Debt choice under the ratio tab:
+   *  total debt as bars, debt / equity as the line (owner, 8-Nov-2026). */
+  balance?: { periods: string[]; items: { label: string; values: (number | null)[] }[] } | null;
   exchange?: string | null;
   peBand?: ChartBand;
   evBand?: ChartBand;
@@ -406,7 +412,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
    *  per share IS market cap over sales, so the line has to change with the
    *  bars - a P/E line over sales bars would be a ratio built from figures the
    *  chart is not showing. */
-  const [perShare, setPerShare] = useState<"eps" | "sps">(() => pick0?.per ?? "eps");
+  const [perShare, setPerShare] = useState<"eps" | "sps" | "debt">(() => pick0?.per ?? "eps");
   // How the controls above the chart are laid out - Settings > Company page >
   // Chart controls (owner, 27-Oct-2026: "build all" of the three candidates,
   // plus the layout before them as Classic). Sheet is the default.
@@ -547,6 +553,20 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   // Sales per share needs both its bars and the Price / Sales line.
   const spsAvail = !!psBand && !!trendQ?.sps?.some((v) => v !== null && v !== undefined);
   const spsOn = perShare === "sps" && spsAvail;
+  // Debt: total debt each year (Rs Cr) under a debt / equity line - money, not
+  // per share, so no share-count adjustment can bend it. Yearly, from the
+  // balance sheet: as many years as are filed (four or five today).
+  const debtSeries = useMemo(() => {
+    const row = (l: string) => balance?.items.find((it) => it.label === l)?.values;
+    const debt = row("Total Debt"), eq = row("Equity");
+    if (!balance || !debt) return null;
+    const pts = balance.periods.map((p, i) => ({ p, d: debt[i] ?? null, e: eq?.[i] ?? null }))
+      .filter((x) => x.d !== null) as { p: string; d: number; e: number | null }[];
+    return pts.length >= 2 ? pts : null;
+  }, [balance]);
+  const debtAvail = !!debtSeries;
+  const debtOn = perShare === "debt" && debtAvail;
+  const ratioLabel = debtOn ? "Debt / Equity" : spsOn ? "P/S Ratio" : "PE Ratio";
   const defOn = (s: SeriesDef) => isOn(s.key, s.group ? !(s.kind === "bars" || s.kind === "dashed") : s.dflt ?? true);
   const toggle = (s: SeriesDef) => setOn({ ...on, [s.key]: !defOn(s) });
 
@@ -689,7 +709,21 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       if (volPts.length) defs.push({ key: "volume", label: "Volume", color: "var(--chart-vol)", kind: "bars", axis: "L", data: volPts, fmt: "vol" });
     }
 
-    if (view === "pe") {
+    if (view === "pe" && debtOn && debtSeries) {
+      // Bars: total debt, each drawn across its financial year, with its change
+      // on the year before. Line: debt / equity at each year end.
+      const bars: XY[] = [], line: XY[] = [];
+      debtSeries.forEach((x, i) => {
+        const t = toT(x.p);
+        const prev = i > 0 ? debtSeries[i - 1] : null;
+        if (t < cutoff) return;
+        bars.push({ t, v: x.d, from: prev ? toT(prev.p) + 86400000 : t - 365 * 86400000, to: t + 86400000,
+          chg: prev ? growth(x.d, prev.d) : { kind: "none" } });
+        if (x.e !== null && x.e > 0) line.push({ t, v: Math.round((x.d / x.e) * 1000) / 1000 });
+      });
+      if (line.length) defs.push({ key: "pe_line", label: "Debt / Equity", color: "var(--accent)", kind: "line", axis: "R", data: line, fmt: "plain" });
+      if (bars.length) defs.push({ key: "pe_bar", label: "Total debt", color: "var(--chart-bar)", kind: "bars", axis: "L", data: bars, fmt: "cr" });
+    } else if (view === "pe") {
       // earnings bars follow the selected window, annualised the same way the
       // PE line is, so the two always describe the same earnings. Sales per
       // share is drawn the same way, on the trailing four quarters only - the
@@ -858,7 +892,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         return base ? src.map((d) => ({ t: d.t, v: (d.v / base - 1) * 100 })) : [];
       };
       const band: ChartBand =
-        view === "pe" ? (spsOn ? peer.ps ?? null : peer.pe ?? null) : view === "pb" ? peer.pb ?? null
+        view === "pe" ? (debtOn ? null : spsOn ? peer.ps ?? null : peer.pe ?? null) : view === "pb" ? peer.pb ?? null
         : view === "ps" ? peer.ps ?? null : view === "ev" ? peer.ev ?? null : null;
       if (view === "price") {
         const src: Pt[] = peer.prices?.weekly ?? peer.prices?.monthly ?? [];
@@ -912,7 +946,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     });
 
     return defs;
-  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, epsCmp, quarters, cmp, symbol, exchange, years, spsOn, overlays]);
+  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, epsCmp, quarters, cmp, symbol, exchange, years, spsOn, overlays, debtOn, debtSeries]);
 
   // With the quarterly-results overlay on, the per-quarter EPS bars are already
   // on screen. Keeping the summed TTM bars too puts two different quantities in
@@ -946,7 +980,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     return (
       <ChartShell top={presetRow} range={range} setRange={setRange} view={view} setView={setView} overlays={overlays} setOverlays={setOverlays} ui={ui}
         expandHref={symbol ? `/chart?s=${encodeURIComponent(symbol)}` : undefined}
-        moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand, ebitda: !!trendQ?.ebitda?.some((v) => v !== null) }} peLabel={spsOn ? "P/S Ratio" : "PE Ratio"}>
+        moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand, ebitda: !!trendQ?.ebitda?.some((v) => v !== null) }} peLabel={ratioLabel}>
         <YearsChart prices={prices} />
       </ChartShell>
     );
@@ -955,7 +989,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     return (
       <ChartShell top={presetRow} range={range} setRange={setRange} view={view} setView={setView} overlays={overlays} setOverlays={setOverlays}
         expandHref={symbol ? `/chart?s=${encodeURIComponent(symbol)}` : undefined}
-        moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand, ebitda: !!trendQ?.ebitda?.some((v) => v !== null) }} peLabel={spsOn ? "P/S Ratio" : "PE Ratio"}>
+        moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand, ebitda: !!trendQ?.ebitda?.some((v) => v !== null) }} peLabel={ratioLabel}>
         <div className="h-64 flex items-center justify-center text-sm text-[var(--ink3)]">No data yet for this view.</div>
       </ChartShell>
     );
@@ -1036,7 +1070,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
 
   const primary = visible.find((s) => !s.group && s.kind !== "bars" && s.kind !== "dashed") ?? visible.find((s) => !s.group) ?? visible[0];
   const activeBand: ChartBand =
-    view === "pe" ? (spsOn ? psBand ?? null : peBand ?? null) : view === "pb" ? pbBand ?? null
+    view === "pe" ? (debtOn ? null : spsOn ? psBand ?? null : peBand ?? null) : view === "pb" ? pbBand ?? null
     : view === "ps" ? psBand ?? null : view === "ev" ? evBand ?? null : null;
   const hoverPt = hover && primary ? nearest(primary.data, hover.t) : null;
   const barW = (s: SeriesDef) => Math.max(1.5, Math.min(26, (plotW / Math.max(1, s.data.length)) * 0.62));
@@ -1077,9 +1111,10 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const growthVal: "off" | "yoy" | "prev" = showChg ? epsCmp : "off";
   const setGrowth = (g: "off" | "yoy" | "prev") => { if (g === "off") setShowChg(false); else { setShowChg(true); setEpsCmp(g); } };
   const isPe = view === "pe";
-  const pBars = isPe && spsAvail ? seg(perShare, [["eps", "EPS"], ["sps", "SPS"]] as const, setPerShare) : null;
+  const barOpts = ([["eps", "EPS"], ["sps", "SPS"], ["debt", "Debt"]] as const).filter(([k]) => k === "eps" || (k === "sps" ? spsAvail : debtAvail));
+  const pBars = isPe && barOpts.length > 1 ? seg(perShare, barOpts, setPerShare) : null;
   const isEb = view === "ebitda";
-  const winBand = spsOn ? psBand : peBand;
+  const winBand = debtOn ? null : spsOn ? psBand : peBand;
   const pWin = isPe && winBand?.alt?.q1 ? seg(peWin as "ttm" | "q1", [["ttm", "TTM"], ["q1", "1Q×4"]] as const, (k) => setPeWin(k)) : null;
   const pGrowth = (isPe && (quarters?.length ?? 0) > 0) || (isEb && !!trendQ)
     ? seg(growthVal, [["off", "No growth"], ["yoy", isPe && peWin === "ttm" ? "vs year before" : "vs year ago"], ["prev", "vs quarter before"]] as const, setGrowth) : null;
@@ -1111,7 +1146,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       <option value="__any__">Any company...</option>
     </select>
   );
-  const qLegend = isPe || isEb ? (
+  const qLegend = (isPe && !debtOn) || isEb ? (
     <div className="flex items-center justify-center gap-3 flex-wrap text-[11px] text-[var(--ink3)] mt-1">
       {[1, 2, 3, 4].map((n) => (
         <span key={n} className="inline-flex items-center gap-1"><i className="inline-block w-2 h-2 rounded-full" style={{ background: Q_COLOUR[n] }} />{Q_LABEL[n].slice(0, 2)}</span>
@@ -1197,7 +1232,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     range, setRange, view, setView, moreOpen, setMoreOpen,
     expandHref: symbol ? `/chart?s=${encodeURIComponent(symbol)}` : undefined,
     avail: { pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand, ebitda: !!trendQ?.ebitda?.some((v) => v !== null) },
-    peLabel: spsOn ? "P/S Ratio" : "PE Ratio", onViewChange: () => setHover(null),
+    peLabel: ratioLabel, onViewChange: () => setHover(null),
     overlays, setOverlays: (v: View[]) => { setOverlays(v); setCmpSym(null); setHover(null); },
   };
   const plotAndLegend = (
@@ -1208,7 +1243,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         // companies hold 20 quarters or fewer because the full-depth pass runs at a
         // bounded rate, so silence here would have the reader inferring something
         // about the business from a gap in our own coverage.
-        if (view === "price" || view === "ebitda" || !primary?.data?.length) return null;
+        if (view === "price" || view === "ebitda" || debtOn || !primary?.data?.length) return null;
         const priceStart = (prices.monthly?.[0] ?? prices.weekly?.[0])?.[0];
         if (!priceStart) return null;
         const gapYears = (primary.data[0].t - toT(priceStart)) / (365.25 * 86400000);
@@ -1550,7 +1585,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
           .map((g) => [g, model.filter((s) => (s.group ?? null) === g)] as const)
           .filter(([, list]) => list.length);
         if (groups.length < 2) return <div className="flex items-center justify-center gap-4 flex-wrap mt-2">{model.map(item)}</div>;
-        const nameOf = (v: View) => (v === "pe" && spsOn ? "P/S Ratio" : VIEW_NAME[v]);
+        const nameOf = (v: View) => (v === "pe" ? ratioLabel : VIEW_NAME[v]);
         return (
           <div className="mt-2 space-y-2">
             {groups.map(([g, list]) => (
@@ -1756,10 +1791,12 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
               )}
             </div>
           )}
-          {view === "pe" && spsAvail && (
+          {view === "pe" && (spsAvail || debtAvail) && (
             <div className="flex items-center gap-0.5 rounded-lg border border-[var(--line)] p-0.5">
               {([["eps", "EPS", "Earnings per share, under the P/E line"],
-                 ["sps", "SPS", "Sales per share - revenue from operations per share, under the Price / Sales line - the same line as Market Cap / Sales"]] as const).map(([k, label, tip]) => (
+                 ["sps", "SPS", "Sales per share - revenue from operations per share, under the Price / Sales line - the same line as Market Cap / Sales"],
+                 ["debt", "Debt", "Total debt each year (Rs Cr), under the debt / equity line"]] as const)
+                .filter(([k]) => k === "eps" || (k === "sps" ? spsAvail : debtAvail)).map(([k, label, tip]) => (
                 <button key={k} onClick={() => { setPerShare(k); setHover(null); }} title={tip}
                   className={`rounded-md px-2 py-1 sm:py-0.5 font-medium ${perShare === k
                     ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)] hover:bg-[var(--card2)]"}`}>

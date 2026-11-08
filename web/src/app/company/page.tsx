@@ -2815,7 +2815,7 @@ function CompanyView() {
       <div id="chart" className="scroll-mt-32 space-y-4">
         {company.prices && (company.prices.monthly?.length || company.prices.weekly?.length) ? (
           <>
-            <StockChart prices={company.prices} peBand={company.pe_band} evBand={company.ev_band} pbBand={company.pb_band} psBand={company.ps_band} trendQ={company.trend?.quarterly} livePrice={price} quarters={company.quarters} actions={company.actions} symbol={symbol} peers={peers} coverage={company.coverage} exchange={company.exchange} />
+            <StockChart prices={company.prices} peBand={company.pe_band} evBand={company.ev_band} pbBand={company.pb_band} psBand={company.ps_band} trendQ={company.trend?.quarterly} livePrice={price} quarters={company.quarters} actions={company.actions} symbol={symbol} peers={peers} coverage={company.coverage} exchange={company.exchange} balance={company.statements.balance_sheet} />
             {company.exchange !== "BSE" && (
               <CoverageNote cov={company.coverage} bandFrom={company.pe_band?.series?.[0]?.[0] ?? null} />
             )}
