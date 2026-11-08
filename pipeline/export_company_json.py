@@ -18,7 +18,7 @@ import pandas as pd
 
 from export_json import freshen_prices
 from fetch_corporate_actions import dividend_detail, split_detail
-from trend_lib import adj_factor, build_trends, net_debt_series, ratio_bands, split_factors, standalone_tables
+from trend_lib import adj_factor, build_trends, cr_round, net_debt_series, ratio_bands, split_factors, standalone_tables
 import fund_units
 import business_updates
 import seasons_lib
@@ -90,7 +90,7 @@ def build_statement(df: pd.DataFrame, stmt_type: str, period_type: str) -> dict 
             elif label in NOT_CRORE:
                 values.append(round(float(v), 2))
             else:
-                values.append(round(float(v) / 1e7, 1))  # Rs -> Rs crore
+                values.append(cr_round(float(v) / 1e7))  # Rs -> Rs crore
         items.append({"label": label, "values": values})
     if not items:
         return None
@@ -1069,7 +1069,7 @@ def main() -> None:
         for (s_, pt), by_p in raw_s.items():
             per = sorted(by_p)[-(8 if pt == "quarterly" else 5):]
             names = sorted({nm for p_ in per for nm in by_p[p_]}, key=lambda nm: -((by_p[per[-1]].get(nm) or (0, 0))[0] or 0))
-            cr = lambda v: round(v / 1e7, 1) if v is not None else None  # noqa: E731
+            cr = lambda v: cr_round(v / 1e7) if v is not None else None  # noqa: E731
             segs_by_symbol.setdefault(s_, {})[pt] = {
                 "periods": per,
                 "items": [{"name": nm, "rev": [cr((by_p[p_].get(nm) or (None, None))[0]) for p_ in per],

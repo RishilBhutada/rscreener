@@ -76,7 +76,9 @@ function labelOf(key: string, by: ByKey = COMPANY_BY): string {
 
 function fmtVal(key: string, v: unknown, by: ByKey = COMPANY_BY): string {
   if (typeof v !== "number" || !Number.isFinite(v)) return "—";
-  const crore = (cr: number) => (Math.abs(cr) >= 1e5 ? `₹${(cr / 1e5).toFixed(2)}L Cr` : `₹${Math.round(cr).toLocaleString("en-IN")} Cr`);
+  // Small amounts keep their decimals: Rs 0.4 Cr is not "Rs 0 Cr".
+  const crore = (cr: number) => (Math.abs(cr) >= 1e5 ? `₹${(cr / 1e5).toFixed(2)}L Cr`
+    : `₹${cr.toLocaleString("en-IN", { maximumFractionDigits: Math.abs(cr) < 10 ? 2 : Math.abs(cr) < 100 ? 1 : 0 })} Cr`);
   if (key === "mcap") return crore(v);
   // Already in crore (qtr_sales, qtr_profit): they printed as bare numbers (review 4-Nov-2026).
   if (by.get(key)?.unit === "₹ Cr") return crore(v);

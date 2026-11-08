@@ -55,8 +55,16 @@ def _table_exists(con: sqlite3.Connection, name: str) -> bool:
     return bool(con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone())
 
 
+def cr_round(c: float) -> float:
+    """Rs crore, to two decimals under Rs 100 Cr and one above. One decimal
+    everywhere stored a small company's Rs 0.04 Cr depreciation as 0.0 and its
+    0.44 profit as 0.4 (owner, 8-Nov-2026); above 100 Cr a second decimal
+    only adds bytes."""
+    return round(c, 2) if abs(c) < 100 else round(c, 1)
+
+
 def _cr(v):
-    return round(v / 1e7, 1) if pd.notna(v) else None  # pd.notna guards None AND NaN
+    return cr_round(v / 1e7) if pd.notna(v) else None  # pd.notna guards None AND NaN
 
 
 def _stitched(con: sqlite3.Connection) -> dict:

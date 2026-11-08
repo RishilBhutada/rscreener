@@ -320,6 +320,15 @@ const STMT_TITLES: Record<string, string> = {
   cash_flow: "Cash Flow",
 };
 
+/** Decimals for an amount in Rs crore, by its size. Rounded to whole crore,
+ *  a small company's Rs 0.4 Cr profit printed as "0" and Rs 0.9 Cr as "1"
+ *  (owner, 8-Nov-2026). Two decimals under 10, one under 100, none above. */
+function amtDec(v: unknown): number {
+  if (typeof v !== "number" || !Number.isFinite(v)) return 0;
+  const a = Math.abs(v);
+  return a < 10 ? 2 : a < 100 ? 1 : 0;
+}
+
 function fmtNum(v: number | string | null | undefined, dec = 2): string {
   if (v === null || v === undefined) return "—";
   if (typeof v === "string") return v;
@@ -442,7 +451,7 @@ function PeerTable({ symbol, self, peers, industry }: { symbol: string; self: Ro
     const signed = k.endsWith("_yoy");
     return (
       <td key={k} className={`px-3 py-1.5 text-right tabular-nums whitespace-nowrap ${bold ? "font-semibold" : ""} ${signed && n !== null ? (n < 0 ? "text-[var(--neg)]" : n > 0 ? "text-[var(--pos)]" : "") : ""}`}>
-        {n === null ? "—" : fmtNum(n, dec)}
+        {n === null ? "—" : fmtNum(n, dec === 0 ? amtDec(n) : dec)}
       </td>
     );
   };
@@ -771,7 +780,7 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
   const [view, setView] = useView(kind);
   const trend = view === "trend";
   const quarterlyCols = isQuarterly(stmt.periods);
-  const decOf = (label: string) => kind === "ratios" ? 1 : label.includes("EPS") || label.includes("%") ? 2 : 0;
+  const decOf = (label: string, v?: unknown) => kind === "ratios" ? 1 : label.includes("EPS") || label.includes("%") ? 2 : amtDec(v);
   const saved = useRowOrder(kind, symbol);
   // Reordering: the order being edited, and whether to ask where it applies.
   const [draft, setDraft] = useState<string[] | null>(null);
@@ -890,7 +899,7 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
                   </span>
                   <Spark values={it.values.slice(Math.max(0, total - span))} />
                   <span className={`text-right tabular-nums whitespace-nowrap ${bold ? "font-semibold" : "font-medium"} ${typeof cur === "number" && cur < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
-                    {fmtNum(cur, decOf(it.label))}
+                    {fmtNum(cur, decOf(it.label, cur))}
                   </span>
                   <span className="text-right text-[11px] sm:text-[12px] tabular-nums whitespace-nowrap">
                     <Delta cur={cur} prev={last >= 0 ? yearBefore(stmt.periods, it.values, last, quarterlyCols) : null} points={points} />
@@ -984,7 +993,7 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
                     const v = ttm.values[child ? `${it.parent}/${it.label}` : it.label] ?? null;
                     return (
                       <td className={`px-3 py-2 sm:py-1.5 text-right whitespace-nowrap tabular-nums border-r border-[var(--line)] ${bold ? "font-semibold" : ""} ${typeof v === "number" && v < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
-                        {fmtNum(v, decOf(it.label))}
+                        {fmtNum(v, decOf(it.label, v))}
                       </td>
                     );
                   })()}
@@ -997,7 +1006,7 @@ function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, p
                     return (
                       <td key={at} style={{ background: heatTint(v, prev, points) }}
                         className={`px-3 py-2 sm:py-1.5 text-right whitespace-nowrap tabular-nums ${bold ? "font-semibold" : ""} ${typeof v === "number" && v < 0 ? "text-[var(--neg)]" : "text-[var(--ink)]"}`}>
-                        {fmtNum(v, decOf(it.label))}
+                        {fmtNum(v, decOf(it.label, v))}
                         {ch !== null && (
                           <span className={`ml-1 text-[11px] font-normal ${ch > 0 ? "text-[var(--pos)]" : ch < 0 ? "text-[var(--neg)]" : "text-[var(--ink3)]"}`}>
                             ({changeText(ch, points, v, prev)})
