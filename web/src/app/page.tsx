@@ -73,10 +73,11 @@ export default function Home() {
         if (d?.recent) setDeclared(d.recent);
       })
       .catch(() => {});
-    // Headlines and the day's deals. The news file is the largest the home
-    // reads, so it waits until the page is up; a failure leaves the block out.
+    // Headlines and the day's deals: news-home.json carries just the three
+    // headlines and the latest day's deals (news.json is 600 KB on a busy
+    // week). It still waits until the page is up; a failure leaves the block out.
     const later = window.setTimeout(() => {
-      fetch(`${BASE}/news.json`)
+      fetch(`${BASE}/news-home.json`)
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
           if (Array.isArray(d?.items)) setHeads([...d.items].sort((a: Headline, b: Headline) => (a.t < b.t ? 1 : -1)).slice(0, 3));

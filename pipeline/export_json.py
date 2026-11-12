@@ -977,6 +977,22 @@ def main() -> None:
                  for r in payload["rows"]],
     }), ensure_ascii=False, allow_nan=False, separators=(",", ":")), encoding="utf-8")
     ikb = idx.stat().st_size / 1024
+    # sectors.json - the Sectors page used to download the whole table (5 MB)
+    # for ten of its fields. Eight of them are already in index.json, which
+    # the top bar has fetched anyway; this adds the two it lacks, as indexes
+    # into two name lists. The page joins the two by symbol.
+    sec_names = sorted({str(r.get("sector") or "") for r in payload["rows"]})
+    ind_names = sorted({str(r.get("industry") or "") for r in payload["rows"]})
+    si = {v: i for i, v in enumerate(sec_names)}
+    ii = {v: i for i, v in enumerate(ind_names)}
+    sec_file = OUT.parent / "sectors.json"
+    sec_file.write_text(json.dumps({
+        "generated_at": payload["generated_at"],
+        "sectors": sec_names, "industries": ind_names,
+        "rows": [[r.get("symbol"), si[str(r.get("sector") or "")], ii[str(r.get("industry") or "")]]
+                 for r in payload["rows"]],
+    }, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    print(f"  sectors -> {sec_file.name} ({sec_file.stat().st_size / 1024:.0f} KB)")
     print(f"  search index -> {idx.name} ({ikb:.0f} KB, {kb / max(ikb, 1):.0f}x smaller "
           f"than the table it replaces on the home and nav search)")
     sample = df[df.symbol == "RELIANCE"]

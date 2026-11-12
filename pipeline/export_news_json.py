@@ -32,6 +32,7 @@ def main() -> None:
         # No news database yet: an empty page, never a missing file.
         PUB.mkdir(parents=True, exist_ok=True)
         (PUB / "news.json").write_text(json.dumps({"generated_at": None, "items": [], "calls": [], "deals": [], "sast": []}), encoding="utf-8")
+        (PUB / "news-home.json").write_text(json.dumps({"generated_at": None, "items": [], "deals": []}), encoding="utf-8")
         print("news: no database yet - wrote an empty news.json")
         return
     con = sqlite3.connect(f"file:{a.db}?mode=ro", uri=True)
@@ -60,6 +61,14 @@ def main() -> None:
     (PUB / "news.json").write_text(json.dumps({
         "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "fetched": fetched,
         "items": items, "calls": calls, "deals": deals, "sast": sast,
+    }, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    # news-home.json - all the home page shows: the three newest headlines and
+    # the latest day's deals (it prints their count). It read the whole news
+    # file for that, 600 KB on a busy week, on every visit to the home page.
+    last_day = max((x["d"] for x in deals), default=None)
+    (PUB / "news-home.json").write_text(json.dumps({
+        "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "items": items[:3], "deals": [x for x in deals if x["d"] == last_day],
     }, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
 
     # Per company, a year back.

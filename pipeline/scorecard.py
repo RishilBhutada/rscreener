@@ -41,6 +41,7 @@ COMPANIES = ROOT / "web" / "public" / "companies"
 HISTORY = ROOT / "pipeline" / "scorecard_history.json"
 OUT = ROOT / "web" / "public" / "scorecard.json"
 CHECKS_OUT = ROOT / "web" / "public" / "checks.json"
+CHECKS_DIR = ROOT / "web" / "public" / "checks"
 
 # A metric is only worth scoring if a reader would notice it missing. These are
 # the fields the screener and the company page actually put on screen.
@@ -153,6 +154,34 @@ FAILS: dict[str, list] = {}
 
 def _cr(v: float) -> str:
     return f"{v / 1e7:,.0f} Cr" if abs(v) >= 1e7 else f"{v / 1e7:,.2f} Cr"
+
+
+def check_shard(sym: str) -> str:
+    """Which checks/<shard>.json a company's failed checks are in: its first
+    letter, or "0" for a symbol starting with anything else. The company page
+    works out the same name (web/src/app/company/page.tsx, checkShard)."""
+    c = sym[:1].upper()
+    return c if "A" <= c <= "Z" else "0"
+
+
+SHARDS = ["0"] + [chr(c) for c in range(ord("A"), ord("Z") + 1)]
+
+
+def write_check_shards(fails: dict[str, list], out_dir: Path, stamp: str) -> None:
+    """checks/<A-Z, 0>.json, newest first within each company.
+
+    A company page used to download every company's failures - 389 KB - to
+    show its own. Every shard is written, empty ones included: a missing file
+    reads as "the checks could not be loaded", not as "every check passed"."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for old in out_dir.glob("*.json"):
+        old.unlink()
+    by: dict[str, dict] = {s: {} for s in SHARDS}
+    for k, v in sorted(fails.items()):
+        by[check_shard(k)][k] = sorted(v, key=lambda f: f[1], reverse=True)
+    for s, part in by.items():
+        (out_dir / f"{s}.json").write_text(json.dumps({"generated_at": stamp, "fails": part},
+                                                      separators=(",", ":")), encoding="utf-8")
 
 
 def _fail(sym: str, check: str, period: str, detail: str) -> None:
@@ -566,6 +595,7 @@ def main() -> None:
         "generated_at": stamp,
         "fails": {k: sorted(v, key=lambda f: f[1], reverse=True) for k, v in sorted(FAILS.items())},
     }, separators=(",", ":")), encoding="utf-8")
+    write_check_shards(FAILS, CHECKS_DIR, stamp)
     OUT.write_text(json.dumps({
         "generated_at": stamp, "overall": overall, "parts": parts,
         "history": (hist or [record])[-60:],

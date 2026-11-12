@@ -173,19 +173,31 @@ function monthYear(iso?: string | null): string {
  *  two sources that disagree, quarters that do not add up to their year, a
  *  year far from the company's own history. Read from checks.json, written by
  *  pipeline/scorecard.py; nothing shows when every check passed. */
-let checksCache: Promise<Record<string, [string, string, string][]>> | null = null;
+/** The file a company's checks are in: its first letter, or "0". Matches
+ *  check_shard in pipeline/scorecard.py. One letter's file is about 15 KB;
+ *  the single file it replaced was 389 KB for every company page. */
+function checkShard(symbol: string): string {
+  const c = symbol.slice(0, 1).toUpperCase();
+  return c >= "A" && c <= "Z" ? c : "0";
+}
+const checksCache = new Map<string, Promise<Record<string, [string, string, string][]>>>();
 function DataChecks({ symbol }: { symbol: string }) {
   const [fails, setFails] = useState<[string, string, string][] | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     // A file that did not arrive is not "every check passed": it is not kept,
     // and the page says the checks could not be read.
-    checksCache ??= fetch(`${BASE}/checks.json`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d) => d.fails ?? {});
+    const shard = checkShard(symbol);
+    let load = checksCache.get(shard);
+    if (!load) {
+      load = fetch(`${BASE}/checks/${shard}.json`)
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+        .then((d) => d.fails ?? {});
+      checksCache.set(shard, load);
+    }
     let live = true;
-    checksCache.then((all) => { if (live) setFails(all[symbol] ?? []); })
-      .catch(() => { checksCache = null; if (live) setFailed(true); });
+    load.then((all) => { if (live) setFails(all[symbol] ?? []); })
+      .catch(() => { checksCache.delete(shard); if (live) setFailed(true); });
     return () => { live = false; };
   }, [symbol]);
   if (failed) return <p className="mt-1 text-[11px] text-[var(--ink3)]">Data checks could not be loaded.</p>;

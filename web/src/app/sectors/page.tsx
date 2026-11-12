@@ -7,6 +7,7 @@ import TopNav from "@/components/TopNav";
 import InfoTip from "@/components/InfoTip";
 import { Segmented } from "@/components/ListUI";
 import { Row } from "@/lib/query";
+import { loadIndex } from "@/lib/index-data";
 import { shortName } from "@/lib/names";
 import { Chips, Stat, dayMove, money, signed, tone } from "@/components/QuoteUI";
 
@@ -15,7 +16,10 @@ import { Chips, Stat, dayMove, money, signed, tone } from "@/components/QuoteUI"
  *  the sector's companies, so one Reliance cannot speak for the rest. */
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
-type Data = { generated_at: string; price_asof?: string | null; rows: Row[] };
+type Data = { rows: Row[] };
+/** sectors.json (pipeline/export_json.py): each company's sector and
+ *  industry, as indexes into two name lists. */
+type SectorFile = { sectors: string[]; industries: string[]; rows: [string, number, number][] };
 type Agg = { name: string; count: number; mcap: number; pe: number | null; roe: number | null; ret: number | null; day: number | null; up: number; down: number };
 
 const SHOWS = [["ret", "1Y"], ["day", "Day"], ["pe", "P/E"], ["roe", "ROE"]] as const;
@@ -54,10 +58,28 @@ function SectorsView() {
   const [limit, setLimit] = useState(50);
 
   useEffect(() => {
-    fetch(`${BASE}/data.json`)
-      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then(setData)
-      .catch((e) => setError(String(e.message ?? e)));
+    // Prices and ratios from index.json, which the top bar has already
+    // fetched, joined to sectors.json by symbol. This page used to download
+    // the whole screener table - 5 MB - for these ten fields.
+    const sectorsFile = fetch(`${BASE}/sectors.json`)
+      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() as Promise<SectorFile>; });
+    let live = true;
+    Promise.all([sectorsFile, loadIndex()])
+      .then(([sf, idx]) => {
+        const by = new Map(idx.rows.map((r) => [r.symbol, r]));
+        const rows: Row[] = [];
+        for (const [symbol, s, i] of sf.rows) {
+          const r = by.get(symbol);
+          if (!r) continue;
+          rows.push({
+            symbol, name: r.name, price: r.price ?? null, mcap: r.mcap || null, pe: r.pe ?? null, roe: r.roe ?? null,
+            ret_1d: r.ret_1d ?? null, ret_1y: r.ret_1y ?? null, sector: sf.sectors[s] ?? "", industry: sf.industries[i] ?? "",
+          });
+        }
+        if (live) setData({ rows });
+      })
+      .catch((e) => { if (live) setError(String(e.message ?? e)); });
+    return () => { live = false; };
   }, []);
 
   const sectors = useMemo(() => {

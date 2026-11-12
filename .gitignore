@@ -19,6 +19,9 @@ web/public/commodity/
 web/public/idx/
 web/public/indices.json
 web/public/world.json
+web/public/sectors.json
+web/public/news-home.json
+web/public/checks/
 web/public/gold.json
 web/public/macro.json
 web/public/news.json
