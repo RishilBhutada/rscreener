@@ -17,6 +17,16 @@ import { COMMODITY_WORDS, NewsDoc, inr, loadNews, qtyShort, since } from "@/lib/
  *  filings are the exchange's own disclosures. */
 
 type Tab = "news" | "calls" | "deals" | "sast";
+type Headline = NewsDoc["items"][number];
+
+/** Headlines by Indian calendar day (owner, 12-Nov-2026: "News B"). The page
+ *  drew 200 headlines in one column - 18,268 px on a phone. Now the newest day
+ *  opens with five and "Show 30 more"; each earlier day is one row with its
+ *  count, opened in place. */
+const FIRST = 5;
+const STEP = 30;
+const IST = 330 * 60000;
+const istDay = (ms: number) => new Date(ms + IST).toISOString().slice(0, 10);
 type Scope = "all" | "mine" | "commod";
 
 const tone = (b: string | null | undefined) =>
@@ -88,6 +98,8 @@ export default function NewsPage() {
   const [mine, setMine] = useState<Set<string>>(new Set());
   const [names, setNames] = useState<Map<string, string>>(new Map());
   const [now, setNow] = useState(0);
+  // Headlines shown per day; a day not in it shows FIRST if it is the newest, else none.
+  const [perDay, setPerDay] = useState<Record<string, number>>({});
 
   useEffect(() => {
     loadNews().then((d) => { setDoc(d); setNow(Date.now()); }).catch((e) => setError(String(e.message ?? e)));
@@ -103,6 +115,46 @@ export default function NewsPage() {
   const calls = useMemo(() => (doc?.calls ?? []).filter((c) => keep(c.sym ? [c.sym] : [], c.title)), [doc, scope, mine]); // eslint-disable-line react-hooks/exhaustive-deps
   const deals = useMemo(() => (doc?.deals ?? []).filter((d) => keep(d.sym ? [d.sym] : [], d.name ?? "")), [doc, scope, mine]); // eslint-disable-line react-hooks/exhaustive-deps
   const sast = useMemo(() => (doc?.sast ?? []).filter((s) => keep(s.sym ? [s.sym] : [], s.company ?? "")), [doc, scope, mine]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const days = useMemo(() => {
+    const by = new Map<string, Headline[]>();
+    for (const n of items) {
+      const d = istDay(new Date(n.t).getTime());
+      const xs = by.get(d);
+      if (xs) xs.push(n); else by.set(d, [n]);
+    }
+    return Array.from(by, ([d, xs]) => [d, xs.sort((a, b) => (a.t < b.t ? 1 : -1))] as const).sort((a, b) => (a[0] < b[0] ? 1 : -1));
+  }, [items]);
+  const shownOf = (d: string) => perDay[d] ?? (d === days[0]?.[0] ? FIRST : 0);
+  const dayName = (d: string) => {
+    const label = new Date(`${d}T00:00:00Z`).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+    if (!now) return label;
+    return d === istDay(now) ? `Today · ${label}` : d === istDay(now - 86400000) ? `Yesterday · ${label}` : label;
+  };
+  const headlines = (d: string, xs: readonly Headline[]) => {
+    const n = shownOf(d);
+    return (
+      <>
+        <ul className="divide-y divide-[var(--line)]">
+          {xs.slice(0, n).map((h) => (
+            <li key={h.url} className="px-3 py-2.5">
+              <a href={h.url} target="_blank" rel="noopener noreferrer" className="block text-[14px] leading-snug hover:underline">{h.title}</a>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--ink3)]">
+                <span>{h.src} · {since(h.t, now)}</span>
+                {h.syms.map(chip)}
+              </div>
+            </li>
+          ))}
+        </ul>
+        {xs.length > n && (
+          <button type="button" onClick={() => setPerDay({ ...perDay, [d]: n + STEP })}
+            className="w-full py-2.5 text-[13px] font-semibold text-[var(--accent-ink)] border-t border-[var(--line)]">
+            Show {Math.min(STEP, xs.length - n)} more · {xs.length - n} left
+          </button>
+        )}
+      </>
+    );
+  };
 
   const chip = (s: string) => (
     <Link key={s} href={symbolHref(s)} className="text-[11px] font-semibold rounded px-1.5 py-0.5 bg-[var(--card2)] text-[var(--accent-ink)]">{s}</Link>
@@ -138,18 +190,35 @@ export default function NewsPage() {
         {error && <p className="text-[13px] text-[var(--neg)]">News could not load ({error}).</p>}
         {!doc && !error && <div className="rs-skel h-96" aria-busy="true" aria-label="Loading" />}
 
-        {doc && tab === "news" && (items.length === 0 ? empty("headlines") : (
-          <ul className="rounded-xl border border-[var(--line)] bg-[var(--card)] divide-y divide-[var(--line)]">
-            {items.slice(0, 200).map((n) => (
-              <li key={n.url} className="px-3 py-2.5">
-                <a href={n.url} target="_blank" rel="noopener noreferrer" className="block text-[14px] leading-snug hover:underline">{n.title}</a>
-                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--ink3)]">
-                  <span>{n.src} · {since(n.t, now)}</span>
-                  {n.syms.map(chip)}
-                </div>
-              </li>
-            ))}
-          </ul>
+        {doc && tab === "news" && (days.length === 0 ? empty("headlines") : (
+          <div className="space-y-4">
+            <section>
+              <h2 className="px-1 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">{dayName(days[0][0])} · {days[0][1].length}</h2>
+              <div className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">{headlines(days[0][0], days[0][1])}</div>
+            </section>
+            {days.length > 1 && (
+              <section>
+                <h2 className="px-1 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">Earlier days</h2>
+                <ul className="rounded-xl border border-[var(--line)] bg-[var(--card)] divide-y divide-[var(--line)] overflow-hidden">
+                  {days.slice(1).map(([d, xs]) => {
+                    const open = shownOf(d) > 0;
+                    return (
+                      <li key={d}>
+                        <button type="button" aria-expanded={open} onClick={() => setPerDay({ ...perDay, [d]: open ? 0 : FIRST })}
+                          className="rs-press w-full min-h-[46px] flex items-center gap-2 px-3 text-left active:bg-[var(--card2)]">
+                          <span className="flex-1 text-[14px] font-semibold">{dayName(d)}</span>
+                          <span className="text-[12px] text-[var(--ink3)] tabular-nums">{xs.length} headlines</span>
+                          <svg viewBox="0 0 24 24" className={`w-4 h-4 text-[var(--ink3)] transition-transform ${open ? "rotate-90" : ""}`} fill="none"
+                            stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+                        </button>
+                        {open && <div className="border-t border-[var(--line)]">{headlines(d, xs)}</div>}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            )}
+          </div>
         ))}
 
         {doc && tab === "calls" && (calls.length === 0 ? empty("broker calls") : (
