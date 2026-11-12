@@ -152,7 +152,8 @@ export default function CalendarPage() {
   const [mineOnly, setMineOnly] = useState(false);
   const [mine, setMine] = useState<Set<string>>(new Set());
   const [q, setQ] = useState("");
-  const [shown, setShown] = useState(PAGE);
+  const [paging, setPaging] = useState({ key: "", n: PAGE });
+  const [nowMs, setNowMs] = useState(0);
   const [open, setOpen] = useState<CalEvent | null>(null);
   const [today, setToday] = useState("");
   const [basis, setBasis] = useState<Basis>("y");
@@ -188,15 +189,17 @@ export default function CalendarPage() {
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then(setPast)
       .catch((e) => setPastError(String(e.message ?? e)));
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
     setMine(new Set([...allWatched(), ...loadPortfolio().map((h) => h.symbol)]));
     // Today in INDIA: every event date is an Indian date, and a phone in
     // another time zone moved the upcoming/past line by a day (review 4-Nov-2026).
     setToday(new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }));
+    setNowMs(Date.now());
     // A link can open the page on a company: /calendar?q=TCS
     try { if (localStorage.getItem(BASIS_KEY) === "q") setBasis("q"); } catch { /* default: yearly */ }
     const fromUrl = new URLSearchParams(window.location.search).get("q");
     if (fromUrl) setQ(fromUrl);
-  }, []);
+  }, [loadNext]);
 
   const coming = useMemo(() => (next?.events ?? []).filter((e) => !today || e.date >= today)
     .map((e, i) => fromUpcoming(e, i, shortName)), [next, today]);
@@ -223,7 +226,9 @@ export default function CalendarPage() {
   const nextList = useMemo(() => (searching ? coming : upcoming).filter(keep), [upcoming, coming, searching, group, mineOnly, mine, q]); // eslint-disable-line react-hooks/exhaustive-deps
   const pastList = useMemo(() => history.filter(keep), [history, group, mineOnly, mine, q]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => setShown(PAGE), [when, group, mineOnly, q, day]);
+  const pageKey = `${when}|${group}|${mineOnly}|${q}|${day}`;
+  const shown = paging.key === pageKey ? paging.n : PAGE;
+  const setShown = (n: number) => setPaging({ key: pageKey, n });
 
   // The date strip: seven days, today in the middle with the three before and
   // the three after it (owner, 31-Oct-2026). The days before come from the past
@@ -273,8 +278,8 @@ export default function CalendarPage() {
   const hidden = drawn.reduce((a, s) => a + s.hidden, 0);
 
   const loadingPast = (when === "past" || searching) && !past && !pastError;
-  const stale = next?.generated_at
-    ? Math.floor((Date.now() - Date.parse(next.generated_at.replace(" UTC", "Z").replace(" ", "T"))) / 86400000) : 0;
+  const stale = next?.generated_at && nowMs
+    ? Math.floor((nowMs - Date.parse(next.generated_at.replace(" UTC", "Z").replace(" ", "T"))) / 86400000) : 0;
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">

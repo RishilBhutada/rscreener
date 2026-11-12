@@ -58,6 +58,7 @@ export default function Home() {
 
   useEffect(() => {
     const st = loadLists();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
     setWatch(allWatched(st));
     setLists(st.lists.filter((l) => l.symbols.length > 0).length);
     setRecent(loadRecent());
@@ -146,7 +147,7 @@ export default function Home() {
     if (!mine.size || !events.length) return [];
     const now = new Date();
     const today = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-    const until = new Date(Date.now() + AHEAD_DAYS * 86400000).toISOString().slice(0, 10);
+    const until = new Date(now.getTime() + AHEAD_DAYS * 86400000).toISOString().slice(0, 10);
     return events.filter((e) => mine.has(e.symbol) && e.date >= today && e.date <= until).slice(0, 12);
   }, [watch, held, events]);
 

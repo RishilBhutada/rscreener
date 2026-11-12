@@ -146,7 +146,7 @@ function loadToken(): string {
   try { return localStorage.getItem(TOKEN_KEY) ?? ""; } catch { return ""; }
 }
 function saveToken(v: string) {
-  try { v ? localStorage.setItem(TOKEN_KEY, v) : localStorage.removeItem(TOKEN_KEY); } catch { /* private mode */ }
+  try { if (v) localStorage.setItem(TOKEN_KEY, v); else localStorage.removeItem(TOKEN_KEY); } catch { /* private mode */ }
 }
 
 /** Sentence case for display. The scope names themselves are the exact values
@@ -177,6 +177,7 @@ export default function RefreshPanel() {
   const [sendMsg, setSendMsg] = useState<string | null>(null);
   const [showSetup, setShowSetup] = useState(false);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
   useEffect(() => { setToken(loadToken()); }, []);
 
   const start = async () => {

@@ -84,7 +84,7 @@ export function InfoDialog({ title, onClose, children }: { title: string; onClos
   // re-renders on every finger movement - the chart - passes a new function
   // each time, and re-running this would steal focus back on every frame.
   const close = useRef(onClose);
-  close.current = onClose;
+  useEffect(() => { close.current = onClose; });
   useBackClose(true, onClose);
   const shutRef = useRef(shut);
   useEffect(() => { shutRef.current = shut; });

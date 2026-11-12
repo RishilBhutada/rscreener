@@ -843,6 +843,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [cmpQ, setCmpQ] = useState("");
   const [vis, setVis] = useState<{ from: number; to: number } | null>(null);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
   useEffect(() => { setPrefs(loadPrefs()); }, []);
   // Every change the reader makes is written back (not the opening state), so
   // the next chart - this company's or another's - opens as this was left.
@@ -862,6 +863,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
   useEffect(() => {
     if (!symbol) return;
     let live = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears the last symbol's chart before the next one's files arrive
     setFile(null); setCompany(null); setError(null); setEtfDoc(null); setCmps([]);
     // The candles and, for an ETF, its NAV file, set TOGETHER. Arriving apart,
     // the chart drew once, then drew again for the NAV line - and the second
@@ -914,6 +916,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
   useEffect(() => {
     const mo = new MutationObserver(() => setThemeKey((k) => k + 1));
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-shade", "data-accent"] });
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a browser capability, known only after mount
     setCanFull(!!document.fullscreenEnabled);
     const onFs = () => setFull(!!document.fullscreenElement);
     document.addEventListener("fullscreenchange", onFs);

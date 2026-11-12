@@ -178,6 +178,7 @@ function ScreensInner() {
         carry_pa: x.carry_pa, world_prem: x.world_prem, spot_prem: x.spot_prem ?? null, oi: x.oi || null, vol: x.vol || null,
       }) as unknown as Row));
     }).catch(() => {});
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
     setSaved(loadSaved());
     setRatios(readJSON<Ratio[]>("rscreener_ratios", []));
     setLists(loadLists());

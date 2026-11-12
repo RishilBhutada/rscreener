@@ -443,6 +443,7 @@ function PeerTable({ symbol, self, peers, industry }: { symbol: string; self: Ro
   useEffect(() => {
     try {
       const v = JSON.parse(localStorage.getItem("rs_peer_cols") ?? "null");
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
       if (Array.isArray(v) && v.length) setCols(v.filter((k: string) => PEER_COLS.some((c) => c.key === k)));
     } catch { /* the default columns */ }
   }, []);
@@ -532,6 +533,7 @@ function PinnedRatios({ row }: { row: Row | null }) {
   useEffect(() => {
     try {
       const v = JSON.parse(localStorage.getItem("rs_grid_pins") ?? "[]");
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
       if (Array.isArray(v)) setPins(v.filter((x): x is string => typeof x === "string"));
     } catch { /* none */ }
   }, []);
@@ -1239,10 +1241,11 @@ function num(r: Row | null, k: string): number | null {
  *  stayed on screen for three weeks looking exactly like a live quote. If the
  *  close is older than the last trading day, say so instead of implying "now". */
 function PriceAsOf({ row, snapshot }: { row: Row | null; snapshot?: Row | null }) {
+  const [now] = useState(() => Date.now());
   const d = row?.["price_date"] ?? snapshot?.["price_date"];
   if (typeof d !== "string" || !d) return null;
   const asof = new Date(d + "T00:00:00");
-  const days = Math.floor((Date.now() - asof.getTime()) / 86400000);
+  const days = Math.floor((now - asof.getTime()) / 86400000);
   const label = asof.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
   const old = days > 4;
   return (
@@ -2136,6 +2139,7 @@ function CompanyView() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
     setMode(loadSectionMode());
     const onMode = (e: Event) => setMode((e as CustomEvent).detail as SectionMode);
     window.addEventListener("rs-sections", onMode);
@@ -2406,6 +2410,7 @@ function CompanyView() {
   useEffect(() => {
     if (!symbol) return;
     pushRecent(symbol);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
     setNote(loadNote(symbol));
   }, [symbol]);
 
@@ -2477,6 +2482,7 @@ function CompanyView() {
     // page used to fetch the whole 5.6 MB screener table and keep three things
     // from it: 99.4% of the transfer discarded, on the app's most-visited page.
     if (company.row || company.peers || company.context) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- the row travels in the company file; the older-file fallback below sets the same state from a download
       setFullRow((company.row as Row) ?? null);
       setPeers((company.peers as Row[]) ?? []);
       const c = company.context;
@@ -3031,6 +3037,7 @@ function PriceAlerts({ symbol, price, onClose }: { symbol: string; price: number
   const [all, setAll] = useState<PriceAlert[]>([]);
   const [op, setOp] = useState<">" | "<">(">");
   const [level, setLevel] = useState("");
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
   useEffect(() => { setAll(loadAlerts()); }, []);
   const save = (next: PriceAlert[]) => {
     setAll(next);

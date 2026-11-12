@@ -30,6 +30,7 @@ export default function Markets() {
     fetch(`${BASE}/commodities.json`).then((r) => (r.ok ? r.json() : null)).then((d) => { if (d?.items) setCom(d.items); }).catch(() => {});
     try {
       const t = localStorage.getItem(KEY) as Tab | null;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- the tab named in the URL is read after mount; the prerendered page has no URL
       if (t && TABS.some(([k]) => k === t)) setTabState(t);
     } catch { /* private mode */ }
   }, []);

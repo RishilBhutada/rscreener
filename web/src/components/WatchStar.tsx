@@ -24,6 +24,7 @@ export default function WatchStar({ symbol, size = "lg" }: { symbol: string; siz
   const [adding, setAdding] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
   useEffect(() => { setState(loadLists()); }, [symbol]);
 
   useEffect(() => {

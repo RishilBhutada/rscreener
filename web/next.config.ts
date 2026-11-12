@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 
 /** Stamped from git at build time. A static export cannot ask a server when it
  *  was built, and "when did the app last change" is a question the Settings
@@ -28,9 +29,8 @@ const BUILD_SUBJECT = process.env.RS_BUILD_SUBJECT || git("git log -1 --format=%
 // have the latest" instead of reloading and leaving you none the wiser. Tiny on
 // purpose: it is fetched to answer one question.
 try {
-  const fs = require("node:fs") as typeof import("node:fs");
-  fs.mkdirSync("public", { recursive: true });
-  fs.writeFileSync(
+  mkdirSync("public", { recursive: true });
+  writeFileSync(
     "public/version.json",
     JSON.stringify({ commit: BUILD_COMMIT, built: BUILD_TIME, subject: BUILD_SUBJECT }),
   );

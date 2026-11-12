@@ -47,6 +47,7 @@ function useVersion(): number {
 export function usePct(kind: TableKind): [boolean, (on: boolean) => void] {
   const v = useVersion();
   const [on, setOn] = useState(true);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
   useEffect(() => { setOn(read(PCT_KEY)[kind] !== false); }, [kind, v]);
   return [on, (next: boolean) => { const all = read(PCT_KEY); all[kind] = next; write(PCT_KEY, all); }];
 }
@@ -56,6 +57,7 @@ export function usePct(kind: TableKind): [boolean, (on: boolean) => void] {
 export function useView(kind: TableKind): [TableView, (v: TableView) => void] {
   const v = useVersion();
   const [view, setView] = useState<TableView>("trend");
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
   useEffect(() => { setView(read(VIEW_KEY)[kind] === "grid" ? "grid" : "trend"); }, [kind, v]);
   return [view, (next: TableView) => { const all = read(VIEW_KEY); all[kind] = next; write(VIEW_KEY, all); }];
 }
@@ -71,6 +73,7 @@ export function useRowOrder(kind: TableKind, symbol: string) {
   useEffect(() => {
     const all = read(ORDER_KEY);
     const mine = ids(all[`${kind}:${symbol}`]), every = ids(all[kind]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
     setState(mine ? { order: mine, scope: "company" } : every ? { order: every, scope: "all" } : { order: null, scope: null });
   }, [kind, symbol, v]);
   const save = (order: string[], scope: "company" | "all") => {

@@ -274,6 +274,7 @@ function MainScreen() {
   const [upd, setUpd] = useState<"idle" | "checking" | "current" | "error">("idle");
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
     setTheme(localStorage.getItem("rs_theme") || "system");
     setAccent(localStorage.getItem("rs_accent") || "indigo");
     setSections(loadSectionMode());
@@ -696,6 +697,7 @@ function ReorderScreen({ kind, title, caption, items, split }: {
   const [order, setOrder] = useState<string[]>([]);
   const [moved, setMoved] = useState<{ id: string; n: number }>({ id: "", n: 0 });
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
   useEffect(() => { setOrder(loadOrder(kind)); }, [kind]);
 
   const shown = applyOrder(items, (x) => x.id, order);

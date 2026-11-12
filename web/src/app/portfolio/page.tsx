@@ -77,6 +77,7 @@ export default function PortfolioPage() {
     loadIndex()
       .then((d) => { setRows(d.rows); setAsof(d.price_modal ?? d.price_asof); })
       .catch(() => {});
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
     setHoldings(loadPortfolio());
     try {
       const s = localStorage.getItem(SORT_KEY) as SortKey | null;

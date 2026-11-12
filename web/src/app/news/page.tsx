@@ -103,6 +103,7 @@ export default function NewsPage() {
 
   useEffect(() => {
     loadNews().then((d) => { setDoc(d); setNow(Date.now()); }).catch((e) => setError(String(e.message ?? e)));
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
     setMine(new Set([...allWatched(), ...loadPortfolio().map((h) => h.symbol)]));
     loadIndex().then((ix) => setNames(new Map(ix.rows.map((r) => [r.symbol, r.name])))).catch(() => {});
   }, []);
