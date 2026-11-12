@@ -2781,5 +2781,20 @@
    "fresh"
   ],
   "companies": 4995
+ },
+ {
+  "at": "2026-11-12 02:49 UTC",
+  "overall": 91.0,
+  "complete": 80.3,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 83.3,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4996
  }
 ]
