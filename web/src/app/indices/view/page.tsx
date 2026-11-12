@@ -10,6 +10,9 @@ import { LiteRow, loadIndex, symbolHref } from "@/lib/index-data";
 import { shortName } from "@/lib/names";
 import { IndexDoc, RETURN_ORDER, ValStat, points } from "@/lib/indices";
 import { dayLabel, signClass, signed } from "@/lib/commodity";
+import { Segmented } from "@/components/ListUI";
+import { HeatLegend, HeatTiles, HeatTreemap } from "@/components/Heatmap";
+import { HEAT_FULL, HeatPeriod } from "@/lib/treemap";
 
 /** One index: its level and day, the year's range, returns over every span,
  *  valuation against its own history, a chart, its members joined to today's
@@ -85,6 +88,12 @@ function RangeBar({ lo, hi, now }: { lo: number; hi: number; now: number }) {
   );
 }
 
+/** The members' heatmap: tiles by market cap, or all the same size. */
+type HeatSize = "size" | "equal";
+const HEAT_SIZES: readonly (readonly [HeatSize, string])[] = [["size", "Size"], ["equal", "Equal"]];
+/** Equal tiles shown before "Show all": a 750-company index is a long scroll. */
+const HEAT_FIRST = 100;
+
 function IndexView() {
   const sym = useSearchParams().get("s") ?? "";
   const [loaded, setDoc] = useState<IndexDoc | null>(null);
@@ -92,6 +101,9 @@ function IndexView() {
   const [rows, setRows] = useState<LiteRow[]>([]);
   const [showAll, setShowAll] = useState(false);
   const [showEtfs, setShowEtfs] = useState(false);
+  const [heatSize, setHeatSize] = useState<HeatSize>("size");
+  const [heatPicked, setHeatPeriod] = useState<HeatPeriod>("d1");
+  const [heatAll, setHeatAll] = useState(false);
   const doc = loaded?.s === sym ? loaded : null;
   const error = failed?.s === sym ? failed.msg : "";
 
@@ -131,6 +143,16 @@ function IndexView() {
     for (const m of members) if (m.w) by.set(m.ind || "Other", (by.get(m.ind || "Other") ?? 0) + m.w);
     return Array.from(by.entries()).sort((a, b) => b[1] - a[1]).slice(0, 6);
   }, [members]);
+
+  // The year's change is in index.json from 12-Nov-2026 on; until then the switch leaves it out.
+  const has1y = useMemo(() => members.some((m) => typeof m.r?.ret_1y === "number"), [members]);
+  const heatPeriod: HeatPeriod = heatPicked === "y1" && !has1y ? "d1" : heatPicked;
+  const heatPeriods = useMemo(() => ([["d1", "Day"], ["m1", "1M"], ...(has1y ? [["y1", "1Y"]] : [])] as [HeatPeriod, string][]), [has1y]);
+  const heat = useMemo(() => members.map((m) => ({
+    key: m.s, label: m.s, name: shortName(m.comp, m.s), group: m.ind || "Other", size: m.r?.mcap,
+    v: heatPeriod === "d1" ? m.r?.ret_1d : heatPeriod === "m1" ? m.r?.ret_1m : m.r?.ret_1y,
+    href: symbolHref(m.s),
+  })), [members, heatPeriod]);
 
   if (error) return <p className="text-[var(--neg)] text-sm">{error}</p>;
   if (!doc) return <div className="rs-skel h-96" aria-busy="true" aria-label="Loading" />;
@@ -225,6 +247,46 @@ function IndexView() {
           )}
         </Card>
       )}
+
+      {members.length > 1 && (() => {
+        const sized = heat.filter((h) => typeof h.size === "number" && h.size > 0).length;
+        const digits = heatPeriod === "d1" ? 2 : 1;
+        return (
+          <Card title="Heatmap" tip={
+            <InfoTip title="Heatmap">
+              <p>Every member as a tile, coloured by its change: green a rise, red a fall, at full strength from 3% for a day, 10% for a month and 40% for a year.</p>
+              <p><b>Size</b> draws each tile by the company&apos;s full market cap, gathered by industry. It is a guide to what moves the index, not its official weights: NSE weights by free float.</p>
+              <p><b>Equal</b> gives every company the same tile, largest first.</p>
+            </InfoTip>
+          }>
+            <div className="px-3 pb-3 space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Segmented label="Tile size" value={heatSize} options={HEAT_SIZES} onChange={setHeatSize} />
+                <Segmented label="Change over" value={heatPeriod} options={heatPeriods} onChange={setHeatPeriod} />
+                <span className="ml-auto"><HeatLegend full={HEAT_FULL[heatPeriod]} /></span>
+              </div>
+              {heatSize === "size" ? (
+                sized > 0
+                  ? <HeatTreemap items={heat} full={HEAT_FULL[heatPeriod]} digits={digits}
+                      height={sized <= 30 ? 320 : sized <= 120 ? 420 : 560}
+                      label={`${doc.name}: ${sized} members by market cap, coloured by change`} />
+                  : <p className="text-[12.5px] text-[var(--ink3)]">No market cap for the members today.</p>
+              ) : (
+                <HeatTiles tiles={heatAll ? heat : heat.slice(0, HEAT_FIRST)} full={HEAT_FULL[heatPeriod]} digits={digits} min={78} />
+              )}
+              {heatSize === "size" && sized > 0 && sized < heat.length && (
+                <p className="text-[11px] text-[var(--ink3)]">{heat.length - sized} not drawn: no market cap today</p>
+              )}
+            </div>
+            {heatSize === "equal" && heat.length > HEAT_FIRST && (
+              <button type="button" onClick={() => setHeatAll(!heatAll)}
+                className="w-full py-2.5 text-[13px] font-semibold text-[var(--accent-ink)] border-t border-[var(--line)]">
+                {heatAll ? `Show top ${HEAT_FIRST}` : `Show all ${heat.length}`}
+              </button>
+            )}
+          </Card>
+        );
+      })()}
 
       {members.length > 0 && (
         <Card title={`Members · ${members.length}`} tip={

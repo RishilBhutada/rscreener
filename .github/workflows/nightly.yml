@@ -361,6 +361,13 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "15"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_indices.py
+      - name: Refresh the world's stock markets (30 indices and 5 companions, daily closes)
+        # On every run, publish-only included: about 35 small requests to
+        # Yahoo's chart endpoint, under a minute. Only sessions that have
+        # ended are stored - at 22:00 IST New York is mid-session.
+        env:
+          RSCREENER_STEP_MINUTES: "5"
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_world.py
       - name: Refresh gold's calendar, Fed dates, headlines and COMEX closes
         # The release schedules of the Fed (meetings and its speech/testimony
         # calendar), BEA, the Census Bureau, the ECB and the Bank of Japan;
@@ -619,6 +626,11 @@ jobs:
         # web/public/indices.json, idx/<SYM>.json, their valuation and chart
         # files, and a row each in the search index.
         run: python pipeline/export_indices_json.py
+      - name: Write the world markets page
+        # web/public/world.json - each market's last finished close, its own
+        # date and its change over a day, week, month and year. Generated,
+        # never committed; written even before the first fetch.
+        run: python pipeline/export_world_json.py
       - name: Build the yearly snapshots the screener's history test runs on
         # web/public/backtest/: each 30 June since 2008, every company's
         # screener fields as known that day, and the next year's return (P10).

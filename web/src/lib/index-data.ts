@@ -32,6 +32,8 @@ export type LiteRow = {
   ret_1d?: number;
   /** Where the price sits in its 52-week range, 0 (low) to 100 (high). */
   at52?: number;
+  /** The year's change, in % - companies only, for an index's heatmap. */
+  ret_1y?: number;
 };
 
 export type LiteIndex = {
@@ -91,6 +93,7 @@ export function loadIndex(): Promise<LiteIndex> {
         index: r[10] === 3 ? true : undefined,
         ret_1d: (r[11] as number) ?? undefined,
         at52: (r[12] as number) ?? undefined,
+        ret_1y: (r[13] as number) ?? undefined,
       }));
       for (const r of rows) {
         if (r.etf) etfs.add(r.symbol);

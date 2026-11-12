@@ -232,7 +232,7 @@ def main() -> None:
         (DIR_OUT / f"{sym}.json").write_text(json.dumps(doc, separators=(",", ":"), allow_nan=False, ensure_ascii=False), encoding="utf-8")
         items.append({
             "s": sym, "name": name, "group": doc["group"], "exch": doc["exch"], "date": last[0], "close": close,
-            "chg": doc["chg"], "chg_pct": doc["chg_pct"], "r1m": ret.get("1M"), "r1y": ret.get("1Y"),
+            "chg": doc["chg"], "chg_pct": doc["chg_pct"], "r1w": ret.get("1W"), "r1m": ret.get("1M"), "r1y": ret.get("1Y"),
             "pe": (val.get("pe") or {}).get("now"), "pb": (val.get("pb") or {}).get("now"),
             "dy": (val.get("dy") or {}).get("now"), "pe_pct": (val.get("pe") or {}).get("pct10"),
             "from_ath": doc["from_ath"], "n": len(doc["members"]),

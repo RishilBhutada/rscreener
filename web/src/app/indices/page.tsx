@@ -6,6 +6,9 @@ import TopNav from "@/components/TopNav";
 import InfoTip from "@/components/InfoTip";
 import { dayLabel, signClass, signed } from "@/lib/commodity";
 import { IndexList, IndexListItem, points } from "@/lib/indices";
+import { Segmented } from "@/components/ListUI";
+import { HeatLegend, HeatTiles } from "@/components/Heatmap";
+import { HEAT_FULL, HeatPeriod } from "@/lib/treemap";
 
 /** Every NSE index and the Sensex, grouped as NSE groups them, with one
  *  chosen figure on the right. A filter box, because there are 145. */
@@ -14,11 +17,28 @@ const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 /** The grid's columns: level, then the four figures that used to be picked one at a time. */
 const COLS: [string, string][] = [["close", "Level"], ["chg_pct", "Day"], ["r1y", "1Y"], ["pe", "P/E"], ["from_ath", "From high"]];
 
+/** List or heatmap: the same indices, the same groups. The choice is kept. */
+type View = "list" | "map";
+const VIEWS: readonly (readonly [View, string])[] = [["list", "List"], ["map", "Heatmap"]];
+const VIEW_KEY = "rscreener_indices_view";
+function savedView(): View {
+  try { return typeof window !== "undefined" && window.localStorage.getItem(VIEW_KEY) === "map" ? "map" : "list"; } catch { return "list"; }
+}
+/** The figure a tile is coloured by, for each period. */
+const HEAT_FIELD: Record<HeatPeriod, "chg_pct" | "r1w" | "r1m" | "r1y"> = { d1: "chg_pct", w1: "r1w", m1: "r1m", y1: "r1y" };
+
 export default function IndicesPage() {
   const [data, setData] = useState<IndexList | null>(null);
   const [error, setError] = useState("");
   const [sort, setSort] = useState<{ key: string; desc: boolean } | null>(null);
   const [q, setQ] = useState("");
+  const [view, setView] = useState<View>(savedView);
+  const [picked, setPeriod] = useState<HeatPeriod>("d1");
+  const pickView = (v: View) => { setView(v); try { window.localStorage.setItem(VIEW_KEY, v); } catch { /* private window: the choice lasts the visit */ } };
+  // The week's change is in files written from 12-Nov-2026 on; until one arrives the switch leaves it out.
+  const has1w = useMemo(() => !!data && data.items.some((x) => typeof x.r1w === "number"), [data]);
+  const periods = useMemo(() => ([["d1", "Day"], ...(has1w ? [["w1", "1W"]] : []), ["m1", "1M"], ["y1", "1Y"]] as [HeatPeriod, string][]), [has1w]);
+  const period: HeatPeriod = picked === "w1" && !has1w ? "d1" : picked;
 
   useEffect(() => {
     fetch(`${BASE}/indices.json`)
@@ -74,9 +94,26 @@ export default function IndicesPage() {
             <div className="flex items-center gap-2 flex-wrap">
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter" aria-label="Filter indices"
                 className="flex-1 min-w-[120px] h-[38px] px-3 rounded-xl border border-[var(--line)] bg-[var(--card)] text-[14px] outline-none focus:border-[var(--accent-line)]" />
+              <Segmented label="View" value={view} options={VIEWS} onChange={pickView} />
             </div>
 
-            {groups.map(([g, xs]) => (
+            {view === "map" && (
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <Segmented label="Change over" value={period} options={periods} onChange={setPeriod} />
+                <HeatLegend full={HEAT_FULL[period]} />
+              </div>
+            )}
+            {view === "map" && groups.map(([g, xs]) => (
+              <section key={g}>
+                <h2 className="px-1 pt-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">{g} · {xs.length}</h2>
+                <HeatTiles full={HEAT_FULL[period]} digits={period === "d1" ? 2 : 1} tiles={xs.map((x) => ({
+                  key: x.s, label: x.name, v: x[HEAT_FIELD[period]], href: `/indices/view?s=${encodeURIComponent(x.s)}`,
+                  note: x.date !== data.asof ? dayLabel(x.date) : undefined,
+                }))} />
+              </section>
+            ))}
+
+            {view === "list" && groups.map(([g, xs]) => (
               <section key={g}>
                 <h2 className="px-1 pt-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">{g} · {xs.length}</h2>
                 <div className="overflow-x-auto rounded-xl border border-[var(--line)] bg-[var(--card)] [scrollbar-width:none]">

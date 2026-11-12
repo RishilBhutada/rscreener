@@ -4,6 +4,8 @@
 export type IndexListItem = {
   s: string; name: string; group: string; exch: string; date: string; close: number;
   chg: number | null; chg_pct: number | null; r1m: number | null; r1y: number | null;
+  /** The week's change - in files written from 12-Nov-2026 on. */
+  r1w?: number | null;
   pe: number | null; pb: number | null; dy: number | null; pe_pct: number | null;
   from_ath: number | null; n: number;
 };

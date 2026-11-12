@@ -38,6 +38,9 @@ export const DESTINATIONS: { key: string; label: string; href: string; icon: str
   // Every NSE index and the Sensex: level, returns, valuation, members.
   { key: "indices", label: "Indices", href: "/indices",
     icon: "M4 19h16M5.5 15l4-4.5 3.5 3 5.5-7" },
+  // The world's stock markets, one tile each, coloured by the move.
+  { key: "world", label: "World", href: "/world",
+    icon: "M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17zM3.5 12h17M12 3.5c2.4 2.5 3.6 5.3 3.6 8.5S14.4 18 12 20.5C9.6 18 8.4 15.2 8.4 12S9.6 6 12 3.5z" },
   { key: "sectors", label: "Sectors", href: "/sectors",
     icon: "M4.5 4.5h6v6h-6zM13.5 4.5h6v6h-6zM4.5 13.5h6v6h-6zM13.5 13.5h6v6h-6z" },
   // Headlines, broker calls, bulk/block deals and stake filings, through the day.
@@ -60,7 +63,7 @@ export type Hub = { key: string; label: string; icon: string; tabs: string[] };
 export const HUBS: Hub[] = [
   { key: "home", label: "Home", icon: DESTINATIONS[0].icon, tabs: ["home"] },
   { key: "markets", label: "Markets", icon: "M4 19h16M5.5 15l4-4.5 3.5 3 5.5-7",
-    tabs: ["indices", "sectors", "etfs", "commodities", "gold"] },
+    tabs: ["indices", "sectors", "world", "etfs", "commodities", "gold"] },
   // Screener first: the hub opens on it, so it stays one tap away.
   { key: "research", label: "Research", icon: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-3.5-3.5",
     tabs: ["screens", "calendar", "news", "others"] },
