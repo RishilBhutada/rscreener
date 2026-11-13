@@ -171,4 +171,7 @@ export type Cohort = {
   indRankOf: number;
 };
 
-export type Tile = { label: string; value: string; sub?: string | null; field?: string; full?: string; info?: string };
+/** subFirst: the sub-line says something the reader must see (sources that
+ *  disagree), so it takes the place of the industry median's text; the
+ *  median's bar still draws. */
+export type Tile = { label: string; value: string; sub?: string | null; field?: string; full?: string; info?: string; subFirst?: boolean };

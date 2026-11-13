@@ -634,6 +634,24 @@ def main() -> None:
     for fk in SCREEN_FIELDS:
         df[fk] = df["symbol"].map(lambda s, k=fk: extra_fields.get(s, {}).get(k))
     print("  screener fields: " + ", ".join(f"{k} {int(df[k].notna().sum())}" for k in SCREEN_FIELDS))
+    # ONE P/E basis (owner, 13-Nov-2026). The tile and every screen used
+    # Yahoo's trailingPE while the chart used the filings; on the 500 largest
+    # companies the two were within 5% for 87%, and where they split each
+    # source failed its own way (Yahoo a quarter stale or on a wrong share
+    # count; filings misread, now checked by implausible_quarters). The filed
+    # figure leads; Yahoo's stands in, labelled, where there is no current
+    # filed one; the gap is kept so the page can say when they disagree.
+    vendor = pd.to_numeric(df["pe"], errors="coerce")
+    filed_pe = pd.to_numeric(df["pe_filed"], errors="coerce")
+    df["pe_vendor"] = vendor.round(2)
+    df["pe_src"] = ["filed" if f == f else ("vendor" if v == v else None) for f, v in zip(filed_pe, vendor)]
+    df["pe_gap"] = [round((v / f - 1) * 100, 1) if (f == f and v == v and f > 0) else None
+                    for f, v in zip(filed_pe, vendor)]
+    df["pe"] = [f if f == f else v for f, v in zip(filed_pe, vendor)]
+    n_f = sum(1 for x in df["pe_src"] if x == "filed")
+    n_v = sum(1 for x in df["pe_src"] if x == "vendor")
+    n_gap = sum(1 for g in df["pe_gap"] if g is not None and abs(g) > 10)
+    print(f"  P/E: filed {n_f}, Yahoo standing in {n_v}; sources more than 10% apart on {n_gap}")
     df["avg_npm_5y"] = df["symbol"].map(lambda s: avg_npm_5y(trends.get(s, {}).get("annual")))
     df["off_52w_high"] = [
         round((p / h - 1) * 100, 1) if p and h else None
@@ -894,7 +912,7 @@ def main() -> None:
         "sales_cagr_5y", "sales_cagr_10y", "profit_cagr_5y", "profit_cagr_10y",
         "roce", "ev_ebitda", "ps", "peg", "int_coverage", "div_payout",
         "debtor_days", "inventory_days", "promoter_holding",
-        "median_pe_5y", "avg_npm_5y",
+        "median_pe_5y", "avg_npm_5y", "pe_vendor", "pe_src", "pe_gap",
         "ret_1d", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "ret_3y", "ret_5y", "off_52w_high",
         "volatility_1y", "volatility_30d", "vol_method",
         *SCREEN_FIELDS,

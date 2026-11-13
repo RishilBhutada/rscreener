@@ -20,7 +20,7 @@ from statistics import median
 import pandas as pd
 
 import price_adjust
-from filing_checks import unit_outliers
+from filing_checks import unit_outliers, ytd_quarters
 
 # yfinance income-statement item -> our field name
 YF_INCOME_MAP = {
@@ -337,6 +337,36 @@ def implausible_quarters(con: sqlite3.Connection) -> dict[str, set]:
     # 4-Nov-2026: Heritage Foods' Mar-2015 quarter holds FY2015).
     for sym, pes in year_equals_quarter(con).items():
         out.setdefault(sym, set()).update(pes)
+    # A quarter holding the year-to-date (filing_checks.ytd_quarters; 13-Nov-2026:
+    # Coal India, Coforge, TVS Holdings Sep-2026; Maruti Sep-2017, HCL Dec-2015).
+    for sym, pes in year_to_date_quarters(con).items():
+        out.setdefault(sym, set()).update(pes)
+    return out
+
+
+def year_to_date_quarters(con: sqlite3.Connection) -> dict[str, set]:
+    """{symbol: {period_end}} of quarters whose figures are year-to-date."""
+    if not _table_exists(con, "results_history"):
+        return {}
+    fy: dict[str, dict[int, int]] = {}
+    for sym, pe in con.execute(
+        "SELECT symbol, period_end FROM results_history WHERE period_type='annual' AND item='revenue'"
+    ):
+        m = fy.setdefault(sym, {})
+        m[int(pe[5:7])] = m.get(int(pe[5:7]), 0) + 1
+    series: dict[str, dict[str, list]] = {}
+    for sym, pe, item, v in con.execute(
+        "SELECT symbol, period_end, item, value FROM results_history WHERE period_type='quarterly' "
+        "AND item IN ('revenue','depreciation','employee_cost') ORDER BY symbol, period_end"
+    ):
+        series.setdefault(sym, {}).setdefault(item, []).append((pe, v))
+    out: dict[str, set] = {}
+    for sym, s in series.items():
+        months = fy.get(sym)
+        fy_end = max(months, key=months.get) if months else 3
+        bad = ytd_quarters(s, fy_end)
+        if bad:
+            out[sym] = bad
     return out
 
 
@@ -482,6 +512,19 @@ def net_debt_series(con: sqlite3.Connection) -> dict[str, list]:
             nd = td - (items.get("Cash And Cash Equivalents") or 0.0)
         out.setdefault(sym, []).append((period, nd / 1e7))
     return out
+
+
+def filed_share_base(sh_now: float | None, recent: list[tuple]) -> float | None:
+    """Today's share count for the EPS fallback: Yahoo's, unless the filings'
+    own count (median PAT/EPS of the four newest quarters) is more than 2.5x
+    away from it, in which case the filings'. recent: [(pat, eps)], oldest first."""
+    counts = [pat / eps for pat, eps in recent if pat and eps and pat / eps > 0][-4:]
+    if not counts:
+        return sh_now
+    filed = median(counts)
+    if not sh_now or not (1 / 2.5 <= sh_now / filed <= 2.5):
+        return filed
+    return sh_now
 
 
 def filed_eps_on_todays_base(pat, eps, sh_now) -> float | None:
@@ -1286,6 +1329,44 @@ def adj_factor(events: list[tuple[str, float]] | None, period_end: str) -> float
     return f or 1.0
 
 
+RESTATED_TOL = 0.15
+
+
+def restated_quarters(events: list[tuple[str, float]] | None, quarters: list[tuple[str, float | None, float | None]],
+                      announced: dict) -> dict[str, float]:
+    """{period_end: split factor the filing ITSELF already applied}.
+
+    adj_factor() counts every split dated after a quarter's END. But a split
+    that falls between the quarter's end and the day its results come out is
+    often already in the filed EPS - Ind AS 33 restates per-share figures for a
+    split made before the results are approved. Kotak's Dec-2025 EPS of 4.95
+    was on the post-split base (split 14-Jan-2026, results late January) and
+    was divided by 5 again: 0.99, and a P/E 25% too high (13-Nov-2026 scan).
+
+    Whether a filing did restate is not uniform - of 461 such filings in the
+    database, 119 had and 201 had not - so each filing's OWN share count
+    decides: profit / EPS jumping by the split ratio from the quarter before
+    means the split is already in it.
+
+    quarters: [(period_end, pat, eps)], oldest first; announced: {period_end: date}."""
+    if not events:
+        return {}
+    shares = {pe: pat / eps for pe, pat, eps in quarters if pat and eps}
+    order = [pe for pe, _, _ in quarters]
+    out: dict[str, float] = {}
+    for i, pe in enumerate(order):
+        ann = announced.get(pe)
+        if not ann or pe not in shares:
+            continue
+        for d, r in events:
+            if not (pe < d <= ann) or r <= 0:
+                continue
+            prev = next((shares[q] for q in reversed(order[:i]) if q in shares), None)
+            if prev and abs((shares[pe] / prev) / r - 1) <= RESTATED_TOL:
+                out[pe] = out.get(pe, 1.0) * r
+    return out
+
+
 def _median(vals: list[float]) -> float:
     s = sorted(vals)
     n = len(s)
@@ -1374,6 +1455,19 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
             pe_ for pe_, items_ in cross_q.get((sym, "quarterly"), {}).items() if items_ is None
         }
         flows, eqs = [], []
+        # Today's share count, as the filings themselves imply it: when Yahoo's
+        # (market cap / price) is more than 2.5x away from it, Yahoo's is the
+        # wrong one - IndiaMART's read 60 crore shares against about 6, so every
+        # EPS built on it was a tenth of the filed one and the P/E read 200
+        # where the filings give ~20 (13-Nov-2026 scan). Within that band
+        # Yahoo's stands: a group with outside shareholders implies a count
+        # above the true one (see filed_eps_on_todays_base).
+        sh_base = filed_share_base(shares.get(sym), [(by_pe[p_].get("pat"), by_pe[p_].get("eps"))
+                                                     for p_ in sorted(by_pe) if p_ not in skip])
+        # Splits the filing itself already applied (results published after
+        # the ex-date, EPS restated): not divided out a second time.
+        done = restated_quarters(ev, [(p_, by_pe[p_].get("pat"), by_pe[p_].get("eps"))
+                                      for p_ in sorted(by_pe) if p_ not in skip], announced.get(sym, {}))
         for pe in sorted(by_pe):
             # A filing that disagrees with itself is dropped rather than drawn.
             # Empty is honest; wrong is acted on.
@@ -1391,17 +1485,17 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
             eps = s.get("eps")
             if sym in known:
                 if eps is not None:
-                    eps /= adj_factor(ev, pe)
+                    eps /= adj_factor(ev, pe) / done.get(pe, 1.0)
             else:
-                pat_v, sh_now = s.get("pat"), shares.get(sym)
-                own = filed_eps_on_todays_base(pat_v, eps, sh_now)
+                pat_v = s.get("pat")
+                own = filed_eps_on_todays_base(pat_v, eps, sh_base)
                 if own is not None:
                     eps = own
-                elif pat_v is not None and sh_now:
-                    eps = pat_v / sh_now
+                elif pat_v is not None and sh_base:
+                    eps = pat_v / sh_base
             flows.append((pe, eps, (rev / 1e7 if rev is not None else None),
                           (ebitda / 1e7 if ebitda is not None else None),
-                          effective_shares(s.get("pat"), s.get("eps"), adj_factor(ev, pe), sh_now),
+                          effective_shares(s.get("pat"), s.get("eps"), adj_factor(ev, pe) / done.get(pe, 1.0), sh_now),
                           s.get("_basis")))
         # Net worth comes from filed_net_worth(), which reads the ANNUAL rows too -
         # Reg-33 only requires net worth once a year, so collecting it here inside

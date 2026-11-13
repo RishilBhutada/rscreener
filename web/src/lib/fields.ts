@@ -13,7 +13,9 @@ export const FIELD_CATALOG: FieldDef[] = [
   { key: "wk52_low", label: "52-week low", group: "Size & price", unit: "₹", desc: "Lowest price in the last year" },
   { key: "beta", label: "Beta", group: "Size & price", unit: "", desc: "Volatility vs the market (1 = market-like)" },
 
-  { key: "pe", label: "P/E", group: "Valuation", unit: "x", desc: "Price to earnings — years of profit you pay for" },
+  { key: "pe", label: "P/E", group: "Valuation", unit: "x", desc: "Price to earnings — years of profit you pay for. From the company's filings (last four quarters); Yahoo's where there is no current filed figure" },
+  { key: "pe_vendor", label: "P/E (Yahoo)", group: "Valuation", unit: "x", desc: "Yahoo Finance's trailing P/E, kept beside the filed one as a cross-check", short: "P/E Yahoo" },
+  { key: "pe_gap", label: "P/E sources gap", group: "Valuation", unit: "%", desc: "How far Yahoo's P/E is from the filed one: +20 means Yahoo's is 20% higher. Beyond ±10%, check the latest results before trusting either", short: "P/E gap" },
   { key: "median_pe_5y", label: "Median P/E (5y)", group: "Valuation", unit: "x", desc: "The stock's own typical P/E over 5 years", short: "Median P/E" },
   { key: "pe_filed", label: "P/E on filed earnings", group: "Valuation", unit: "x", desc: "Price over the last four quarters' EPS exactly as filed with NSE, one-offs included - the P/E the chart draws", short: "P/E filed" },
   { key: "pe_core", label: "P/E excluding one-offs", group: "Valuation", unit: "x", desc: "P/E on filed earnings with exceptional items (land sales, write-downs, settlements) taken out after tax. Blank where the filings do not state them, or where nothing is left without them", short: "P/E ex one-offs" },

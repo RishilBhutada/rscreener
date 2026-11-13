@@ -70,6 +70,16 @@ TAGS = {
     "ProfitOrLossAttributableToNonControllingInterests": "minority",
     "ShareOfProfitLossOfAssociatesAndJointVenturesAccountedForUsingEquityMethod": "associates",
     "ExceptionalItemsBeforeTax": "exceptional",
+    # Profit from a business sold or demerged, after its tax - a one-off like
+    # an exceptional item, filed on its own line (oneoffs_lib.py). Siemens'
+    # Jun-2026 and ABB's Mar-2026 quarters were four to five times their
+    # neighbours on such gains. Tag names per the Ind-AS results taxonomy; the
+    # variants cover its spellings (13-Nov-2026: unverified against a live
+    # file - the nightly's "one-offs" line shows whether any stored).
+    "ProfitLossFromDiscontinuedOperationAfterTax": "discontinued",
+    "ProfitLossFromDiscontinuedOperationsAfterTax": "discontinued",
+    "ProfitOrLossFromDiscontinuedOperationAfterTax": "discontinued",
+    "ProfitOrLossFromDiscontinuedOperationsAfterTax": "discontinued",
     "BasicEarningsLossPerShareFromContinuingAndDiscontinuedOperations": "eps",
     # banks file a different P&L shape
     "InterestEarned": "revenue_bank",

@@ -536,7 +536,7 @@ export const METRIC_INFO: Record<string, { how: string; means: string; watch?: s
     means: "The range the market has actually paid this year. How far today sits below the high usually tells you more than the high itself.",
   },
   "Stock P/E": {
-    how: "Price divided by earnings per share over the trailing four quarters, as Yahoo Finance reports them, moved with each day's close. The P/E chart below uses the company's own NSE filings instead, so the two can differ.",
+    how: "Price divided by earnings per share over the last four quarters as filed with NSE, one-offs included - the same figure the P/E chart draws. Where there is no current filed figure, Yahoo Finance's P/E stands in and the tile says \"Yahoo\". Where the two differ by more than 10%, Yahoo's is shown under it: on the 500 largest companies that is about one in ten, and either side can be the wrong one (Yahoo a quarter late, or a misread filing).",
     means: "Years of current profit you are paying for. Comparable against this company's own history and against genuine peers - never across industries.",
     watch: "Meaningless when profit is near zero or negative. One loss-making quarter inside a profitable year still leaves it positive.",
   },
@@ -614,6 +614,16 @@ export function RatioGrid({ snapshot, row, cohort, next, updates, faceValue }: {
   const debt = g("total_debt"), cash = g("total_cash"), mcap = g("mcap");
   const ev = mcap === null ? null : mcap + ((debt ?? 0) - (cash ?? 0)) / 1e7;
   const day = (d: string, opts: Intl.DateTimeFormatOptions) => new Date(`${d}T00:00:00`).toLocaleDateString("en-IN", opts);
+  // Where the P/E came from (export_json.py, 13-Nov-2026): the filings lead;
+  // Yahoo's stands in, said so, where there is no current filed figure; and
+  // where the two are more than 10% apart the other one is shown, not hidden.
+  const peSrc = String(row?.["pe_src"] ?? ""), peGap = g("pe_gap"), peVendor = g("pe_vendor");
+  const peNote: Partial<Tile> = peSrc === "vendor"
+    ? { sub: "Yahoo", subFirst: true, full: "Yahoo Finance's P/E: no current figure from the company's own filings" }
+    : peSrc === "filed" && peGap !== null && Math.abs(peGap) > 10 && peVendor !== null
+      ? { sub: `Yahoo ${fmtNum(peVendor, 1)}`, subFirst: true,
+          full: `From the filings ${plain(g("pe"))}; Yahoo Finance says ${fmtNum(peVendor, 1)}. The two disagree by ${fmtNum(Math.abs(peGap), 0)}% - check the latest results before relying on either.` }
+      : {};
   // The P/E without one-offs, beside the one with them - only where they are
   // a tenth of the year's profit or more (oneoffs_lib.py). No dead tile.
   const oneoff = g("oneoff_pct"), peFiled = g("pe_filed"), peCore = g("pe_core"), epsCore = g("eps_core");
@@ -641,7 +651,7 @@ export function RatioGrid({ snapshot, row, cohort, next, updates, faceValue }: {
       { label: "52W low", value: rupee(lo, 0), sub: fromLo === null ? null : signedPct(fromLo) },
     ]],
     ["What it costs", [
-      { label: "Stock P/E", value: plain(g("pe")), field: "pe" },
+      { label: "Stock P/E", value: plain(g("pe")), field: "pe", ...peNote },
       ...(oneoffTile ? [oneoffTile] : []),
       { label: "Book value", info: "Book Value", value: rupee(g("book_value")), sub: "Per share" },
       { label: "Div. yield", info: "Dividend Yield", value: pct(g("div_yield")), field: "div_yield" },
@@ -707,7 +717,9 @@ export function RatioGrid({ snapshot, row, cohort, next, updates, faceValue }: {
                   <div key={t.label} className="min-w-0 rounded-lg bg-[var(--card2)] px-2 py-1.5" title={t.full}>
                     <p className="text-[10.5px] leading-tight text-[var(--ink3)] truncate">{t.label}</p>
                     <p className="text-[14px] leading-[18px] font-semibold text-[var(--ink)] tabular-nums truncate">{t.value}</p>
-                    {med ? (
+                    {t.subFirst && t.sub ? (
+                      <p className="text-[10px] leading-tight text-[var(--warn-ink)] truncate tabular-nums">{t.sub}</p>
+                    ) : med ? (
                       <p className="text-[10px] leading-tight text-[var(--accent-ink)] truncate tabular-nums"
                         title={`Industry median ${medTxt} across ${med.n} companies`}>
                         Ind {medTxt}{med.n < 15 ? ` (${med.n})` : ""}

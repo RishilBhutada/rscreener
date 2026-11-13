@@ -16,6 +16,9 @@ exceptional items out after tax, and gives the P/E and EPS without them.
 - The share is taken against the group's profit for the period; EPS belongs
   to the owners. Where a subsidiary with outside shareholders booked the
   one-off, the owners' share of it is smaller than this assumes.
+- Profit from discontinued operations (a business sold or demerged) is a
+  one-off too, and is filed after tax. A quarter without that line is taken
+  as having none - most filings leave it out when there is nothing to show.
 - A quarter whose filing states no exceptional line at all is UNKNOWN, not
   zero: then nothing is worked out, rather than a P/E "without one-offs"
   that may still contain them.
@@ -46,7 +49,7 @@ def after_tax(exceptional: float, pbt: float | None, tax: float | None) -> float
 
 def core_figures(price: float | None, ttm_eps: float | None, quarters: list[dict]) -> dict:
     """price and ttm_eps from the newest P/E point; quarters = the four it
-    used, each {pat, exceptional, pbt, tax} in rupees.
+    used, each {pat, exceptional, pbt, tax, discontinued?} in rupees.
 
     Returns pe_filed always (when the P/E exists), and oneoff_pct / eps_core
     / pe_core when all four quarters state their exceptional items. pe_core
@@ -59,7 +62,8 @@ def core_figures(price: float | None, ttm_eps: float | None, quarters: list[dict
     pat = sum(q["pat"] for q in quarters)
     if pat <= 0:
         return out
-    one = sum(after_tax(q["exceptional"], q.get("pbt"), q.get("tax")) for q in quarters)
+    one = sum(after_tax(q["exceptional"], q.get("pbt"), q.get("tax")) + (q.get("discontinued") or 0.0)
+              for q in quarters)
     out["oneoff_pct"] = round(one / pat * 100, 1)
     core = pat - one
     if core > 0:
@@ -91,7 +95,7 @@ def screen_fields(con: sqlite3.Connection, pe_bands: dict[str, dict]) -> dict[st
     by: dict[str, dict] = {}
     for sym, pe, item, v in con.execute(
         "SELECT symbol, period_end, item, value FROM results_history "
-        "WHERE period_type='quarterly' AND item IN ('pat','exceptional','pbt','tax')"
+        "WHERE period_type='quarterly' AND item IN ('pat','exceptional','pbt','tax','discontinued')"
     ):
         if sym in want and pe in want[sym][2] and v is not None:
             by.setdefault(sym, {}).setdefault(pe, {})[item] = float(v)

@@ -67,3 +67,72 @@ def unit_outliers(seq: list[tuple[str, float | None]]) -> set[str]:
                 and is_unit_step(v / m)):
             bad.add(p)
     return bad
+
+
+# A quarter holding the year-to-date instead of its own three months: Coal
+# India, Coforge and TVS Holdings Sep-2026 each filed revenue about twice
+# their June quarter (13-Nov-2026 scan). The spike test above never judges the
+# NEWEST quarter, which is exactly where a fresh misread sits.
+YTD_TOL = 0.2        # within 20% of 2x / 3x / 4x the run-rate
+YTD_SEASONAL = 1.5   # the same quarter a year earlier this far above ITS run-rate = seasonal business
+
+
+def quarters_into_year(period_end: str, fy_end_month: int) -> int:
+    """1 for the first quarter of the financial year .. 4 for the last."""
+    m = int(period_end[5:7])
+    return ((m - fy_end_month - 1) % 12) // 3 + 1
+
+
+def _lift(pts: list, i: int) -> float | None:
+    before = [v for _, v in pts[max(0, i - 4):i]]
+    if len(before) < 2:
+        return None
+    return pts[i][1] / median(before)
+
+
+def ytd_quarters(series: dict[str, list[tuple[str, float | None]]], fy_end_month: int = 3) -> set[str]:
+    """Quarters whose figures are the year-to-date total, not the quarter.
+
+    `series` maps an item to its quarterly values [(period_end, value)],
+    oldest first: "revenue" is required; "depreciation" and "employee_cost"
+    are the witnesses.
+
+    The k-th quarter of a year read as year-to-date is about k times the
+    run-rate (the median of up to four quarters before it). Revenue alone
+    cannot tell that from a lumpy business - a defence maker's order-heavy
+    quarter looks the same - so a STEADY cost has to have jumped by the same
+    multiple too: depreciation or staff cost does not double in a quarter
+    unless the column holds two quarters. Also cleared:
+      - the same quarter a year earlier stood as far above its run-rate
+        (a seasonal business);
+      - the quarter after it stays up (a real step: an acquisition)."""
+    rev = [(p, v) for p, v in series.get("revenue", []) if v is not None and v > 0]
+    ridx = {p: i for i, (p, _) in enumerate(rev)}
+    steady = []
+    for item in ("depreciation", "employee_cost"):
+        pts = [(p, v) for p, v in series.get(item, []) if v is not None and v > 0]
+        steady.append((pts, {p: i for i, (p, _) in enumerate(pts)}))
+
+    bad: set[str] = set()
+    for i, (p, v) in enumerate(rev):
+        k = quarters_into_year(p, fy_end_month)
+        r = _lift(rev, i)
+        if k < 2 or r is None or abs(r / k - 1) > YTD_TOL:
+            continue
+        j = ridx.get(f"{int(p[:4]) - 1}{p[4:]}")
+        r_prev = _lift(rev, j) if j is not None else None
+        if r_prev is not None and r_prev >= YTD_SEASONAL:
+            continue
+        if i + 1 < len(rev):
+            base = median([x for _, x in rev[max(0, i - 4):i]])
+            if rev[i + 1][1] / base >= YTD_SEASONAL:
+                continue
+        witnessed = False
+        for pts, idx in steady:
+            n = idx.get(p)
+            w = _lift(pts, n) if n is not None else None
+            if w is not None and abs(w / k - 1) <= YTD_TOL + 0.05:
+                witnessed = True
+        if witnessed:
+            bad.add(p)
+    return bad
