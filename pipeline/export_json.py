@@ -24,6 +24,7 @@ import pandas as pd
 from ratios_lib import compute_ratios, derived_roe, latest_annual_items, latest_promoter
 from trend_lib import avg_npm_5y, build_trends, cagr_pct, ratio_bands
 import fund_units
+import market_activity_lib
 import oneoffs_lib
 import screen_fields
 import seasons_lib
@@ -62,7 +63,10 @@ SCREEN_FIELDS = ["vs_dma50", "vs_dma200", "dma50_200", "rsi14", "vol_surge",
                  "season_peak", "season_low", "season_swing",
                  "fii_holding", "dii_holding", "mf_holding", "fii_chg_qtr", "dii_chg_qtr",
                  # oneoffs_lib.py: the P/E on filed earnings, and without one-offs
-                 "pe_filed", "pe_core", "eps_core", "oneoff_pct"]
+                 "pe_filed", "pe_core", "eps_core", "oneoff_pct",
+                 # market_activity_lib.py: the exchanges' daily activity files
+                 "deliv_pct", "deliv_pct_20d", "deliv_x", "vwap", "fut_oi_chg_pct", "pcr",
+                 "short_qty", "surv", "in_surv", "pledge_pct", "pledge_total_pct"]
 RETURN_ANCHORS = {"ret_1m": 1, "ret_3m": 3, "ret_6m": 6, "ret_1y": 12, "ret_3y": 36, "ret_5y": 60}
 
 
@@ -592,7 +596,8 @@ def main() -> None:
                  screen_fields.promoter_changes(con), screen_fields.piotroski(con),
                  screen_fields.institutions(con),
                  seasons_lib.screen_fields(seasons_lib.seasons(con)),
-                 oneoffs_lib.screen_fields(con, pe_by_symbol)):
+                 oneoffs_lib.screen_fields(con, pe_by_symbol),
+                 market_activity_lib.screen_fields(con)):
         for sym, vals in part.items():
             extra_fields.setdefault(sym, {}).update(vals)
     # In NSE's futures & options segment: 1, else 0 (fetch_fno.py) - so
@@ -633,6 +638,10 @@ def main() -> None:
         df[rk] = df["symbol"].map(lambda s, k=rk: returns_by_symbol.get(s, {}).get(k))
     for fk in SCREEN_FIELDS:
         df[fk] = df["symbol"].map(lambda s, k=fk: extra_fields.get(s, {}).get(k))
+    # "in_surv = 0" has to find the companies on no surveillance list, as
+    # in_fno does - but only once a list has been read at all.
+    if df["in_surv"].notna().any():
+        df["in_surv"] = df["in_surv"].fillna(0)
     print("  screener fields: " + ", ".join(f"{k} {int(df[k].notna().sum())}" for k in SCREEN_FIELDS))
     # ONE P/E basis (owner, 13-Nov-2026). The tile and every screen used
     # Yahoo's trailingPE while the chart used the filings; on the 500 largest

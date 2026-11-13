@@ -545,6 +545,37 @@ export const METRIC_INFO: Record<string, { how: string; means: string; watch?: s
     means: "Shown when one-offs are a tenth of the year's profit or more. A one-off gain flatters the filed P/E for four quarters, a charge makes it look dear; the market prices the profit that repeats.",
     watch: "Assumes the one-off belongs wholly to shareholders; where a part-owned subsidiary booked it, the owners' share is smaller. Companies decide what they call exceptional, and some routine costs get the label.",
   },
+  "Delivery %": {
+    how: "From NSE's daily delivery file: shares taken into demat as a share of all shares traded that day. The rest were bought and sold within the day.",
+    means: "Higher delivery means more of the day's buying was by people keeping the shares. Compare it with the stock's own 20-day average, not with other stocks - a large cap and a small cap have very different normal levels.",
+    watch: "Not a buy or sell signal on its own; this app has not tested it as one.",
+  },
+  "Delivered vs usual": {
+    how: "The latest day's delivered shares divided by their average over the 20 sessions before.",
+    means: "3x means three times the usual number of shares changed hands for keeps - something drew real buyers or sellers that day.",
+  },
+  "VWAP": {
+    how: "Volume-weighted average price for the latest session, from NSE's delivery file.",
+    means: "What the average share actually traded at. A close well above VWAP means the day finished strong.",
+  },
+  "Futures open interest": {
+    how: "Open futures contracts in the stock, all expiries added, from NSE's F&O file; the change over the latest day.",
+    means: "Rising open interest means new positions are being opened. It says nothing about which side is right.",
+    watch: "Shown for information only. The plan puts F&O after Phase-3, and SEBI found about 90% of retail F&O traders lose money.",
+  },
+  "Put-call ratio": {
+    how: "Open put contracts divided by open call contracts in the stock's options, all expiries.",
+    means: "Above 1, more puts are open than calls. Read as sentiment by some; it is not a forecast.",
+  },
+  "Promoter pledge": {
+    how: "Promoter shares pledged as loan security, as a share of the promoters' own holding, from NSE's pledge disclosures.",
+    means: "A lender can sell pledged shares if the price falls far enough, which can push it down further.",
+    watch: "Left blank where the promoters hold almost nothing (the share would be meaningless).",
+  },
+  "Surveillance": {
+    how: "NSE's Additional (ASM) and Graded (GSM) Surveillance lists and the F&O ban list, read daily.",
+    means: "The exchange itself has flagged unusual price or volume behaviour or a company concern, and applies stricter trading rules. A warning sign, not a verdict.",
+  },
   "Book Value": {
     how: "Shareholders' funds divided by shares outstanding, from the filed balance sheet.",
     means: "What the accounts say each share owns once every debt is paid. Useful for banks and asset-heavy businesses, nearly meaningless for software or brands whose value never appears on a balance sheet.",
@@ -624,6 +655,17 @@ export function RatioGrid({ snapshot, row, cohort, next, updates, faceValue }: {
       ? { sub: `Yahoo ${fmtNum(peVendor, 1)}`, subFirst: true,
           full: `From the filings ${plain(g("pe"))}; Yahoo Finance says ${fmtNum(peVendor, 1)}. The two disagree by ${fmtNum(Math.abs(peGap), 0)}% - check the latest results before relying on either.` }
       : {};
+  // NSE's surveillance lists (ASM-LT / ASM-ST / GSM / FO-BAN), short enough
+  // for a quarter of a phone: the list as the value, its stage beneath.
+  const survFirst = row?.["surv"] ? String(row["surv"]).split(";")[0].trim() : "";
+  const survTile: Tile | null = survFirst ? {
+    label: "Watch list", info: "Surveillance",
+    value: survFirst.startsWith("FO-BAN") ? "F&O ban" : survFirst.split(/[- ]/)[0],
+    sub: survFirst.startsWith("ASM-LT") ? `Long-term ${survFirst.replace(/^ASM-LT\s*(Stage\s*)?/, "")}`
+      : survFirst.startsWith("ASM-ST") ? `Short-term ${survFirst.replace(/^ASM-ST\s*(Stage\s*)?/, "")}`
+      : survFirst.startsWith("GSM") ? `Stage ${survFirst.replace(/^GSM\s*/, "")}` : "NSE list",
+    full: `On NSE's list: ${String(row?.["surv"])}`,
+  } : null;
   // The P/E without one-offs, beside the one with them - only where they are
   // a tenth of the year's profit or more (oneoffs_lib.py). No dead tile.
   const oneoff = g("oneoff_pct"), peFiled = g("pe_filed"), peCore = g("pe_core"), epsCore = g("eps_core");
@@ -670,7 +712,21 @@ export function RatioGrid({ snapshot, row, cohort, next, updates, faceValue }: {
         sub: `${updates.n} of ${updates.of} qtrs`,
         full: [`${updates.last.q}`, `${updates.n} of ${updates.of} quarters`, updates.typ != null && `usually day ${updates.typ}`].filter(Boolean).join(" · ") }] : []),
     ]],
+    // The exchanges' daily activity files (fetch_market_activity.py). Only the
+    // tiles that have a figure: a stock outside F&O has no open interest.
+    ["Trading activity", ([
+      g("deliv_pct") !== null && { label: "Delivery %", value: pct(g("deliv_pct")), field: "deliv_pct",
+        full: g("deliv_pct_20d") !== null ? `20-day average ${fmtNum(g("deliv_pct_20d")!, 1)}%` : undefined },
+      g("deliv_x") !== null && { label: "Del. vs avg", info: "Delivered vs usual", value: `${fmtNum(g("deliv_x")!, 1)}x`, sub: "20 days",
+        full: "Delivered shares against their 20-session average" },
+      g("vwap") !== null && { label: "VWAP", value: rupee(g("vwap"), 0), sub: "Latest day" },
+      g("fut_oi_chg_pct") !== null && { label: "Fut. OI", info: "Futures open interest", value: signedPct(g("fut_oi_chg_pct")) ?? "—", sub: "1 day",
+        full: "Change in open futures contracts over the latest day" },
+      g("pcr") !== null && { label: "Put/call", info: "Put-call ratio", value: plain(g("pcr")), sub: "Options" },
+    ].filter(Boolean) as Tile[])],
     ["Risk and ownership", [
+      ...(survTile ? [survTile] : []),
+      ...(g("pledge_pct") !== null ? [{ label: "Pledged", info: "Promoter pledge", value: pct(g("pledge_pct")), sub: "Of promoter stake", field: "pledge_pct" }] : []),
       // Absolute debt and cash as well as the ratio: the ratio gives the shape
       // of the funding, these give its size against the profit.
       { label: "EV ₹Cr", info: "Enterprise value", value: crShort(ev), full: "Market cap plus debt, less cash" },
@@ -702,7 +758,7 @@ export function RatioGrid({ snapshot, row, cohort, next, updates, faceValue }: {
         </InfoTip>
       </h2>
       <div className="mt-1 space-y-3">
-        {groups.map(([heading, tiles]) => (
+        {groups.filter(([, tiles]) => tiles.length > 0).map(([heading, tiles]) => (
           <div key={heading}>
             <h3 className="text-[10.5px] font-semibold uppercase tracking-wide text-[var(--ink3)] mb-1.5 px-1">{heading}</h3>
             <div className="grid grid-cols-4 gap-1.5">

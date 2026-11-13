@@ -368,6 +368,14 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "5"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_world.py
+      - name: Read the exchanges' daily activity files (delivery, F&O open interest, short selling, FII/DII, surveillance, pledges)
+        # pipeline/fetch_market_activity.py - NSE's own archive files and its
+        # FII/DII, ASM/GSM and pledge reports. On every run, publish-only
+        # included: only days not yet stored are read (30 calendar days back,
+        # so a missed week fills itself in), about a minute. Read-only.
+        env:
+          RSCREENER_STEP_MINUTES: "8"
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_market_activity.py --days 30
       - name: Refresh gold's calendar, Fed dates, headlines and COMEX closes
         # The release schedules of the Fed (meetings and its speech/testimony
         # calendar), BEA, the Census Bureau, the ECB and the Bank of Japan;
@@ -631,6 +639,11 @@ jobs:
         # date and its change over a day, week, month and year. Generated,
         # never committed; written even before the first fetch.
         run: python pipeline/export_world_json.py
+      - name: Write the market activity file
+        # web/public/market.json - FII/DII net buying, who holds index futures
+        # long, and breadth (share of NSE stocks above their 200- and 50-day
+        # averages). Generated, never committed.
+        run: python pipeline/export_market_json.py
       - name: Build the yearly snapshots the screener's history test runs on
         # web/public/backtest/: each 30 June since 2008, every company's
         # screener fields as known that day, and the next year's return (P10).

@@ -92,6 +92,15 @@ export const FIELD_CATALOG: FieldDef[] = [
 
   { key: "volatility_1y", label: "Volatility (1y)", group: "Risk", unit: "%", desc: "How wildly the price swings — annualised realised volatility from a year of daily bars (Yang-Zhang OHLC estimator); under ~25% is calm, over ~50% is stormy", short: "Vol 1y" },
   { key: "volatility_30d", label: "Volatility (30d)", group: "Risk", unit: "%", desc: "Same measure over just the last month — spikes when news hits", short: "Vol 30d" },
+  { key: "pledge_pct", label: "Promoter shares pledged", group: "Risk", unit: "%", desc: "Share of the promoters' own holding pledged as loan security (NSE disclosures). High pledging can force selling if the price falls", short: "Pledged" },
+  { key: "in_surv", label: "On a surveillance list", group: "Risk", unit: "", desc: "1 when NSE has the stock on its ASM or GSM surveillance list, or in the F&O ban, else 0. A warning sign set by the exchange", short: "Surveillance" },
+  { key: "deliv_pct", label: "Delivery %", group: "Trading activity", unit: "%", desc: "Share of the latest day's traded shares that were taken into demat (not squared off the same day). NSE's daily delivery file", short: "Deliv %" },
+  { key: "deliv_pct_20d", label: "Delivery % (20-day average)", group: "Trading activity", unit: "%", desc: "The same, averaged over the last 20 sessions - the stock's usual level", short: "Deliv 20d" },
+  { key: "deliv_x", label: "Delivered shares vs usual", group: "Trading activity", unit: "x", desc: "Latest day's delivered shares against their 20-session average: 3 means three times the usual number changed hands for keeps", short: "Deliv vs usual" },
+  { key: "vwap", label: "VWAP", group: "Trading activity", unit: "₹", desc: "The day's volume-weighted average price - what the average share actually traded at" },
+  { key: "fut_oi_chg_pct", label: "Futures OI change (1 day)", group: "Trading activity", unit: "%", desc: "Change in open futures contracts, all expiries, on the latest day. F&O stocks only. Read-only information, not a trading signal", short: "Fut OI chg" },
+  { key: "pcr", label: "Put-call ratio (OI)", group: "Trading activity", unit: "x", desc: "Open put contracts over open call contracts in the stock's options. F&O stocks only", short: "PCR" },
+  { key: "short_qty", label: "Shares sold short (latest day)", group: "Trading activity", unit: "", desc: "Shares sold short as reported to NSE for the latest session", short: "Short qty" },
 ];
 
 /** What the screener can screen besides companies. Each has its own fields,

@@ -9,6 +9,7 @@ import { IndexList, IndexListItem, points } from "@/lib/indices";
 import { Segmented } from "@/components/ListUI";
 import { HeatLegend, HeatTiles } from "@/components/Heatmap";
 import { HEAT_FULL, HeatPeriod } from "@/lib/treemap";
+import MarketPulse from "@/components/MarketPulse";
 
 /** Every NSE index and the Sensex, grouped as NSE groups them, with one
  *  chosen figure on the right. A filter box, because there are 145. */
@@ -84,6 +85,8 @@ export default function IndicesPage() {
             <p>Closes from NSE&apos;s daily index file and NSE Indices; the Sensex from Yahoo. Not checked further.</p>
           </InfoTip>
         </h1>
+
+        <MarketPulse />
 
         {error && <p className="text-[var(--neg)] text-sm">{error}</p>}
         {!data && !error && <div className="rs-skel h-96" aria-busy="true" aria-label="Loading" />}
