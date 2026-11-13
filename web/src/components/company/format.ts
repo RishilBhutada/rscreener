@@ -1,10 +1,10 @@
 /** Pure helpers for the company page: number and period formatting, and the
  *  statement transforms. No React, so they can be tested on their own. */
 
-import { Row } from "@/lib/query";
+import type { Row } from "@/lib/query";
 import { change } from "@/lib/tableprefs";
 import { fourInRow } from "@/lib/ttm";
-import { Stmt, Trend, Company, Cohort } from "@/components/company/types";
+import type { Stmt, Trend, Company, Cohort } from "@/components/company/types";
 
 export const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
