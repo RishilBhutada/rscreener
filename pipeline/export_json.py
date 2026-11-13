@@ -24,6 +24,7 @@ import pandas as pd
 from ratios_lib import compute_ratios, derived_roe, latest_annual_items, latest_promoter
 from trend_lib import avg_npm_5y, build_trends, cagr_pct, ratio_bands
 import fund_units
+import oneoffs_lib
 import screen_fields
 import seasons_lib
 
@@ -59,7 +60,9 @@ SCREEN_FIELDS = ["vs_dma50", "vs_dma200", "dma50_200", "rsi14", "vol_surge",
                  "qtr_sales", "qtr_profit", "in_fno",
                  "promoter_chg_qtr", "promoter_chg_1y", "f_score",
                  "season_peak", "season_low", "season_swing",
-                 "fii_holding", "dii_holding", "mf_holding", "fii_chg_qtr", "dii_chg_qtr"]
+                 "fii_holding", "dii_holding", "mf_holding", "fii_chg_qtr", "dii_chg_qtr",
+                 # oneoffs_lib.py: the P/E on filed earnings, and without one-offs
+                 "pe_filed", "pe_core", "eps_core", "oneoff_pct"]
 RETURN_ANCHORS = {"ret_1m": 1, "ret_3m": 3, "ret_6m": 6, "ret_1y": 12, "ret_3y": 36, "ret_5y": 60}
 
 
@@ -588,7 +591,8 @@ def main() -> None:
     for part in (screen_fields.technicals(con), screen_fields.quarter_growth(trends),
                  screen_fields.promoter_changes(con), screen_fields.piotroski(con),
                  screen_fields.institutions(con),
-                 seasons_lib.screen_fields(seasons_lib.seasons(con))):
+                 seasons_lib.screen_fields(seasons_lib.seasons(con)),
+                 oneoffs_lib.screen_fields(con, pe_by_symbol)):
         for sym, vals in part.items():
             extra_fields.setdefault(sym, {}).update(vals)
     # In NSE's futures & options segment: 1, else 0 (fetch_fno.py) - so

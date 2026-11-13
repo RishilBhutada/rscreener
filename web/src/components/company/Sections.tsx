@@ -536,9 +536,14 @@ export const METRIC_INFO: Record<string, { how: string; means: string; watch?: s
     means: "The range the market has actually paid this year. How far today sits below the high usually tells you more than the high itself.",
   },
   "Stock P/E": {
-    how: "Price divided by earnings per share over the trailing four quarters, taken from the company's own NSE filings rather than a data vendor.",
+    how: "Price divided by earnings per share over the trailing four quarters, as Yahoo Finance reports them, moved with each day's close. The P/E chart below uses the company's own NSE filings instead, so the two can differ.",
     means: "Years of current profit you are paying for. Comparable against this company's own history and against genuine peers - never across industries.",
     watch: "Meaningless when profit is near zero or negative. One loss-making quarter inside a profitable year still leaves it positive.",
+  },
+  "P/E excl. one-offs": {
+    how: "Core P/E is the P/E on the last four quarters' EPS as filed with NSE, then again with the exceptional items those filings state - land sales, write-downs, settlements - taken out at each quarter's own tax rate (25.17% where that rate is unusable).",
+    means: "Shown when one-offs are a tenth of the year's profit or more. A one-off gain flatters the filed P/E for four quarters, a charge makes it look dear; the market prices the profit that repeats.",
+    watch: "Assumes the one-off belongs wholly to shareholders; where a part-owned subsidiary booked it, the owners' share is smaller. Companies decide what they call exceptional, and some routine costs get the label.",
   },
   "Book Value": {
     how: "Shareholders' funds divided by shares outstanding, from the filed balance sheet.",
@@ -609,6 +614,19 @@ export function RatioGrid({ snapshot, row, cohort, next, updates, faceValue }: {
   const debt = g("total_debt"), cash = g("total_cash"), mcap = g("mcap");
   const ev = mcap === null ? null : mcap + ((debt ?? 0) - (cash ?? 0)) / 1e7;
   const day = (d: string, opts: Intl.DateTimeFormatOptions) => new Date(`${d}T00:00:00`).toLocaleDateString("en-IN", opts);
+  // The P/E without one-offs, beside the one with them - only where they are
+  // a tenth of the year's profit or more (oneoffs_lib.py). No dead tile.
+  const oneoff = g("oneoff_pct"), peFiled = g("pe_filed"), peCore = g("pe_core"), epsCore = g("eps_core");
+  const oneoffTile: Tile | null = oneoff !== null && peFiled !== null && Math.abs(oneoff) >= 10 ? {
+    // Short enough for a quarter of a phone's width; the title carries the rest.
+    label: "Core P/E", info: "P/E excl. one-offs",
+    value: peCore === null ? "Loss" : plain(peCore),
+    // The filed P/E it is measured against; the one-off share fits only in the title.
+    sub: `Filed ${fmtNum(peFiled, 1)}`,
+    full: `One-offs ${oneoff > 0 ? "+" : "−"}${fmtNum(Math.abs(oneoff), 1)}% of the year's profit. On filed earnings: P/E ${fmtNum(peFiled, 1)}. ` + (peCore === null
+      ? "Without the one-offs there is no profit."
+      : `Without one-offs: P/E ${fmtNum(peCore, 1)}${epsCore !== null ? `, EPS ₹${fmtNum(epsCore)}` : ""}.`),
+  } : null;
 
   // Grouped by the question each one answers; four short groups is a page to
   // scan where fourteen rows were a list to read. `field` is the data.json
@@ -624,6 +642,7 @@ export function RatioGrid({ snapshot, row, cohort, next, updates, faceValue }: {
     ]],
     ["What it costs", [
       { label: "Stock P/E", value: plain(g("pe")), field: "pe" },
+      ...(oneoffTile ? [oneoffTile] : []),
       { label: "Book value", info: "Book Value", value: rupee(g("book_value")), sub: "Per share" },
       { label: "Div. yield", info: "Dividend Yield", value: pct(g("div_yield")), field: "div_yield" },
       ...(faceValue ? [{ label: "Face value", value: `₹${fmtNum(faceValue, faceValue % 1 ? 2 : 0)}`, sub: "Per share" }] : []),

@@ -15,6 +15,9 @@ export const FIELD_CATALOG: FieldDef[] = [
 
   { key: "pe", label: "P/E", group: "Valuation", unit: "x", desc: "Price to earnings — years of profit you pay for" },
   { key: "median_pe_5y", label: "Median P/E (5y)", group: "Valuation", unit: "x", desc: "The stock's own typical P/E over 5 years", short: "Median P/E" },
+  { key: "pe_filed", label: "P/E on filed earnings", group: "Valuation", unit: "x", desc: "Price over the last four quarters' EPS exactly as filed with NSE, one-offs included - the P/E the chart draws", short: "P/E filed" },
+  { key: "pe_core", label: "P/E excluding one-offs", group: "Valuation", unit: "x", desc: "P/E on filed earnings with exceptional items (land sales, write-downs, settlements) taken out after tax. Blank where the filings do not state them, or where nothing is left without them", short: "P/E ex one-offs" },
+  { key: "oneoff_pct", label: "One-offs in the year's profit", group: "Valuation", unit: "%", desc: "Exceptional items after tax as a share of the last four quarters' profit: +20 means a fifth of it was a one-off gain, -20 that a one-off charge held it down", short: "One-offs %" },
   { key: "forward_pe", label: "Forward P/E", group: "Valuation", unit: "x", desc: "P/E on next year's expected earnings" },
   { key: "pb", label: "P/B", group: "Valuation", unit: "x", desc: "Price to book value" },
   { key: "ps", label: "P/S", group: "Valuation", unit: "x", desc: "Price to sales" },
