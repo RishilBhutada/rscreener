@@ -644,6 +644,11 @@ jobs:
         # long, and breadth (share of NSE stocks above their 200- and 50-day
         # averages). Generated, never committed.
         run: python pipeline/export_market_json.py
+      - name: Write the 200-day average page
+        # web/public/dma.json - per NSE stock, the share of weeks below its
+        # 40-week average, its dips, and where it stands against the daily
+        # 200-day now. Descriptive. Generated, never committed.
+        run: python pipeline/export_dma_json.py
       - name: Build the yearly snapshots the screener's history test runs on
         # web/public/backtest/: each 30 June since 2008, every company's
         # screener fields as known that day, and the next year's return (P10).

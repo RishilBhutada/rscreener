@@ -46,6 +46,10 @@ export const DESTINATIONS: { key: string; label: string; href: string; icon: str
   // Headlines, broker calls, bulk/block deals and stake filings, through the day.
   { key: "news", label: "News", href: "/news",
     icon: "M5 5h11v14H6a1 1 0 0 1-1-1zM16 9h3v9a1 1 0 0 1-1 1h-2M8 9h5M8 12.5h5M8 16h3" },
+  // How often each stock has closed below its 200-day average, and how much
+  // of the market is above it now (owner, 13-Nov-2026).
+  { key: "dma", label: "200 DMA", href: "/dma",
+    icon: "M4 18.5h16M4.5 15c3-6 5.5-8 8-8s4.5 2.5 7 6M4.5 11.5h15" },
   { key: "calendar", label: "Calendar", href: "/calendar",
     icon: "M5.5 6h13A1.5 1.5 0 0 1 20 7.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6zM4 10.5h16M8.5 4v4M15.5 4v4" },
   { key: "status", label: "Data", href: "/status",
@@ -66,7 +70,7 @@ export const HUBS: Hub[] = [
     tabs: ["indices", "sectors", "world", "etfs", "commodities", "gold"] },
   // Screener first: the hub opens on it, so it stays one tap away.
   { key: "research", label: "Research", icon: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-3.5-3.5",
-    tabs: ["screens", "calendar", "news", "others"] },
+    tabs: ["screens", "dma", "calendar", "news", "others"] },
   { key: "you", label: "You", icon: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c0-4 3.6-7 8-7s8 3 8 7",
     tabs: ["watchlists", "portfolio", "status", "settings"] },
 ];
