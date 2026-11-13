@@ -22,6 +22,7 @@ import { useSwipePager } from "@/components/company/useSwipePager";
 import { TabKey, useTabs, TabRow, SectionMenu } from "@/components/company/CompanyNav";
 import { ListStrip, CompanyTitle, PriceLine } from "@/components/company/CompanyHeading";
 import { exportCompanyXlsx } from "@/components/company/exportXlsx";
+import VolumeSplit from "@/components/company/VolumeSplit";
 
 /** "26 L" holders, "4.2 K", or the plain count. */
 function holdersShort(n: number): string {
@@ -222,6 +223,7 @@ function CompanyView() {
           questions. Each is now addressable by name. */}
       <div id="performance" className="scroll-mt-32">
         <PriceHistory row={fullRow} snapshot={s} />
+        <VolumeSplit symbol={symbol} />
       </div>
 
       <div id="analysis" className="scroll-mt-32 space-y-4">

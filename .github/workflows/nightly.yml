@@ -376,6 +376,14 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "8"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_market_activity.py --days 30
+      - name: Read the volume split, 10 years (delivered vs same-day shares, NSE and BSE)
+        # pipeline/fetch_volume_split.py - NSE's MTO and BSE's SCBSEALL delivery
+        # files, each trading day read once, newest first. The first nights
+        # fill ten years back within the time limit; after that it is a few
+        # files a night. Read-only.
+        env:
+          RSCREENER_STEP_MINUTES: "22"
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_volume_split.py --years 10 --minutes 20
       - name: Refresh gold's calendar, Fed dates, headlines and COMEX closes
         # The release schedules of the Fed (meetings and its speech/testimony
         # calendar), BEA, the Census Bureau, the ECB and the Bank of Japan;
@@ -649,6 +657,10 @@ jobs:
         # 40-week average, its dips, and where it stands against the daily
         # 200-day now. Descriptive. Generated, never committed.
         run: python pipeline/export_dma_json.py
+      - name: Write the volume-split files
+        # web/public/vol/<SYMBOL>.json - delivered vs same-day shares: a year
+        # daily, three years weekly, ten years monthly. Generated, never committed.
+        run: python pipeline/export_vol_json.py
       - name: Build the yearly snapshots the screener's history test runs on
         # web/public/backtest/: each 30 June since 2008, every company's
         # screener fields as known that day, and the next year's return (P10).

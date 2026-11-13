@@ -19,7 +19,7 @@ import csv
 import io
 import re
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 def _num(s) -> float | None:
@@ -199,7 +199,7 @@ def screen_fields(con) -> dict[str, dict]:
     keeps. Only sources whose newest day is recent are used."""
     out: dict[str, dict] = {}
     have = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    newest_any = max((d for t in ("deliv", "fo_oi", "short_sell") if t in have and (d := _latest(con, t))), default=None)
+    newest_any = max((d for t in ("deliv", "fo_oi", "short_sell", "vol_split") if t in have and (d := _latest(con, t))), default=None)
 
     def fresh(d):
         return d and newest_any and (datetime.fromisoformat(newest_any) - datetime.fromisoformat(d)).days <= FRESH_DAYS
@@ -219,6 +219,32 @@ def screen_fields(con) -> dict[str, dict]:
             o = out.setdefault(sym, {})
             o["deliv_pct"], o["vwap"] = dp, vwap
             pcts = [x[3] for x in rows if x[3] is not None]
+            if len(pcts) >= 10:
+                o["deliv_pct_20d"] = round(sum(pcts) / len(pcts), 1)
+            qs = [x[2] for x in rows[:-1] if x[2]]
+            if dq and len(qs) >= 10:
+                o["deliv_x"] = round(dq / (sum(qs) / len(qs)), 2)
+
+    # BSE-only companies: delivery % and its 20-day comparison from BSE's own
+    # delivery file (vol_split, fetch_volume_split.py) - NSE's file has no
+    # row for them. No VWAP: BSE's file does not carry one.
+    if "vol_split" in have and fresh(last := _latest(con, "vol_split")):
+        days = [r[0] for r in con.execute("SELECT DISTINCT date FROM vol_split WHERE date <= ? ORDER BY date DESC LIMIT 20", (last,))]
+        hist: dict[str, list] = {}
+        for sym, d, t, dq in con.execute(
+            f"SELECT symbol, date, traded, delivered FROM vol_split WHERE date IN ({','.join('?' * len(days))})", days
+        ):
+            if sym in out and "deliv_pct" in out[sym]:
+                continue
+            hist.setdefault(sym, []).append((d, t, dq))
+        for sym, rows in hist.items():
+            rows.sort()
+            d, t, dq = rows[-1]
+            if d != last or not t:
+                continue
+            o = out.setdefault(sym, {})
+            o["deliv_pct"] = round(dq / t * 100, 2)
+            pcts = [x[2] / x[1] * 100 for x in rows if x[1]]
             if len(pcts) >= 10:
                 o["deliv_pct_20d"] = round(sum(pcts) / len(pcts), 1)
             qs = [x[2] for x in rows[:-1] if x[2]]
@@ -253,3 +279,59 @@ def screen_fields(con) -> dict[str, dict]:
             o = out.setdefault(sym, {})
             o["pledge_pct"], o["pledge_total_pct"] = of_p, of_t
     return out
+
+
+# ---- the volume split: delivered vs same-day (intraday), 10 years -------------
+
+def mto(text: str) -> list[tuple]:
+    """NSE's MTO file (security-wise delivery position, back to 2012 and
+    beyond): [(symbol, date, traded_qty, delivered_qty)] for the EQ series."""
+    lines = text.splitlines()
+    day = None
+    for ln in lines[:4]:
+        m = re.search(r"Trade Date <(\d{2}-[A-Z]{3}-\d{4})>", ln)
+        if m:
+            day = _iso(m.group(1).title(), "%d-%b-%Y")
+            break
+    if not day:
+        m = re.match(r"\s*10,MTO,(\d{8})", lines[1] if len(lines) > 1 else "")
+        if not m:
+            return []
+        day = _iso(m.group(1), "%d%m%Y")
+    out = []
+    for ln in lines:
+        c = [x.strip() for x in ln.split(",")]
+        if len(c) >= 6 and c[0] == "20" and c[3] == "EQ":
+            t, dq = _num(c[4]), _num(c[5])
+            if t is not None and dq is not None:
+                out.append((c[2], day, t, dq))
+    return out
+
+
+def bse_delivery(zip_bytes: bytes, code_to_sym: dict[str, str]) -> list[tuple]:
+    """BSE's SCBSEALL file (back to 2016 and beyond): [(symbol, date,
+    traded_qty, delivered_qty)] for the scrip codes in `code_to_sym`."""
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
+        name = next((n for n in z.namelist() if n.upper().endswith(".TXT")), None)
+        if not name:
+            return []
+        text = z.read(name).decode("latin-1")
+    out = []
+    for ln in text.splitlines()[1:]:
+        c = ln.split("|")
+        if len(c) < 7:
+            continue
+        sym = code_to_sym.get(c[1].strip())
+        if not sym:
+            continue
+        dq, t = _num(c[2]), _num(c[4])
+        if t is not None and dq is not None:
+            out.append((sym, _iso(c[0].strip(), "%d%m%Y"), t, dq))
+    return out
+
+
+def week_end(day: str) -> str:
+    """The Friday of the week `day` falls in (a Saturday Muhurat session
+    counts in the week before it)."""
+    d = datetime.strptime(day, "%Y-%m-%d")
+    return (d + timedelta(days=(4 - d.weekday()) % 7 if d.weekday() <= 4 else -(d.weekday() - 4))).strftime("%Y-%m-%d")

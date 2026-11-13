@@ -74,3 +74,32 @@ def test_screen_fields_from_stored_days(tmp_path):
     f = m.screen_fields(con)
     assert f["AAA"]["deliv_pct"] == 30.0 and f["AAA"]["deliv_x"] == 3.0 and f["AAA"]["deliv_pct_20d"] == 30.0
     assert f["BBB"] == {"surv": "ASM-LT Stage I", "in_surv": 1}
+
+
+MTO = """Security Wise Delivery Position - Compulsory Rolling Settlement
+10,MTO,15112016,622503471,0001661
+Trade Date <15-NOV-2016>,Settlement Type <N>,Settlement No <2016214>,Settlement Date <17-NOV-2016>
+Record Type,Sr No,Name of Security,Quantity Traded,Deliverable Quantity(gross across client level),% of Deliverable Quantity to Traded Quantity
+20,1,20MICRONS,EQ,212023,115694,54.57
+20,2,SOMEBOND,N1,100,100,100.00
+"""
+
+
+def test_mto_reads_the_eq_series_and_the_trade_date():
+    assert m.mto(MTO) == [("20MICRONS", "2016-11-15", 212023.0, 115694.0)]
+
+
+def test_bse_delivery_maps_scrip_codes_to_symbols():
+    text = ("DATE|SCRIP CODE|DELIVERY QTY|DELIVERY VAL|DAY'S VOLUME|DAY'S TURNOVER|DELV. PER.\n"
+            "12112026|532144|0000000000058694|0000000126755563|0000000000112132|0000000243242226|052.34\n"
+            "12112026|999999|0000000000000001|0000000000000001|0000000000000002|0000000000000002|050.00\n")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("SCBSEALL1211.TXT", text)
+    assert m.bse_delivery(buf.getvalue(), {"532144": "ABC"}) == [("ABC", "2026-11-12", 112132.0, 58694.0)]
+
+
+def test_week_end_is_that_weeks_friday():
+    assert m.week_end("2026-11-09") == "2026-11-13"     # Monday
+    assert m.week_end("2026-11-13") == "2026-11-13"     # Friday
+    assert m.week_end("2026-11-08") == "2026-11-06"     # Sunday Muhurat session: the week before
