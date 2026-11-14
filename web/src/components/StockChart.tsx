@@ -587,6 +587,19 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     return () => { live = false; };
   }, [symbol]);
   const split = vsplit && vsplit.sym === symbol && (vsplit.d.length || vsplit.w.length) ? vsplit : null;
+  // Every day for ten years (vol/daily/<SYMBOL>.json, ~50 KB): fetched only
+  // once a split mode is picked, so the page opens as fast as before.
+  const [vdaily, setVdaily] = useState<{ sym: string; d: [string, number, number][] } | null>(null);
+  useEffect(() => {
+    if (!symbol || volMode === "all" || (vdaily && vdaily.sym === symbol)) return;
+    let live = true;
+    fetch(`${CHART_BASE}/vol/daily/${symbol}.json`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((v) => { if (live && v?.d?.length) setVdaily({ sym: symbol, d: v.d }); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [symbol, volMode, vdaily]);
+  const daily10 = vdaily && vdaily.sym === symbol ? vdaily.d : null;
 
   const years = RANGES.find(([r]) => r === range)?.[1] ?? 5;
   const now = Date.now();
@@ -730,8 +743,13 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         // Days for a year, weeks for three, months beyond - the delivery
         // file's own bars, on the same axis, so "split" reads as a stack:
         // the delivered part over the light total.
-        const rows = years <= 1 && split.d.length ? split.d : years <= 3 && split.w.length ? split.w : split.m;
         const at = (p: string) => toT(p.length === 7 ? `${p}-28` : p);
+        const coarse = years <= 1 && split.d.length ? split.d : years <= 3 && split.w.length ? split.w : split.m;
+        // Daily when the ten-year file covers the whole range. Mixing would
+        // put a month's total beside a day's on one axis and flatten the
+        // days, so while the file is still filling in, the coarser bars
+        // carry the range alone.
+        const rows = daily10 && at(daily10[0][0]) <= cutoff + 40 * 86400000 ? daily10 : coarse;
         const inRange = rows.filter((r) => at(r[0]) >= cutoff);
         const pts = (f: (r: [string, number, number]) => number): XY[] => inRange.map((r) => ({ t: at(r[0]), v: f(r) }));
         if (volMode === "split") {
@@ -982,7 +1000,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     });
 
     return defs;
-  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, epsCmp, quarters, cmp, symbol, exchange, years, spsOn, overlays, debtOn, debtSeries, volMode, split]);
+  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, epsCmp, quarters, cmp, symbol, exchange, years, spsOn, overlays, debtOn, debtSeries, volMode, split, daily10]);
 
   // With the quarterly-results overlay on, the per-quarter EPS bars are already
   // on screen. Keeping the summed TTM bars too puts two different quantities in

@@ -812,6 +812,13 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [held, setHeld] = useState<View | null>(null);
   const viewTouched = useRef(false);
   const [interval, setIv] = useState<Interval>("d");
+  // The volume split (owner, 14-Nov-2026): which part of the volume the
+  // histogram shows. Every day for ten years from vol/daily/<SYMBOL>.json
+  // (the ~400-day vol/<SYMBOL>.json where that is missing), summed into each
+  // weekly or monthly candle's own days.
+  type FvMode = "all" | "deliv" | "intra" | "split";
+  const [fvMode, setFvMode] = useState<FvMode>("all");
+  const [fvDays, setFvDays] = useState<{ sym: string; day: number[]; t: number[]; d: number[] } | null>(null);
   const [prefs, setPrefs] = useState<Prefs>({ kind: "candles", inds: ["vol", "dma50", "dma200"], log: false, lv: LV_DEFAULT });
   // The levels on screen, for the legend's one-line summary.
   const [lvl, setLvl] = useState<Levels | null>(null);
@@ -845,6 +852,22 @@ export default function FullChart({ symbol }: { symbol: string }) {
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
   useEffect(() => { setPrefs(loadPrefs()); }, []);
+  useEffect(() => {
+    if (!symbol) return;
+    let live = true;
+    const take = (rows: [string, number, number][] | undefined) => {
+      if (!live || !rows?.length) return false;
+      const day: number[] = [], t: number[] = [], d: number[] = [];
+      for (const [iso, tt, dd] of rows) { day.push(Math.round(Date.parse(`${iso}T00:00:00Z`) / 86400000)); t.push(tt); d.push(dd); }
+      setFvDays({ sym: symbol, day, t, d });
+      return true;
+    };
+    fetch(`${BASE}/vol/daily/${symbol}.json`).then((r) => (r.ok ? r.json() : null))
+      .then((v) => (v && take(v.d)) || fetch(`${BASE}/vol/${symbol}.json`).then((r) => (r.ok ? r.json() : null)).then((w) => take(w?.d)))
+      .catch(() => {});
+    return () => { live = false; };
+  }, [symbol]);
+  const fv = fvDays && fvDays.sym === symbol ? fvDays : null;
   // Every change the reader makes is written back (not the opening state), so
   // the next chart - this company's or another's - opens as this was left.
   const firstWrite = useRef(true);
@@ -1166,12 +1189,40 @@ export default function FullChart({ symbol }: { symbol: string }) {
           line(alpha(p.ink3, 0.9), 1, true).setData(pts(days, bb.lo));
         }
       }
+      // Delivered and traded shares in each candle's own days (a day, a week,
+      // a month), from the delivery files.
+      const split: ([number, number] | null)[] = rows.map(() => null);
+      if (fv && fvMode !== "all") {
+        let j = 0;
+        for (let i = 0; i < rows.length; i++) {
+          const from = rows[i][0], to = i + 1 < rows.length ? rows[i + 1][0] : from + (interval === "d" ? 1 : interval === "w" ? 7 : 31);
+          while (j < fv.day.length && fv.day[j] < from) j++;
+          let tt = 0, dd = 0, k = j;
+          while (k < fv.day.length && fv.day[k] < to) { tt += fv.t[k]; dd += fv.d[k]; k++; }
+          if (k > j) split[i] = [tt, dd];
+          j = k;
+        }
+      }
       if (onInd.has("vol")) {
-        const v = chart.addSeries(HistogramSeries, {
+        const hist = () => chart.addSeries(HistogramSeries, {
           priceScaleId: "vol", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false,
         });
+        const v = hist();
         chart.priceScale("vol").applyOptions({ scaleMargins: stripOn ? { top: 0.74, bottom: 0.08 } : { top: 0.82, bottom: 0 } });
-        v.setData(rows.map(([t, o, , , c, vv]) => ({ time: toTime(t), value: vv, color: alpha(c >= o ? p.pos : p.neg, 0.45) })));
+        if (!fv || fvMode === "all") {
+          v.setData(rows.map(([t, o, , , c, vv]) => ({ time: toTime(t), value: vv, color: alpha(c >= o ? p.pos : p.neg, 0.45) })));
+        } else {
+          const at = (f: (x: [number, number]) => number, color: string) =>
+            rows.flatMap((r, i) => (split[i] ? [{ time: toTime(r[0]), value: f(split[i]!), color }] : []));
+          if (fvMode === "split") {
+            v.setData(at((x) => x[0], alpha(p.ink3, 0.35)));
+            hist().setData(at((x) => x[1], alpha(p.accent, 0.8)));
+          } else if (fvMode === "deliv") {
+            v.setData(at((x) => x[1], alpha(p.accent, 0.8)));
+          } else {
+            v.setData(at((x) => Math.max(x[0] - x[1], 0), alpha(p.ink3, 0.6)));
+          }
+        }
       }
       if (onInd.has("rsi")) {
         const r = line(FIXED.rsi!, 2, false, 1);
@@ -1188,6 +1239,10 @@ export default function FullChart({ symbol }: { symbol: string }) {
         const prev = i > 0 ? rows[i - 1][4] : null;
         const items: LItem[] = [];
         if (onInd.has("vol")) items.push({ label: "Vol", value: vol(vv) });
+        if (onInd.has("vol") && split[i]) {
+          items.push({ label: "Delivered", value: `${vol(split[i]![1])} (${split[i]![0] ? Math.round((split[i]![1] / split[i]![0]) * 100) : 0}%)`, color: p.accent });
+          items.push({ label: "Same day", value: vol(Math.max(split[i]![0] - split[i]![1], 0)) });
+        }
         const add = (on: boolean, label: string, arr: (number | null)[], color: string, f = price) => {
           const x = arr[i];
           if (on && x !== null && x !== undefined) items.push({ label, value: f(x), color });
@@ -1773,7 +1828,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
     };
     // `range` is applied below without a rebuild.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, company, view, interval, prefs, peWin, showDates, showChg, epsCmp, showCA, caOn, hidden, cmps, themeKey, symbol, etfDoc, spsOn, overlays, debtOn]);
+  }, [file, company, view, interval, prefs, peWin, showDates, showChg, epsCmp, showCA, caOn, hidden, cmps, themeKey, symbol, etfDoc, spsOn, overlays, debtOn, fv, fvMode]);
 
   const applyRange = () => {
     const chart = chartRef.current, sp = spanRef.current;
@@ -2143,6 +2198,15 @@ export default function FullChart({ symbol }: { symbol: string }) {
                         sub={cmps.length > 0 && k !== "vol" && k !== "rsi" ? "Hidden while comparing - averages mean nothing once rebased" : undefined}
                         onClick={() => savePrefs({ ...prefs, inds: indOn(k) ? prefs.inds.filter((x) => x !== k) : [...prefs.inds, k] })} />
                     ))}
+                    {fv && indOn("vol") && (
+                      <>
+                        <Head>Volume shows</Head>
+                        {([["all", "All volume", undefined], ["deliv", "Delivered", "Shares taken into demat"],
+                          ["intra", "Same day", "Bought and sold within the session"], ["split", "Split", "Delivered over the total, as a stack"]] as const).map(([k, label, sub]) => (
+                          <Toggle key={k} on={fvMode === k} label={label} sub={sub} onClick={() => setFvMode(k)} />
+                        ))}
+                      </>
+                    )}
                     <Head>
                       <span className="inline-flex items-center gap-1">
                         Levels

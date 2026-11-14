@@ -52,6 +52,25 @@ def main() -> None:
         (OUT / f"{sym}.json").write_text(json.dumps(doc, separators=(",", ":")), encoding="utf-8")
         n += 1
     print(f"vol: {n} files written")
+    # Every day for ten years, one file a stock, loaded by the charts only
+    # when a long range asks for the split (vol/daily/<SYMBOL>.json).
+    con = sqlite3.connect(DB)
+    if not con.execute("SELECT 1 FROM sqlite_master WHERE name='vol_daily'").fetchone():
+        con.close()
+        return
+    out_d = OUT / "daily"
+    out_d.mkdir(parents=True, exist_ok=True)
+    per: dict[str, list] = {}
+    for sym, year, data in con.execute("SELECT symbol, year, data FROM vol_daily ORDER BY symbol, year"):
+        if sym not in listed:
+            continue
+        for md, (t, dq) in json.loads(data).items():
+            per.setdefault(sym, []).append([f"{year}-{md[:2]}-{md[2:]}", t, dq])
+    con.close()
+    for sym, rows in per.items():
+        rows.sort()
+        (out_d / f"{sym}.json").write_text(json.dumps({"d": rows}, separators=(",", ":")), encoding="utf-8")
+    print(f"vol/daily: {len(per)} files written")
 
 
 if __name__ == "__main__":

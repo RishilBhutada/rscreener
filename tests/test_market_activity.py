@@ -103,3 +103,15 @@ def test_week_end_is_that_weeks_friday():
     assert m.week_end("2026-11-09") == "2026-11-13"     # Monday
     assert m.week_end("2026-11-13") == "2026-11-13"     # Friday
     assert m.week_end("2026-11-08") == "2026-11-06"     # Sunday Muhurat session: the week before
+
+
+def test_daily_history_packs_by_stock_year_and_merges(tmp_path, monkeypatch):
+    import json
+    import fetch_volume_split as fv
+    monkeypatch.setattr(fv, "DB", tmp_path / "t.db")
+    con = fv.connect()
+    fv.flush_daily(con, {("ABC", "2016"): {"1115": [212023, 115694]}}, [("nse", "2016-11-15")])
+    fv.flush_daily(con, {("ABC", "2016"): {"1116": [100, 40]}}, [("nse", "2016-11-16")])
+    data = json.loads(con.execute("SELECT data FROM vol_daily WHERE symbol='ABC' AND year='2016'").fetchone()[0])
+    assert data == {"1115": [212023, 115694], "1116": [100, 40]}
+    assert con.execute("SELECT COUNT(*) FROM vol_daily_days").fetchone()[0] == 2
