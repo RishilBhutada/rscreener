@@ -315,9 +315,10 @@ type SeriesDef = {
   /** whether the series is on when the view opens (default on) */
   dflt?: boolean;
   /** two bar series sharing each quarter while both are on: L the left half,
-   *  R the right half, drawn outlined */
+   *  R the right half (which one is outlined is set by `outline`) */
   twin?: "L" | "R";
-  /** drawn outlined rather than filled - EPS beside EBITDA, alone or not */
+  /** drawn outlined rather than filled - EBITDA beside EPS, alone or not;
+   *  EPS is the solid one (owner, 14-Nov-2026) */
   outline?: boolean;
   /** the band of the plot its scale spans, top to bottom as fractions -
    *  the EBITDA view keeps its lines above and its bars below */
@@ -921,9 +922,9 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       };
       const t4 = ttmBars(eb).map((d) => ({ ...d, t: midOf(d.t) }));
       if (t4.length > 1) defs.push({ key: "eb_ttm", label: "EBITDA, last 4 quarters", color: "var(--chart-alt)", kind: "line", axis: "R", scale: "eb_ttm", zone: [0, 0.56], data: t4, fmt: "cr" });
-      if (bars.length) defs.push({ key: "ebitda", label: "Quarter EBITDA", color: "var(--chart-bar)", kind: "bars", axis: "L", twin: "L", zone: [0.44, 1], data: bars, fmt: "cr" });
+      if (bars.length) defs.push({ key: "ebitda", label: "Quarter EBITDA", color: "var(--chart-bar)", kind: "bars", axis: "L", twin: "L", outline: true, zone: [0.44, 1], data: bars, fmt: "cr" });
       const eq = spanBars(trendQ.eps);
-      if (eq.length) defs.push({ key: "eb_eps", label: "Quarter EPS", color: "var(--chart-bar)", kind: "bars", axis: "L", scale: "eb_eps", twin: "R", outline: true, zone: [0.44, 1], data: eq, fmt: "plain" });
+      if (eq.length) defs.push({ key: "eb_eps", label: "Quarter EPS", color: "var(--chart-bar)", kind: "bars", axis: "L", scale: "eb_eps", twin: "R", zone: [0.44, 1], data: eq, fmt: "plain" });
       const m = qBars(eb.map((v, i) => {
         const r = trendQ.revenue[i];
         return v === null || !r ? null : Math.round((v / r) * 1000) / 10;

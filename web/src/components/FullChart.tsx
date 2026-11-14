@@ -1387,9 +1387,10 @@ export default function FullChart({ symbol }: { symbol: string }) {
         }), allDays, p.font, twin));
         return bs;
       };
-      const ebS = showEb ? barSeries(ebB, "right", twin ? 0 : null, (x) => Math.round(x).toLocaleString("en-IN")) : null;
-      // EPS is always outlined, EBITDA always solid - alone or side by side.
-      const epS = showEp ? barSeries(epB, ebS ? "eb_eps" : "right", twin ? 1 : null, ratio, true) : null;
+      // EPS is always solid, EBITDA always outlined - alone or side by side
+      // (owner, 14-Nov-2026: the other way round read wrong).
+      const ebS = showEb ? barSeries(ebB, "right", twin ? 0 : null, (x) => Math.round(x).toLocaleString("en-IN"), true) : null;
+      const epS = showEp ? barSeries(epB, ebS ? "eb_eps" : "right", twin ? 1 : null, ratio) : null;
       if (twin && showChg && ebS && epS) {
         const byDay = new Map(epB.map((b) => [b.day, b]));
         ebS.attachPrimitive(new PairLabels(ebB.map((b) => {
