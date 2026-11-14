@@ -2,7 +2,7 @@
 company page's chart. Shares DELIVERED (taken into demat) against shares
 bought and sold the same day, from fetch_volume_split.py.
 
-  d  [[date, traded, delivered]]   last 250 sessions        (the 1-year view)
+  d  [[date, traded, delivered]]   every stored session (~400 days) - the 1-year views
   w  [[week, traded, delivered]]   last 156 weeks           (the 3-year view)
   m  [[month, traded, delivered]]  up to 10 years, monthly  (the 10-year view)
 
@@ -47,7 +47,7 @@ def main() -> None:
             m = months.setdefault(w[:7], [w[:7], 0, 0])
             m[1] += t
             m[2] += dq
-        doc = {"d": daily.get(sym, [])[-250:], "w": ws[-156:], "m": list(months.values())[-120:]}
+        doc = {"d": daily.get(sym, [])[-400:], "w": ws[-156:], "m": list(months.values())[-120:]}
         # "&" and other symbols safe as file names, the way companies/ is.
         (OUT / f"{sym}.json").write_text(json.dumps(doc, separators=(",", ":")), encoding="utf-8")
         n += 1

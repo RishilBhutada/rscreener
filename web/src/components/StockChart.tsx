@@ -570,6 +570,24 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const defOn = (s: SeriesDef) => isOn(s.key, s.group ? !(s.kind === "bars" || s.kind === "dashed") : s.dflt ?? true);
   const toggle = (s: SeriesDef) => setOn({ ...on, [s.key]: !defOn(s) });
 
+  // The volume split (owner, 14-Nov-2026): which part of the volume the bars
+  // under the price show - all of it, the shares delivered, the shares bought
+  // and sold the same day, or the two stacked. vol/<SYMBOL>.json, from NSE's
+  // and BSE's delivery files (pipeline/export_vol_json.py).
+  type VolMode = "all" | "deliv" | "intra" | "split";
+  const [volMode, setVolMode] = useState<VolMode>("all");
+  const [vsplit, setVsplit] = useState<{ sym: string; d: [string, number, number][]; w: [string, number, number][]; m: [string, number, number][] } | null>(null);
+  useEffect(() => {
+    if (!symbol) return;
+    let live = true;
+    fetch(`${CHART_BASE}/vol/${symbol}.json`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((v) => { if (live && v) setVsplit({ sym: symbol, d: v.d ?? [], w: v.w ?? [], m: v.m ?? [] }); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [symbol]);
+  const split = vsplit && vsplit.sym === symbol && (vsplit.d.length || vsplit.w.length) ? vsplit : null;
+
   const years = RANGES.find(([r]) => r === range)?.[1] ?? 5;
   const now = Date.now();
   const cutoff = years >= 999 ? 0 : now - years * 365.25 * 86400000;
@@ -706,7 +724,25 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       const volPts: XY[] = base
         .filter((p) => p.length > 2 && p[2] !== null && (p[2] as number) > 0)
         .map((p) => ({ t: toT(p[0]), v: p[2] as number }));
-      if (volPts.length) defs.push({ key: "volume", label: "Volume", color: "var(--chart-vol)", kind: "bars", axis: "L", data: volPts, fmt: "vol" });
+      if (volMode === "all" || !split) {
+        if (volPts.length) defs.push({ key: "volume", label: "Volume", color: "var(--chart-vol)", kind: "bars", axis: "L", data: volPts, fmt: "vol" });
+      } else {
+        // Days for a year, weeks for three, months beyond - the delivery
+        // file's own bars, on the same axis, so "split" reads as a stack:
+        // the delivered part over the light total.
+        const rows = years <= 1 && split.d.length ? split.d : years <= 3 && split.w.length ? split.w : split.m;
+        const at = (p: string) => toT(p.length === 7 ? `${p}-28` : p);
+        const inRange = rows.filter((r) => at(r[0]) >= cutoff);
+        const pts = (f: (r: [string, number, number]) => number): XY[] => inRange.map((r) => ({ t: at(r[0]), v: f(r) }));
+        if (volMode === "split") {
+          defs.push({ key: "vol_total", label: "Traded", color: "var(--line2)", kind: "bars", axis: "L", data: pts((r) => r[1]), fmt: "vol" });
+          defs.push({ key: "vol_deliv", label: "Delivered", color: "var(--accent)", kind: "bars", axis: "L", data: pts((r) => r[2]), fmt: "vol" });
+        } else if (volMode === "deliv") {
+          defs.push({ key: "vol_deliv", label: "Delivered", color: "var(--accent)", kind: "bars", axis: "L", data: pts((r) => r[2]), fmt: "vol" });
+        } else {
+          defs.push({ key: "vol_intra", label: "Same day", color: "var(--chart-vol)", kind: "bars", axis: "L", data: pts((r) => Math.max(r[1] - r[2], 0)), fmt: "vol" });
+        }
+      }
     }
 
     if (view === "pe" && debtOn && debtSeries) {
@@ -946,7 +982,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     });
 
     return defs;
-  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, epsCmp, quarters, cmp, symbol, exchange, years, spsOn, overlays, debtOn, debtSeries]);
+  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, epsCmp, quarters, cmp, symbol, exchange, years, spsOn, overlays, debtOn, debtSeries, volMode, split]);
 
   // With the quarterly-results overlay on, the per-quarter EPS bars are already
   // on screen. Keeping the summed TTM bars too puts two different quantities in
@@ -1570,6 +1606,18 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
           </div>
         )}
       </div>
+
+      {view === "price" && split && (
+        <div className="mt-2 flex items-center justify-center gap-2 flex-wrap">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">Volume</span>
+          <div className="inline-flex gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs" role="radiogroup" aria-label="Which volume to show">
+            {([["all", "All"], ["deliv", "Delivered"], ["intra", "Same day"], ["split", "Split"]] as const).map(([k, label]) => (
+              <button key={k} type="button" role="radio" aria-checked={volMode === k} onClick={() => setVolMode(k)}
+                className={`rounded-md px-2.5 py-1 font-medium ${volMode === k ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink3)]"}`}>{label}</button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {(() => {
         const item = (s: SeriesDef) => (

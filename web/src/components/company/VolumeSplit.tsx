@@ -42,7 +42,8 @@ export default function VolumeSplit({ symbol }: { symbol: string }) {
     return () => { live = false; };
   }, [symbol]);
 
-  const bars = useMemo(() => (v && v.sym === symbol ? v.data[range] : []), [v, symbol, range]);
+  // The daily file holds ~400 sessions; the 1-year view shows the last 250.
+  const bars = useMemo(() => (v && v.sym === symbol ? (range === "d" ? v.data.d.slice(-250) : v.data[range]) : []), [v, symbol, range]);
   if (!v || v.sym !== symbol || !(v.data.d.length || v.data.w.length)) return null;
 
   const max = Math.max(1, ...bars.map((b) => b[1]));
