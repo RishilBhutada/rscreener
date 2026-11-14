@@ -572,6 +572,11 @@ export const METRIC_INFO: Record<string, { how: string; means: string; watch?: s
     means: "A lender can sell pledged shares if the price falls far enough, which can push it down further.",
     watch: "Left blank where the promoters hold almost nothing (the share would be meaningless).",
   },
+  "Mutual funds monthly": {
+    how: "Shares held by eight fund houses' schemes - SBI, Nippon India, Aditya Birla SL, Motilal Oswal, Tata, DSP, PPFAS and Invesco - read from their own monthly portfolio files, as a share of the company. The change compares the same houses in both months, adjusted for splits and bonuses.",
+    means: "A monthly view of what the quarterly shareholding shows every three months: whether these funds have been adding or cutting.",
+    watch: "Part of mutual-fund money only: HDFC, ICICI, Kotak, UTI, Axis and Mirae are not covered (their sites do not offer the files to a program). A fund buying can also be new money from investors, not a view on the company.",
+  },
   "Surveillance": {
     how: "NSE's Additional (ASM) and Graded (GSM) Surveillance lists and the F&O ban list, read daily.",
     means: "The exchange itself has flagged unusual price or volume behaviour or a company concern, and applies stricter trading rules. A warning sign, not a verdict.",
@@ -650,9 +655,9 @@ export function RatioGrid({ snapshot, row, cohort, next, updates, faceValue }: {
   // where the two are more than 10% apart the other one is shown, not hidden.
   const peSrc = String(row?.["pe_src"] ?? ""), peGap = g("pe_gap"), peVendor = g("pe_vendor");
   const peNote: Partial<Tile> = peSrc === "vendor"
-    ? { sub: "Yahoo", subFirst: true, full: "Yahoo Finance's P/E: no current figure from the company's own filings" }
+    ? { sub: "Yahoo", subFirst: true, subWarn: true, full: "Yahoo Finance's P/E: no current figure from the company's own filings" }
     : peSrc === "filed" && peGap !== null && Math.abs(peGap) > 10 && peVendor !== null
-      ? { sub: `Yahoo ${fmtNum(peVendor, 1)}`, subFirst: true,
+      ? { sub: `Yahoo ${fmtNum(peVendor, 1)}`, subFirst: true, subWarn: true,
           full: `From the filings ${plain(g("pe"))}; Yahoo Finance says ${fmtNum(peVendor, 1)}. The two disagree by ${fmtNum(Math.abs(peGap), 0)}% - check the latest results before relying on either.` }
       : {};
   // NSE's surveillance lists (ASM-LT / ASM-ST / GSM / FO-BAN), short enough
@@ -726,6 +731,13 @@ export function RatioGrid({ snapshot, row, cohort, next, updates, faceValue }: {
     ].filter(Boolean) as Tile[])],
     ["Risk and ownership", [
       ...(survTile ? [survTile] : []),
+      ...(g("mf_schemes") !== null ? [{ label: "MF stake", info: "Mutual funds monthly", value: g("mf_pct") !== null ? pct(g("mf_pct")) : `${g("mf_schemes")} sch.`,
+        sub: g("mf_chg_1m_pct") !== null ? `1m ${signedPct(g("mf_chg_1m_pct"))}` : `${g("mf_schemes")} schemes`, field: "mf_pct",
+        // The month's change is the point of a monthly figure: it, not the
+        // industry median, goes under the value (the median's bar still draws).
+        subFirst: true,
+        full: `${g("mf_schemes")} schemes of ${g("mf_houses")} fund houses, ${String(row?.["mf_month"] ?? "")}` +
+          (g("mf_chg_3m_pct") !== null ? `; shares ${signedPct(g("mf_chg_3m_pct"))} over 3 months` : "") }] : []),
       ...(g("pledge_pct") !== null ? [{ label: "Pledged", info: "Promoter pledge", value: pct(g("pledge_pct")), sub: "Of promoter stake", field: "pledge_pct" }] : []),
       // Absolute debt and cash as well as the ratio: the ratio gives the shape
       // of the funding, these give its size against the profit.
@@ -774,7 +786,7 @@ export function RatioGrid({ snapshot, row, cohort, next, updates, faceValue }: {
                     <p className="text-[10.5px] leading-tight text-[var(--ink3)] truncate">{t.label}</p>
                     <p className="text-[14px] leading-[18px] font-semibold text-[var(--ink)] tabular-nums truncate">{t.value}</p>
                     {t.subFirst && t.sub ? (
-                      <p className="text-[10px] leading-tight text-[var(--warn-ink)] truncate tabular-nums">{t.sub}</p>
+                      <p className={`text-[10px] leading-tight truncate tabular-nums ${t.subWarn ? "text-[var(--warn-ink)]" : "text-[var(--ink3)]"}`}>{t.sub}</p>
                     ) : med ? (
                       <p className="text-[10px] leading-tight text-[var(--accent-ink)] truncate tabular-nums"
                         title={`Industry median ${medTxt} across ${med.n} companies`}>

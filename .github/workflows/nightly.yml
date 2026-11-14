@@ -81,7 +81,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install pandas requests yfinance google-auth beautifulsoup4 lxml
+      - run: pip install pandas requests yfinance google-auth beautifulsoup4 lxml openpyxl xlrd
       - name: Download the data DB from the data-db release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -384,6 +384,19 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "22"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_volume_split.py --years 10 --minutes 20
+      - name: Read mutual funds' monthly holdings (8 fund houses' own portfolio files)
+        # pipeline/fetch_mf_holdings.py. Fund houses publish by about the 10th,
+        # so this runs from the 6th to the 25th; each house-month is read once.
+        # Most houses build their file list with JavaScript, so a headless
+        # Chromium opens those pages as a visitor would. A house that refuses
+        # programs is left out, never worked around.
+        env:
+          RSCREENER_STEP_MINUTES: "30"
+        run: |
+          day=$(date -u +%-d)
+          if [ "$day" -lt 6 ] || [ "$day" -gt 25 ]; then echo "Outside the 6th-25th publishing window - skipped."; exit 0; fi
+          pip install --quiet playwright && python -m playwright install --with-deps chromium             || { echo "::warning::Playwright could not be installed - only the plainly linked fund houses are read"; }
+          bash pipeline/guarded_fetch.sh python pipeline/fetch_mf_holdings.py --months 12 --minutes 25
       - name: Refresh gold's calendar, Fed dates, headlines and COMEX closes
         # The release schedules of the Fed (meetings and its speech/testimony
         # calendar), BEA, the Census Bureau, the ECB and the Bank of Japan;

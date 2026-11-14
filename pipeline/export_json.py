@@ -25,6 +25,7 @@ from ratios_lib import compute_ratios, derived_roe, latest_annual_items, latest_
 from trend_lib import avg_npm_5y, build_trends, cagr_pct, ratio_bands
 import fund_units
 import market_activity_lib
+import mf_holdings_lib
 import oneoffs_lib
 import screen_fields
 import seasons_lib
@@ -66,7 +67,9 @@ SCREEN_FIELDS = ["vs_dma50", "vs_dma200", "dma50_200", "rsi14", "vol_surge",
                  "pe_filed", "pe_core", "eps_core", "oneoff_pct",
                  # market_activity_lib.py: the exchanges' daily activity files
                  "deliv_pct", "deliv_pct_20d", "deliv_x", "vwap", "fut_oi_chg_pct", "pcr",
-                 "short_qty", "surv", "in_surv", "pledge_pct", "pledge_total_pct"]
+                 "short_qty", "surv", "in_surv", "pledge_pct", "pledge_total_pct",
+                 # mf_holdings_lib.py: the covered fund houses' monthly holdings
+                 "mf_month", "mf_shares", "mf_houses", "mf_schemes", "mf_chg_1m_pct", "mf_chg_3m_pct"]
 RETURN_ANCHORS = {"ret_1m": 1, "ret_3m": 3, "ret_6m": 6, "ret_1y": 12, "ret_3y": 36, "ret_5y": 60}
 
 
@@ -597,7 +600,8 @@ def main() -> None:
                  screen_fields.institutions(con),
                  seasons_lib.screen_fields(seasons_lib.seasons(con)),
                  oneoffs_lib.screen_fields(con, pe_by_symbol),
-                 market_activity_lib.screen_fields(con)):
+                 market_activity_lib.screen_fields(con),
+                 mf_holdings_lib.screen_fields(con)):
         for sym, vals in part.items():
             extra_fields.setdefault(sym, {}).update(vals)
     # In NSE's futures & options segment: 1, else 0 (fetch_fno.py) - so
@@ -638,6 +642,9 @@ def main() -> None:
         df[rk] = df["symbol"].map(lambda s, k=rk: returns_by_symbol.get(s, {}).get(k))
     for fk in SCREEN_FIELDS:
         df[fk] = df["symbol"].map(lambda s, k=fk: extra_fields.get(s, {}).get(k))
+    # The covered fund houses' shares as a share of the company's.
+    df["mf_pct"] = [round(m / so * 100, 2) if (m and so and m == m and so == so) else None
+                    for m, so in zip(pd.to_numeric(df["mf_shares"], errors="coerce"), pd.to_numeric(df["shares_out"], errors="coerce"))]
     # "in_surv = 0" has to find the companies on no surveillance list, as
     # in_fno does - but only once a list has been read at all.
     if df["in_surv"].notna().any():
@@ -921,7 +928,7 @@ def main() -> None:
         "sales_cagr_5y", "sales_cagr_10y", "profit_cagr_5y", "profit_cagr_10y",
         "roce", "ev_ebitda", "ps", "peg", "int_coverage", "div_payout",
         "debtor_days", "inventory_days", "promoter_holding",
-        "median_pe_5y", "avg_npm_5y", "pe_vendor", "pe_src", "pe_gap",
+        "median_pe_5y", "avg_npm_5y", "pe_vendor", "pe_src", "pe_gap", "mf_pct",
         "ret_1d", "ret_1m", "ret_3m", "ret_6m", "ret_1y", "ret_3y", "ret_5y", "off_52w_high",
         "volatility_1y", "volatility_30d", "vol_method",
         *SCREEN_FIELDS,
