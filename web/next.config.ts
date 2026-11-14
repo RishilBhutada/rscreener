@@ -39,6 +39,39 @@ try {
   // which is what it did before this existed.
 }
 
+// The app's update history (owner, 14-Nov-2026): after each update the app
+// says what changed, and Settings keeps a numbered list for the last year.
+// One update = one change to the app's code: housekeeping commits ([skip ci]),
+// data snapshots ("data: ..."), review notes and merges are left out. Numbered
+// across the WHOLE history, oldest first, so a number never changes as the
+// one-year window moves on. A commit may carry a plain-language line,
+// "What's new: ...", in its message; the subject line stands in otherwise.
+// CI passes RS_UPDATES_REF (the commit being built; the checkout's HEAD can be
+// older) and fetches the full history, without file contents, for numbering.
+function writeUpdates() {
+  const ref = process.env.RS_UPDATES_REF || "HEAD";
+  let raw = "";
+  try {
+    raw = execSync(`git log ${ref} --no-merges --reverse --format=%h%x1f%cI%x1f%s%x1f%b%x1e`,
+      { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  } catch { return; }
+  const skip = /\[skip ci\]|^(Nightly:|Merge |data:|Review status)/i;
+  const all: { n: number; sha: string; at: string; text: string }[] = [];
+  for (const rec of raw.split("\x1e")) {
+    const [sha, at, subject, body] = rec.replace(/^\n+/, "").split("\x1f");
+    if (!sha || !subject || skip.test(subject)) continue;
+    const note = (body ?? "").split("\n").map((l) => l.trim()).find((l) => /^what's new:/i.test(l));
+    const text = (note ? note.replace(/^what's new:\s*/i, "") : subject).slice(0, 240);
+    all.push({ n: all.length + 1, sha, at, text });
+  }
+  const since = Date.now() - 366 * 86400000;
+  const year = all.filter((u) => Date.parse(u.at) >= since).reverse();
+  try {
+    writeFileSync("public/updates.json", JSON.stringify({ latest: all.length, updates: year }));
+  } catch { /* no list: the What's new card and the Settings list simply stay hidden */ }
+}
+writeUpdates();
+
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {

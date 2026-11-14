@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import WhatsNew from "@/components/WhatsNew";
 
 const interSans = Inter({
   variable: "--font-geist-sans",
@@ -41,7 +42,7 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInit }} />
       </head>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">{children}<WhatsNew /></body>
     </html>
   );
 }

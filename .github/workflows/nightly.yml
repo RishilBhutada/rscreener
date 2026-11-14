@@ -793,6 +793,11 @@ jobs:
           # the filter with a warning and simply send more; either is fine.
           git fetch origin main --deepen=30 --filter=blob:none 2>/dev/null \
             || git fetch origin main --deepen=30 2>/dev/null || true
+          # The app's numbered update list (next.config.ts) counts every code
+          # change from the first, so it needs the whole history - commits and
+          # trees only, no file contents. Without it the list is shorter and
+          # numbered from wherever the history stops; nothing else breaks.
+          git fetch origin main --unshallow --filter=blob:none 2>/dev/null || true
           BEFORE=$(git rev-parse --short HEAD)
           git checkout FETCH_HEAD -- web/src web/package.json web/package-lock.json web/next.config.ts 2>/dev/null || true
           echo "built from $(git rev-parse --short FETCH_HEAD) (this job started at $BEFORE)"
@@ -815,6 +820,7 @@ jobs:
             REF=$(git log -1 --format=%H --invert-grep --grep="\[skip ci\]" FETCH_HEAD || true)
             REF=${REF:-$(git rev-parse FETCH_HEAD)}
             echo "RS_BUILD_COMMIT=$(git rev-parse --short "$REF")"
+            echo "RS_UPDATES_REF=$(git rev-parse FETCH_HEAD)"
             echo "RS_BUILD_TIME=$(git log -1 --format=%cI "$REF")"
             # Delimiter form, not KEY=value: a subject is free text and mine
             # routinely contain quotes and dollar signs, which inside an echo

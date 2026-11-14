@@ -10,6 +10,7 @@ import { reloadBypassingCache } from "@/lib/reload";
 import { clearOrders, customOrders } from "@/lib/tableprefs";
 import { backupText, restoreText } from "@/lib/sync";
 import { allWatched } from "@/lib/watchlists";
+import { Updates, loadUpdates, markSeen, updateWhen } from "@/lib/updates";
 import {
   addPassword, authMessage, firebaseConfigured, hasPassword, inApp, sendPasswordReset, signInWithEmail, signInWithGoogle, signOutOfGoogle, useAuth,
 } from "@/lib/firebase";
@@ -249,6 +250,7 @@ export function SettingsScreen() {
   if (p === "data") return <DataScreen />;
   if (p === "alerts") return <AlertsScreen />;
   if (p === "account") return <AccountScreen />;
+  if (p === "updates") return <UpdatesScreen />;
   if (p === "sections") {
     return (
       <ReorderScreen
@@ -426,6 +428,7 @@ function MainScreen() {
           right={BUILD_COMMIT ? <span className="font-mono text-xs text-[var(--ink3)] shrink-0">{BUILD_COMMIT.slice(0, 7)}</span> : null}
         />
         {BUILD_SUBJECT && <Row icon={<Glyph d={ICON.change} />} title="Latest change" sub={BUILD_SUBJECT} wrap />}
+        <Row icon={<Glyph d={ICON.update} />} title="Updates" sub="Every update in the last year, numbered" href="/settings?p=updates" chevron />
         {/* The full chart's library asks for this credit and a link to its
             makers somewhere users can find it. Given here, the chart itself
             carries no logo - which sat over the left end of its timeline, and
@@ -634,6 +637,45 @@ const ALERT_LIST = "https://github.com/RishilBhutada/rscreener/edit/main/alerts/
  *  (alerts/watchlist.txt), where the GitHub runs that send the pushes can read
  *  it; the stars in the app live on this device and cannot reach them. This
  *  turns the stars into the list's format and opens the file to paste into. */
+/** Every update to the app in the last year (owner, 14-Nov-2026): its
+ *  number, date and time, and what changed - newest first, by month. */
+function UpdatesScreen() {
+  const [u, setU] = useState<Updates | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    loadUpdates().then((d) => {
+      if (!d) { setFailed(true); return; }
+      setU(d);
+      markSeen(d.latest);   // read here: no "What's new" card for these again
+    });
+  }, []);
+  const months: [string, Updates["updates"]][] = [];
+  for (const x of u?.updates ?? []) {
+    const m = new Date(x.at).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "Asia/Kolkata" });
+    const last = months[months.length - 1];
+    if (last && last[0] === m) last[1].push(x); else months.push([m, [x]]);
+  }
+  return (
+    <div>
+      <PageTitle>Updates</PageTitle>
+      {!u && !failed && <div className="rs-skel h-64" aria-busy="true" aria-label="Loading" />}
+      {failed && <p className="text-sm text-[var(--ink3)] px-1">The update list could not be loaded.</p>}
+      {u && (
+        <p className="text-[12.5px] text-[var(--ink3)] px-1 mb-3">
+          {u.updates.length} updates in the last year; this app is at update {u.latest}. Times are India time.
+        </p>
+      )}
+      {months.map(([m, list]) => (
+        <Group key={m} title={`${m} · ${list.length}`}>
+          {list.map((x) => (
+            <Row key={x.n} title={x.text} sub={`Update ${x.n} · ${updateWhen(x.at)}`} wrap />
+          ))}
+        </Group>
+      ))}
+    </div>
+  );
+}
+
 function AlertsScreen() {
   const [text, setText] = useState("");
   const [msg, setMsg] = useState("");
