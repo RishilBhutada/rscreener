@@ -128,6 +128,9 @@ type XY = {
   /** growth on the comparison bar, carried on the point so the label, the
    *  tooltip and the legend cannot disagree about it */
   chg?: Growth;
+  /** set on the EBITDA margin points: the change in percentage points on the
+   *  point compared against (the quarter before, or a year earlier) */
+  dpts?: number;
 };
 
 /** How this bar's earnings compare with the bar being compared against.
@@ -324,6 +327,9 @@ type SeriesDef = {
    *  the EBITDA view keeps its lines above and its bars below */
   zone?: [number, number];
   fmt: FmtKind;
+  /** straight segments with a dot on every point and, while growth is on, each
+   *  point's change printed above it in green or red (EBITDA margin) */
+  dots?: boolean;
 };
 
 /** One filed quarter: the period it covers, its EPS, and when NSE broadcast it. */
@@ -434,6 +440,17 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   // calendar, not the business.
   const [epsCmp, setEpsCmp] = useState<"yoy" | "prev">(() => pick0?.cmp ?? "yoy");
   const [showChg, setShowChg] = useState(() => pick0?.chg ?? true);
+  // Where each quarter's EBITDA margin point stands: over the middle of its
+  // quarter, or on the day its results were declared - when the market first
+  // knew it (owner, 16-Nov-2026: "I want these two variations").
+  const [marginAt, setMarginAtState] = useState<"mid" | "day">("mid");
+  useEffect(() => {
+    try { if (localStorage.getItem("rs_ebm_at") === "day") setMarginAtState("day"); } catch { /* the middle, then */ }
+  }, []);
+  const setMarginAt = (k: "mid" | "day") => {
+    setMarginAtState(k);
+    try { localStorage.setItem("rs_ebm_at", k); } catch { /* still applied */ }
+  };
   // Peers answer "is this expensive for its industry". Comparing against anything
   // listed answers a different and equally fair question - "of the two I was
   // choosing between, did I pick the better one" - and those two need not be
@@ -925,11 +942,37 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       if (bars.length) defs.push({ key: "ebitda", label: "Quarter EBITDA", color: "var(--chart-bar)", kind: "bars", axis: "L", twin: "L", outline: true, zone: [0.44, 1], data: bars, fmt: "cr" });
       const eq = spanBars(trendQ.eps);
       if (eq.length) defs.push({ key: "eb_eps", label: "Quarter EPS", color: "var(--chart-bar)", kind: "bars", axis: "L", scale: "eb_eps", twin: "R", zone: [0.44, 1], data: eq, fmt: "plain" });
-      const m = qBars(eb.map((v, i) => {
+      // EBITDA margin: a point per quarter, joined by straight lines, each
+      // with its change in percentage points on the quarter it is compared
+      // with - the bars' own choice, the quarter before or a year earlier,
+      // found by date so a missing quarter is never compared with the wrong one.
+      const DAYMS = 86400000;
+      const marg = eb.map((v, i) => {
         const r = trendQ.revenue[i];
-        return v === null || !r ? null : Math.round((v / r) * 1000) / 10;
-      })).map((d) => ({ ...d, t: midOf(d.t) }));
-      if (m.length > 1) defs.push({ key: "ebitda_m", label: "EBITDA margin %", color: "var(--chart-dma50)", kind: "smooth", axis: "R", scale: "eb_m", dflt: false, zone: [0, 0.56], data: m, fmt: "pct" });
+        return v === null || v === undefined || !r ? null : Math.round((v / r) * 1000) / 10;
+      });
+      const ends = trendQ.periods.map((pp) => toT(pp));
+      const m: XY[] = [];
+      trendQ.periods.forEach((pp, i) => {
+        const v = marg[i];
+        if (v === null || ends[i] < cutoff) return;
+        const [lo, hi] = epsCmp === "yoy" ? [340, 390] : [60, 120];
+        let j = -1;
+        for (let k = i - 1; k >= 0; k--) {
+          const gap = (ends[i] - ends[k]) / DAYMS;
+          if (gap >= lo && gap <= hi) { j = k; break; }
+          if (gap > hi) break;
+        }
+        const pv = j >= 0 ? marg[j] : null;
+        const day = quarters?.find((qq) => qq.end === pp)?.announced;
+        // On the result day only where the day is known: a guessed date would
+        // put the point where nothing happened.
+        const t = marginAt === "day" ? (day ? toT(day) : null) : midOf(ends[i]);
+        if (t === null) return;
+        m.push({ t, v, ...(pv !== null && pv !== undefined ? { dpts: Math.round((v - pv) * 10) / 10 } : {}) });
+      });
+      m.sort((a, b) => a.t - b.t);
+      if (m.length > 1) defs.push({ key: "ebitda_m", label: marginAt === "day" ? "EBITDA margin % (on result day)" : "EBITDA margin %", color: "var(--chart-dma50)", kind: "line", dots: true, axis: "R", scale: "eb_m", zone: [0, 0.56], data: m, fmt: "pct" });
     }
 
     };
@@ -1001,7 +1044,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     });
 
     return defs;
-  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, epsCmp, quarters, cmp, symbol, exchange, years, spsOn, overlays, debtOn, debtSeries, volMode, split, daily10]);
+  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, epsCmp, marginAt, quarters, cmp, symbol, exchange, years, spsOn, overlays, debtOn, debtSeries, volMode, split, daily10]);
 
   // With the quarterly-results overlay on, the per-quarter EPS bars are already
   // on screen. Keeping the summed TTM bars too puts two different quantities in
@@ -1174,6 +1217,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const pGrowth = (isPe && (quarters?.length ?? 0) > 0) || (isEb && !!trendQ)
     ? seg(growthVal, [["off", "No growth"], ["yoy", isPe && peWin === "ttm" ? "vs year before" : "vs year ago"], ["prev", "vs quarter before"]] as const, setGrowth) : null;
   const pDates = (quarters?.length ?? 0) > 0 ? chip(showDates, "Result dates", () => setShowDates(!showDates)) : null;
+  const pMarginAt = isEb && (quarters?.length ?? 0) > 0 && isOn("ebitda_m", true)
+    ? seg(marginAt, [["mid", "Margin: mid-quarter"], ["day", "Margin: result day"]] as const, setMarginAt) : null;
   const pCA = (actions?.length ?? 0) > 0 ? chip(showCA, "Corporate actions", () => setShowCA(!showCA)) : null;
   const pCAKinds = showCA && CA_ORDER.some((k) => caCount[k]) ? (
     <div className="flex items-center gap-3 flex-wrap text-xs text-[var(--ink2)]">
@@ -1211,7 +1256,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   ) : null;
   const strip = (
     <div className="flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 pb-1 text-xs [scrollbar-width:none]">
-      {pBars}{pCompare}{pGrowth}{pDates}{pCA}{pWin}
+      {pBars}{pCompare}{pGrowth}{pMarginAt}{pDates}{pCA}{pWin}
     </div>
   );
   // What is switched on beyond the defaults - growth labels are on by default.
@@ -1223,6 +1268,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         {pBars && <div className="flex flex-col items-start gap-1.5">{label("Bars")}{pBars}</div>}
         {pWin && <div className="flex flex-col items-start gap-1.5">{label(spsOn ? "Sales" : "Earnings")}{pWin}</div>}
         {pGrowth && <div className="flex flex-col items-start gap-1.5">{label("Growth on bars")}{pGrowth}</div>}
+        {pMarginAt && <div className="flex flex-col items-start gap-1.5">{label("EBITDA margin point")}{pMarginAt}</div>}
         <div className="flex flex-col items-start gap-1.5">{label("Show on chart")}
           <div className="flex gap-1.5 flex-wrap">{pDates}{pCA}</div>{pCAKinds}</div>
         <div className="flex flex-col items-start gap-1.5">{label("Compare")}{pCompare}</div>
@@ -1530,6 +1576,36 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                   <path d={`M${pts[0].x.toFixed(1)},${foot} L${line} L${pts[pts.length - 1].x.toFixed(1)},${foot} Z`} fill={`url(#rsfill-${s.key})`} className="rs-chart-in" style={{ animationDelay: "250ms" }} />
                   <polyline points={pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")} pathLength={1} className="rs-draw"
                     fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+                </g>
+              );
+            }
+            if (s.dots) {
+              // Labels only where they fit: every point while they are far
+              // enough apart, else every second or third, newest kept.
+              const gaps = pts.slice(1).map((pt, i) => pt.x - pts[i].x).filter((g) => g > 0);
+              const minGap = gaps.length ? Math.min(...gaps) : 999;
+              const need = FS * 2.4;
+              const every = minGap >= need ? 1 : Math.ceil(need / Math.max(minGap, 1));
+              const n = s.data.length;
+              return (
+                <g key={s.key}>
+                  <polyline points={pts.map((pt) => `${pt.x.toFixed(1)},${pt.y.toFixed(1)}`).join(" ")} pathLength={1} className="rs-draw"
+                    fill="none" stroke={s.color} strokeWidth={1.6} strokeLinejoin="miter" strokeLinecap="round" />
+                  {pts.map((pt, i) => {
+                    const d = s.data[i].dpts;
+                    const show = showChg && d !== undefined && (n - 1 - i) % every === 0 && pt.y - 7 > MT + FS;
+                    return (
+                      <g key={i} className="rs-chart-in">
+                        <circle cx={pt.x} cy={pt.y} r="2.8" fill={s.color} stroke="var(--card)" strokeWidth="1.2" />
+                        {show && (
+                          <text x={pt.x} y={pt.y - 6} textAnchor="middle" fontSize={FS * 0.85} fontWeight="600"
+                            fill={d! > 0 ? "var(--chart-pos)" : d! < 0 ? "var(--chart-neg)" : "var(--ink3)"} style={{ pointerEvents: "none" }}>
+                            {`${d! > 0 ? "+" : d! < 0 ? "−" : ""}${Math.abs(d!).toFixed(1)}`}
+                          </text>
+                        )}
+                      </g>
+                    );
+                  })}
                 </g>
               );
             }

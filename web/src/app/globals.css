@@ -413,3 +413,10 @@ a, button { transition: color 0.15s, background-color 0.15s, border-color 0.15s,
     transition-duration: 0.01ms !important;
   }
 }
+
+/* The top bar stays on screen (owner, 16-Nov-2026), and on the company page
+ * the tab row sticks under it: a section jumped to lands below both. --hdr is
+ * the bar's measured height (TopNav). */
+.scroll-mt-32 {
+  scroll-margin-top: calc(var(--hdr, 56px) + 56px);
+}

@@ -3,7 +3,7 @@
 /** The company page's smaller panels: data checks, coverage, price history,
  *  announcements, filings, pros and cons, alerts, about, and the refetch button. */
 
-import { ChevronGlyph } from "@/components/Glyphs";
+import { ChevronGlyph, ExternalGlyph } from "@/components/Glyphs";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Quarter } from "@/components/StockChart";
@@ -11,7 +11,7 @@ import { Row } from "@/lib/query";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { markSaved } from "@/lib/sync";
 import { IconButton } from "@/components/QuoteUI";
-import { Company, Coverage } from "@/components/company/types";
+import { AnnualReport, Company, Coverage } from "@/components/company/types";
 import { BASE, monthYear, fmtNum, num } from "@/components/company/format";
 
 /** Says why the history starts where it starts, instead of leaving a short chart
@@ -549,5 +549,37 @@ export function RefetchButton({ symbol }: { symbol: string }) {
         </InfoDialog>
       )}
     </>
+  );
+}
+
+/** Right under the results: the newest results filing and annual report, as
+ *  the company filed them on NSE (owner, 16-Nov-2026). The figures above are
+ *  read from the filing's XBRL; the PDF is the document itself, to check them
+ *  against. */
+export function OfficialDocs({ quarters, reports }: { quarters?: Quarter[] | null; reports?: AnnualReport[] | null }) {
+  const q = [...(quarters ?? [])].reverse().find((x) => x.pdf);
+  const ar = [...(reports ?? [])].sort((x, y) => Number(y.to) - Number(x.to))[0];
+  if (!q && !ar) return null;
+  const href = (u: string) => (u.includes("://") ? u : `https://nsearchives.nseindia.com/corporate/${u}`);
+  const fy = (end: string) => {
+    const y = Number(end.slice(0, 4)), m = Number(end.slice(5, 7));
+    const fq = { 6: 1, 9: 2, 12: 3, 3: 4 }[m];
+    return fq ? `Q${fq} FY${String(m <= 3 ? y : y + 1).slice(2)}` : end.slice(0, 7);
+  };
+  const link = "inline-flex items-center gap-1 font-semibold text-[var(--accent-ink)] hover:underline";
+  return (
+    <div className="-mt-3 px-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px]">
+      <span className="text-[var(--ink3)]">Official documents (NSE):</span>
+      {q?.pdf && (
+        <a href={href(q.pdf)} target="_blank" rel="noopener noreferrer" className={link}>
+          Results {fy(q.end)}{q.announced ? `, filed ${new Date(q.announced).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : ""} <ExternalGlyph size={12} />
+        </a>
+      )}
+      {ar && (
+        <a href={href(ar.url)} target="_blank" rel="noopener noreferrer" className={link}>
+          Annual report FY{ar.to.slice(2)} <ExternalGlyph size={12} />
+        </a>
+      )}
+    </div>
   );
 }

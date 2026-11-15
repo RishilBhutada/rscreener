@@ -467,6 +467,20 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
   };
   const hubTabs = (hub && hub !== "home" ? HUBS.find((h) => h.key === hub)?.tabs ?? [] : []).filter((k) => shown(k) || k === active);
   const boxRef = useRef<HTMLDivElement>(null);
+  // The bar stays at the top while the page scrolls, on every screen (owner,
+  // 16-Nov-2026). On a phone it is two rows (name, then search), so its
+  // height is measured and shared as --hdr: the company page's tab row
+  // sticks just below it, whatever its height.
+  const hdrRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = hdrRef.current;
+    if (!el) return;
+    const set = () => document.documentElement.style.setProperty("--hdr", `${el.offsetHeight}px`);
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const ensureData = async () => {
     if (cache) { if (!indexCache) indexCache = buildIndex(cache); if (rows.length === 0) setRows(cache); return; }
@@ -523,7 +537,7 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
   };
 
   return (
-    <header className="bg-[var(--card)] border-b border-[var(--line)] sm:sticky sm:top-0 land:!static z-30">
+    <header ref={hdrRef} className="bg-[var(--card)] border-b border-[var(--line)] sticky top-0 z-30">
       <div className="max-w-6xl mx-auto px-4 h-auto sm:h-14 py-2.5 sm:py-0 flex flex-wrap items-center gap-x-3 gap-y-2 sm:gap-4">
         {/* Suspense around this one control, not the whole header. Reading the
             query string opts a component out of static prerendering, and the

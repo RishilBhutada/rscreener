@@ -16,7 +16,7 @@ import { Stmt } from "@/components/company/types";
 import { num, withEbitda, ttmOf, trendToStmt, hasValuationHistory } from "@/components/company/format";
 import { StatementTable, RatiosTable, SegmentsTable, ShareholdingTable } from "@/components/company/StatementTable";
 import { PeerTable, InsiderTrades, CompoundedGrowth, HoldingTrend, FScore, ValuationHistory, RatioGrid } from "@/components/company/Sections";
-import { DataChecks, CoverageNote, ProsCons, Announcements, PriceHistory, FilingLists, PriceAlerts, AboutCompany } from "@/components/company/Panels";
+import { DataChecks, CoverageNote, ProsCons, Announcements, PriceHistory, FilingLists, PriceAlerts, AboutCompany, OfficialDocs } from "@/components/company/Panels";
 import { useCompanyData } from "@/components/company/useCompanyData";
 import { useSwipePager } from "@/components/company/useSwipePager";
 import { TabKey, useTabs, TabRow, SectionMenu } from "@/components/company/CompanyNav";
@@ -266,8 +266,11 @@ function CompanyView() {
       {quarterly && (
         <div id="quarters" className="scroll-mt-32 space-y-6">
           {basisSwitch}
+          {/* The filing's PDF carries both bases, standalone and consolidated,
+              so the row stays whichever the table shows. */}
           <StatementTable title="Quarterly results" stmt={quarterly} subtitle={tableCaption} boldRows={["Net Profit", "Net profit"]} next={nextResults} kind="quarterly" symbol={symbol}
-            pdfs={sa ? undefined : quarterly.periods.map((p) => company.quarters?.find((q) => q.end === p)?.pdf ?? null)} />
+            pdfs={quarterly.periods.map((p) => company.quarters?.find((q) => q.end === p)?.pdf ?? null)} pdfLabel="Results PDF" />
+          <OfficialDocs quarters={company.quarters} reports={company.documents?.annual_reports} />
           {company.segments && <SegmentsTable segs={company.segments} symbol={symbol} />}
           <SeasonsCard seasons={company.seasons} />
         </div>
@@ -276,7 +279,8 @@ function CompanyView() {
       {pnl && (
         <div id="profit-loss" className="scroll-mt-32 space-y-6">
           {basisSwitch}
-          <StatementTable title="Profit & loss" stmt={pnl} subtitle={tableCaption} boldRows={["Net Profit", "Net profit"]} kind="pnl" symbol={symbol} ttm={sameBasis ? ttmOf(pnl, quarterly) : null} />
+          <StatementTable title="Profit & loss" stmt={pnl} subtitle={tableCaption} boldRows={["Net Profit", "Net profit"]} kind="pnl" symbol={symbol} ttm={sameBasis ? ttmOf(pnl, quarterly) : null}
+            pdfs={pnl.periods.map((p) => company.documents?.annual_reports?.find((r) => r.to === p.slice(0, 4))?.url ?? null)} pdfLabel="Annual report" />
           <CompoundedGrowth trend={company.trend} prices={company.prices} />
         </div>
       )}

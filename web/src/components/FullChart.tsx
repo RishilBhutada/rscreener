@@ -64,7 +64,9 @@ const VIEWS: [View, string][] = [
 ];
 const VIEW_LABEL = Object.fromEntries(VIEWS) as Record<View, string>;
 /** Lines that start switched off: the margin under EBITDA, as on the company chart. */
-const DEF_OFF = new Set(["ebitda:ebitda_m", "ov:ebitda:ebitda_m"]);
+// The EBITDA margin is on by default since the owner asked for it as points
+// over the bars (16-Nov-2026); only the overlay copy starts off.
+const DEF_OFF = new Set(["ov:ebitda:ebitda_m"]);
 type Interval = "d" | "w" | "m";
 type Range = "1M" | "3M" | "6M" | "YTD" | "1Y" | "2Y" | "3Y" | "5Y" | "10Y" | "MAX";
 type Kind = "candles" | "hollow" | "bars" | "heikin" | "line" | "area";
@@ -481,6 +483,48 @@ class PairLabels implements ISeriesPrimitive<Time> {
   }
 }
 
+/** A short label over each point of a line series - the EBITDA margin's
+ *  change in percentage points, green up, red down (owner, 16-Nov-2026).
+ *  Where the points are too close for every label, every second or third is
+ *  printed, the newest always among them. */
+class PointLabels implements ISeriesPrimitive<Time> {
+  private chart: SeriesAttachedParameter<Time>["chart"] | null = null;
+  private series: ISeriesApi<SeriesType> | null = null;
+  private readonly view: IPrimitivePaneView;
+  constructor(private readonly items: { day: number; v: number; text: string; color: string }[], private readonly font: string) {
+    this.view = {
+      zOrder: () => "top",
+      renderer: () => ({ draw: (target) => target.useMediaCoordinateSpace(({ context }) => this.draw(context)) }),
+    };
+  }
+  attached(param: SeriesAttachedParameter<Time>) { this.chart = param.chart; this.series = param.series; }
+  detached() { this.chart = null; this.series = null; }
+  paneViews() { return [this.view]; }
+  private draw(ctx: Ctx) {
+    if (!this.chart || !this.series) return;
+    const ts = this.chart.timeScale();
+    const pts = this.items.flatMap((it) => {
+      const x = ts.timeToCoordinate(toTime(it.day)), y = this.series!.priceToCoordinate(it.v);
+      return x === null || y === null ? [] : [{ x, y, it }];
+    });
+    if (!pts.length) return;
+    ctx.save();
+    ctx.font = `600 10px ${this.font}`;
+    const widest = Math.max(...pts.map((q) => ctx.measureText(q.it.text).width));
+    const gaps = pts.slice(1).map((q, i) => q.x - pts[i].x).filter((g) => g > 0);
+    const gap = gaps.length ? Math.min(...gaps) : 999;
+    const every = gap >= widest + 4 ? 1 : Math.ceil((widest + 4) / Math.max(gap, 1));
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    pts.forEach((q, i) => {
+      if ((pts.length - 1 - i) % every !== 0 || !q.it.text) return;
+      ctx.fillStyle = q.it.color;
+      ctx.fillText(q.it.text, q.x, q.y - 5);
+    });
+    ctx.restore();
+  }
+}
+
 /** The timeline band along the chart's foot: results on the upper line,
  *  corporate actions on the lower, each a tag carrying its figure.
  *
@@ -868,6 +912,17 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [showDates, setShowDates] = useState(true);
   const [showChg, setShowChg] = useState(() => pick0?.chg ?? true);
   const [epsCmp, setEpsCmp] = useState<"yoy" | "prev">(() => pick0?.cmp ?? "yoy");
+  // Where each EBITDA margin point stands - the middle of its quarter, or the
+  // day its results were declared. Shared with the company chart.
+  const [marginAt, setMarginAtState] = useState<"mid" | "day">("mid");
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
+    try { if (localStorage.getItem("rs_ebm_at") === "day") setMarginAtState("day"); } catch { /* the middle, then */ }
+  }, []);
+  const setMarginAt = (k: "mid" | "day") => {
+    setMarginAtState(k);
+    try { localStorage.setItem("rs_ebm_at", k); } catch { /* still applied */ }
+  };
   const [showCA, setShowCA] = useState(true);
   // RBI policy and Budget days on the event strip, and the market series the
   // three market indicators draw. Loaded once, only when one of them is on.
@@ -1432,8 +1487,49 @@ export default function FullChart({ symbol }: { symbol: string }) {
         chart.priceScale(id).applyOptions({ visible: false, scaleMargins: { top: 0.12, bottom: 0.12 } });
       };
       own("eb_ttm", p.alt, ttm4, crore, !isHidden("eb_ttm"));
-      const marg = qd.map((_, i) => { const v = eb[i], r = tq.revenue[i]; return v === null || !r ? null : Math.round((v / r) * 1000) / 10; });
-      own("eb_m", p.dma50, marg, (x) => `${x.toFixed(1)}%`, !isHidden("ebitda_m"), true);
+      const marg = qd.map((_, i) => { const v = eb[i], r = tq.revenue[i]; return v === null || v === undefined || !r ? null : Math.round((v / r) * 1000) / 10; });
+      // The margin: a point per quarter joined by straight lines, each with its
+      // change in percentage points (green up, red down) on the quarter it is
+      // compared with - the bars' own choice, found by date. Placed over the
+      // middle of its quarter or on the day its results were declared.
+      if (!isHidden("ebitda_m")) {
+        const ymOf = (iso: string) => Number(iso.slice(0, 4)) * 12 + Number(iso.slice(5, 7));
+        const backM = epsCmp === "yoy" ? 12 : 3;
+        const mids = quarterMids(qd, pdays);
+        const snap = (d: number) => {
+          if (!pdays.length || d < pdays[0] - 7 || d > pdays[pdays.length - 1] + 7) return d;
+          const i = atOrBefore(pdays, d), j = Math.min(pdays.length - 1, i + 1);
+          return Math.abs(pdays[j] - d) < Math.abs(pdays[i] - d) ? pdays[j] : pdays[i];
+        };
+        const mp: { day: number; v: number; d: number | null }[] = [];
+        tq.periods.forEach((end, i) => {
+          const v = marg[i];
+          if (v === null) return;
+          const j = tq.periods.findIndex((e2) => ymOf(e2) === ymOf(end) - backM);
+          const pv = j >= 0 ? marg[j] : null;
+          const ann = company?.quarters?.find((x) => x.end === end)?.announced;
+          // On the result day only where the day is known.
+          const day = marginAt === "day" ? (ann ? snap(dayOf(ann)) : null) : mids[i];
+          if (day === null) return;
+          mp.push({ day, v, d: pv === null || pv === undefined ? null : Math.round((v - pv) * 10) / 10 });
+        });
+        mp.sort((a, b) => a.day - b.day);
+        const uniq = mp.filter((x, k) => k === 0 || x.day !== mp[k - 1].day);
+        const ms = chart.addSeries(LineSeries, {
+          color: p.dma50, lineWidth: 2, priceScaleId: "eb_m", lineType: LineType.Simple, priceFormat: fmt((x) => `${x.toFixed(1)}%`),
+          pointMarkersVisible: true, pointMarkersRadius: 3,
+          priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        });
+        ms.setData(uniq.map((x) => ({ time: toTime(x.day), value: x.v })));
+        chart.priceScale("eb_m").applyOptions({ visible: false, scaleMargins: { top: 0.14, bottom: 0.12 } });
+        if (showChg) {
+          ms.attachPrimitive(new PointLabels(uniq.filter((x) => x.d !== null).map((x) => ({
+            day: x.day, v: x.v,
+            color: x.d! > 0 ? p.pos : x.d! < 0 ? p.neg : p.ink3,
+            text: `${x.d! > 0 ? "+" : x.d! < 0 ? "−" : ""}${Math.abs(x.d!).toFixed(1)}`,
+          })), p.font));
+        }
+      }
       // Each quarter's own figure, its fiscal quarter, and its change on the
       // same quarter a year earlier or the one before, found by date.
       const ym = (iso: string) => Number(iso.slice(0, 4)) * 12 + Number(iso.slice(5, 7));
@@ -1924,7 +2020,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
     };
     // `range` is applied below without a rebuild.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, company, view, interval, prefs, peWin, showDates, showChg, epsCmp, showCA, caOn, hidden, cmps, themeKey, symbol, etfDoc, spsOn, overlays, debtOn, fv, fvMode, mkt, showMkt]);
+  }, [file, company, view, interval, prefs, peWin, showDates, showChg, epsCmp, marginAt, showCA, caOn, hidden, cmps, themeKey, symbol, etfDoc, spsOn, overlays, debtOn, fv, fvMode, mkt, showMkt]);
 
   const applyRange = () => {
     const chart = chartRef.current, sp = spanRef.current;
@@ -2391,6 +2487,13 @@ export default function FullChart({ symbol }: { symbol: string }) {
                         </span>
                       ))}
                     </div>
+                    {view === "ebitda" && !isHidden("ebitda_m") && (company?.quarters?.length ?? 0) > 0 && (
+                      <div className="px-3 pt-1 pb-2">
+                        <span className="block text-[15px] text-[var(--ink)]">EBITDA margin point</span>
+                        <span className="block text-[12px] text-[var(--ink3)] mb-1.5">Over the middle of its quarter, or on the day its results came out</span>
+                        <Seg value={marginAt} options={[["mid", "Mid-quarter"], ["day", "Result day"]]} onChange={setMarginAt} />
+                      </div>
+                    )}
                     <Toggle on={showChg} label="Growth %" sub="Printed over each bar when there is room for every one" onClick={() => setShowChg(!showChg)} />
                     {showChg && (
                       <div className="px-3 pb-2">

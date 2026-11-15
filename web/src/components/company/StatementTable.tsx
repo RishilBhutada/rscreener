@@ -56,12 +56,14 @@ export function ViewSwitch({ view, onChange }: { view: TableView; onChange: (v: 
   );
 }
 
-export function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, pdfs, info, ttm }: {
+export function StatementTable({ title, stmt, subtitle, boldRows, next, kind, symbol, pdfs, pdfLabel, info, ttm }: {
   title: string; stmt: Stmt; subtitle?: string; boldRows?: string[];
   /** The annual table's trailing-twelve-month column, shown last in the grid. */
   ttm?: { asOf: string; values: Record<string, number | null> } | null;
   /** The results PDF for each period, aligned with stmt.periods ("Raw PDF" row). */
   pdfs?: (string | null)[];
+  /** The PDF row's name: "Results PDF" under quarters, "Annual report" under years. */
+  pdfLabel?: string;
   /** The coming quarter, named in the grid's top-left corner - the quarterly table only. */
   next?: NextResults;
   /** Which table this is, for its "%" switch and row order; and whose page. */
@@ -321,14 +323,15 @@ export function StatementTable({ title, stmt, subtitle, boldRows, next, kind, sy
             })}
             {pdfs && !draft && pdfs.slice(from).some(Boolean) && (
               <tr className="border-b border-[var(--line)]">
-                <td className="px-3 py-2 sm:py-1.5 sticky left-0 bg-[var(--card)] text-[var(--ink2)]">Raw PDF</td>
+                <td className="px-3 py-2 sm:py-1.5 sticky left-0 bg-[var(--card)] text-[var(--ink2)] font-medium">{pdfLabel ?? "Results PDF"}</td>
                 {ttm && <td />}
                 {cols.map((at) => {
                   const u = pdfs[at];
                   return (
                     <td key={at} className="px-3 py-2 sm:py-1.5 text-right">
                       {u ? <a href={u.includes("://") ? u : `https://nsearchives.nseindia.com/corporate/${u}`} target="_blank" rel="noopener noreferrer"
-                        aria-label={`Results PDF, ${periodLabel(stmt.periods[at])}`} className="inline-flex text-[var(--accent-ink)]"><ExternalGlyph size={14} /></a> : null}
+                        aria-label={`${pdfLabel ?? "Results PDF"}, ${periodLabel(stmt.periods[at])}`}
+                        className="inline-flex items-center gap-0.5 text-[12px] font-semibold text-[var(--accent-ink)] hover:underline">PDF<ExternalGlyph size={12} /></a> : null}
                     </td>
                   );
                 })}
