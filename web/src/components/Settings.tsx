@@ -10,6 +10,7 @@ import { reloadBypassingCache } from "@/lib/reload";
 import { clearOrders, customOrders } from "@/lib/tableprefs";
 import { backupText, restoreText } from "@/lib/sync";
 import { allWatched } from "@/lib/watchlists";
+import { labOn } from "@/lib/destinations";
 import { Updates, loadUpdates, markSeen, updateWhen } from "@/lib/updates";
 import {
   addPassword, authMessage, firebaseConfigured, hasPassword, inApp, sendPasswordReset, signInWithEmail, signInWithGoogle, signOutOfGoogle, useAuth,
@@ -53,6 +54,7 @@ const SECTIONS: { id: string; label: string }[] = [
 
 const THEMES = [["light", "Light"], ["dark", "Dark"], ["black", "Black"], ["system", "Auto"]] as const;
 const LAYOUTS = [["scroll", "Scroll"], ["swipe", "Swipe"]] as const;
+const LAB_SWITCH: readonly (readonly ["off" | "on", string])[] = [["off", "Off"], ["on", "On"]];
 
 const ACCENTS = ["mono", "indigo", "emerald", "rose", "amber"] as const;
 
@@ -269,6 +271,13 @@ function MainScreen() {
   const [theme, setTheme] = useState("system");
   const [accent, setAccent] = useState("indigo");
   const [sections, setSections] = useState<SectionMode>("scroll");
+  // The Options lab (Research hub): off until switched on here.
+  const [lab, setLab] = useState(false);
+  const pickLab = (v: "off" | "on") => {
+    setLab(v === "on");
+    try { if (v === "on") localStorage.setItem("rs_lab", "1"); else localStorage.removeItem("rs_lab"); } catch { /* not remembered */ }
+    window.dispatchEvent(new Event("rs-lab"));
+  };
   const [rowOrders, setRowOrders] = useState<string[]>([]);
   const [isDark, setIsDark] = useState(false);
   const [secOrder, setSecOrder] = useState<string[]>([]);
@@ -280,6 +289,7 @@ function MainScreen() {
     setTheme(localStorage.getItem("rs_theme") || "system");
     setAccent(localStorage.getItem("rs_accent") || "indigo");
     setSections(loadSectionMode());
+    setLab(labOn());
     setRowOrders(customOrders());
     setSecOrder(loadOrder("sections"));
     setChartUi(loadChartUi());
@@ -407,6 +417,13 @@ function MainScreen() {
 
       <Group title="App">
         <Row icon={<Glyph d={ICON.status} />} title="Data status" sub="How fresh each source is" href="/status" chevron />
+        <Row
+          icon={<Glyph d={ICON.change} />}
+          title="Options lab"
+          sub="Research only: tests an overnight Nifty option idea on history. Adds a tab under Research"
+          wrap
+          right={<Segmented label="Options lab" value={lab ? "on" : "off"} options={LAB_SWITCH} onChange={pickLab} />}
+        />
         <Row
           icon={<Glyph d={ICON.update} />}
           title="Check for updates"

@@ -61,7 +61,8 @@ function writeUpdates() {
     const [sha, at, subject, body] = rec.replace(/^\n+/, "").split("\x1f");
     if (!sha || !subject || skip.test(subject)) continue;
     const note = (body ?? "").split("\n").map((l) => l.trim()).find((l) => /^what's new:/i.test(l));
-    const text = (note ? note.replace(/^what's new:\s*/i, "") : subject).slice(0, 240);
+    const said = (note ? note.replace(/^what's new:\s*/i, "") : subject).slice(0, 240);
+    const text = said.charAt(0).toUpperCase() + said.slice(1);
     all.push({ n: all.length + 1, sha, at, text });
   }
   const since = Date.now() - 366 * 86400000;

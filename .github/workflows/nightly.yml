@@ -384,6 +384,14 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "22"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_volume_split.py --years 10 --minutes 20
+      - name: Read Nifty options for the Options lab (research only; daily F&O files, ten years)
+        # pipeline/fetch_nifty_options.py - Nifty option closes and first
+        # trades near the money, plus Nifty and India VIX levels. Each day read
+        # once, newest first: ten years fill over about a week of nights, then
+        # one file a night. Read-only; nothing here places a trade.
+        env:
+          RSCREENER_STEP_MINUTES: "17"
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_nifty_options.py --years 10 --minutes 15
       - name: Read mutual funds' monthly holdings (8 fund houses' own portfolio files)
         # pipeline/fetch_mf_holdings.py. Fund houses publish by about the 10th,
         # so this runs from the 6th to the 25th; each house-month is read once.
@@ -674,6 +682,10 @@ jobs:
         # web/public/vol/<SYMBOL>.json - delivered vs same-day shares: a year
         # daily, three years weekly, ten years monthly. Generated, never committed.
         run: python pipeline/export_vol_json.py
+      - name: Write the Options lab file
+        # web/public/optlab.json - one record a night: the option prices the
+        # browser's backtest needs. Generated, never committed.
+        run: python pipeline/export_optlab_json.py
       - name: Build the yearly snapshots the screener's history test runs on
         # web/public/backtest/: each 30 June since 2008, every company's
         # screener fields as known that day, and the next year's return (P10).

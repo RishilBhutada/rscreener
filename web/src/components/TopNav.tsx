@@ -7,7 +7,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Settings from "@/components/Settings";
 import { loadIndex, symbolHref } from "@/lib/index-data";
 import { BUILD_COMMIT, BUILD_SUBJECT, BUILD_TIME } from "@/lib/buildinfo";
-import { HUBS, HUB_OF, destination } from "@/lib/destinations";
+import { HUBS, HUB_OF, OPT_IN_TABS, destination } from "@/lib/destinations";
 import {
   REFRESH_MARK, isRefreshLoad, reloadBypassingCache,
   fetchLiveVersion, isNewer, pendingRelease, pendingText, type Pending, type Version,
@@ -430,7 +430,7 @@ function BackButton() {
   );
 }
 
-export default function TopNav({ active }: { active?: "home" | "screens" | "sectors" | "calendar" | "portfolio" | "watchlists" | "others" | "etfs" | "commodities" | "indices" | "world" | "dma" | "gold" | "news" | "status" | "settings" }) {
+export default function TopNav({ active }: { active?: "home" | "screens" | "sectors" | "calendar" | "portfolio" | "watchlists" | "others" | "etfs" | "commodities" | "indices" | "world" | "dma" | "optlab" | "gold" | "news" | "status" | "settings" }) {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<Lite[]>([]);
@@ -439,6 +439,7 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
   // button reopens where you were in it rather than its first tab.
   const hub = active ? HUB_OF[active] : undefined;
   const [lastTab, setLastTab] = useState<Record<string, string>>({});
+  const [optIn, setOptIn] = useState<Record<string, boolean>>({});
   useEffect(() => {
     const sync = () => {
       let saved: Record<string, string> = {};
@@ -448,14 +449,23 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
         try { localStorage.setItem("rs_hub_last", JSON.stringify(saved)); } catch { /* not remembered */ }
       }
       setLastTab(saved);
+      // Tabs that are opt-in (the Options lab) show only once switched on.
+      const on: Record<string, boolean> = {};
+      for (const [k, store] of Object.entries(OPT_IN_TABS)) {
+        try { on[k] = localStorage.getItem(store) === "1"; } catch { on[k] = false; }
+      }
+      setOptIn(on);
     };
     sync();
+    window.addEventListener("rs-lab", sync);
+    return () => window.removeEventListener("rs-lab", sync);
   }, [hub, active]);
+  const shown = (k: string) => !(k in OPT_IN_TABS) || !!optIn[k];
   const hubHref = (h: (typeof HUBS)[number]) => {
-    const key = lastTab[h.key] && h.tabs.includes(lastTab[h.key]) ? lastTab[h.key] : h.tabs[0];
+    const key = lastTab[h.key] && h.tabs.includes(lastTab[h.key]) && shown(lastTab[h.key]) ? lastTab[h.key] : h.tabs[0];
     return destination(key)?.href ?? "/";
   };
-  const hubTabs = hub && hub !== "home" ? HUBS.find((h) => h.key === hub)?.tabs ?? [] : [];
+  const hubTabs = (hub && hub !== "home" ? HUBS.find((h) => h.key === hub)?.tabs ?? [] : []).filter((k) => shown(k) || k === active);
   const boxRef = useRef<HTMLDivElement>(null);
 
   const ensureData = async () => {

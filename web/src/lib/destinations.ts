@@ -50,6 +50,11 @@ export const DESTINATIONS: { key: string; label: string; href: string; icon: str
   // of the market is above it now (owner, 13-Nov-2026).
   { key: "dma", label: "200 DMA", href: "/dma",
     icon: "M4 18.5h16M4.5 15c3-6 5.5-8 8-8s4.5 2.5 7 6M4.5 11.5h15" },
+  // The Options lab: a backtest of an overnight Nifty option strategy on ten
+  // years of exchange files. Research only, and hidden until it is switched
+  // on in Settings (owner, 15-Nov-2026; the plan puts F&O after Phase-3).
+  { key: "optlab", label: "Options lab", href: "/optlab",
+    icon: "M9 3.5h6M10 3.5v5.2L5.2 17a2.3 2.3 0 0 0 2 3.5h9.6a2.3 2.3 0 0 0 2-3.5L14 8.7V3.5M7.6 14.5h8.8" },
   { key: "calendar", label: "Calendar", href: "/calendar",
     icon: "M5.5 6h13A1.5 1.5 0 0 1 20 7.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6zM4 10.5h16M8.5 4v4M15.5 4v4" },
   { key: "status", label: "Data", href: "/status",
@@ -70,10 +75,17 @@ export const HUBS: Hub[] = [
     tabs: ["indices", "sectors", "world", "etfs", "commodities", "gold"] },
   // Screener first: the hub opens on it, so it stays one tap away.
   { key: "research", label: "Research", icon: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-3.5-3.5",
-    tabs: ["screens", "dma", "calendar", "news", "others"] },
+    tabs: ["screens", "dma", "calendar", "news", "others", "optlab"] },
   { key: "you", label: "You", icon: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c0-4 3.6-7 8-7s8 3 8 7",
     tabs: ["watchlists", "portfolio", "status", "settings"] },
 ];
+
+/** Tabs shown only once switched on in Settings: destination key -> the
+ *  localStorage key that holds "1". */
+export const OPT_IN_TABS: Record<string, string> = { optlab: "rs_lab" };
+export function labOn(): boolean {
+  try { return localStorage.getItem("rs_lab") === "1"; } catch { return false; }
+}
 
 /** The hub a page belongs to, by its destination key. */
 export const HUB_OF: Record<string, string> = Object.fromEntries(HUBS.flatMap((h) => h.tabs.map((t) => [t, h.key])));
