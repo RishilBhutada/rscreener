@@ -1,103 +1,200 @@
-/** The Options lab's backtest: buy a Nifty call and a put near one day's
- *  close, sell both the next trading day. Runs in the browser on optlab.json
- *  (pipeline/export_optlab_json.py), so every parameter can be changed.
+/** The Lab's backtest: any mix of bought and sold calls, puts and futures on
+ *  one instrument, entered and left on daily prices. Runs in the browser on
+ *  lab/<SYMBOL>.json and lab/index.json (pipeline/export_lab_json.py), so
+ *  every setting can be changed.
  *
  *  RESEARCH ONLY. Nothing here places or prepares a trade; the owner's plan
- *  puts F&O after Phase-3 (owner, 15-Nov-2026). Pure functions, tested. */
+ *  puts F&O after Phase-3 (owner, 15/16-Nov-2026). Pure functions, tested. */
 
-/** [expiry, ATM strike, step, call close D, put close D, call open D+1,
- *   put open D+1, call close D+1, put close D+1] - arrays over ATM-span..ATM+span. */
-export type OptExp = [string, number, number, (number | null)[], (number | null)[], (number | null)[], (number | null)[], (number | null)[], (number | null)[]];
-/** [D, D+1, nifty close D, nifty open D+1, nifty close D+1, VIX close D, expiries] */
-export type OptDay = [string, string, number | null, number | null, number | null, number | null, OptExp[]];
-export type OptLab = { generated_at: string; lot: number; span: number; days: OptDay[] };
+/** [expiry, lowest strike, step, call open[], call close[], put open[], put close[]] */
+export type Exp = [string, number, number, (number | null)[], (number | null)[], (number | null)[], (number | null)[]];
+/** [date, underlying close, futures [expiry, open, close][], put/call OI ratio, expiries] */
+export type Day = [string, number | null, [string, number | null, number | null][], number | null, Exp[]];
+export type Chain = { sym: string; lot: number; index: boolean; days: Day[] };
+/** Market-wide facts per date: [India VIX close, VIX % change that day, FII
+ *  index-futures long %, S&P 500 % change in the US session that ended before
+ *  this Indian day opened, event letters ("R" RBI policy, "B" Budget)] */
+export type Market = Record<string, [number | null, number | null, number | null, number | null, string]>;
+
+export type Leg = { side: 1 | -1; kind: "C" | "P" | "F"; /** strikes above (+) or below (-) at-the-money */ off: number; /** 0 nearest expiry, 1 the next */ exp: number };
+export type Hold = "overnight" | "intraday" | "days" | "expiry";
+type Tri = "any" | "only" | "skip";
+type Dir = "any" | "up" | "down";
 
 export type Params = {
-  /** which expiry: the nearest that qualifies, or the one after it */
-  expiry: "near" | "next";
-  /** calendar days from the entry day to expiry, at least */
+  legs: Leg[];
+  /** overnight: close -> next open. intraday: open -> close. days: close -> close N days on. expiry: close -> settlement. */
+  hold: Hold;
+  days: number;
+  /** calendar days from entry to the nearest expiry used, at least */
   minDte: number;
-  /** strikes out of the money for each leg: 0 = both at the money (a straddle) */
-  width: number;
-  /** sell at the next day's first trade, or at its close */
-  exit: "open" | "close";
-  /** points lost to the bid-ask spread per option, each time it is traded */
-  slip: number;
-  /** rupees per order (four orders a night) */
-  brokerage: number;
-  lot: number;
-  /** STT, exchange, SEBI, stamp duty and GST */
-  charges: boolean;
-  /** entry days: 1 = Monday .. 5 = Friday */
+  slip: number; brokerage: number; lot: number; charges: boolean;
   weekdays: number[];
-  vixMin: number | null;
-  vixMax: number | null;
-  from: string | null;
-  to: string | null;
+  vixMin: number | null; vixMax: number | null; vixDir: Dir;
+  /** the entry day is an expiry day of this instrument */
+  expiryDay: Tri;
+  /** an RBI policy or Budget day falls inside the holding period */
+  event: Tri;
+  /** underlying against its own 200-day average on the entry day */
+  trend: "any" | "above" | "below";
+  /** the US market's last finished session before entry */
+  usDir: Dir;
+  pcrMin: number | null; pcrMax: number | null;
+  fiiMin: number | null; fiiMax: number | null;
+  from: string | null; to: string | null;
 };
 
+export const PRESETS: [string, Leg[]][] = [
+  ["Long straddle", [{ side: 1, kind: "C", off: 0, exp: 0 }, { side: 1, kind: "P", off: 0, exp: 0 }]],
+  ["Short straddle", [{ side: -1, kind: "C", off: 0, exp: 0 }, { side: -1, kind: "P", off: 0, exp: 0 }]],
+  ["Long strangle", [{ side: 1, kind: "C", off: 2, exp: 0 }, { side: 1, kind: "P", off: -2, exp: 0 }]],
+  ["Short strangle", [{ side: -1, kind: "C", off: 2, exp: 0 }, { side: -1, kind: "P", off: -2, exp: 0 }]],
+  ["Bull call spread", [{ side: 1, kind: "C", off: 0, exp: 0 }, { side: -1, kind: "C", off: 2, exp: 0 }]],
+  ["Bear put spread", [{ side: 1, kind: "P", off: 0, exp: 0 }, { side: -1, kind: "P", off: -2, exp: 0 }]],
+  ["Iron condor", [{ side: -1, kind: "C", off: 2, exp: 0 }, { side: 1, kind: "C", off: 4, exp: 0 }, { side: -1, kind: "P", off: -2, exp: 0 }, { side: 1, kind: "P", off: -4, exp: 0 }]],
+  ["Iron butterfly", [{ side: -1, kind: "C", off: 0, exp: 0 }, { side: -1, kind: "P", off: 0, exp: 0 }, { side: 1, kind: "C", off: 4, exp: 0 }, { side: 1, kind: "P", off: -4, exp: 0 }]],
+  ["Buy call", [{ side: 1, kind: "C", off: 0, exp: 0 }]],
+  ["Buy put", [{ side: 1, kind: "P", off: 0, exp: 0 }]],
+  ["Long future", [{ side: 1, kind: "F", off: 0, exp: 0 }]],
+  ["Short future", [{ side: -1, kind: "F", off: 0, exp: 0 }]],
+];
+
 export const DEFAULTS: Params = {
-  expiry: "near", minDte: 1, width: 0, exit: "open", slip: 0.5, brokerage: 20, lot: 65, charges: true,
-  weekdays: [1, 2, 3, 4, 5], vixMin: null, vixMax: null, from: null, to: null,
+  legs: PRESETS[0][1], hold: "overnight", days: 1, minDte: 1, slip: 0.5, brokerage: 20, lot: 65, charges: true,
+  weekdays: [1, 2, 3, 4, 5], vixMin: null, vixMax: null, vixDir: "any", expiryDay: "any", event: "any", trend: "any", usDir: "any",
+  pcrMin: null, pcrMax: null, fiiMin: null, fiiMax: null, from: null, to: null,
 };
 
 export type Trade = {
-  d0: string; d1: string; expiry: string; dte: number; wd: number; vix: number | null;
-  callK: number; putK: number;
-  /** premium paid for the pair, and what it sold for (index points, before costs) */
-  paid: number; got: number;
+  d0: string; d1: string; dte: number; wd: number;
+  vix: number | null; pcr: number | null; fii: number | null; us: number | null;
+  above200: boolean | null; onExpiry: boolean; event: boolean;
+  /** net premium paid (+) or received (-), index points */
+  paid: number;
   gross: number; costs: number; net: number;
-  /** net as a percentage of the premium paid */
-  pct: number;
-  /** Nifty's move from the entry close to the exit, % (known only afterwards) */
+  /** the underlying's move from entry to exit, % (known only afterwards) */
   move: number | null;
 };
 
-const DAY = 86400000;
-const days = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / DAY);
+const DAYMS = 86400000;
+const gap = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / DAYMS);
+const mid = (e: Exp) => (e[3].length - 1) / 2;
+/** A strike's place in an expiry's grid, or -1 when it is outside it. */
+const at = (e: Exp, k: number) => { const i = Math.round((k - e[1]) / e[2]); return i >= 0 && i < e[3].length && Math.abs(e[1] + i * e[2] - k) < 1e-6 ? i : -1; };
 
-/** Every cost of one night, in index points per unit, at today's rates:
- *  spread on four trades; brokerage on four orders; STT 0.1% of the premium
- *  sold; exchange charge 0.03503% and SEBI 0.0001% of premium both ways;
- *  stamp duty 0.003% of the premium bought; GST 18% on brokerage, exchange
- *  and SEBI charges. (Rates as of late 2024 - earlier years were charged a
- *  little less STT.) */
-export function costs(paid: number, got: number, p: Pick<Params, "slip" | "brokerage" | "lot" | "charges">): number {
-  const buy = paid + 2 * p.slip, sell = Math.max(got - 2 * p.slip, 0);
-  let c = 4 * p.slip;
-  if (p.charges) {
-    const brk = (4 * p.brokerage) / Math.max(p.lot, 1);
-    const txn = 0.0003503 * (buy + sell), sebi = 0.000001 * (buy + sell);
-    c += brk + 0.001 * sell + txn + sebi + 0.00003 * buy + 0.18 * (brk + txn + sebi);
+/** What one leg cost to trade, in points per unit, at today's rates.
+ *  Options: STT 0.1% of premium sold (0.125% of the settlement value of a
+ *  bought option left to expire in the money), exchange 0.03503%, SEBI
+ *  0.0001%, stamp 0.003% of premium bought. Futures: STT 0.02% of value
+ *  sold, exchange 0.00173%, stamp 0.002% of value bought. Brokerage per
+ *  order and GST 18% on brokerage, exchange and SEBI charges. A leg left to
+ *  expire has one order and no spread on the way out. */
+export function legCost(leg: Leg, entry: number, exit: number, settled: boolean, p: Pick<Params, "slip" | "brokerage" | "lot" | "charges">): number {
+  const orders = settled ? 1 : 2;
+  let c = orders * p.slip;
+  if (!p.charges) return c;
+  const buy = leg.side === 1 ? entry : exit, sell = leg.side === 1 ? exit : entry;
+  const brk = (orders * p.brokerage) / Math.max(p.lot, 1);
+  const traded = settled ? entry : entry + exit;
+  if (leg.kind === "F") {
+    const txn = 0.0000173 * traded, sebi = 0.000001 * traded;
+    c += brk + 0.0002 * sell + txn + sebi + 0.00002 * buy + 0.18 * (brk + txn + sebi);
+  } else {
+    const txn = 0.0003503 * traded, sebi = 0.000001 * traded;
+    const stt = settled ? (leg.side === 1 ? 0.00125 * exit : 0.001 * entry) : 0.001 * sell;
+    c += brk + stt + txn + sebi + 0.00003 * (settled && leg.side === -1 ? 0 : buy) + 0.18 * (brk + txn + sebi);
   }
   return c;
 }
 
-export function run(lab: OptLab, p: Params): Trade[] {
-  const out: Trade[] = [];
-  const mid = lab.span;
-  for (const [d0, d1, n0, n1o, n1c, vix, exps] of lab.days) {
+export function run(chain: Chain, market: Market, p: Params): Trade[] {
+  const D = chain.days, out: Trade[] = [];
+  const idx = new Map(D.map((d, i) => [d[0], i]));
+  // The underlying each day: the stated close, else the nearest future's.
+  const und = D.map((d) => d[1] ?? d[2][0]?.[2] ?? null);
+  const avg200: (number | null)[] = [];
+  { let s = 0, n = 0; const q: number[] = [];
+    for (const u of und) { if (u !== null) { q.push(u); s += u; n++; if (q.length > 200) { s -= q.shift()!; n--; } } avg200.push(n === 200 ? s / 200 : null); } }
+  const expiries = new Set(D.flatMap((d) => d[4].map((e) => e[0])));
+
+  for (let i = 0; i < D.length; i++) {
+    const [d0, , , pcr] = D[i];
     if (p.from && d0 < p.from) continue;
     if (p.to && d0 > p.to) continue;
     const wd = new Date(`${d0}T00:00:00Z`).getUTCDay();
     if (!p.weekdays.includes(wd)) continue;
+    const mk = market[d0] ?? [null, null, null, null, ""];
+    const [vix, vixChg, fii, us] = mk;
     if (p.vixMin !== null && (vix === null || vix < p.vixMin)) continue;
     if (p.vixMax !== null && (vix === null || vix > p.vixMax)) continue;
-    const ok = exps.filter((e) => days(d0, e[0]) >= p.minDte);
-    const e = ok[p.expiry === "near" ? 0 : 1];
-    if (!e) continue;
-    const ci = mid + p.width, pi = mid - p.width;
-    if (ci >= e[3].length || pi < 0) continue;
-    const c0 = e[3][ci], p0 = e[4][pi];
-    const c1 = (p.exit === "open" ? e[5] : e[7])[ci], p1 = (p.exit === "open" ? e[6] : e[8])[pi];
-    // Both legs must have traded on both days, or there was no price to deal at.
-    if (c0 === null || p0 === null || c1 === null || p1 === null) continue;
-    const paid = c0 + p0, got = c1 + p1, gross = got - paid, cost = costs(paid, got, p), net = gross - cost;
-    const n1 = p.exit === "open" ? n1o : n1c;
+    if (p.vixDir !== "any" && (vixChg === null || (p.vixDir === "up") !== (vixChg > 0))) continue;
+    if (p.usDir !== "any" && (us === null || (p.usDir === "up") !== (us > 0))) continue;
+    if (p.pcrMin !== null && (pcr === null || pcr < p.pcrMin)) continue;
+    if (p.pcrMax !== null && (pcr === null || pcr > p.pcrMax)) continue;
+    if (p.fiiMin !== null && (fii === null || fii < p.fiiMin)) continue;
+    if (p.fiiMax !== null && (fii === null || fii > p.fiiMax)) continue;
+    const onExpiry = expiries.has(d0);
+    if (p.expiryDay === "only" ? !onExpiry : p.expiryDay === "skip" && onExpiry) continue;
+    const above200 = und[i] !== null && avg200[i] !== null ? und[i]! > avg200[i]! : null;
+    if (p.trend !== "any" && (above200 === null || (p.trend === "above") !== above200)) continue;
+
+    // Intraday enters at the open, so at-the-money is yesterday's: today's is
+    // worked out from today's closes, which nobody knew at the open.
+    const ref = p.hold === "intraday" ? D[i - 1] : D[i];
+    if (!ref) continue;
+    const live = ref[4].filter((e) => gap(d0, e[0]) >= (p.hold === "intraday" ? 0 : p.minDte));
+    const liveF = D[i][2].filter((f) => gap(d0, f[0]) >= (p.hold === "intraday" ? 0 : p.minDte));
+    let gross = 0, cost = 0, paid = 0, ok = true, d1 = "", dte = 0;
+    const legs: { leg: Leg; exp: string; k: number }[] = [];
+    for (const leg of p.legs) {
+      if (leg.kind === "F") { const f = liveF[leg.exp]; if (!f) { ok = false; break; } legs.push({ leg, exp: f[0], k: 0 }); }
+      else { const e = live[leg.exp]; if (!e) { ok = false; break; } legs.push({ leg, exp: e[0], k: e[1] + (mid(e) + leg.off) * e[2] }); }
+    }
+    if (!ok || !legs.length) continue;
+    const firstExp = legs.map((l) => l.exp).sort()[0];
+    dte = gap(d0, firstExp);
+    // Where the trade ends.
+    let j = -1, settle = false;
+    if (p.hold === "overnight") j = i + 1;
+    else if (p.hold === "intraday") j = i;
+    else if (p.hold === "days") j = i + Math.max(1, p.days);
+    else { settle = true; j = idx.get(firstExp) ?? -1; if (j < 0) { for (let x = i + 1; x < D.length && D[x][0] <= firstExp; x++) j = x; } }
+    if (j < 0 || j >= D.length || (p.hold !== "intraday" && j <= i)) continue;
+    // A multi-day hold may not run past the first expiry among its legs.
+    if (p.hold === "days" && D[j][0] > firstExp) continue;
+    if (gap(d0, D[j][0]) > (p.hold === "overnight" ? 5 : 400)) continue;   // a hole in the data, not a weekend
+    d1 = D[j][0];
+
+    const price = (day: Day, l: { leg: Leg; exp: string; k: number }, when: "open" | "close"): number | null => {
+      if (l.leg.kind === "F") { const f = day[2].find((x) => x[0] === l.exp); return f ? f[when === "open" ? 1 : 2] : null; }
+      const e = day[4].find((x) => x[0] === l.exp); if (!e) return null;
+      const n = at(e, l.k); if (n < 0) return null;
+      const col = ((l.leg.kind === "C" ? 3 : 5) + (when === "open" ? 0 : 1)) as 3 | 4 | 5 | 6;
+      return e[col][n];
+    };
+    for (const l of legs) {
+      const entry = price(D[i], l, p.hold === "intraday" ? "open" : "close");
+      let exit: number | null;
+      const legSettles = settle && l.exp === firstExp;
+      if (legSettles) {
+        const u = und[j];
+        exit = u === null ? null : l.leg.kind === "F" ? u : l.leg.kind === "C" ? Math.max(u - l.k, 0) : Math.max(l.k - u, 0);
+      } else exit = price(D[j], l, p.hold === "overnight" ? "open" : "close");
+      // Every leg must have traded at both ends, or there was no price to deal at.
+      if (entry === null || exit === null) { ok = false; break; }
+      gross += l.leg.side * (exit - entry);
+      if (l.leg.kind !== "F") paid += l.leg.side * entry;
+      cost += legCost(l.leg, entry, exit, legSettles, p);
+    }
+    if (!ok) continue;
+    let event = false;
+    for (let x = p.hold === "intraday" ? i : i + 1; x <= j; x++) if ((market[D[x][0]]?.[4] ?? "") !== "") event = true;
+    if (p.event === "only" ? !event : p.event === "skip" && event) continue;
+    const uEnd = p.hold === "overnight" ? (D[j][2][0]?.[1] ?? null) : und[j];
+    const uStart = p.hold === "intraday" ? (D[i][2][0]?.[1] ?? null) : (p.hold === "overnight" ? (D[i][2][0]?.[2] ?? und[i]) : und[i]);
     out.push({
-      d0, d1, expiry: e[0], dte: days(d0, e[0]), wd, vix, callK: e[1] + p.width * e[2], putK: e[1] - p.width * e[2],
-      paid, got, gross, costs: cost, net, pct: paid > 0 ? (net / paid) * 100 : 0,
-      move: n0 && n1 ? (n1 / n0 - 1) * 100 : null,
+      d0, d1, dte, wd, vix, pcr, fii, us, above200, onExpiry, event, paid, gross, costs: cost, net: gross - cost,
+      move: uStart && uEnd ? (uEnd / uStart - 1) * 100 : null,
     });
   }
   return out;
@@ -105,25 +202,24 @@ export function run(lab: OptLab, p: Params): Trade[] {
 
 export type Stats = {
   n: number; wins: number; winRate: number;
-  /** per night, index points */
   avg: number; median: number; total: number; best: number; worst: number;
-  avgPct: number; avgGross: number; avgCosts: number;
+  avgGross: number; avgCosts: number; avgPaid: number;
   /** the deepest fall of the running total from an earlier peak, points */
   maxDrawdown: number;
 };
 
-export function stats(ts: Trade[]): Stats | null {
+export function stats(ts: Pick<Trade, "net" | "gross" | "costs" | "paid">[]): Stats | null {
   if (!ts.length) return null;
   const nets = ts.map((t) => t.net), sorted = [...nets].sort((a, b) => a - b), n = ts.length;
   const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
-  let run = 0, peak = 0, dd = 0;
-  for (const v of nets) { run += v; peak = Math.max(peak, run); dd = Math.max(dd, peak - run); }
+  let tot = 0, peak = 0, dd = 0;
+  for (const v of nets) { tot += v; peak = Math.max(peak, tot); dd = Math.max(dd, peak - tot); }
   const wins = nets.filter((v) => v > 0).length;
   return {
     n, wins, winRate: (wins / n) * 100, avg: sum(nets) / n,
     median: n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2,
     total: sum(nets), best: sorted[n - 1], worst: sorted[0],
-    avgPct: sum(ts.map((t) => t.pct)) / n, avgGross: sum(ts.map((t) => t.gross)) / n, avgCosts: sum(ts.map((t) => t.costs)) / n,
+    avgGross: sum(ts.map((t) => t.gross)) / n, avgCosts: sum(ts.map((t) => t.costs)) / n, avgPaid: sum(ts.map((t) => t.paid)) / n,
     maxDrawdown: dd,
   };
 }
@@ -131,8 +227,8 @@ export function stats(ts: Trade[]): Stats | null {
 export type GroupRow = { key: string; n: number; winRate: number; avg: number; total: number };
 
 /** Trades grouped by `key`, in the order given by `order` (else first seen). */
-export function group(ts: Trade[], key: (t: Trade) => string | null, order?: string[]): GroupRow[] {
-  const m = new Map<string, Trade[]>();
+export function group<T extends { net: number }>(ts: T[], key: (t: T) => string | null, order?: string[]): GroupRow[] {
+  const m = new Map<string, T[]>();
   for (const t of ts) {
     const k = key(t);
     if (k === null) continue;
@@ -149,7 +245,7 @@ export function group(ts: Trade[], key: (t: Trade) => string | null, order?: str
 export const WEEKDAYS = ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
 export const VIX_BANDS = ["Under 12", "12-15", "15-20", "20-25", "25+"];
 export const vixBand = (v: number | null) => (v === null ? null : v < 12 ? VIX_BANDS[0] : v < 15 ? VIX_BANDS[1] : v < 20 ? VIX_BANDS[2] : v < 25 ? VIX_BANDS[3] : VIX_BANDS[4]);
-export const DTE_BANDS = ["1-2 days", "3-7 days", "8-14 days", "15+ days"];
+export const DTE_BANDS = ["0-2 days", "3-7 days", "8-14 days", "15+ days"];
 export const dteBand = (d: number) => (d <= 2 ? DTE_BANDS[0] : d <= 7 ? DTE_BANDS[1] : d <= 14 ? DTE_BANDS[2] : DTE_BANDS[3]);
 export const MOVE_BANDS = ["Under 0.25%", "0.25-0.5%", "0.5-1%", "1%+"];
 export const moveBand = (m: number | null) => {
@@ -157,3 +253,9 @@ export const moveBand = (m: number | null) => {
   const a = Math.abs(m);
   return a < 0.25 ? MOVE_BANDS[0] : a < 0.5 ? MOVE_BANDS[1] : a < 1 ? MOVE_BANDS[2] : MOVE_BANDS[3];
 };
+export const PCR_BANDS = ["Under 0.8", "0.8-1.0", "1.0-1.2", "1.2+"];
+export const pcrBand = (v: number | null) => (v === null ? null : v < 0.8 ? PCR_BANDS[0] : v < 1 ? PCR_BANDS[1] : v < 1.2 ? PCR_BANDS[2] : PCR_BANDS[3]);
+export const FII_BANDS = ["Under 30%", "30-50%", "50-70%", "70%+"];
+export const fiiBand = (v: number | null) => (v === null ? null : v < 30 ? FII_BANDS[0] : v < 50 ? FII_BANDS[1] : v < 70 ? FII_BANDS[2] : FII_BANDS[3]);
+export const US_BANDS = ["Fell 1%+", "Fell under 1%", "Rose under 1%", "Rose 1%+"];
+export const usBand = (v: number | null) => (v === null ? null : v <= -1 ? US_BANDS[0] : v < 0 ? US_BANDS[1] : v < 1 ? US_BANDS[2] : US_BANDS[3]);

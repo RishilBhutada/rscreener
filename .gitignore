@@ -22,7 +22,7 @@ web/public/world.json
 web/public/market.json
 web/public/dma.json
 web/public/updates.json
-web/public/optlab.json
+web/public/lab/
 web/public/vol/
 web/public/sectors.json
 web/public/news-home.json

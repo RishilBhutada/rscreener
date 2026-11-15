@@ -68,7 +68,7 @@ const DEF_OFF = new Set(["ebitda:ebitda_m", "ov:ebitda:ebitda_m"]);
 type Interval = "d" | "w" | "m";
 type Range = "1M" | "3M" | "6M" | "YTD" | "1Y" | "2Y" | "3Y" | "5Y" | "10Y" | "MAX";
 type Kind = "candles" | "hollow" | "bars" | "heikin" | "line" | "area";
-type Ind = "vol" | "dma50" | "dma200" | "sma20" | "ema21" | "bb" | "rsi";
+type Ind = "vol" | "dma50" | "dma200" | "sma20" | "ema21" | "bb" | "rsi" | "mvix" | "mfii" | "mpcr";
 /** Results and corporate actions are drawn three ways at once, as the owner
  *  chose on 27-Sep-2026: fiscal quarters as tinted blocks behind the chart, a
  *  faint line through the chart on each event date, and a timeline band along
@@ -103,8 +103,11 @@ const KINDS: [Kind, string][] = [
 const INDS: [Ind, string][] = [
   ["vol", "Volume"], ["dma50", "50 DMA"], ["dma200", "200 DMA"], ["sma20", "SMA 20"],
   ["ema21", "EMA 21"], ["bb", "Bollinger Bands (20, 2)"], ["rsi", "RSI (14)"],
+  // The market's backdrop under a stock (owner, 16-Nov-2026): lab/index.json.
+  ["mvix", "India VIX"], ["mfii", "FII index futures long %"], ["mpcr", "Nifty put-call ratio"],
 ];
-const FIXED: Partial<Record<Ind, string>> = { sma20: "#3b82f6", ema21: "#14b8a6", rsi: "#a855f7" };
+const MARKET_INDS: Ind[] = ["mvix", "mfii", "mpcr"];
+const FIXED: Partial<Record<Ind, string>> = { sma20: "#3b82f6", ema21: "#14b8a6", rsi: "#a855f7", mvix: "#f59e0b", mfii: "#22c55e", mpcr: "#ec4899" };
 
 /** The series each non-price view draws, for its on/off switches. */
 const LAYERS: Record<Exclude<View, "price">, [string, string][]> = {
@@ -838,6 +841,25 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [showChg, setShowChg] = useState(() => pick0?.chg ?? true);
   const [epsCmp, setEpsCmp] = useState<"yoy" | "prev">(() => pick0?.cmp ?? "yoy");
   const [showCA, setShowCA] = useState(true);
+  // RBI policy and Budget days on the event strip, and the market series the
+  // three market indicators draw. Loaded once, only when one of them is on.
+  const [showMkt, setShowMkt] = useState(false);
+  const [mkt, setMkt] = useState<{ day: number[]; vix: (number | null)[]; fii: (number | null)[]; pcr: (number | null)[]; rbi: number[]; budget: number[] } | null>(null);
+  const wantMkt = showMkt || prefs.inds.some((k) => MARKET_INDS.includes(k));
+  useEffect(() => {
+    if (!wantMkt || mkt) return;
+    let live = true;
+    fetch(`${BASE}/lab/index.json`).then((r) => (r.ok ? r.json() : null))
+      .then((d: { series?: [string, number | null, number | null, number | null][]; events?: { rbi?: string[]; budget?: string[] } } | null) => {
+        if (!live || !d?.series) return;
+        setMkt({
+          day: d.series.map((x) => dayOf(x[0])), vix: d.series.map((x) => x[1]), fii: d.series.map((x) => x[2]), pcr: d.series.map((x) => x[3]),
+          rbi: (d.events?.rbi ?? []).map(dayOf), budget: (d.events?.budget ?? []).map(dayOf),
+        });
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [wantMkt, mkt]);
   const [evPop, setEvPop] = useState<{ title: string; items: { text: string; sub?: string; color: string }[] } | null>(null);
   const [caOn, setCaOn] = useState<Record<string, boolean>>({ dividend: true, bonus: true, split: true, rights: true, buyback: true, other: true });
   // Kept in the saved picks' words ("pe:line", "ov:ebitda:eb_ttm"); lines the
@@ -1107,7 +1129,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
       const comparing = cmps.some((c) => c.file);
       // Room at the foot of the price pane for the timeline band, when there
       // is anything to put in it.
-      const stripOn = (showCA && (company?.actions?.length ?? 0) > 0) || (showDates && (company?.quarters?.length ?? 0) > 0);
+      const stripOn = (showCA && (company?.actions?.length ?? 0) > 0) || (showDates && (company?.quarters?.length ?? 0) > 0) || (showMkt && !!mkt);
       chart.priceScale("right").applyOptions({
         mode: comparing ? PriceScaleMode.Percentage : prefs.log ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
         scaleMargins: { top: 0.08, bottom: (onInd.has("vol") ? 0.22 : 0.06) + (stripOn ? 0.1 : 0) },
@@ -1233,6 +1255,25 @@ export default function FullChart({ symbol }: { symbol: string }) {
         chart.panes()[0]?.setStretchFactor(3);
         chart.panes()[1]?.setStretchFactor(1);
       }
+      // The market's backdrop: each line on a scale of its own in the lower
+      // pane (their units differ), read from the legend. The value shown at a
+      // candle is the market's on that day, or the last one before it.
+      const mAt = (arr: (number | null)[]) => days.map((dd) => {
+        if (!mkt || !mkt.day.length || dd < mkt.day[0]) return null;
+        return arr[atOrBefore(mkt.day, dd)];
+      });
+      const mVals: Partial<Record<Ind, (number | null)[]>> = {};
+      if (mkt) {
+        for (const [k, arr] of [["mvix", mkt.vix], ["mfii", mkt.fii], ["mpcr", mkt.pcr]] as [Ind, (number | null)[]][]) {
+          if (!onInd.has(k)) continue;
+          mVals[k] = mAt(arr);
+          chart.addSeries(LineSeries, {
+            color: FIXED[k]!, lineWidth: 2, priceScaleId: k, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+          }, 1).setData(pts(days, mVals[k]!));
+          chart.panes()[0]?.setStretchFactor(3);
+          chart.panes()[1]?.setStretchFactor(1);
+        }
+      }
       legendAt = (day) => {
         const i = day === null ? rows.length - 1 : atOrBefore(days, day);
         const [t, o, h, l, c, vv] = rows[i];
@@ -1254,6 +1295,9 @@ export default function FullChart({ symbol }: { symbol: string }) {
           add(onInd.has("ema21"), "EMA 21", e21, FIXED.ema21!);
         }
         add(onInd.has("rsi"), "RSI", r14, FIXED.rsi!, (x) => x.toFixed(1));
+        if (mVals.mvix) add(true, "VIX", mVals.mvix, FIXED.mvix!, (x) => x.toFixed(1));
+        if (mVals.mfii) add(true, "FII long", mVals.mfii, FIXED.mfii!, (x) => `${x.toFixed(0)}%`);
+        if (mVals.mpcr) add(true, "PCR", mVals.mpcr, FIXED.mpcr!, (x) => x.toFixed(2));
         const nav = navArr[i];
         if (nav !== null && nav !== undefined) {
           const prem = (c / nav - 1) * 100;
@@ -1691,6 +1735,15 @@ export default function FullChart({ symbol }: { symbol: string }) {
           evs.push({ day: d, kind: "res", type: "res", tag: `Q${q.q}`, label: `Q${q.q} results`, text: `${Q_LABEL[q.q] ?? `Q${q.q}`} results declared ${dateOf(dayOf(q.announced))}`, color: p.q[q.q] ?? p.q[1] });
         }
       }
+      if (showMkt && mkt) {
+        for (const [list, tag, label, color] of [[mkt.rbi, "RBI", "RBI policy decision", "#f59e0b"], [mkt.budget, "BUD", "Union Budget", "#ec4899"]] as [number[], string, string, string][]) {
+          for (const md of list) {
+            const d = snap(anchorDays, md);
+            if (d === null) continue;
+            evs.push({ day: d, kind: "ca", type: tag, tag, label, text: `${label} · ${dateOf(md)}`, color });
+          }
+        }
+      }
       evs.sort((x, y) => x.day - y.day);
 
       if (evs.length) {
@@ -1829,7 +1882,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
     };
     // `range` is applied below without a rebuild.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, company, view, interval, prefs, peWin, showDates, showChg, epsCmp, showCA, caOn, hidden, cmps, themeKey, symbol, etfDoc, spsOn, overlays, debtOn, fv, fvMode]);
+  }, [file, company, view, interval, prefs, peWin, showDates, showChg, epsCmp, showCA, caOn, hidden, cmps, themeKey, symbol, etfDoc, spsOn, overlays, debtOn, fv, fvMode, mkt, showMkt]);
 
   const applyRange = () => {
     const chart = chartRef.current, sp = spanRef.current;
@@ -2296,6 +2349,9 @@ export default function FullChart({ symbol }: { symbol: string }) {
                 )}
 
                 {company && <Head>Events</Head>}
+                {company && (
+                  <Toggle on={showMkt} label="RBI policy and Budget days" sub="A hand-kept list, not checked line by line" onClick={() => setShowMkt(!showMkt)} />
+                )}
                 {(company?.quarters?.length ?? 0) > 0 && (
                   <Toggle on={showDates} label="Result dates" sub="The day each quarter's results were declared" onClick={() => setShowDates(!showDates)} />
                 )}
