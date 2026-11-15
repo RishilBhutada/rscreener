@@ -697,10 +697,15 @@ function growthCol(g: Growth | undefined, p: Pal): string {
 /** Auto levels (lib/levels): off until asked for, then all three layers. */
 type LvPrefs = { on: boolean; zones: boolean; trend: boolean; vol: boolean; sens: Sens };
 const LV_DEFAULT: LvPrefs = { on: false, zones: true, trend: true, vol: true, sens: "med" };
-type Prefs = { kind: Kind; inds: Ind[]; log: boolean; lv: LvPrefs };
+/** What decides a candle's or a volume bar's colour: its own open to close
+ *  (green when it closed above where it opened), or the close before it
+ *  (green when it closed above yesterday's close). Owner, 16-Nov-2026. */
+type ColourBy = "candle" | "prev";
+const COLOUR_BY: [ColourBy, string][] = [["candle", "Open to close"], ["prev", "Previous close"]];
+type Prefs = { kind: Kind; inds: Ind[]; log: boolean; lv: LvPrefs; volBy: ColourBy; candleBy: ColourBy };
 const PREF_KEY = "rs_fullchart";
 function loadPrefs(): Prefs {
-  const dflt: Prefs = { kind: "candles", inds: ["vol", "dma50", "dma200"], log: false, lv: LV_DEFAULT };
+  const dflt: Prefs = { kind: "candles", inds: ["vol", "dma50", "dma200"], log: false, lv: LV_DEFAULT, volBy: "candle", candleBy: "candle" };
   try {
     const p = JSON.parse(localStorage.getItem(PREF_KEY) || "null");
     if (!p) return dflt;
@@ -713,6 +718,8 @@ function loadPrefs(): Prefs {
         on: !!lv.on, zones: lv.zones !== false, trend: lv.trend !== false, vol: lv.vol !== false,
         sens: SENS.some(([k]) => k === lv.sens) ? lv.sens : "med",
       },
+      volBy: p.volBy === "prev" ? "prev" : "candle",
+      candleBy: p.candleBy === "prev" ? "prev" : "candle",
     };
   } catch {
     return dflt;
@@ -788,6 +795,27 @@ const Seg = <T extends string>({ value, options, onChange }: { value: T; options
 export default function FullChart({ symbol }: { symbol: string }) {
   const router = useRouter();
   const boxRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
+  // A pinch or a ctrl + wheel zooms the chart, never the page: the buttons,
+  // the switches and the legend stay their size (owner, 16-Nov-2026). The
+  // chart box takes every touch itself (touch-action: none); the rest of the
+  // screen allows panning only, and the gestures browsers zoom the page with
+  // are cancelled here - the chart still receives them.
+  useEffect(() => {
+    const el = pageRef.current;
+    if (!el) return;
+    const stop = (e: Event) => e.preventDefault();
+    const wheel = (e: WheelEvent) => { if (e.ctrlKey) e.preventDefault(); };
+    const touch = (e: TouchEvent) => { if (e.touches.length > 1) e.preventDefault(); };
+    el.addEventListener("gesturestart", stop, { passive: false });
+    el.addEventListener("wheel", wheel, { passive: false });
+    el.addEventListener("touchmove", touch, { passive: false });
+    return () => {
+      el.removeEventListener("gesturestart", stop);
+      el.removeEventListener("wheel", wheel);
+      el.removeEventListener("touchmove", touch);
+    };
+  }, []);
   const chartRef = useRef<IChartApi | null>(null);
   const kept = useRef<{ key: string; from: number; to: number } | null>(null);
   // First and last day of the series on screen, for placing a range. The range
@@ -822,7 +850,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
   type FvMode = "all" | "deliv" | "intra" | "split";
   const [fvMode, setFvMode] = useState<FvMode>("all");
   const [fvDays, setFvDays] = useState<{ sym: string; day: number[]; t: number[]; d: number[] } | null>(null);
-  const [prefs, setPrefs] = useState<Prefs>({ kind: "candles", inds: ["vol", "dma50", "dma200"], log: false, lv: LV_DEFAULT });
+  const [prefs, setPrefs] = useState<Prefs>({ kind: "candles", inds: ["vol", "dma50", "dma200"], log: false, lv: LV_DEFAULT, volBy: "candle", candleBy: "candle" });
   // The levels on screen, for the legend's one-line summary.
   const [lvl, setLvl] = useState<Levels | null>(null);
   const [sheet, setSheet] = useState<null | "type" | "layers" | "cmp">(null);
@@ -1134,7 +1162,16 @@ export default function FullChart({ symbol }: { symbol: string }) {
         mode: comparing ? PriceScaleMode.Percentage : prefs.log ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
         scaleMargins: { top: 0.08, bottom: (onInd.has("vol") ? 0.22 : 0.06) + (stripOn ? 0.1 : 0) },
       });
-      const ohlc = (rs: Row[]) => rs.map(([t, o, h, l, c]) => ({ time: toTime(t), open: o, high: h, low: l, close: c }));
+      // Up or down for each candle: against its own open, or against the
+      // close before it. The first candle has no close before it.
+      const upBy = (by: ColourBy) => rows.map(([, o, , , c], i) => (by === "prev" ? (i > 0 ? c >= rows[i - 1][4] : c >= o) : c >= o));
+      const candleUp = upBy(prefs.candleBy);
+      const tint = prefs.candleBy === "prev" && prefs.kind !== "heikin";
+      const tone = (i: number) => (candleUp[i] ? p.pos : p.neg);
+      const ohlc = (rs: Row[]) => rs.map(([t, o, h, l, c], i) => ({
+        time: toTime(t), open: o, high: h, low: l, close: c,
+        ...(tint ? { color: tone(i), wickColor: tone(i), borderColor: tone(i) } : {}),
+      }));
       const value = (rs: Row[]) => rs.map(([t, , , , c]) => ({ time: toTime(t), value: c }));
       let main: ISeriesApi<SeriesType>;
       const pf = fmt(axis);
@@ -1155,7 +1192,9 @@ export default function FullChart({ symbol }: { symbol: string }) {
             upColor: "rgba(0, 0, 0, 0)", downColor: p.neg, borderVisible: true, priceFormat: pf,
             borderUpColor: p.pos, borderDownColor: p.neg, wickUpColor: p.pos, wickDownColor: p.neg, priceLineVisible: false,
           });
-          main.setData(ohlc(rows)); break;
+          // Hollow keeps its fill by open to close (hollow = closed above its
+          // open); the outline and wick follow the chosen rule.
+          main.setData(ohlc(rows).map((b, i) => (tint ? { ...b, color: rows[i][4] >= rows[i][1] ? "rgba(0, 0, 0, 0)" : tone(i) } : b))); break;
         default:
           main = chart.addSeries(CandlestickSeries, {
             upColor: p.pos, downColor: p.neg, borderVisible: false, wickUpColor: p.pos, wickDownColor: p.neg, priceFormat: pf,
@@ -1231,18 +1270,21 @@ export default function FullChart({ symbol }: { symbol: string }) {
         });
         const v = hist();
         chart.priceScale("vol").applyOptions({ scaleMargins: stripOn ? { top: 0.74, bottom: 0.08 } : { top: 0.82, bottom: 0 } });
+        const volUp = upBy(prefs.volBy);
+        const dir = (i: number, a: number) => alpha(volUp[i] ? p.pos : p.neg, a);
         if (!fv || fvMode === "all") {
-          v.setData(rows.map(([t, o, , , c, vv]) => ({ time: toTime(t), value: vv, color: alpha(c >= o ? p.pos : p.neg, 0.45) })));
+          v.setData(rows.map(([t, , , , , vv], i) => ({ time: toTime(t), value: vv, color: dir(i, 0.45) })));
         } else {
-          const at = (f: (x: [number, number]) => number, color: string) =>
-            rows.flatMap((r, i) => (split[i] ? [{ time: toTime(r[0]), value: f(split[i]!), color }] : []));
+          const at = (f: (x: [number, number]) => number, color: (i: number) => string) =>
+            rows.flatMap((r, i) => (split[i] ? [{ time: toTime(r[0]), value: f(split[i]!), color: color(i) }] : []));
           if (fvMode === "split") {
-            v.setData(at((x) => x[0], alpha(p.ink3, 0.35)));
-            hist().setData(at((x) => x[1], alpha(p.accent, 0.8)));
+            // The stack keeps its own two colours: delivered over the total.
+            v.setData(at((x) => x[0], () => alpha(p.ink3, 0.35)));
+            hist().setData(at((x) => x[1], () => alpha(p.accent, 0.8)));
           } else if (fvMode === "deliv") {
-            v.setData(at((x) => x[1], alpha(p.accent, 0.8)));
+            v.setData(at((x) => x[1], (i) => dir(i, 0.6)));
           } else {
-            v.setData(at((x) => Math.max(x[0] - x[1], 0), alpha(p.ink3, 0.6)));
+            v.setData(at((x) => Math.max(x[0] - x[1], 0), (i) => dir(i, 0.45)));
           }
         }
       }
@@ -1999,7 +2041,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
     k === "dma50" ? "var(--chart-dma50)" : k === "dma200" ? "var(--chart-dma200)" : k === "vol" ? "var(--chart-vol)" : FIXED[k] ?? "var(--ink3)";
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-[var(--bg)] text-[var(--ink)] select-none">
+    <div ref={pageRef} className="fixed inset-0 z-[60] flex flex-col bg-[var(--bg)] text-[var(--ink)] select-none" style={{ touchAction: "pan-x pan-y" }}>
       <header className="shrink-0 flex items-center gap-2 px-2 pt-[env(safe-area-inset-top)] h-[calc(52px+env(safe-area-inset-top))] border-b border-[var(--line)]">
         <button onClick={back} aria-label="Back" className="rs-press w-10 h-10 rounded-full flex items-center justify-center text-[var(--ink2)] active:bg-[var(--card2)]">
           <svg viewBox="0 0 24 24" className="w-[22px] h-[22px]" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
@@ -2080,7 +2122,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
       )}
 
       <div className="relative flex-1 min-h-0">
-        <div ref={boxRef} className="absolute inset-0" />
+        <div ref={boxRef} className="absolute inset-0" style={{ touchAction: "none" }} />
         {L && (
           <div className="pointer-events-none absolute left-2 top-1.5 z-10 max-w-[calc(100%-72px)] text-[11px] leading-[1.35] tabular-nums">
             <p className="text-[var(--ink3)]">
@@ -2238,6 +2280,11 @@ export default function FullChart({ symbol }: { symbol: string }) {
                 <div className="mt-1.5 pt-1.5 border-t border-[var(--line)]">
                   <Toggle on={prefs.log} label="Log scale" sub="Equal percentage moves take equal height"
                     onClick={() => savePrefs({ ...prefs, log: !prefs.log })} />
+                  <div className="px-3 pt-2 pb-2">
+                    <span className="block text-[15px] text-[var(--ink)]">Candle colour</span>
+                    <span className="block text-[12px] text-[var(--ink3)] mb-1.5">Green when the close is above its open, or above the previous close</span>
+                    <Seg value={prefs.candleBy} options={COLOUR_BY} onChange={(v) => savePrefs({ ...prefs, candleBy: v })} />
+                  </div>
                 </div>
               </>
             )}
@@ -2252,6 +2299,13 @@ export default function FullChart({ symbol }: { symbol: string }) {
                         sub={cmps.length > 0 && k !== "vol" && k !== "rsi" ? "Hidden while comparing - averages mean nothing once rebased" : undefined}
                         onClick={() => savePrefs({ ...prefs, inds: indOn(k) ? prefs.inds.filter((x) => x !== k) : [...prefs.inds, k] })} />
                     ))}
+                    {indOn("vol") && (
+                      <div className="px-3 pt-1 pb-2">
+                        <span className="block text-[15px] text-[var(--ink)]">Volume colour</span>
+                        <span className="block text-[12px] text-[var(--ink3)] mb-1.5">Green when that day closed above its open, or above the previous close</span>
+                        <Seg value={prefs.volBy} options={COLOUR_BY} onChange={(v) => savePrefs({ ...prefs, volBy: v })} />
+                      </div>
+                    )}
                     {fv && indOn("vol") && (
                       <>
                         <Head>Volume shows</Head>
