@@ -1,11 +1,11 @@
 "use client";
 
-import { CheckGlyph, ChevronGlyph } from "@/components/Glyphs";
+import { CheckGlyph } from "@/components/Glyphs";
+import { ema, bollinger, rsi, IND_COLOUR } from "@/lib/indicators";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import TabIndicator from "@/components/TabIndicator";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { useBackClose } from "@/lib/backclose";
-import { ChartUi, loadChartUi } from "@/lib/chartui";
 import YearsChart from "@/components/YearsChart";
 import { loadIndex } from "@/lib/index-data";
 import { canonKey, companyKey, rangeToCompany, rangeToFull, readPick, writePick, type ChartPick } from "@/lib/chartpick";
@@ -131,6 +131,8 @@ type XY = {
   /** set on the EBITDA margin points: the change in percentage points on the
    *  point compared against (the quarter before, or a year earlier) */
   dpts?: number;
+  /** a bar's own colour - volume, green or red on the close before it */
+  c?: string;
 };
 
 /** How this bar's earnings compare with the bar being compared against.
@@ -283,6 +285,12 @@ function axisVal(v: number, kind: FmtKind, short: boolean): string {
   return fmtVal(v, kind);
 }
 
+type SmallInd = "sma20" | "ema21" | "bb" | "rsi" | "mvix" | "mfii" | "mpcr" | "events";
+const SMALL_INDS: [SmallInd, string][] = [
+  ["sma20", "SMA 20"], ["ema21", "EMA 21"], ["bb", "Bollinger (20, 2)"], ["rsi", "RSI (14)"],
+  ["mvix", "India VIX"], ["mfii", "FII index futures long %"], ["mpcr", "Nifty put-call ratio"], ["events", "RBI policy and Budget days"],
+];
+
 function sma(vals: number[], win: number): (number | null)[] {
   let sum = 0;
   return vals.map((v, i) => {
@@ -330,6 +338,9 @@ type SeriesDef = {
   /** straight segments with a dot on every point and, while growth is on, each
    *  point's change printed above it in green or red (EBITDA margin) */
   dots?: boolean;
+  /** shown and hidden with another series and left out of the legend - the
+   *  Bollinger band's outer lines follow its middle line's switch */
+  link?: string;
 };
 
 /** One filed quarter: the period it covers, its EPS, and when NSE broadcast it. */
@@ -420,17 +431,9 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
    *  bars - a P/E line over sales bars would be a ratio built from figures the
    *  chart is not showing. */
   const [perShare, setPerShare] = useState<"eps" | "sps" | "debt">(() => pick0?.per ?? "eps");
-  // How the controls above the chart are laid out - Settings > Company page >
-  // Chart controls (owner, 27-Oct-2026: "build all" of the three candidates,
-  // plus the layout before them as Classic). Sheet is the default.
-  const [ui, setUi] = useState<ChartUi>("a");
+  // The chart's options open in a sheet - the one layout kept of four
+  // (owner, 16-Nov-2026: "only the sheet option to remain").
   const [sheet, setSheet] = useState(false);
-  useEffect(() => {
-    setUi(loadChartUi());
-    const on = (e: Event) => setUi((e as CustomEvent<ChartUi>).detail);
-    window.addEventListener("rs-chart-ui", on);
-    return () => window.removeEventListener("rs-chart-ui", on);
-  }, []);
   // The line on each day a quarter's results were declared. It used to sit
   // behind a "Quarterly results" button that only opened a second "Result
   // dates" button; the owner asked for the dates themselves (11-Oct-2026).
@@ -440,6 +443,37 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   // calendar, not the business.
   const [epsCmp, setEpsCmp] = useState<"yoy" | "prev">(() => pick0?.cmp ?? "yoy");
   const [showChg, setShowChg] = useState(() => pick0?.chg ?? true);
+  // The full chart's indicators and market backdrop, picked in the options
+  // sheet (owner, 16-Nov-2026: "every addition made to chart is applicable to
+  // small and full view").
+  const [inds, setIndsState] = useState<SmallInd[]>([]);
+  useEffect(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem("rs_small_inds") || "[]");
+      if (Array.isArray(v)) setIndsState(v.filter((k: string) => SMALL_INDS.some(([x]) => x === k)));
+    } catch { /* none, then */ }
+  }, []);
+  const toggleInd = (k: SmallInd) => {
+    const next = inds.includes(k) ? inds.filter((x) => x !== k) : [...inds, k];
+    setIndsState(next);
+    try { localStorage.setItem("rs_small_inds", JSON.stringify(next)); } catch { /* still applied */ }
+  };
+  const [mkt, setMkt] = useState<{ t: number[]; vix: (number | null)[]; fii: (number | null)[]; pcr: (number | null)[]; rbi: number[]; budget: number[] } | null>(null);
+  const wantMkt = inds.some((k) => k === "mvix" || k === "mfii" || k === "mpcr" || k === "events");
+  useEffect(() => {
+    if (!wantMkt || mkt) return;
+    let live = true;
+    fetch(`${CHART_BASE}/lab/index.json`).then((r) => (r.ok ? r.json() : null))
+      .then((d: { series?: [string, number | null, number | null, number | null][]; events?: { rbi?: string[]; budget?: string[] } } | null) => {
+        if (!live || !d?.series) return;
+        setMkt({
+          t: d.series.map((x) => toT(x[0])), vix: d.series.map((x) => x[1]), fii: d.series.map((x) => x[2]), pcr: d.series.map((x) => x[3]),
+          rbi: (d.events?.rbi ?? []).map(toT), budget: (d.events?.budget ?? []).map(toT),
+        });
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [wantMkt, mkt]);
   // Where each quarter's EBITDA margin point stands: over the middle of its
   // quarter, or on the day its results were declared - when the market first
   // knew it (owner, 16-Nov-2026: "I want these two variations").
@@ -585,7 +619,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const debtAvail = !!debtSeries;
   const debtOn = perShare === "debt" && debtAvail;
   const ratioLabel = debtOn ? "Debt / Equity" : spsOn ? "P/S Ratio" : "PE Ratio";
-  const defOn = (s: SeriesDef) => isOn(s.key, s.group ? !(s.kind === "bars" || s.kind === "dashed") : s.dflt ?? true);
+  const defOn = (s: SeriesDef) => isOn(s.link ?? s.key, s.group ? !(s.kind === "bars" || s.kind === "dashed") : s.dflt ?? true);
   const toggle = (s: SeriesDef) => setOn({ ...on, [s.key]: !defOn(s) });
 
   // The volume split (owner, 14-Nov-2026): which part of the volume the bars
@@ -752,9 +786,49 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         if (d50.length > 1) defs.push({ key: "dma50", label: "50 DMA", color: "var(--chart-dma50)", kind: "line", axis: "R", data: d50, fmt: "rupee" });
         if (d200.length > 1) defs.push({ key: "dma200", label: "200 DMA", color: "var(--chart-dma200)", kind: "line", axis: "R", data: d200, fmt: "rupee" });
       }
+      // The full chart's indicators, in this series' own bars.
+      {
+        const closes = src.map((p) => p[1]);
+        const times = src.map((p) => toT(p[0]));
+        const along = (arr: (number | null)[]): XY[] =>
+          arr.flatMap((v, i) => (v === null || times[i] < cutoff ? [] : [{ t: times[i], v }]));
+        if (inds.includes("sma20")) defs.push({ key: "sma20", label: "SMA 20", color: IND_COLOUR.sma20, kind: "line", axis: "R", data: along(sma(closes, 20)), fmt: "rupee" });
+        if (inds.includes("ema21")) defs.push({ key: "ema21", label: "EMA 21", color: IND_COLOUR.ema21, kind: "line", axis: "R", data: along(ema(closes, 21)), fmt: "rupee" });
+        if (inds.includes("bb")) {
+          const bb = bollinger(closes);
+          defs.push({ key: "bb", label: "Bollinger (20, 2)", color: "var(--chart-axis)", kind: "line", axis: "R", data: along(bb.mid), fmt: "rupee" });
+          defs.push({ key: "bb_up", link: "bb", label: "Bollinger upper", color: "var(--chart-axis)", kind: "dashed", axis: "R", data: along(bb.up), fmt: "rupee" });
+          defs.push({ key: "bb_lo", link: "bb", label: "Bollinger lower", color: "var(--chart-axis)", kind: "dashed", axis: "R", data: along(bb.lo), fmt: "rupee" });
+        }
+        if (inds.includes("rsi")) defs.push({ key: "rsi", label: "RSI (14)", color: IND_COLOUR.rsi, kind: "line", axis: "R", scale: "rsi", zone: [0.78, 1], data: along(rsi(closes)), fmt: "plain" });
+        // The market's backdrop, each line on a scale of its own in the
+        // lower part of the chart: their units differ from the price.
+        if (mkt) {
+          const mk = (arr: (number | null)[]): XY[] =>
+            arr.flatMap((v, i) => (v === null || v === undefined || mkt.t[i] < cutoff ? [] : [{ t: mkt.t[i], v }]));
+          if (inds.includes("mvix")) defs.push({ key: "mvix", label: "India VIX", color: IND_COLOUR.mvix, kind: "line", axis: "R", scale: "mvix", zone: [0.55, 0.95], data: mk(mkt.vix), fmt: "plain" });
+          if (inds.includes("mfii")) defs.push({ key: "mfii", label: "FII long %", color: IND_COLOUR.mfii, kind: "line", axis: "R", scale: "mfii", zone: [0.55, 0.95], data: mk(mkt.fii), fmt: "pct" });
+          if (inds.includes("mpcr")) defs.push({ key: "mpcr", label: "Nifty PCR", color: IND_COLOUR.mpcr, kind: "line", axis: "R", scale: "mpcr", zone: [0.55, 0.95], data: mk(mkt.pcr), fmt: "plain" });
+        }
+      }
+      // Volume bars green or red on the close before them, as on the full
+      // chart (owner, 16-Nov-2026). This chart has closes only, no opens, so
+      // "open to close" is the full chart's alone.
+      const srcT = src.map((p) => toT(p[0]));
+      const closeAt = (t: number): number | null => {
+        let lo = 0, hi = srcT.length - 1, k = -1;
+        while (lo <= hi) { const m = (lo + hi) >> 1; if (srcT[m] <= t) { k = m; lo = m + 1; } else hi = m - 1; }
+        return k >= 0 ? src[k][1] : null;
+      };
+      const tone = (cur: number | null, prev: number | null) =>
+        cur === null || prev === null ? undefined : cur >= prev ? "color-mix(in srgb, var(--chart-pos) 55%, transparent)" : "color-mix(in srgb, var(--chart-neg) 55%, transparent)";
+      const baseIdx = new Map(src.map((p, i) => [p[0], i]));
       const volPts: XY[] = base
         .filter((p) => p.length > 2 && p[2] !== null && (p[2] as number) > 0)
-        .map((p) => ({ t: toT(p[0]), v: p[2] as number }));
+        .map((p) => {
+          const i = baseIdx.get(p[0]) ?? -1;
+          return { t: toT(p[0]), v: p[2] as number, c: tone(p[1], i > 0 ? src[i - 1][1] : null) };
+        });
       if (volMode === "all" || !split) {
         if (volPts.length) defs.push({ key: "volume", label: "Volume", color: "var(--chart-vol)", kind: "bars", axis: "L", data: volPts, fmt: "vol" });
       } else {
@@ -769,10 +843,16 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         // carry the range alone.
         const rows = daily10 && at(daily10[0][0]) <= cutoff + 40 * 86400000 ? daily10 : coarse;
         const inRange = rows.filter((r) => at(r[0]) >= cutoff);
-        const pts = (f: (r: [string, number, number]) => number): XY[] => inRange.map((r) => ({ t: at(r[0]), v: f(r) }));
+        const pts = (f: (r: [string, number, number]) => number, coloured = true): XY[] => inRange.map((r) => {
+          const t = at(r[0]);
+          const k = rows.indexOf(r);
+          const prevT = k > 0 ? at(rows[k - 1][0]) : null;
+          return { t, v: f(r), c: coloured ? tone(closeAt(t), prevT === null ? null : closeAt(prevT)) : undefined };
+        });
         if (volMode === "split") {
-          defs.push({ key: "vol_total", label: "Traded", color: "var(--line2)", kind: "bars", axis: "L", data: pts((r) => r[1]), fmt: "vol" });
-          defs.push({ key: "vol_deliv", label: "Delivered", color: "var(--accent)", kind: "bars", axis: "L", data: pts((r) => r[2]), fmt: "vol" });
+          // The stack keeps its own two colours: delivered over the total.
+          defs.push({ key: "vol_total", label: "Traded", color: "var(--line2)", kind: "bars", axis: "L", data: pts((r) => r[1], false), fmt: "vol" });
+          defs.push({ key: "vol_deliv", label: "Delivered", color: "var(--accent)", kind: "bars", axis: "L", data: pts((r) => r[2], false), fmt: "vol" });
         } else if (volMode === "deliv") {
           defs.push({ key: "vol_deliv", label: "Delivered", color: "var(--accent)", kind: "bars", axis: "L", data: pts((r) => r[2]), fmt: "vol" });
         } else {
@@ -1044,7 +1124,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     });
 
     return defs;
-  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, epsCmp, marginAt, quarters, cmp, symbol, exchange, years, spsOn, overlays, debtOn, debtSeries, volMode, split, daily10]);
+  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, epsCmp, marginAt, inds, mkt, quarters, cmp, symbol, exchange, years, spsOn, overlays, debtOn, debtSeries, volMode, split, daily10]);
 
   // With the quarterly-results overlay on, the per-quarter EPS bars are already
   // on screen. Keeping the summed TTM bars too puts two different quantities in
@@ -1076,7 +1156,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   // own on a day-of-year axis, inside the same frame and view switch.
   if (view === "years") {
     return (
-      <ChartShell top={presetRow} range={range} setRange={setRange} view={view} setView={setView} overlays={overlays} setOverlays={setOverlays} ui={ui}
+      <ChartShell top={presetRow} range={range} setRange={setRange} view={view} setView={setView} overlays={overlays} setOverlays={setOverlays}
         expandHref={symbol ? `/chart?s=${encodeURIComponent(symbol)}` : undefined}
         moreOpen={moreOpen} setMoreOpen={setMoreOpen} avail={{ pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand, ebitda: !!trendQ?.ebitda?.some((v) => v !== null) }} peLabel={ratioLabel}>
         <YearsChart prices={prices} />
@@ -1254,13 +1334,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       {showDates && <span className="inline-flex items-center gap-1"><i className="inline-block w-3 border-t-2 border-dashed border-[var(--ink3)]" />declared</span>}
     </div>
   ) : null;
-  const strip = (
-    <div className="flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 pb-1 text-xs [scrollbar-width:none]">
-      {pBars}{pCompare}{pGrowth}{pMarginAt}{pDates}{pCA}{pWin}
-    </div>
-  );
   // What is switched on beyond the defaults - growth labels are on by default.
-  const activeCount = [spsOn, showDates, showCA, !!cmpSym, isPe && peWin !== "ttm"].filter(Boolean).length;
+  const activeCount = [spsOn, showDates, showCA, !!cmpSym, isPe && peWin !== "ttm"].filter(Boolean).length + (view === "price" ? inds.length : 0);
   const label = (t: string) => <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">{t}</span>;
   const optionsSheet = sheet && (
     <InfoDialog title="Chart options" onClose={() => setSheet(false)}>
@@ -1269,9 +1344,18 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         {pWin && <div className="flex flex-col items-start gap-1.5">{label(spsOn ? "Sales" : "Earnings")}{pWin}</div>}
         {pGrowth && <div className="flex flex-col items-start gap-1.5">{label("Growth on bars")}{pGrowth}</div>}
         {pMarginAt && <div className="flex flex-col items-start gap-1.5">{label("EBITDA margin point")}{pMarginAt}</div>}
+        {view === "price" && (
+          <div className="flex flex-col items-start gap-1.5">{label("Indicators")}
+            <div className="flex gap-1.5 flex-wrap">{SMALL_INDS.map(([k, name]) => <span key={k}>{chip(inds.includes(k), name, () => toggleInd(k))}</span>)}</div>
+            {inds.some((k) => k === "mvix" || k === "mfii" || k === "mpcr") && (
+              <span className="text-[11px] text-[var(--ink3)]">Market lines: Nifty-wide, from NSE&apos;s daily files, each on a scale of its own.</span>
+            )}
+          </div>
+        )}
         <div className="flex flex-col items-start gap-1.5">{label("Show on chart")}
           <div className="flex gap-1.5 flex-wrap">{pDates}{pCA}</div>{pCAKinds}</div>
-        <div className="flex flex-col items-start gap-1.5">{label("Compare")}{pCompare}</div>
+        <div className="flex flex-col items-start gap-1.5">{label("Compare")}{pCompare}
+          {cmpErr && <span className="text-[var(--neg)]">{cmpErr}</span>}</div>
       </div>
     </InfoDialog>
   );
@@ -1420,6 +1504,14 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
               </g>
             );
           })}
+          {inds.includes("events") && mkt && ([[mkt.rbi, "RBI", "RBI policy decision", IND_COLOUR.rbi], [mkt.budget, "BUD", "Union Budget", IND_COLOUR.budget]] as const)
+            .flatMap(([list, tag, title, col]) => list.filter((t) => t >= t0 && t <= t1).map((t) => (
+              <g key={`${tag}${t}`}>
+                <line x1={x(t)} x2={x(t)} y1={MT + 12} y2={MT + plotH} stroke={col} strokeWidth="1" strokeDasharray="3 3" opacity="0.85" />
+                <text x={x(t)} y={MT + 9 + (tag === "BUD" ? 10 : 0)} textAnchor="middle" fontSize={FS - (isMobile ? 5 : 2)} fontWeight="600" fill={col}>{tag}</text>
+                <title>{`${title} \u00b7 ${new Date(t).toISOString().slice(0, 10)}`}</title>
+              </g>
+            )))}
           {showDates && qShown.map((q, i) => (
             q.announced && toT(q.announced) >= t0 && toT(q.announced) <= t1 ? (
               <g key={`ql${i}`}>
@@ -1510,7 +1602,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
                   }
                   // EPS bars always in their fiscal quarter's colour.
                   const qcol = d.q ? (Q_COLOUR[d.q] ?? s.color) : s.color;
-                  const fill = d.q && !s.outline ? `url(#${gid}q${d.q})` : qcol;
+                  const fill = d.c ?? (d.q && !s.outline ? `url(#${gid}q${d.q})` : qcol);
                   const loss = d.v < 0;
                   const chgTxt = d.chg ? growthText(d.chg) : "";
                   const labelFits = showChg && chgTxt !== "" && chgFont > 0 && (!twin || twinRows > 0);
@@ -1725,9 +1817,9 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
           </button>
         );
         const groups = ([null, ...overlays] as (View | null)[])
-          .map((g) => [g, model.filter((s) => (s.group ?? null) === g)] as const)
+          .map((g) => [g, model.filter((s) => (s.group ?? null) === g && !s.link)] as const)
           .filter(([, list]) => list.length);
-        if (groups.length < 2) return <div className="flex items-center justify-center gap-4 flex-wrap mt-2">{model.map(item)}</div>;
+        if (groups.length < 2) return <div className="flex items-center justify-center gap-4 flex-wrap mt-2">{model.filter((x) => !x.link).map(item)}</div>;
         const nameOf = (v: View) => (v === "pe" ? ratioLabel : VIEW_NAME[v]);
         return (
           <div className="mt-2 space-y-2">
@@ -1751,243 +1843,12 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     </>
   );
 
-  if (ui !== "classic") {
-    return (
-      <ChartShell {...shellProps} ui={ui} onOptions={() => setSheet(true)} optionsCount={activeCount}
-        footer={ui === "c" ? <div className="mt-2 flex flex-col gap-2">{strip}{pCAKinds}</div> : null}>
-        {ui === "b" && <div className="mb-2 flex flex-col gap-2">{strip}{pCAKinds}</div>}
-        {anyPanel}
-        {plotAndLegend}
-        {qLegend}
-        {optionsSheet}
-      </ChartShell>
-    );
-  }
-
   return (
-    <ChartShell {...shellProps}>
-      <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
-        <span className="text-[var(--ink3)]">Compare with</span>
-        <select
-          value={pickAny ? "__any__" : (cmpSym ?? "")}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v === "__any__") { setPickAny(true); return; }
-            setPickAny(false); setAnyQ("");
-            setCmpSym(v || null); setHover(null);
-          }}
-          className="rounded-lg border border-[var(--line)] bg-[var(--card2)] text-[var(--ink2)] px-2 py-1.5 sm:py-1 max-w-[52vw] sm:max-w-none"
-        >
-          <option value="">None</option>
-          {(peers ?? [])
-            .map((p) => ({ sym: String(p.symbol ?? ""), nm: String(p.name ?? p.symbol ?? "") }))
-            .filter((p) => p.sym && p.sym !== symbol)
-            .map((p) => (
-              <option key={p.sym} value={p.sym}>{p.nm} ({p.sym})</option>
-            ))}
-          <option value="__any__">Others - search all companies...</option>
-        </select>
-        {cmp && (
-          <span className="inline-flex items-center gap-1.5 text-[var(--ink3)]">
-            <i className="inline-block w-3 h-1 rounded-sm" style={{ background: "var(--chart-alt)" }} />
-            {cmp.name}
-            {view === "price" && <span>· both shown as % change over the range</span>}
-          </span>
-        )}
-        {cmpErr && <span className="text-[var(--neg)]">{cmpErr}</span>}
-      </div>
-      {pickAny && (
-        <div className="mb-2 rounded-xl border border-[var(--line2)] bg-[var(--card2)] p-3">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-xs text-[var(--ink3)]">Compare against any listed company</span>
-            <button
-              onClick={() => { setPickAny(false); setAnyQ(""); }}
-              className="text-xs text-[var(--ink3)] hover:text-[var(--ink)]"
-            >
-              close
-            </button>
-          </div>
-          <input
-            autoFocus
-            value={anyQ}
-            onChange={(e) => setAnyQ(e.target.value)}
-            placeholder="Search by name or symbol"
-            className="mt-2 w-full rounded-lg border border-[var(--line)] bg-[var(--card)] px-3 py-2 text-sm
-                       text-[var(--ink)] placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)]"
-          />
-          <div className="mt-2 max-h-52 overflow-y-auto">
-            {(() => {
-              const q = anyQ.trim().toLowerCase();
-              if (q.length < 1) {
-                return <p className="text-xs text-[var(--ink3)] px-1 py-2">
-                  Type to search all {allCos.length ? allCos.length.toLocaleString("en-IN") : ""} companies.
-                </p>;
-              }
-              const hits = allCos
-                .map((c) => {
-                  const s = c.symbol.toLowerCase(), n = c.name.toLowerCase();
-                  const sc = s.startsWith(q) ? 0 : n.startsWith(q) ? 1 : n.includes(` ${q}`) ? 2
-                    : s.includes(q) || n.includes(q) ? 3 : 9;
-                  return [sc, c] as const;
-                })
-                .filter(([sc, c]) => sc < 9 && c.symbol !== symbol)
-                .sort((a, b) => a[0] - b[0] || b[1].mcap - a[1].mcap)
-                .slice(0, 12)
-                .map(([, c]) => c);
-              if (!hits.length) return <p className="text-xs text-[var(--ink3)] px-1 py-2">No match.</p>;
-              return hits.map((c) => (
-                <button
-                  key={c.symbol}
-                  onClick={() => { setCmpSym(c.symbol); setOverlays([]); setPickAny(false); setAnyQ(""); setHover(null); }}
-                  className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-[var(--card)] flex items-baseline justify-between gap-3"
-                >
-                  <span className="text-sm text-[var(--ink)] truncate">{c.name || c.symbol}</span>
-                  <span className="text-xs text-[var(--ink3)] shrink-0">{c.symbol}</span>
-                </button>
-              ));
-            })()}
-          </div>
-        </div>
-      )}
-      {(actions?.length ?? 0) > 0 && (
-        <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
-          <button
-            onClick={() => setShowCA(!showCA)}
-            title="Mark dividends, bonuses, splits and rights issues on their ex-date"
-            className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium border ${
-              showCA
-                ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
-                : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
-            }`}
-          >
-            {showCA ? "\u2713 " : ""}Corporate actions
-          </button>
-          {showCA && CA_ORDER.filter((k) => caCount[k]).map((k) => (
-            <label key={k} className="inline-flex items-center gap-1.5 cursor-pointer text-[var(--ink2)]">
-              <input
-                type="checkbox"
-                checked={caIsOn(k)}
-                onChange={() => setCaOn({ ...caOn, [k]: !caIsOn(k) })}
-                className="accent-[var(--accent)] cursor-pointer"
-              />
-              <i className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: CA_COLOUR[k] }} />
-              {CA_LABEL[k]} <span className="text-[var(--ink3)]">({caCount[k]})</span>
-            </label>
-          ))}
-          {showCA && caShown.length === 0 && (
-            <span className="text-[var(--ink3)]">None in this range</span>
-          )}
-        </div>
-      )}
-      {(quarters?.length ?? 0) > 0 && (
-        <div className="flex items-center gap-2 flex-wrap mb-2 text-xs">
-          <button
-            onClick={() => setShowDates(!showDates)}
-            title="Mark the day each quarter's results were declared"
-            className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium border ${
-              showDates
-                ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
-                : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
-            }`}
-          >
-            {showDates && <CheckGlyph className="mr-1" />}Result dates
-          </button>
-          {(view === "pe" || view === "ebitda") && (
-            <div className="flex items-center gap-1 flex-wrap">
-              <button
-                onClick={() => setShowChg(!showChg)}
-                title="Print each bar's earnings growth above it"
-                className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium border ${
-                  showChg
-                    ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] border-[var(--accent-line)]"
-                    : "text-[var(--ink2)] border-[var(--line)] hover:bg-[var(--card2)]"
-                }`}
-              >
-                {showChg && <CheckGlyph className="mr-1" />}Growth %
-              </button>
-              {showChg && (
-                <div className="flex items-center gap-0.5 rounded-lg border border-[var(--line)] p-0.5">
-                  {/* Same two choices in both windows, described in the terms of
-                      whichever window is showing - a bar means a quarter in one
-                      and twelve months in the other, so one wording cannot serve
-                      both without misleading in one of them. */}
-                  {(view === "pe" && peWin === "ttm"
-                    ? ([["yoy", "Year before", "Compare these twelve months with the TWELVE MONTHS BEFORE THEM. The two periods share no quarter, so it is a full year measured against a full year."],
-                        ["prev", "Quarter before", "Compare these twelve months with the twelve months ending one quarter earlier. They share three of their four quarters, so the figure moves by one quarter's news spread across a whole year of earnings - smoother, and smaller, than the same news in the 1Q x4 view."]] as const)
-                    : ([["yoy", "Year ago", "Compare each quarter with the SAME quarter a year earlier. Quarterly earnings are seasonal, so this is the comparison filings and analysts use."],
-                        ["prev", "Previous", "Compare each quarter with the one immediately before it. Reads momentum, but mixes in seasonality - a December quarter is not a June quarter."]] as const)
-                  ).map(([k, label, tip]) => (
-                    <button
-                      key={k}
-                      onClick={() => setEpsCmp(k)}
-                      title={tip}
-                      className={`rounded-md px-2 py-1 sm:py-0.5 font-medium ${
-                        epsCmp === k
-                          ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]"
-                          : "text-[var(--ink2)] hover:bg-[var(--card2)]"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          {view === "pe" && (spsAvail || debtAvail) && (
-            <div className="flex items-center gap-0.5 rounded-lg border border-[var(--line)] p-0.5">
-              {([["eps", "EPS", "Earnings per share, under the P/E line"],
-                 ["sps", "SPS", "Sales per share - revenue from operations per share, under the Price / Sales line - the same line as Market Cap / Sales"],
-                 ["debt", "Debt", "Total debt each year (Rs Cr), under the debt / equity line"]] as const)
-                .filter(([k]) => k === "eps" || (k === "sps" ? spsAvail : debtAvail)).map(([k, label, tip]) => (
-                <button key={k} onClick={() => { setPerShare(k); setHover(null); }} title={tip}
-                  className={`rounded-md px-2 py-1 sm:py-0.5 font-medium ${perShare === k
-                    ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)] hover:bg-[var(--card2)]"}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
-          {view === "pe" && winBand?.alt && (
-            <div className="flex items-center gap-1 flex-wrap">
-              <span className="text-[var(--ink3)] mr-0.5">{spsOn ? "Sales" : "Earnings"}</span>
-              {PE_WINDOWS.filter(([k]) => k === "ttm" || winBand.alt?.[k]).map(([k, label, tip]) => (
-                <button
-                  key={k}
-                  onClick={() => { setPeWin(k); setHover(null); }}
-                  title={tip}
-                  className={`rounded-lg px-2.5 py-1.5 sm:py-1 font-medium ${
-                    peWin === k
-                      ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]"
-                      : "text-[var(--ink2)] hover:bg-[var(--card2)]"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
-          {(view === "pe" || view === "ebitda") && (
-            <div className="flex items-center gap-2.5 flex-wrap text-[var(--ink3)]">
-              {[1, 2, 3, 4].map((n) => (
-                <span key={n} className="inline-flex items-center gap-1">
-                  <i className="inline-block w-3 h-3 rounded-sm" style={{ background: Q_COLOUR[n] }} />
-                  {Q_LABEL[n]}
-                </span>
-              ))}
-            </div>
-          )}
-          {showDates && (
-            <div className="flex items-center gap-2.5 flex-wrap text-[var(--ink3)]">
-              <span className="inline-flex items-center gap-1">
-                <i className="inline-block w-4 border-t-2 border-dashed border-[var(--ink3)]" />
-                declared
-              </span>
-            </div>
-          )}
-        </div>
-      )}
+    <ChartShell {...shellProps} onOptions={() => setSheet(true)} optionsCount={activeCount}>
+      {anyPanel}
       {plotAndLegend}
+      {qLegend}
+      {optionsSheet}
     </ChartShell>
   );
 }
@@ -2004,8 +1865,8 @@ const MORE_VIEWS: [View, string][] = [
 ];
 
 function ChartShell({
-  range, setRange, view, setView, moreOpen, setMoreOpen, avail, onViewChange, expandHref, peLabel = "PE Ratio", children,
-  ui = "classic", onOptions, optionsCount = 0, footer, overlays = [], setOverlays, top,
+  range, setRange, view, setView, setMoreOpen, avail, onViewChange, expandHref, peLabel = "PE Ratio", children,
+  onOptions, optionsCount = 0, overlays = [], setOverlays, top,
 }: {
   /** drawn above the tabs - the chart presets row */
   top?: React.ReactNode;
@@ -2013,9 +1874,8 @@ function ChartShell({
   overlays?: View[]; setOverlays?: (v: View[]) => void;
   /** The ratio tab's name: it reads P/S Ratio while sales per share is shown. */
   peLabel?: string;
-  /** Control layout (Settings > Chart controls): a = options sheet, b = chip
-   *  strip, c = controls under the chart, classic = every row stacked above. */
-  ui?: ChartUi; onOptions?: () => void; optionsCount?: number; footer?: React.ReactNode;
+  /** Opens the chart's options sheet; the count marks options switched on. */
+  onOptions?: () => void; optionsCount?: number;
   /** The full-screen chart for this company. */
   expandHref?: string;
   range: string; setRange: (r: string) => void;
@@ -2076,11 +1936,8 @@ function ChartShell({
     </div>
   );
   const moreItems = MORE_VIEWS.filter(([v]) => avail[v as keyof typeof avail]);
-  const activeMore = moreItems.find(([v]) => v === view);
-  const btn = (active: boolean) =>
-    `rounded-lg px-3 py-2 sm:py-1.5 min-h-[38px] sm:min-h-0 inline-flex items-center whitespace-nowrap font-medium ${active ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)] hover:bg-[var(--card2)]"}`;
 
-  if (ui !== "classic") {
+  {
     const tab = (active: boolean) =>
       `shrink-0 px-1 pb-2 pt-1 text-[13px] font-semibold border-b-2 border-transparent whitespace-nowrap transition-colors ${active ? "text-[var(--ink)]" : "text-[var(--ink3)]"}`;
     const tabs = (
@@ -2099,7 +1956,7 @@ function ChartShell({
         <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
       </Link>
     );
-    const opts = ui === "a" && onOptions && (
+    const opts = onOptions && (
       <button onClick={onOptions} aria-label="Chart options" className={iconBtn}>
         <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" /></svg>
         {optionsCount > 0 && <span className="absolute top-1 right-1 min-w-3.5 h-3.5 px-0.5 rounded-full bg-[var(--accent)] text-white text-[9px] leading-[14px] font-bold">{optionsCount}</span>}
@@ -2113,79 +1970,17 @@ function ChartShell({
         ))}
       </div>
     );
-    const rangePill = (
-      <select value={range} onChange={(e) => setRange(e.target.value)} aria-label="Range"
-        className="shrink-0 rounded-full border border-[var(--line)] bg-transparent px-2.5 py-1.5 text-xs font-semibold text-[var(--ink)]">
-        {RANGES.map(([r]) => <option key={r} value={r}>{r.replace("Yr", "Y")}</option>)}
-      </select>
-    );
     return (
       <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4 shadow-[0_1px_3px_rgba(0,0,0,0.10)]">
         {top}
         <div className="flex items-center justify-between gap-2 border-b border-[var(--line)] mb-2">
           {tabs}
-          <div className="flex items-center gap-0.5 pb-1">{ui === "b" && view !== "years" && rangePill}{view !== "years" && opts}{full}</div>
+          <div className="flex items-center gap-0.5 pb-1">{view !== "years" && opts}{full}</div>
         </div>
         {heldBar}
-        {ui === "a" && view !== "years" && <div className="mb-2">{rangesSeg}</div>}
+        {view !== "years" && <div className="mb-2">{rangesSeg}</div>}
         {children}
-        {ui === "c" && view !== "years" && <div className="mt-3">{rangesSeg}</div>}
-        {footer}
       </section>
     );
   }
-
-  return (
-    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4">
-      {top}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:flex-wrap mb-2">
-        <div className="flex gap-1 text-xs flex-nowrap overflow-x-auto sm:flex-wrap -mx-1 px-1 [scrollbar-width:none]">
-          {view !== "years" && RANGES.map(([r]) => (
-            <button key={r} onClick={() => setRange(r)} className={btn(range === r)}>{r}</button>
-          ))}
-        </div>
-        <div className="flex gap-1 text-xs flex-wrap items-center select-none [-webkit-touch-callout:none]" onPointerDown={tabDown} onPointerUp={stop} onPointerLeave={stop} onPointerCancel={stop} onContextMenu={tabMenu} onClick={tabClick}>
-          <button {...press("price")} className={btn(view === "price")}>Price{mark("price")}</button>
-          <button {...press("years")} className={btn(view === "years")}>Years</button>
-          {avail.pe && <button {...press("pe")} className={btn(view === "pe")}>{peLabel}{mark("pe")}</button>}
-          {moreItems.length > 0 && (
-            <div className="relative">
-              <button onClick={() => setMoreOpen(!moreOpen)} className={btn(!!activeMore)}>
-                {activeMore ? activeMore[1] : "More"} <ChevronGlyph size={11} />
-              </button>
-              {moreOpen && <div className="fixed inset-0 z-10" onClick={() => setMoreOpen(false)} />}
-              {moreOpen && (
-                <div className="absolute right-0 mt-1 z-20 min-w-44 bg-[var(--card)] border border-[var(--line)] rounded-xl shadow-xl overflow-hidden">
-                  {moreItems.map(([v, label]) => (
-                    <button key={v} {...press(v)}
-                      className={`block w-full text-left px-3 py-2 ${view === v ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] font-semibold" : "text-[var(--ink2)] hover:bg-[var(--card2)]"}`}>
-                      {label}{mark(v)}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          {expandHref && (
-            <Link
-              href={expandHref}
-              // Remembered so the full chart's back arrow returns here rather
-              // than pushing a second copy of this page onto the history.
-              onClick={() => { try { sessionStorage.setItem("rs_chart_from", location.pathname + location.search); } catch { /* private mode */ } }}
-              aria-label="Open the full-screen chart"
-              title="Full-screen chart"
-              className={`${btn(false)} gap-1.5 ml-auto sm:ml-1`}
-            >
-              <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
-              </svg>
-              Full view
-            </Link>
-          )}
-        </div>
-      </div>
-      {heldBar}
-      {children}
-    </section>
-  );
 }
