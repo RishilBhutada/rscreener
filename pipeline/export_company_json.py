@@ -176,10 +176,12 @@ def why_no_pe(con: sqlite3.Connection, listing: dict) -> dict[str, str]:
     out: dict[str, str] = {}
     for sym, exch in listing.items():
         e = eps.get(sym, [])
-        if exch == "BSE":
-            out[sym] = ("This company is listed only on the BSE. The valuation charts are built "
-                        "from NSE's filing archive, which does not carry it, so there is nothing "
-                        "to draw rather than something missing.")
+        if exch == "BSE" and not e:
+            # Since 17-Nov-2026 BSE-only companies' results come from BSE's
+            # archive (fetch_bse_results.py --scope bse), a few hundred a night.
+            out[sym] = ("This company is listed only on the BSE. Its results are read from BSE's "
+                        "filing archive, and none have been read for it yet - BSE's machine-readable "
+                        "filings start around 2016, and some companies file none.")
         elif not e:
             out[sym] = ("No quarterly results have been filed for this company yet, and a "
                         "price-to-earnings line needs earnings.")

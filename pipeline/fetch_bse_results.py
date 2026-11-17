@@ -30,6 +30,11 @@ Usage
   python fetch_bse_results.py --scope gaps --max-minutes 20
       every NSE company whose stored quarters start after 2016-06 or that has
       none, oldest-checked first
+  python fetch_bse_results.py --scope bse --max-minutes 25
+      the companies listed on BSE only (owner, 17-Nov-2026: "add BSE results
+      for BSE-only companies too") - their whole results history comes from
+      here, as no NSE filing exists for them. Those with no results stored
+      come first.
 """
 from __future__ import annotations
 
@@ -48,6 +53,7 @@ import fetch_results_history as frh
 from fetch_bhavcopy import BSE_CM
 from fetch_universe import BSE_HEADERS
 from fetch_bse_documents import HEADERS as BSE_API_HEADERS   # with Origin, as the BSE site sends
+from filing_checks import AGREE, WINDOW, is_unit_step
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
@@ -133,6 +139,34 @@ def pick(rows: list[dict]) -> list[dict]:
     return sorted(best.values(), key=lambda c: c["pe"], reverse=True)
 
 
+def oldest_units_wrong(con: sqlite3.Connection, sym: str, ptype: str, period_end: str,
+                       revenue: float | None) -> bool:
+    """A filing OLDER than every stored period whose revenue is a units step
+    (100x, 1,000x, 100,000x) ABOVE the next three, which agree with each other.
+
+    filing_checks.unit_outliers never judges the oldest period, on purpose: a
+    business can start small (Reliance Power's first year). Backfilling from
+    BSE makes the oldest period exactly where each new filing lands, though -
+    PB Global's Dec-2018 quarter came in at Rs 1.2 lakh crore against about
+    Rs 150 crore after it (17-Nov-2026 test). So the edge is judged here, and
+    only one way: the oldest value far ABOVE a steady run is refused. A small
+    start is never touched."""
+    if not revenue or revenue <= 0:
+        return False
+    after = [v for (v,) in con.execute(
+        "SELECT MAX(value) FROM results_history WHERE symbol=? AND period_type=? AND item='revenue' "
+        "AND period_end>? GROUP BY period_end ORDER BY period_end LIMIT ?", (sym, ptype, period_end, WINDOW))]
+    older = con.execute("SELECT 1 FROM results_history WHERE symbol=? AND period_type=? AND period_end<? LIMIT 1",
+                        (sym, ptype, period_end)).fetchone()
+    after = [v for v in after if v and v > 0]
+    if older or len(after) < WINDOW:
+        return False
+    m = sorted(after)[len(after) // 2]
+    if not all(1 / AGREE <= v / m <= AGREE for v in after):
+        return False
+    return revenue > m and is_unit_step(revenue / m)
+
+
 def bse_codes(con: sqlite3.Connection) -> dict[str, str]:
     """{NSE symbol: BSE scrip code}, matched by ISIN. BSE-only companies
     carry theirs in the universe already. The ISIN-to-code pairs come from
@@ -165,7 +199,7 @@ def bse_codes(con: sqlite3.Connection) -> dict[str, str]:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbols", default="", help="comma list; overrides --scope")
-    ap.add_argument("--scope", choices=["gaps"], default="gaps")
+    ap.add_argument("--scope", choices=["gaps", "bse"], default="gaps")
     ap.add_argument("--max-age-days", type=float, default=90, help="check a company again after this long")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--max-minutes", type=float, default=0)
@@ -182,8 +216,13 @@ def main() -> None:
         due = [s.strip().upper() for s in a.symbols.split(",") if s.strip()]
     else:
         first = dict(con.execute("SELECT symbol, MIN(period_end) FROM results_history WHERE period_type='quarterly' GROUP BY symbol"))
-        nse = [s for (s,) in con.execute("SELECT SYMBOL FROM universe WHERE EXCHANGE='NSE'")]
-        gaps = [s for s in nse if s in codes and (first.get(s) is None or first[s] > XBRL_FROM)]
+        if a.scope == "bse":
+            # Every BSE-only company: NSE has nothing for them, so any period
+            # BSE holds is new. The 90-day recheck picks up each new quarter.
+            gaps = [s for (s,) in con.execute("SELECT SYMBOL FROM universe WHERE EXCHANGE='BSE'") if s in codes]
+        else:
+            nse = [s for (s,) in con.execute("SELECT SYMBOL FROM universe WHERE EXCHANGE='NSE'")]
+            gaps = [s for s in nse if s in codes and (first.get(s) is None or first[s] > XBRL_FROM)]
         log = dict(con.execute("SELECT symbol, fetched_at FROM bse_results_log"))
         cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=a.max_age_days)).strftime("%Y-%m-%d %H:%M:%S")
         # Never-checked first; among them the widest gap first - prices
@@ -195,7 +234,8 @@ def main() -> None:
             a_, b_ = px0.get(s_), first.get(s_) or datetime.now().strftime("%Y-%m-%d")
             return 0.0 if not a_ else (date.fromisoformat(b_[:10]) - date.fromisoformat(a_[:10])).days
         due = sorted((s for s in gaps if log.get(s, "") < cutoff), key=lambda s: (log.get(s) or "", -gap(s)))
-        print(f"  {len(gaps)} NSE companies with history starting after {XBRL_FROM} (or none) and a BSE listing; {len(due)} due")
+        print(f"  {len(gaps)} " + ("BSE-only companies" if a.scope == "bse" else
+              f"NSE companies with history starting after {XBRL_FROM} (or none) and a BSE listing") + f"; {len(due)} due")
     if a.limit:
         due = due[: a.limit]
 
@@ -229,7 +269,8 @@ def main() -> None:
                 if not facts:
                     unread += 1
                     continue
-                if frh.units_wrong(con, "results_history", sym, f["ptype"], f["pe"], facts.get("revenue")):
+                if (frh.units_wrong(con, "results_history", sym, f["ptype"], f["pe"], facts.get("revenue"))
+                        or oldest_units_wrong(con, sym, f["ptype"], f["pe"], facts.get("revenue"))):
                     refused += 1
                     continue
                 frh.db_retry(lambda: con.executemany(

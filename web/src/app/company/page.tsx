@@ -207,9 +207,13 @@ function CompanyView() {
           <InfoTip title="Listed on BSE only" className="ml-1">
             <p>Price, market cap and the chart come from the exchange feed and are current.</p>
             <p>
-              The as-filed quarterly table, the valuation bands and the shareholding pattern
-              are built from NSE&rsquo;s filing archive, which does not carry companies that
-              are not listed there — so those sections are absent rather than pending.
+              Quarterly and annual results, EPS and the P/E line are read from BSE&rsquo;s
+              filing archive. Its machine-readable filings start around 2016, so history
+              begins there at the earliest.
+            </p>
+            <p>
+              The shareholding pattern is built from NSE&rsquo;s archive, which does not
+              carry this company, so that section is absent.
             </p>
           </InfoTip>
         </p>

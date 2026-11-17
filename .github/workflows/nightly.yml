@@ -562,6 +562,15 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "25"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_bse_results.py --max-minutes 20 --sleep 0.3
+      - name: Results of companies listed on BSE only
+        if: steps.plan.outputs.earnings == '1'
+        # Owner, 17-Nov-2026: "add BSE results for BSE-only companies too".
+        # The same archive and XBRL as the step above; for these 2,347
+        # companies it is the only results source. Those with none stored
+        # first; each is checked again after 90 days for its new quarter.
+        env:
+          RSCREENER_STEP_MINUTES: "30"
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_bse_results.py --scope bse --max-minutes 25 --sleep 0.3
       - name: Top up every price with the exchanges' own closes (NSE, BSE, Nifty indices)
         # Yahoo's daily history trails the market by a session or two: the
         # 28-Sep run ended every chart and 284 of 351 ETF prices on the 25th.

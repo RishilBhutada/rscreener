@@ -33,3 +33,20 @@ def test_pick_prefers_consolidated_then_revised_and_keeps_first_date():
     f = got[0]
     assert f["basis"] == "consolidated" and f["xbrl"].endswith("/c2.xml")
     assert f["filed"] == "2022-05-20"      # the results date is the first filing, not the revision
+
+
+def test_oldest_units_wrong():
+    import sqlite3
+    import fetch_bse_results as m
+    con = sqlite3.connect(":memory:")
+    con.execute("CREATE TABLE results_history (symbol, basis, period_type, period_start, period_end, item, value)")
+    for pe, v in [("2019-06-30", 1.5e9), ("2019-09-30", 1.6e9), ("2019-12-31", 1.2e9)]:
+        con.execute("INSERT INTO results_history VALUES ('X','standalone','quarterly','',?, 'revenue', ?)", (pe, v))
+    # PB Global's Dec-2018: 100,000x the run that follows - refused
+    assert m.oldest_units_wrong(con, "X", "quarterly", "2018-12-31", 1.2e14)
+    # a small start is a business starting, never judged
+    assert not m.oldest_units_wrong(con, "X", "quarterly", "2018-12-31", 1.5e6)
+    # an ordinary value passes
+    assert not m.oldest_units_wrong(con, "X", "quarterly", "2018-12-31", 1.4e9)
+    # with fewer than three newer periods there is nothing to judge by
+    assert not m.oldest_units_wrong(con, "Y", "quarterly", "2018-12-31", 1.2e14)
