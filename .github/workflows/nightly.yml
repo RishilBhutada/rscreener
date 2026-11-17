@@ -568,9 +568,13 @@ jobs:
         # The same archive and XBRL as the step above; for these 2,347
         # companies it is the only results source. Those with none stored
         # first; each is checked again after 90 days for its new quarter.
+        # 60 minutes (owner, 18-Nov-2026: "speed up the BSE-only fill to 60
+        # min") - about 4-5 weeks to cover all, not 2-3 months. The run's one
+        # deadline (budget.py) still binds: a late night gives it less, never
+        # the publish.
         env:
-          RSCREENER_STEP_MINUTES: "30"
-        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_bse_results.py --scope bse --max-minutes 25 --sleep 0.3
+          RSCREENER_STEP_MINUTES: "65"
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_bse_results.py --scope bse --max-minutes 60 --sleep 0.3
       - name: Top up every price with the exchanges' own closes (NSE, BSE, Nifty indices)
         # Yahoo's daily history trails the market by a session or two: the
         # 28-Sep run ended every chart and 284 of 351 ETF prices on the 25th.
