@@ -551,6 +551,17 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "20"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_results_history.py --symbols @data/nse_symbols.txt --max-age-hours 4320 --limit 200 --quarters-back 0 --sleep 0.3 --max-minutes 75
+      - name: Results filed on BSE before NSE (companies that came to NSE late)
+        if: steps.plan.outputs.earnings == '1'
+        # Owner, 17-Nov-2026: Hindustan Foods' EPS began in 2023 and its P/E in
+        # May 2024 - it listed on NSE in June 2023 and filed on BSE alone before.
+        # BSE's results archive and XBRL (pipeline/fetch_bse_results.py) fill
+        # the periods NSE has not got, never overwriting NSE's. Only NSE
+        # companies whose stored quarters start after mid-2016 are asked;
+        # each is checked again after 90 days.
+        env:
+          RSCREENER_STEP_MINUTES: "25"
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_bse_results.py --max-minutes 20 --sleep 0.3
       - name: Top up every price with the exchanges' own closes (NSE, BSE, Nifty indices)
         # Yahoo's daily history trails the market by a session or two: the
         # 28-Sep run ended every chart and 284 of 351 ETF prices on the 25th.

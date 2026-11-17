@@ -1161,6 +1161,7 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None,
     dmg = price_adjust.events(con)   # demergers, applied as the prices are
     known = splits_trustworthy(con, shares, suspect)
     bal = balance_equity(con)
+    announced_all = filing_dates(con)   # for splits a filing already applied
     out: dict[str, dict] = {}
     for (symbol, ptype), periods in comps.items():
         if only is not None and symbol not in only:
@@ -1176,6 +1177,12 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None,
 
         ev = splits.get(symbol)
         dm = dmg.get(symbol)
+        # A split between a period's end and its results is often already in
+        # the filed EPS (Ind AS 33): not divided out again - the same rule the
+        # P/E line uses (restated_quarters). Hindustan Foods' Jun-2022 EPS of
+        # 1.32 was on the post-split base and read 0.26 (17-Nov-2026).
+        done = restated_quarters(ev, [(p_, periods[p_].get("pat"), periods[p_].get("eps")) for p_ in sorted(periods)],
+                                 announced_all.get(symbol, {}))
 
         def adj_eps(p):
             """As-filed EPS put on today's share base, to match the adjusted price.
@@ -1190,14 +1197,14 @@ def build_trends(con: sqlite3.Connection, shares: dict | None = None,
             """
             e = periods[p].get("eps")
             if symbol in known:
-                return None if e is None else round(e / adj_factor(ev, p), 2)
+                return None if e is None else round(e / (adj_factor(ev, p) / done.get(p, 1.0)), 2)
             pat_v = periods[p].get("pat")
             own = filed_eps_on_todays_base(pat_v, e, sh)
             if own is not None:
                 return round(own, 2)
             if pat_v is not None and sh:
                 return round(pat_v / sh, 2)
-            return None if e is None else round(e / adj_factor(ev, p), 2)
+            return None if e is None else round(e / (adj_factor(ev, p) / done.get(p, 1.0)), 2)
 
         rev = [periods[p].get("revenue") for p in ordered]
         pat = [periods[p].get("pat") for p in ordered]

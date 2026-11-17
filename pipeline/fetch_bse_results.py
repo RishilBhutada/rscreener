@@ -1,0 +1,249 @@
+"""Rscreener - the results history a company filed on BSE before NSE.
+
+Owner, 17-Nov-2026: Hindustan Foods showed a P/E only from May 2024 and EPS
+only from the June 2023 quarter, though its prices go back to 2019. The
+company listed on NSE on 6-Jun-2023; every result before that was filed on
+BSE alone, and Rscreener read results from NSE alone. The same holds for any
+company that came to NSE late, and for one whose NSE symbol changed (BSE's
+scrip code does not).
+
+BSE's results archive (Result_Arch_ng) lists every results filing a company
+has made, with its XBRL - the same structured document NSE serves, which
+fetch_results_history.parse_xbrl reads unchanged. Standalone XBRL from about
+2016, consolidated from about 2019.
+
+Rules
+  * Only periods NOT already stored are taken: NSE's figures are never
+    overwritten, so this only ever adds history.
+  * One basis per period, consolidated first - the main table's own rule.
+  * A revised filing wins over the original of the same period.
+  * The units check (filing_checks, via units_wrong) applies as for NSE.
+  * The filing time goes to filing_dates (INSERT OR IGNORE: an NSE date
+    already there is kept).
+
+The NSE symbol is matched to its BSE scrip code by ISIN from BSE's own scrip
+list. The universe table is left as it is: other jobs read its BSE_CODE as
+"listed on BSE only".
+
+Usage
+  python fetch_bse_results.py --symbols HNDFDS          one company
+  python fetch_bse_results.py --scope gaps --max-minutes 20
+      every NSE company whose stored quarters start after 2016-06 or that has
+      none, oldest-checked first
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import io
+import sqlite3
+import time
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+
+import requests
+
+import budget
+import fetch_results_history as frh
+from fetch_bhavcopy import BSE_CM
+from fetch_universe import BSE_HEADERS
+from fetch_bse_documents import HEADERS as BSE_API_HEADERS   # with Origin, as the BSE site sends
+
+ROOT = Path(__file__).resolve().parents[1]
+DB = ROOT / "data" / "rscreener.db"
+ARCH = "https://api.bseindia.com/BseIndiaAPI/api/Result_Arch_ng/w?scrip_cd={code}"
+SITE = "https://www.bseindia.com"
+MON = {m: i for i, m in enumerate(["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], 1)}
+XBRL_FROM = "2016-06-30"     # BSE XBRL starts about here; earlier stored history needs nothing from BSE
+
+
+
+def get(s: requests.Session, url: str, tries: int = 3) -> requests.Response:
+    """GET with backoff, with BSE's headers (fetch_results_history.get_retry
+    always sends NSE's, which BSE refuses)."""
+    delay, last = 1.5, None
+    for attempt in range(tries):
+        try:
+            r = s.get(url, timeout=30)
+            r.raise_for_status()
+            return r
+        except requests.RequestException as e:
+            last = e
+            if attempt < tries - 1:
+                time.sleep(delay)
+                delay *= 2
+    raise last  # type: ignore[misc]
+
+
+def month_end(y: int, m: int) -> date:
+    return (date(y + (m == 12), m % 12 + 1, 1) - timedelta(days=1))
+
+
+def parse_quarter(q: str, kind: str) -> tuple[str, str, str, str] | None:
+    """BSE's "Consolidated-Mar-22;MQ2021-2022;113.00;c" with Fld_QuarterName
+    ("Quarter" / "Year") -> (basis, period_type, period_start, period_end).
+    Half years and anything unreadable -> None."""
+    if kind not in ("Quarter", "Year") or not q:
+        return None
+    head = q.split(";")[0]
+    try:
+        basis_s, mon, yy = head.split("-")
+    except ValueError:
+        return None
+    basis = "consolidated" if basis_s.strip().lower().startswith("cons") else "standalone"
+    if mon not in MON or not yy.isdigit():
+        return None
+    y = int(yy) + (2000 if int(yy) < 70 else 1900)
+    end = month_end(y, MON[mon])
+    back = 3 if kind == "Quarter" else 12
+    sm, sy = MON[mon] - back + 1, y
+    while sm <= 0:
+        sm += 12
+        sy -= 1
+    start = date(sy, sm, 1)
+    return basis, ("quarterly" if kind == "Quarter" else "annual"), start.isoformat(), end.isoformat()
+
+
+def pick(rows: list[dict]) -> list[dict]:
+    """One filing per (period_type, period_end): consolidated over standalone,
+    then a revised filing over the original. Newest first."""
+    best: dict[tuple[str, str], dict] = {}
+    first: dict[tuple[str, str], str] = {}     # the earliest filing day: the results date
+    for r in rows:
+        p = parse_quarter(r.get("Quarter") or "", r.get("Fld_QuarterName") or "")
+        if not p:
+            continue
+        basis, ptype, ps, pe = p
+        link = r.get("conso_xbrl_link") if basis == "consolidated" else r.get("stand_xbrl_link")
+        if not link:
+            continue
+        cand = {"basis": basis, "ptype": ptype, "ps": ps, "pe": pe, "xbrl": SITE + link,
+                "revised": (r.get("Status") or "").lower().startswith("revis"),
+                "filed": (r.get("Filing_Date_Time") or "")[:10] or None,
+                "at": r.get("Revised_Date_Time") or r.get("Filing_Date_Time") or ""}
+        key = (ptype, pe)
+        if cand["filed"] and (key not in first or cand["filed"] < first[key]):
+            first[key] = cand["filed"]
+        cur = best.get(key)
+        rank = lambda c: (c["basis"] == "consolidated", c["revised"], c["at"])  # noqa: E731
+        if cur is None or rank(cand) > rank(cur):
+            best[key] = cand
+    for key, c in best.items():
+        c["filed"] = first.get(key)
+    return sorted(best.values(), key=lambda c: c["pe"], reverse=True)
+
+
+def bse_codes(con: sqlite3.Connection) -> dict[str, str]:
+    """{NSE symbol: BSE scrip code}, matched by ISIN. BSE-only companies
+    carry theirs in the universe already. The ISIN-to-code pairs come from
+    BSE's daily price file (bhavcopy), which every active scrip is in; BSE's
+    scrip-list API refuses scripted requests at times (403), and a refusal is
+    not worked around."""
+    out = {s: str(c) for s, c in con.execute(
+        "SELECT SYMBOL, BSE_CODE FROM universe WHERE BSE_CODE IS NOT NULL AND BSE_CODE != ''")}
+    by_isin: dict[str, str] = {}
+    for back in range(0, 8):                      # the latest trading day's file
+        d = date.today() - timedelta(days=back)
+        try:
+            r = requests.get(BSE_CM.format(ymd=d.strftime("%Y%m%d")), headers=BSE_HEADERS, timeout=60)
+        except requests.RequestException:
+            continue
+        if r.status_code != 200 or r.content[:200].lstrip().lower().startswith((b"<!doctype", b"<html")):
+            continue
+        for x in csv.DictReader(io.StringIO(r.content.decode("utf-8-sig"))):
+            if x.get("ISIN") and x.get("FinInstrmId"):
+                by_isin[x["ISIN"]] = x["FinInstrmId"]
+        break
+    if not by_isin:
+        print("  BSE bhavcopy unavailable - only BSE-only companies' codes are known")
+    for sym, isin in con.execute("SELECT SYMBOL, \"ISIN NUMBER\" FROM universe WHERE EXCHANGE = 'NSE'"):
+        if isin in by_isin:
+            out[sym] = by_isin[isin]
+    return out
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--symbols", default="", help="comma list; overrides --scope")
+    ap.add_argument("--scope", choices=["gaps"], default="gaps")
+    ap.add_argument("--max-age-days", type=float, default=90, help="check a company again after this long")
+    ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--max-minutes", type=float, default=0)
+    ap.add_argument("--sleep", type=float, default=0.3)
+    a = ap.parse_args()
+
+    con = sqlite3.connect(DB, timeout=180)
+    con.execute("PRAGMA busy_timeout=180000")
+    con.execute("CREATE TABLE IF NOT EXISTS bse_results_log (symbol TEXT PRIMARY KEY, fetched_at TEXT, error TEXT, n_periods INTEGER)")
+    con.execute("CREATE TABLE IF NOT EXISTS filing_dates (symbol TEXT, period_end TEXT, announced_on TEXT, PRIMARY KEY (symbol, period_end))")
+    codes = bse_codes(con)
+
+    if a.symbols:
+        due = [s.strip().upper() for s in a.symbols.split(",") if s.strip()]
+    else:
+        first = dict(con.execute("SELECT symbol, MIN(period_end) FROM results_history WHERE period_type='quarterly' GROUP BY symbol"))
+        nse = [s for (s,) in con.execute("SELECT SYMBOL FROM universe WHERE EXCHANGE='NSE'")]
+        gaps = [s for s in nse if s in codes and (first.get(s) is None or first[s] > XBRL_FROM)]
+        log = dict(con.execute("SELECT symbol, fetched_at FROM bse_results_log"))
+        cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=a.max_age_days)).strftime("%Y-%m-%d %H:%M:%S")
+        due = sorted((s for s in gaps if log.get(s, "") < cutoff), key=lambda s: log.get(s) or "")
+        print(f"  {len(gaps)} NSE companies with history starting after {XBRL_FROM} (or none) and a BSE listing; {len(due)} due")
+    if a.limit:
+        due = due[: a.limit]
+
+    s = requests.Session()
+    s.headers.update(BSE_API_HEADERS)
+    started = time.monotonic()
+    added_total = 0
+    for i, sym in enumerate(due, 1):
+        if budget.stop(i - 1, len(due)):
+            break
+        if a.max_minutes and (time.monotonic() - started) / 60 >= a.max_minutes:
+            print(f"  time budget reached after {i - 1} of {len(due)} companies; the rest next run")
+            break
+        code = codes.get(sym)
+        if not code:
+            print(f"[{i}/{len(due)}] {sym}: no BSE listing found")
+            continue
+        added = unread = refused = 0
+        err = None
+        try:
+            rows = get(s, ARCH.format(code=code)).json().get("Table") or []
+            have = {(pt, pe) for pt, pe in con.execute(
+                "SELECT DISTINCT period_type, period_end FROM results_history WHERE symbol=?", (sym,))}
+            for f in pick(rows):
+                if (f["ptype"], f["pe"]) in have:
+                    continue
+                try:
+                    facts = frh.parse_xbrl(get(s, f["xbrl"]).content, f["ptype"])
+                except Exception:  # noqa: BLE001 - one unreadable filing costs that filing
+                    facts = {}
+                if not facts:
+                    unread += 1
+                    continue
+                if frh.units_wrong(con, "results_history", sym, f["ptype"], f["pe"], facts.get("revenue")):
+                    refused += 1
+                    continue
+                frh.db_retry(lambda: con.executemany(
+                    "INSERT INTO results_history VALUES (?,?,?,?,?,?,?)",
+                    [(sym, f["basis"], f["ptype"], f["ps"], f["pe"], k, v) for k, v in facts.items()]))
+                if f["ptype"] == "quarterly" and f["filed"]:
+                    frh.db_retry(lambda: con.execute("INSERT OR IGNORE INTO filing_dates VALUES (?,?,?)", (sym, f["pe"], f["filed"])))
+                added += 1
+                time.sleep(a.sleep)
+        except Exception as e:  # noqa: BLE001 - one company must not stop the rest
+            err = str(e)[:200]
+        frh.db_retry(lambda: con.execute("INSERT OR REPLACE INTO bse_results_log VALUES (?,?,?,?)",
+                                         (sym, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), err, added)))
+        frh.db_retry(con.commit)
+        added_total += added
+        print(f"[{i}/{len(due)}] {sym} (BSE {code}): {added} periods added"
+              + (f", {unread} unreadable" if unread else "") + (f", {refused} refused (units)" if refused else "")
+              + (f" - ERROR {err}" if err else ""), flush=True)
+        time.sleep(a.sleep)
+    con.close()
+    print(f"done: {added_total} periods added from BSE")
+
+
+if __name__ == "__main__":
+    main()
