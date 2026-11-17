@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useState } from "react";
+import LeaveGuard, { type Change } from "@/components/LeaveGuard";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { BUILD_TIME, BUILD_COMMIT, BUILD_SUBJECT } from "@/lib/buildinfo";
@@ -232,6 +233,9 @@ function MainScreen() {
   const [isDark, setIsDark] = useState(false);
   const [secOrder, setSecOrder] = useState<string[]>([]);
   const [upd, setUpd] = useState<"idle" | "checking" | "current" | "error">("idle");
+  // The settings as this screen opened with them: leaving with any changed
+  // asks first, naming each change (components/LeaveGuard).
+  const [opened, setOpened] = useState<{ theme: string; accent: string; sections: SectionMode; lab: boolean } | null>(null);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
@@ -239,6 +243,7 @@ function MainScreen() {
     setAccent(localStorage.getItem("rs_accent") || "indigo");
     setSections(loadSectionMode());
     setLab(labOn());
+    setOpened({ theme: localStorage.getItem("rs_theme") || "system", accent: localStorage.getItem("rs_accent") || "indigo", sections: loadSectionMode(), lab: labOn() });
     setRowOrders(customOrders());
     setSecOrder(loadOrder("sections"));
     const resolve = () => setIsDark(document.documentElement.dataset.theme === "dark");
@@ -254,6 +259,23 @@ function MainScreen() {
   };
   const pickAccent = (a: string) => {
     setAccent(a); localStorage.setItem("rs_accent", a); apply(theme, a);
+  };
+  const nameOf = (list: readonly (readonly [string, string])[], k: string) => list.find(([x]) => x === k)?.[1] ?? k;
+  const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1);
+  const changes: Change[] = !opened ? [] : [
+    ...(theme !== opened.theme ? [{ label: "Theme", from: nameOf(THEMES, opened.theme), to: nameOf(THEMES, theme) }] : []),
+    ...(accent !== opened.accent ? [{ label: "Accent", from: cap(opened.accent), to: cap(accent) }] : []),
+    ...(sections !== opened.sections ? [{ label: "Company page layout", from: nameOf(LAYOUTS, opened.sections), to: nameOf(LAYOUTS, sections) }] : []),
+    ...(lab !== opened.lab ? [{ label: "Options lab", from: opened.lab ? "On" : "Off", to: lab ? "On" : "Off" }] : []),
+  ];
+  const undoAll = () => {
+    if (!opened) return;
+    if (theme !== opened.theme || accent !== opened.accent) {
+      localStorage.setItem("rs_theme", opened.theme); localStorage.setItem("rs_accent", opened.accent);
+      apply(opened.theme, opened.accent);
+    }
+    if (sections !== opened.sections) pickSections(opened.sections);
+    if (lab !== opened.lab) pickLab(opened.lab ? "on" : "off");
   };
   const pickSections = (m: SectionMode) => {
     setSections(m); localStorage.setItem("rs_sections", m);
@@ -288,6 +310,7 @@ function MainScreen() {
   return (
     <div>
       <PageTitle>Settings</PageTitle>
+      <LeaveGuard changes={changes} undo={undoAll} />
 
       <Group title="Appearance">
         <ThemePicker value={theme} accent={accent} onChange={pickTheme} />

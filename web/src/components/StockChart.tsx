@@ -821,7 +821,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         return k >= 0 ? src[k][1] : null;
       };
       const tone = (cur: number | null, prev: number | null) =>
-        cur === null || prev === null ? undefined : cur >= prev ? "color-mix(in srgb, var(--chart-pos) 55%, transparent)" : "color-mix(in srgb, var(--chart-neg) 55%, transparent)";
+        cur === null || prev === null ? undefined : cur >= prev ? "var(--chart-pos2)" : "var(--chart-neg2)";
       const baseIdx = new Map(src.map((p, i) => [p[0], i]));
       const volPts: XY[] = base
         .filter((p) => p.length > 2 && p[2] !== null && (p[2] as number) > 0)

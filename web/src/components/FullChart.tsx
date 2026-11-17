@@ -198,6 +198,7 @@ function palette() {
     bg: v("--bg", "#000000"), card2: v("--card2", "#161616"),
     ink: v("--ink", "#f5f5f5"), ink3: v("--ink3", "#8c8c8c"), line: v("--line", "#1f1f1f"),
     grid: v("--chart-grid", "#1c1c1c"), pos: v("--chart-pos", "#34d399"), neg: v("--chart-neg", "#f87171"),
+    pos2: v("--chart-pos2", "#14b8a6"), neg2: v("--chart-neg2", "#f97316"),
     accent: v("--accent", "#818cf8"), axisCol: v("--chart-axis", "#6e6e6e"),
     dma50: v("--chart-dma50", "#fbbf24"), dma200: v("--chart-dma200", "#818cf8"),
     vol: v("--chart-vol", "#31517e"), alt: v("--chart-alt", "#22d3ee"), bar: v("--chart-bar", "#55499b"),
@@ -686,6 +687,11 @@ const LV_DEFAULT: LvPrefs = { on: false, zones: true, trend: true, vol: true, se
  *  (green when it closed above yesterday's close). Owner, 16-Nov-2026. */
 type ColourBy = "candle" | "prev";
 const COLOUR_BY: [ColourBy, string][] = [["candle", "Open to close"], ["prev", "Previous close"]];
+/** One pair of colours per rule, shared by a candle and its volume bar so the
+ *  two always read alike: green / red for open to close, teal / orange for
+ *  the previous close (owner, 17-Nov-2026). */
+const upDown = (by: ColourBy, up: boolean, p: { pos: string; neg: string; pos2: string; neg2: string }) =>
+  by === "prev" ? (up ? p.pos2 : p.neg2) : (up ? p.pos : p.neg);
 type Prefs = { kind: Kind; inds: Ind[]; log: boolean; lv: LvPrefs; volBy: ColourBy; candleBy: ColourBy };
 const PREF_KEY = "rs_fullchart";
 function loadPrefs(): Prefs {
@@ -1162,7 +1168,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
       const upBy = (by: ColourBy) => rows.map(([, o, , , c], i) => (by === "prev" ? (i > 0 ? c >= rows[i - 1][4] : c >= o) : c >= o));
       const candleUp = upBy(prefs.candleBy);
       const tint = prefs.candleBy === "prev" && prefs.kind !== "heikin";
-      const tone = (i: number) => (candleUp[i] ? p.pos : p.neg);
+      const tone = (i: number) => upDown("prev", candleUp[i], p);
       const ohlc = (rs: Row[]) => rs.map(([t, o, h, l, c], i) => ({
         time: toTime(t), open: o, high: h, low: l, close: c,
         ...(tint ? { color: tone(i), wickColor: tone(i), borderColor: tone(i) } : {}),
@@ -1266,9 +1272,10 @@ export default function FullChart({ symbol }: { symbol: string }) {
         const v = hist();
         chart.priceScale("vol").applyOptions({ scaleMargins: stripOn ? { top: 0.74, bottom: 0.08 } : { top: 0.82, bottom: 0 } });
         const volUp = upBy(prefs.volBy);
-        const dir = (i: number, a: number) => alpha(volUp[i] ? p.pos : p.neg, a);
+        // The volume bar in its candle's own shade, not a paler one.
+        const dir = (i: number, a: number) => alpha(upDown(prefs.volBy, volUp[i], p), a);
         if (!fv || fvMode === "all") {
-          v.setData(rows.map(([t, , , , , vv], i) => ({ time: toTime(t), value: vv, color: dir(i, 0.45) })));
+          v.setData(rows.map(([t, , , , , vv], i) => ({ time: toTime(t), value: vv, color: dir(i, 1) })));
         } else {
           const at = (f: (x: [number, number]) => number, color: (i: number) => string) =>
             rows.flatMap((r, i) => (split[i] ? [{ time: toTime(r[0]), value: f(split[i]!), color: color(i) }] : []));
@@ -1277,9 +1284,9 @@ export default function FullChart({ symbol }: { symbol: string }) {
             v.setData(at((x) => x[0], () => alpha(p.ink3, 0.35)));
             hist().setData(at((x) => x[1], () => alpha(p.accent, 0.8)));
           } else if (fvMode === "deliv") {
-            v.setData(at((x) => x[1], (i) => dir(i, 0.6)));
+            v.setData(at((x) => x[1], (i) => dir(i, 1)));
           } else {
-            v.setData(at((x) => Math.max(x[0] - x[1], 0), (i) => dir(i, 0.45)));
+            v.setData(at((x) => Math.max(x[0] - x[1], 0), (i) => dir(i, 1)));
           }
         }
       }
@@ -2317,8 +2324,8 @@ export default function FullChart({ symbol }: { symbol: string }) {
                   <Toggle on={prefs.log} label="Log scale" sub="Equal percentage moves take equal height"
                     onClick={() => savePrefs({ ...prefs, log: !prefs.log })} />
                   <div className="px-3 pt-2 pb-2">
-                    <span className="block text-[15px] text-[var(--ink)]">Candle colour</span>
-                    <span className="block text-[12px] text-[var(--ink3)] mb-1.5">Green when the close is above its open, or above the previous close</span>
+                    <span className="block text-[15px] text-[var(--ink)]">Candle and bar colour</span>
+                    <span className="block text-[12px] text-[var(--ink3)] mb-1.5">Open to close: green up, red down. Previous close: teal up, orange down</span>
                     <Seg value={prefs.candleBy} options={COLOUR_BY} onChange={(v) => savePrefs({ ...prefs, candleBy: v })} />
                   </div>
                 </div>
@@ -2338,7 +2345,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
                     {indOn("vol") && (
                       <div className="px-3 pt-1 pb-2">
                         <span className="block text-[15px] text-[var(--ink)]">Volume colour</span>
-                        <span className="block text-[12px] text-[var(--ink3)] mb-1.5">Green when that day closed above its open, or above the previous close</span>
+                        <span className="block text-[12px] text-[var(--ink3)] mb-1.5">Open to close: green up, red down. Previous close: teal up, orange down - the same shades as the candles</span>
                         <Seg value={prefs.volBy} options={COLOUR_BY} onChange={(v) => savePrefs({ ...prefs, volBy: v })} />
                       </div>
                     )}
