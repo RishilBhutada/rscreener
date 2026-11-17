@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronGlyph } from "@/components/Glyphs";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   createChart, createTextWatermark,
@@ -19,6 +19,7 @@ import { readPick, writePick, type ChartPick } from "@/lib/chartpick";
 import ChartPresets from "@/components/ChartPresets";
 import { fourInRow } from "@/lib/ttm";
 import { sma, ema, bollinger, rsi, IND_COLOUR } from "@/lib/indicators";
+import YearsChart from "@/components/YearsChart";
 import {
   workingFor, growth, growthText, PE_WINDOWS, CA_LABEL, CA_ORDER, Q_LABEL,
   type ChartBand, type ChartTrendQ, type Quarter, type CorpAction, type Growth, type Working,
@@ -830,6 +831,11 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [range, setRange] = useState<Range>(() => (RANGES.includes(pick0?.range as Range) ? pick0!.range as Range : "1Y"));
   // Views laid over the one on screen (hold a view's name), each on its own scale.
   const [overlays, setOverlays] = useState<View[]>(() => (pick0?.overlays ?? []).filter((v) => VIEWS.some(([x]) => x === v)) as View[]);
+  // The company chart's Years view, here too (owner, 18-Nov-2026: "every
+  // addition made to chart is applicable to small and full view"). Each year's
+  // move from the last close before it, on a day-of-year axis - the same
+  // component, fed from this chart's own weekly and monthly closes.
+  const [years, setYears] = useState(() => pick0?.view === "years");
   const [held, setHeld] = useState<View | null>(null);
   const viewTouched = useRef(false);
   const [interval, setIv] = useState<Interval>("d");
@@ -926,9 +932,14 @@ export default function FullChart({ symbol }: { symbol: string }) {
     if (firstWrite.current) { firstWrite.current = false; return; }
     const vis = Object.fromEntries(Object.entries(hidden).map(([k, h]) => [k, !h]));
     // The company chart's Years view has no twin here; left untouched it stays Years there.
-    const v = viewSel === "price" && pick0?.view === "years" && !viewTouched.current ? "years" : viewSel;
+    const v = years ? "years" : viewSel;
     writePick({ view: v, range, overlays, vis, win: peWin, cmp: epsCmp, per: perShare, chg: showChg });
-  }, [viewSel, range, overlays, hidden, peWin, epsCmp, perShare, showChg, pick0]);
+  }, [viewSel, years, range, overlays, hidden, peWin, epsCmp, perShare, showChg]);
+  const yearsPrices = useMemo(() => {
+    const iso = (d: number) => new Date(d * DAY * 1000).toISOString().slice(0, 10);
+    const pts = (rows?: Row[]) => (rows ?? []).map((r) => [iso(r[0]), r[4]] as [string, number]);
+    return { weekly: pts(file?.w), monthly: pts(file?.m) };
+  }, [file]);
   const savePrefs = (p: Prefs) => {
     setPrefs(p);
     try { localStorage.setItem(PREF_KEY, JSON.stringify(p)); } catch { /* private mode */ }
@@ -1037,6 +1048,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
   };
   const pickView = (v: View) => {
     setView(v);
+    setYears(false);
     viewTouched.current = true;
     // A tap on a view switches to it alone; holding one lays it over.
     if (overlays.length) setOverlays([]);
@@ -2123,9 +2135,14 @@ export default function FullChart({ symbol }: { symbol: string }) {
       <nav className="shrink-0 flex items-center gap-0.5 overflow-x-auto px-2 py-1 border-b border-[var(--line)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [-webkit-touch-callout:none]"
         onPointerDown={tabDown} onPointerUp={stopHold} onPointerLeave={stopHold} onPointerCancel={stopHold} onContextMenu={tabMenu} onClick={tabClick}>
         {VIEWS.filter(([v]) => avail[v]).map(([v, label]) => (
-          <button key={v} data-view={v} className={`${pill(view === v)} whitespace-nowrap`}>
-            {label}{overlays.includes(v) && <span className="ml-0.5 text-[var(--accent)]" aria-label="overlaid">+</span>}
-          </button>
+          <Fragment key={v}>
+            <button data-view={v} className={`${pill(view === v && !years)} whitespace-nowrap`}>
+              {label}{overlays.includes(v) && <span className="ml-0.5 text-[var(--accent)]" aria-label="overlaid">+</span>}
+            </button>
+            {v === "price" && (
+              <button type="button" onClick={() => { setYears(true); setHeld(null); }} className={`${pill(years)} whitespace-nowrap`}>Years</button>
+            )}
+          </Fragment>
         ))}
         {cmps.length > 0 && (
           <span className="ml-auto shrink-0 inline-flex items-center gap-1 pl-2 text-xs text-[var(--ink3)] whitespace-nowrap">
@@ -2166,6 +2183,11 @@ export default function FullChart({ symbol }: { symbol: string }) {
 
       <div className="relative flex-1 min-h-0">
         <div ref={boxRef} className="absolute inset-0" style={{ touchAction: "none" }} />
+        {years && (
+          <div className="absolute inset-0 z-20 overflow-auto bg-[var(--bg)] p-3">
+            <YearsChart prices={yearsPrices} />
+          </div>
+        )}
         {L && (
           <div className="pointer-events-none absolute left-2 top-1.5 z-10 max-w-[calc(100%-72px)] text-[11px] leading-[1.35] tabular-nums">
             <p className="text-[var(--ink3)]">
