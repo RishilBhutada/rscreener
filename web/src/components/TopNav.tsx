@@ -17,6 +17,7 @@ import { useBackClose } from "@/lib/backclose";
 import { buildIndex, search, didYouMean, type SearchIndex, type SearchRow } from "@/lib/search";
 import AccountButton from "@/components/AccountButton";
 import PullToRefresh from "@/components/PullToRefresh";
+import ClearCacheButton from "@/components/ClearCacheButton";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -650,6 +651,8 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
             Two taps behind a panel is too far for the one control that answers
             "am I looking at the current version". */}
         <div className="shrink-0 ml-auto flex items-center gap-2">
+          {/* Clear cache data, left of refresh (owner, 17-Nov-2026). */}
+          <ClearCacheButton />
           <RefreshButton />
           <Settings />
           <PullToRefresh />

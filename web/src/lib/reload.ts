@@ -90,3 +90,19 @@ export function reloadBypassingCache() {
     .catch(() => {})      // no cache storage, or blocked: reload anyway
     .then(go, go);
 }
+
+/** "Clear cache data" (owner, 17-Nov-2026), the button left of refresh.
+ *  Throws away what the app has DOWNLOADED - the cache storage, any service
+ *  worker, this tab's session memory - and reloads past every cache, so each
+ *  data file is fetched again. What YOU made stays: watchlists, portfolio,
+ *  notes, alerts and settings live in localStorage and are not touched. A
+ *  page cannot empty the browser's own HTTP cache; the reload's marker makes
+ *  every loader fetch around it instead (isRefreshLoad). */
+export async function clearCachedData() {
+  try { sessionStorage.clear(); } catch { /* private mode */ }
+  try {
+    const regs = (await navigator.serviceWorker?.getRegistrations?.()) ?? [];
+    await Promise.all(regs.map((r) => r.unregister()));
+  } catch { /* none */ }
+  reloadBypassingCache();
+}
