@@ -186,7 +186,15 @@ def main() -> None:
         gaps = [s for s in nse if s in codes and (first.get(s) is None or first[s] > XBRL_FROM)]
         log = dict(con.execute("SELECT symbol, fetched_at FROM bse_results_log"))
         cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=a.max_age_days)).strftime("%Y-%m-%d %H:%M:%S")
-        due = sorted((s for s in gaps if log.get(s, "") < cutoff), key=lambda s: log.get(s) or "")
+        # Never-checked first; among them the widest gap first - prices
+        # starting furthest before the first stored quarter is where a chart
+        # is most visibly missing its P/E and EPS (Hindustan Foods: 3.8 years).
+        px0 = dict(con.execute("SELECT symbol, MIN(date) FROM prices GROUP BY symbol"))
+
+        def gap(s_: str) -> float:
+            a_, b_ = px0.get(s_), first.get(s_) or datetime.now().strftime("%Y-%m-%d")
+            return 0.0 if not a_ else (date.fromisoformat(b_[:10]) - date.fromisoformat(a_[:10])).days
+        due = sorted((s for s in gaps if log.get(s, "") < cutoff), key=lambda s: (log.get(s) or "", -gap(s)))
         print(f"  {len(gaps)} NSE companies with history starting after {XBRL_FROM} (or none) and a BSE listing; {len(due)} due")
     if a.limit:
         due = due[: a.limit]
