@@ -16,6 +16,7 @@ import {
   addPassword, authMessage, firebaseConfigured, hasPassword, inApp, sendPasswordReset, signInWithEmail, signInWithGoogle, signOutOfGoogle, useAuth,
 } from "@/lib/firebase";
 import { Glyph, Group, PageTitle, Row, Segmented } from "@/components/ListUI";
+import ClearCache from "@/components/ClearCacheButton";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -81,6 +82,7 @@ const ICON = {
   update: "M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5V9H15",
   version: "M12 3.5a8.5 8.5 0 1 0 0 17a8.5 8.5 0 0 0 0-17zM12 11v5.5M12 7.8v.01",
   change: "M3.5 12h5M15.5 12h5M12 8.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 0 0 0-7z",
+  trash: "M4 7h16M9 7V4.5h6V7M6.5 7l1 12.5h9l1-12.5M10 11v5M14 11v5",
   charts: "M7 3.5v17M17 3.5v17M5 8h4v7H5zM15 6.5h4v7h-4z",
 };
 
@@ -400,6 +402,10 @@ function MainScreen() {
             </span>
           }
         />
+        {/* Moved here from the top bar (owner, 17-Nov-2026). */}
+        <ClearCache trigger={(open) => (
+          <Row icon={<Glyph d={ICON.trash} />} title="Clear cache data" sub="Reload prices and charts fresh; your lists and settings stay" wrap onClick={open} />
+        )} />
       </Group>
 
       <Group title="About">

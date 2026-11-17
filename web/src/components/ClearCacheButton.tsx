@@ -1,25 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useBackClose } from "@/lib/backclose";
 import { clearCachedData } from "@/lib/reload";
 
-/** The button left of refresh (owner, 17-Nov-2026): clears what the app has
+/** Clear cache data (owner, 17-Nov-2026): clears what the app has
  *  downloaded and loads everything fresh. It asks first, and says plainly
- *  that the owner's own lists and settings are kept. */
-export default function ClearCacheButton() {
+ *  that the owner's own lists and settings are kept. It sat left of refresh
+ *  in the top bar; the owner moved it into Settings the same day, so the
+ *  caller now draws the control it opens from (`trigger`). */
+export default function ClearCache({ trigger }: { trigger: (open: () => void) => ReactNode }) {
   const [ask, setAsk] = useState(false);
   const [busy, setBusy] = useState(false);
   useBackClose(ask, () => setAsk(false));
   return (
     <>
-      <button type="button" onClick={() => setAsk(true)} aria-label="Clear cache data" title="Clear cache data"
-        className="rs-press w-10 h-10 rounded-full flex items-center justify-center text-[var(--ink2)] active:bg-[var(--card2)] hover:bg-[var(--card2)]">
-        <svg viewBox="0 0 24 24" className="w-[19px] h-[19px]" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 12.5h9l1-12.5M10 11v5M14 11v5" />
-        </svg>
-      </button>
+      {trigger(() => setAsk(true))}
       {ask && createPortal(
         <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="rs-clear-title">
           <div className="rs-fade absolute inset-0 bg-black/50" onClick={() => setAsk(false)} />
