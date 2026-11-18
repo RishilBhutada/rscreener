@@ -60,6 +60,9 @@ export function samePick(a: ChartPick, b: ChartPick, sameRange: (x: string, y: s
   if (a.view === "pe" || a.overlays.includes("pe")) {
     if (a.win !== b.win || a.per !== b.per) return false;
   }
+  // The window draws on every ratio view that carries one (18-Nov-2026).
+  if ((a.view === "ps" || a.view === "ev") && a.win !== b.win) return false;
+  if (a.view === "sales" && (a.sw ?? "q") !== (b.sw ?? "q")) return false;
   if (a.chg !== b.chg || (a.chg && a.cmp !== b.cmp)) return false;
   // Only the lines this view and its overlays draw.
   const mine = (k: string) => k.startsWith(`${a.view}:`) || a.overlays.some((o) => k.startsWith(`ov:${o}:`));
@@ -81,7 +84,8 @@ const LAYER_WORDS: Record<string, string> = {
 /** What a preset sets, in plain words, for the save sheet. */
 export function describe(p: ChartPick): string[] {
   const out = [`View: ${p.view === "pe" && p.per === "sps" ? "P/S Ratio" : VIEW_WORDS[p.view] ?? p.view}`, `Range: ${p.range}`];
-  if (p.view === "pe" && p.win === "q1") out.push("Window: latest quarter x4");
+  if ((p.view === "pe" || p.view === "ps" || p.view === "ev") && p.win === "q1") out.push("Window: latest quarter x4");
+  if (p.view === "sales") out.push(`Sales: ${p.sw === "ttm" ? "twelve months to each quarter (TTM)" : "each quarter"}`);
   if (p.overlays.length) out.push(`Overlays: ${p.overlays.map((o) => VIEW_WORDS[o] ?? o).join(", ")}`);
   out.push(`Growth on bars: ${!p.chg ? "off" : p.cmp === "yoy" ? "vs year ago" : "vs quarter before"}`);
   const mine = (k: string) => k.startsWith(`${p.view}:`) || p.overlays.some((o) => k.startsWith(`ov:${o}:`));

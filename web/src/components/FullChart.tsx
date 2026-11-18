@@ -17,7 +17,7 @@ import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { useBackClose } from "@/lib/backclose";
 import { readPick, writePick, type ChartPick } from "@/lib/chartpick";
 import ChartPresets from "@/components/ChartPresets";
-import { fourInRow } from "@/lib/ttm";
+import { fourInRow, quarterX4, ttmMargins, ttmSums } from "@/lib/ttm";
 import { sma, ema, bollinger, rsi, IND_COLOUR } from "@/lib/indicators";
 import YearsChart from "@/components/YearsChart";
 import DataStatusButton, { whyMissing, type DataStatus } from "@/components/DataStatus";
@@ -860,6 +860,8 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [canFull, setCanFull] = useState(false);
   // The company chart's own switches, same defaults.
   const [peWin, setPeWin] = useState(() => pick0?.win ?? "ttm");
+  // Sales & margin on each quarter or the twelve months to it (StockChart.tsx).
+  const [salesWin, setSalesWin] = useState<"q" | "ttm">(() => (pick0?.sw === "ttm" ? "ttm" : "q"));
   /** EPS under the P/E line, or sales per share under the Price / Sales line -
    *  the company chart's switch (StockChart.tsx); the line follows the bars. */
   const [perShare, setPerShare] = useState<"eps" | "sps" | "debt">(() => pick0?.per ?? "eps");
@@ -936,8 +938,8 @@ export default function FullChart({ symbol }: { symbol: string }) {
     const vis = Object.fromEntries(Object.entries(hidden).map(([k, h]) => [k, !h]));
     // The company chart's Years view has no twin here; left untouched it stays Years there.
     const v = years ? "years" : viewSel;
-    writePick({ view: v, range, overlays, vis, win: peWin, cmp: epsCmp, per: perShare, chg: showChg });
-  }, [viewSel, years, range, overlays, hidden, peWin, epsCmp, perShare, showChg]);
+    writePick({ view: v, range, overlays, vis, win: peWin, cmp: epsCmp, per: perShare, chg: showChg, sw: salesWin });
+  }, [viewSel, years, range, overlays, hidden, peWin, epsCmp, perShare, showChg, salesWin]);
   const yearsPrices = useMemo(() => {
     const iso = (d: number) => new Date(d * DAY * 1000).toISOString().slice(0, 10);
     const pts = (rows?: Row[]) => (rows ?? []).map((r) => [iso(r[0]), r[4]] as [string, number]);
@@ -1072,7 +1074,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
   // presets, applied to this chart's own switches.
   const presetPick: ChartPick = {
     view: viewSel, range, overlays, vis: Object.fromEntries(Object.entries(hidden).map(([k, h]) => [k, !h])),
-    win: peWin, cmp: epsCmp, per: perShare, chg: showChg,
+    win: peWin, cmp: epsCmp, per: perShare, chg: showChg, sw: salesWin,
   };
   const applyPreset = (p: ChartPick) => {
     setView(VIEWS.some(([v]) => v === p.view) ? p.view as View : "price");
@@ -1081,6 +1083,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
     setOverlays(p.overlays.filter((v) => VIEWS.some(([x]) => x === v)) as View[]);
     setHidden(Object.fromEntries(Object.entries(p.vis).map(([k, on]) => [k, !on])));
     setPeWin(p.win); setEpsCmp(p.cmp); setPerShare(p.per); setShowChg(p.chg);
+    setSalesWin(p.sw === "ttm" ? "ttm" : "q");
     setCmps([]); setHeld(null);
     kept.current = null;
   };
@@ -1382,7 +1385,11 @@ export default function FullChart({ symbol }: { symbol: string }) {
     } else if (view === "sales") {
       if (!tq) { chart.remove(); chartRef.current = null; return; }
       const qd = tq.periods.map(dayOf);
-      const sales = tq.revenue;
+      // Each quarter, or the twelve months to it (lib/ttm.ts) - the company
+      // chart's switch, the same arithmetic.
+      const tw = salesWin === "ttm";
+      keyWin = `sales:${salesWin}`;
+      const sales = tw ? ttmSums(tq.periods, tq.revenue, tq.basis) : tq.revenue;
       chart.applyOptions({ leftPriceScale: { visible: !isHidden("sales"), borderColor: p.line, scaleMargins: { top: 0.35, bottom: 0 } } });
       const s = chart.addSeries(HistogramSeries, {
         priceScaleId: "left", priceLineVisible: false, lastValueVisible: false, priceFormat: fmt((x) => Math.round(x).toLocaleString("en-IN")),
@@ -1401,7 +1408,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
       }
       const pctFmt = fmt((x) => `${Math.round(x)}%`);
       const margin = (k: "gpm" | "opm" | "npm", color: string) => {
-        const arr = tq[k] ?? [];
+        const arr = tw ? ttmMargins(tq.periods, tq[k], tq.revenue, tq.basis) : tq[k] ?? [];
         const m = chart.addSeries(LineSeries, {
           color, lineWidth: 2, lineType: LineType.Curved, priceFormat: pctFmt,
           priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, visible: !isHidden(k),
@@ -1414,11 +1421,11 @@ export default function FullChart({ symbol }: { symbol: string }) {
       legendAt = (day) => {
         const i = day === null ? qd.length - 1 : atOrBefore(qd, day);
         const items: LItem[] = [];
-        if (!isHidden("sales") && sales[i] != null) items.push({ label: "Sales", value: crore(sales[i] as number), color: p.bar });
+        if (!isHidden("sales") && sales[i] != null) items.push({ label: tw ? "Sales (TTM)" : "Sales", value: crore(sales[i] as number), color: p.bar });
         if (!isHidden("gpm") && g[i] != null) items.push({ label: "GPM", value: `${(g[i] as number).toFixed(1)}%`, color: p.gpm });
         if (!isHidden("opm") && o[i] != null) items.push({ label: "OPM", value: `${(o[i] as number).toFixed(1)}%`, color: p.opm });
         if (!isHidden("npm") && n[i] != null) items.push({ label: "NPM", value: `${(n[i] as number).toFixed(1)}%`, color: p.npm });
-        return { date: `Quarter ended ${dateOf(qd[i], "month")}`, items };
+        return { date: `${tw ? "Twelve months to" : "Quarter ended"} ${dateOf(qd[i], "month")}`, items };
       };
     } else if (view === "ebitda") {
       // The company chart's EBITDA view (owner's pick B, 1-Nov-2026): price and
@@ -1617,9 +1624,10 @@ export default function FullChart({ symbol }: { symbol: string }) {
       keyWin = `${view}:${peWin}:${spsOn ? "sps" : "eps"}`;
       let series = band0.series;
       let median = band0.median_5y;
-      // Latest quarter x4 - for earnings, and for sales since 1-Nov-2026.
-      const q1w = view === "pe" && peWin === "q1" && !!band0.alt?.q1;
-      if (view === "pe" && peWin !== "ttm" && band0.alt?.[peWin]) {
+      // Latest quarter x4 - for earnings, for sales since 1-Nov-2026, and on
+      // Market cap / Sales and EV / EBITDA since 18-Nov-2026 (owner).
+      const q1w = (view === "pe" || view === "ps" || view === "ev") && peWin === "q1" && !!band0.alt?.q1;
+      if (q1w && band0.alt?.[peWin]) {
         const alt = band0.alt[peWin];
         series = band0.series.map((q, i) => [q[0], alt[i]] as [string, number | null])
           .filter((q): q is [string, number] => q[1] !== null && q[1] !== undefined);
@@ -1685,8 +1693,14 @@ export default function FullChart({ symbol }: { symbol: string }) {
           const back = epsCmp === "yoy" ? 4 : 1;
           bars.forEach((b, i) => { b.chg = i >= back ? growth(b.v, bars[i - back].v) : { kind: "none" }; });
           barLabel = spsOn ? (q1w ? "SPS (1Q×4)" : "SPS (4Q)") : q1w ? "EPS (1Q×4)" : "EPS (4Q)";
-        } else if (view === "ev") { ttm(tq.ebitda); barLabel = "EBITDA (TTM)"; barFmt = crore; }
-        else if (view === "ps") { ttm(tq.revenue); barLabel = "Sales (TTM)"; barFmt = crore; }
+        } else if (view === "ev" || view === "ps") {
+          // The figure under the ratio on the ratio's own window.
+          const src = view === "ev" ? tq.ebitda : tq.revenue;
+          if (q1w) quarterX4(src).forEach((v, i) => { if (v !== null) bars.push({ day: dayOf(periods[i]), v }); });
+          else ttm(src);
+          barLabel = `${view === "ev" ? "EBITDA" : "Sales"} (${q1w ? "1Q×4" : "TTM"})`;
+          barFmt = crore;
+        }
         else {
           periods.forEach((d, i) => { const x = tq.book_value?.[i]; if (x !== null && x !== undefined) bars.push({ day: dayOf(d), v: x }); });
           barLabel = "Book value";
@@ -1985,7 +1999,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
     };
     // `range` is applied below without a rebuild.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, company, view, interval, prefs, peWin, showDates, showChg, epsCmp, marginAt, showCA, caOn, hidden, cmps, themeKey, symbol, etfDoc, spsOn, overlays, debtOn, fv, fvMode, mkt, showMkt]);
+  }, [file, company, view, interval, prefs, peWin, salesWin, showDates, showChg, epsCmp, marginAt, showCA, caOn, hidden, cmps, themeKey, symbol, etfDoc, spsOn, overlays, debtOn, fv, fvMode, mkt, showMkt]);
 
   const applyRange = () => {
     const chart = chartRef.current, sp = spanRef.current;
@@ -2313,6 +2327,11 @@ export default function FullChart({ symbol }: { symbol: string }) {
                 <Seg value={peWin} options={PE_WINDOWS.map(([k, label]) => [k, label] as [string, string])} onChange={(v) => { kept.current = null; setPeWin(v); }} />
               )}
             </>
+          ) : (view === "ps" || view === "ev") && (view === "ps" ? company?.ps_band : company?.ev_band)?.alt?.q1 ? (
+            // The same window on the other ratio views (owner, 18-Nov-2026).
+            <Seg value={peWin} options={PE_WINDOWS.map(([k, label]) => [k, label] as [string, string])} onChange={(v) => { kept.current = null; setPeWin(v); }} />
+          ) : view === "sales" && tq ? (
+            <Seg value={salesWin} options={[["q", "Quarter"], ["ttm", "TTM"]]} onChange={(v) => { kept.current = null; setSalesWin(v); }} />
           ) : null}
           <button onClick={() => setSheet("layers")} className={pill(nLayers > 0)}>
             {view === "price" ? "Indicators" : "Layers"}{nLayers > 0 ? ` · ${nLayers}` : ""}

@@ -17,10 +17,14 @@ export type ChartPick = {
   overlays: string[];
   /** true = shown, false = hidden; a line not listed keeps its default */
   vis: Record<string, boolean>;
-  win: string;            // "ttm" | "q1"
+  /** "ttm" | "q1" - the window of every ratio view that carries one: P/E,
+   *  Market cap / Sales and EV / EBITDA (P/E alone before 18-Nov-2026) */
+  win: string;
   cmp: "yoy" | "prev";
   per: "eps" | "sps" | "debt";
   chg: boolean;
+  /** Sales & margin: each quarter ("q", the default) or twelve months to each ("ttm") */
+  sw?: "q" | "ttm";
 };
 
 const KEY = "rs_chart_pick";

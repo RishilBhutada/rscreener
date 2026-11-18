@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckGlyph } from "@/components/Glyphs";
+import { CheckGlyph, ChevronGlyph } from "@/components/Glyphs";
 import { ema, bollinger, rsi, IND_COLOUR } from "@/lib/indicators";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import TabIndicator from "@/components/TabIndicator";
@@ -12,7 +12,7 @@ import { canonKey, companyKey, rangeToCompany, rangeToFull, readPick, writePick,
 import ChartPresets from "@/components/ChartPresets";
 import Hint from "@/components/Hint";
 import Link from "next/link";
-import { fourInRow } from "@/lib/ttm";
+import { fourInRow, quarterX4, ttmMargins, ttmSums } from "@/lib/ttm";
 import DataStatusButton, { whyMissing, type DataStatus } from "@/components/DataStatus";
 
 type Pt = [string, number] | [string, number, number | null];
@@ -36,6 +36,22 @@ export type ChartBand = {
 /** How a ratio was arrived at, in the units it was arrived in. */
 export type Working = { label: string; value: string; note?: string }[];
 
+/** A band on another earnings window: its line and median swapped for that
+ *  window's, which align index-for-index with the TTM series. TTM, or a band
+ *  without that window, comes back as it was. */
+export function onWindow(b0: ChartBand | undefined, win: string): ChartBand {
+  const b = b0 ?? null;
+  const vals = win !== "ttm" ? b?.alt?.[win] : undefined;
+  if (!b || !vals) return b;
+  return {
+    ...b,
+    series: b.series
+      .map((p, i) => [p[0], vals[i]] as [string, number | null])
+      .filter((p): p is [string, number] => p[1] !== null && p[1] !== undefined),
+    median_5y: b.alt_median_5y?.[win] ?? b.median_5y,
+  };
+}
+
 export function workingFor(view: View, band: ChartBand, idx: number, qs?: Quarter[] | null, win = "ttm"): Working | null {
   const p = band?.parts?.[idx];
   if (!p) return null;
@@ -52,6 +68,11 @@ export function workingFor(view: View, band: ChartBand, idx: number, qs?: Quarte
     if (view === "ps") return [
       { label: "Market cap", value: `₹ ${n(p[0], 0)} Cr` },
       { label: "÷ Sales (latest quarter x4)", value: `₹ ${n(p[0] / alt, 0)} Cr` },
+    ];
+    if (view === "ev" && typeof p[1] === "number") return [
+      { label: "Market cap", value: `₹ ${n(p[0], 0)} Cr` },
+      { label: "+ Net debt", value: `₹ ${n(p[1], 0)} Cr` },
+      { label: "÷ EBITDA (latest quarter x4)", value: `₹ ${n((p[0] + p[1]) / alt, 0)} Cr` },
     ];
   }
   if (view === "pe") {
@@ -432,6 +453,9 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const [overlays, setOverlays] = useState<View[]>(() => (pick0?.overlays ?? []).filter((v) => v in VIEW_NAME && v !== "years") as View[]);
   const [range, setRange] = useState(() => rangeToCompany(pick0?.range) ?? "5Yr");
   const [peWin, setPeWin] = useState(() => pick0?.win ?? "ttm");
+  // Sales & margin: each quarter, or the twelve months to each quarter, with
+  // the margins on the same basis (owner, 18-Nov-2026).
+  const [salesWin, setSalesWin] = useState<"q" | "ttm">(() => (pick0?.sw === "ttm" ? "ttm" : "q"));
   /** What the bars under the ratio line are: earnings per share (with the P/E
    *  line) or sales per share (with the Price / Sales line). Price over sales
    *  per share IS market cap over sales, so the line has to change with the
@@ -492,6 +516,17 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     setMarginAtState(k);
     try { localStorage.setItem("rs_ebm_at", k); } catch { /* still applied */ }
   };
+  // The options sheet's Advanced part - every other setting the chart has,
+  // folded away so it takes no room until wanted (owner, 18-Nov-2026). Open
+  // or shut as it was last left, on this device.
+  const [adv, setAdvState] = useState(false);
+  useEffect(() => {
+    try { if (localStorage.getItem("rs_chart_adv") === "1") setAdvState(true); } catch { /* shut, then */ }
+  }, []);
+  const setAdv = (b: boolean) => {
+    setAdvState(b);
+    try { localStorage.setItem("rs_chart_adv", b ? "1" : "0"); } catch { /* still applied */ }
+  };
   // Peers answer "is this expensive for its industry". Comparing against anything
   // listed answers a different and equally fair question - "of the two I was
   // choosing between, did I pick the better one" - and those two need not be
@@ -539,8 +574,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     // The full chart has finer ranges (2Y, YTD); one set there that maps to
     // the range shown here is kept, not rounded.
     const r = prev?.range && rangeToCompany(prev.range) === range ? prev.range : rangeToFull(range);
-    writePick({ view: viewSel, range: r, overlays, vis, win: peWin, cmp: epsCmp, per: perShare, chg: showChg });
-  }, [viewSel, range, overlays, on, peWin, epsCmp, perShare, showChg]);
+    writePick({ view: viewSel, range: r, overlays, vis, win: peWin, cmp: epsCmp, per: perShare, chg: showChg, sw: salesWin });
+  }, [viewSel, range, overlays, on, peWin, epsCmp, perShare, showChg, salesWin]);
   const [moreOpen, setMoreOpen] = useState(false);
   useBackClose(moreOpen, () => setMoreOpen(false));
   const [hover, setHover] = useState<{ t: number; px: number; py: number } | null>(null);
@@ -987,19 +1022,38 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       }
     }
 
-    if (view === "ev") bandView(evBand, "EV / EBITDA", "Median EV Multiple", "plain", ttmBars(trendQ?.ebitda), "Operating profit (TTM, before other income)", "cr");
+    // The P/E view's window on every ratio view that carries it (owner,
+    // 18-Nov-2026): the line, its median and the bars under it all move to
+    // the latest quarter x4 together, so the ratio and its figure agree.
+    const q1On = (b?: ChartBand) => peWin === "q1" && !!b?.alt?.q1;
+    if (view === "ev") {
+      const q1 = q1On(evBand);
+      bandView(onWindow(evBand, q1 ? "q1" : "ttm"), q1 ? "EV / EBITDA (1Q×4)" : "EV / EBITDA", "Median EV Multiple", "plain",
+        q1 ? qBars(quarterX4(trendQ?.ebitda)) : ttmBars(trendQ?.ebitda),
+        q1 ? "Operating profit (latest quarter x4)" : "Operating profit (TTM, before other income)", "cr");
+    }
     if (view === "pb") bandView(pbBand, "Price to BV", "Median PBV", "plain", qBars(trendQ?.book_value), "Book Value", "rupee");
-    if (view === "ps") bandView(psBand, "Market Cap / Sales", "Median Market Cap to Sales", "plain", ttmBars(trendQ?.revenue), "Sales (TTM)", "cr");
+    if (view === "ps") {
+      const q1 = q1On(psBand);
+      bandView(onWindow(psBand, q1 ? "q1" : "ttm"), q1 ? "Market Cap / Sales (1Q×4)" : "Market Cap / Sales", "Median Market Cap to Sales", "plain",
+        q1 ? qBars(quarterX4(trendQ?.revenue)) : ttmBars(trendQ?.revenue), q1 ? "Sales (latest quarter x4)" : "Sales (TTM)", "cr");
+    }
 
     if (view === "sales" && trendQ) {
-      const sales = qBars(trendQ.revenue);
-      if (sales.length) defs.push({ key: "sales", label: "Quarter Sales", color: "var(--chart-bar)", kind: "bars", axis: "L", data: sales, fmt: "cr" });
-      const gpm = qBars(trendQ.gpm);
-      if (gpm.length > 1) defs.push({ key: "gpm", label: "GPM %", color: "var(--chart-alt)", kind: "smooth", axis: "R", data: gpm, fmt: "pct" });
-      const opm = qBars(trendQ.opm);
-      if (opm.length > 1) defs.push({ key: "opm", label: "OPM %", color: "var(--chart-dma50)", kind: "smooth", axis: "R", data: opm, fmt: "pct" });
-      const npm = qBars(trendQ.npm);
-      if (npm.length > 1) defs.push({ key: "npm", label: "NPM %", color: "var(--chart-pos)", kind: "smooth", axis: "R", data: npm, fmt: "pct" });
+      // Each quarter, or the twelve months to it - sales added up, margins as
+      // the year's profit over the year's sales (lib/ttm.ts).
+      const tw = salesWin === "ttm";
+      const per = trendQ.periods;
+      const pct = (m?: (number | null)[]) => (tw ? ttmMargins(per, m, trendQ.revenue, trendQ.basis) : m);
+      const sales = qBars(tw ? ttmSums(per, trendQ.revenue, trendQ.basis) : trendQ.revenue);
+      const sfx = tw ? " (TTM)" : "";
+      if (sales.length) defs.push({ key: "sales", label: tw ? "Sales (TTM)" : "Quarter Sales", color: "var(--chart-bar)", kind: "bars", axis: "L", data: sales, fmt: "cr" });
+      const gpm = qBars(pct(trendQ.gpm));
+      if (gpm.length > 1) defs.push({ key: "gpm", label: `GPM %${sfx}`, color: "var(--chart-alt)", kind: "smooth", axis: "R", data: gpm, fmt: "pct" });
+      const opm = qBars(pct(trendQ.opm));
+      if (opm.length > 1) defs.push({ key: "opm", label: `OPM %${sfx}`, color: "var(--chart-dma50)", kind: "smooth", axis: "R", data: opm, fmt: "pct" });
+      const npm = qBars(pct(trendQ.npm));
+      if (npm.length > 1) defs.push({ key: "npm", label: `NPM %${sfx}`, color: "var(--chart-pos)", kind: "smooth", axis: "R", data: npm, fmt: "pct" });
     }
 
     // EBITDA beside the price - the owner's pick B, 1-Nov-2026. EBITDA is
@@ -1131,7 +1185,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     });
 
     return defs;
-  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, cutoff, livePrice, now, epsCmp, marginAt, inds, mkt, quarters, cmp, symbol, exchange, years, spsOn, overlays, debtOn, debtSeries, volMode, split, daily10]);
+  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, salesWin, cutoff, livePrice, now, epsCmp, marginAt, inds, mkt, quarters, cmp, symbol, exchange, years, spsOn, overlays, debtOn, debtSeries, volMode, split, daily10]);
 
   // With the quarterly-results overlay on, the per-quarter EPS bars are already
   // on screen. Keeping the summed TTM bars too puts two different quantities in
@@ -1146,12 +1200,13 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     for (const [c, b] of Object.entries(p.vis)) { const k = companyKey(c); if (k) o[k] = b; }
     setOn(o);
     setPeWin(p.win); setEpsCmp(p.cmp); setPerShare(p.per); setShowChg(p.chg);
+    setSalesWin(p.sw === "ttm" ? "ttm" : "q");
     setCmpSym(null); setHover(null);
   };
   const presetPick: ChartPick = (() => {
     const vis: Record<string, boolean> = {};
     for (const [k, b] of Object.entries(on)) { const c = canonKey(k); if (c) vis[c] = b; }
-    return { view: viewSel, range: rangeToFull(range), overlays, vis, win: peWin, cmp: epsCmp, per: perShare, chg: showChg };
+    return { view: viewSel, range: rangeToFull(range), overlays, vis, win: peWin, cmp: epsCmp, per: perShare, chg: showChg, sw: salesWin };
   })();
   const presetRow = (
     <>
@@ -1299,8 +1354,14 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const barOpts = ([["eps", "EPS"], ["sps", "SPS"], ["debt", "Debt"]] as const).filter(([k]) => k === "eps" || (k === "sps" ? spsAvail : debtAvail));
   const pBars = isPe && barOpts.length > 1 ? seg(perShare, barOpts, setPerShare) : null;
   const isEb = view === "ebitda";
-  const winBand = debtOn ? null : spsOn ? psBand : peBand;
-  const pWin = isPe && winBand?.alt?.q1 ? seg(peWin as "ttm" | "q1", [["ttm", "TTM"], ["q1", "1Q×4"]] as const, (k) => setPeWin(k)) : null;
+  // TTM or the latest quarter x4 on every ratio view that carries it - P/E,
+  // Market cap / Sales, EV / EBITDA (owner, 18-Nov-2026). One choice for all
+  // three, so a preset's window means the same on each.
+  const winBand = view === "pe" ? (debtOn ? null : spsOn ? psBand : peBand) : view === "ps" ? psBand : view === "ev" ? evBand : null;
+  const winWord = view === "ev" ? "Operating profit" : view === "ps" || spsOn ? "Sales" : "Earnings";
+  const pWin = winBand?.alt?.q1 ? seg(peWin as "ttm" | "q1", [["ttm", "TTM"], ["q1", "1Q×4"]] as const, (k) => setPeWin(k)) : null;
+  const pSales = view === "sales" && trendQ ? seg(salesWin, [["q", "Each quarter"], ["ttm", "TTM"]] as const, setSalesWin) : null;
+  const note = (t?: string) => (t ? <span className="text-[11px] leading-snug text-[var(--ink3)] max-w-[34ch]">{t}</span> : null);
   const pGrowth = (isPe && (quarters?.length ?? 0) > 0) || (isEb && !!trendQ)
     ? seg(growthVal, [["off", "No growth"], ["yoy", isPe && peWin === "ttm" ? "vs year before" : "vs year ago"], ["prev", "vs quarter before"]] as const, setGrowth) : null;
   const pDates = (quarters?.length ?? 0) > 0 ? chip(showDates, "Result dates", () => setShowDates(!showDates)) : null;
@@ -1342,15 +1403,24 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     </div>
   ) : null;
   // What is switched on beyond the defaults - growth labels are on by default.
-  const activeCount = [spsOn, showDates, showCA, !!cmpSym, isPe && peWin !== "ttm"].filter(Boolean).length + (view === "price" ? inds.length : 0);
+  const activeCount = [spsOn, showDates, showCA, !!cmpSym, !!pWin && peWin !== "ttm", !!pSales && salesWin === "ttm"].filter(Boolean).length + (view === "price" ? inds.length : 0);
   const label = (t: string) => <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">{t}</span>;
+  // Settled once and left alone: growth labels, the margin point and the
+  // event lines sit under Advanced, folded away (owner, 18-Nov-2026).
+  const advItems = [
+    pGrowth && <div key="g" className="flex flex-col items-start gap-1.5">{label("Growth on bars")}{pGrowth}</div>,
+    pMarginAt && <div key="m" className="flex flex-col items-start gap-1.5">{label("EBITDA margin point")}{pMarginAt}</div>,
+    (pDates || pCA) && <div key="s" className="flex flex-col items-start gap-1.5">{label("Show on chart")}
+      <div className="flex gap-1.5 flex-wrap">{pDates}{pCA}</div>{pCAKinds}</div>,
+  ].filter(Boolean);
   const optionsSheet = sheet && (
     <InfoDialog title="Chart options" onClose={() => setSheet(false)}>
       <div className="flex flex-col gap-4 text-xs">
         {pBars && <div className="flex flex-col items-start gap-1.5">{label("Bars")}{pBars}</div>}
-        {pWin && <div className="flex flex-col items-start gap-1.5">{label(spsOn ? "Sales" : "Earnings")}{pWin}</div>}
-        {pGrowth && <div className="flex flex-col items-start gap-1.5">{label("Growth on bars")}{pGrowth}</div>}
-        {pMarginAt && <div className="flex flex-col items-start gap-1.5">{label("EBITDA margin point")}{pMarginAt}</div>}
+        {pWin && <div className="flex flex-col items-start gap-1.5">{label(winWord)}{pWin}
+          {note(PE_WINDOWS.find(([k]) => k === peWin)?.[2])}</div>}
+        {pSales && <div className="flex flex-col items-start gap-1.5">{label("Sales & margins")}{pSales}
+          {note(salesWin === "ttm" ? "The twelve months to each quarter: sales added up, each margin the year's profit over the year's sales. Smooths the season out." : "Each quarter on its own - the season shows.")}</div>}
         {view === "price" && (
           <div className="flex flex-col items-start gap-1.5">{label("Indicators")}
             <div className="flex gap-1.5 flex-wrap">{SMALL_INDS.map(([k, name]) => <span key={k}>{chip(inds.includes(k), name, () => toggleInd(k))}</span>)}</div>
@@ -1359,10 +1429,21 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             )}
           </div>
         )}
-        <div className="flex flex-col items-start gap-1.5">{label("Show on chart")}
-          <div className="flex gap-1.5 flex-wrap">{pDates}{pCA}</div>{pCAKinds}</div>
         <div className="flex flex-col items-start gap-1.5">{label("Compare")}{pCompare}
           {cmpErr && <span className="text-[var(--neg)]">{cmpErr}</span>}</div>
+        {advItems.length > 0 && (
+          <div className="border-t border-[var(--line)] pt-3 flex flex-col gap-4">
+            <button type="button" onClick={() => setAdv(!adv)} aria-expanded={adv}
+              className="-my-1 py-1 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-[var(--ink2)]">
+              Advanced
+              <span className="inline-flex items-center gap-1 normal-case tracking-normal font-medium text-[var(--ink3)]">
+                {adv ? "Hide" : `${advItems.length} more`}
+                <span className={`inline-block transition-transform ${adv ? "rotate-180" : ""}`}><ChevronGlyph size={12} /></span>
+              </span>
+            </button>
+            {adv && advItems}
+          </div>
+        )}
       </div>
     </InfoDialog>
   );
@@ -1788,7 +1869,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
             {(() => {
               if (!hoverPt || !activeBand?.parts || (dragging && boxW < 520)) return null;
               const idx = activeBand.series.findIndex((r) => toT(r[0]) === hoverPt.t);
-              const w = idx >= 0 ? workingFor(view === "pe" && spsOn ? "ps" : view, activeBand, idx, quarters, view === "pe" ? peWin : "ttm") : null;
+              const w = idx >= 0 ? workingFor(view === "pe" && spsOn ? "ps" : view, activeBand, idx, quarters, view === "pe" || view === "ps" || view === "ev" ? peWin : "ttm") : null;
               if (!w) return null;
               return (
                 <div className="mt-1.5 pt-1.5 border-t border-[var(--line)] space-y-0.5">
