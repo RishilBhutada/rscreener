@@ -112,8 +112,11 @@ def parse_quarter(q: str, kind: str) -> tuple[str, str, str, str] | None:
 
 def pick(rows: list[dict]) -> list[dict]:
     """One filing per (period_type, period_end): consolidated over standalone,
-    then a revised filing over the original. Newest first."""
+    then a revised filing over the original. Newest first. Each carries
+    `alts`, the best filing on EACH basis, for a gap inside a history that
+    must be filled on its neighbours' basis (inside_basis)."""
     best: dict[tuple[str, str], dict] = {}
+    per_basis: dict[tuple[str, str, str], dict] = {}
     first: dict[tuple[str, str], str] = {}     # the earliest filing day: the results date
     for r in rows:
         p = parse_quarter(r.get("Quarter") or "", r.get("Fld_QuarterName") or "")
@@ -134,9 +137,45 @@ def pick(rows: list[dict]) -> list[dict]:
         rank = lambda c: (c["basis"] == "consolidated", c["revised"], c["at"])  # noqa: E731
         if cur is None or rank(cand) > rank(cur):
             best[key] = cand
+        bkey = (ptype, pe, basis)
+        if bkey not in per_basis or rank(cand) > rank(per_basis[bkey]):
+            per_basis[bkey] = cand
     for key, c in best.items():
         c["filed"] = first.get(key)
+        c["alts"] = {b: dict(per_basis[(key[0], key[1], b)], filed=first.get(key))
+                     for b in ("consolidated", "standalone") if (key[0], key[1], b) in per_basis}
     return sorted(best.values(), key=lambda c: c["pe"], reverse=True)
+
+
+def inside_basis(stored: list[tuple[str, str]], period_end: str) -> str | None | bool:
+    """For a quarter between stored quarters: the basis it must be filled on -
+    that of the quarters either side - or False when those two differ (no
+    basis would join them). None when the quarter is not inside the history
+    (before the first stored quarter or after the last): no neighbour to match.
+
+    Owner, 18-Nov-2026 ("fix F2"): INFY's and TCS's Mar/Jun-2018 holes sit
+    between consolidated quarters; a standalone BSE filing would put a smaller
+    company's figures in the middle of the group's."""
+    before = [b for pe, b in stored if pe < period_end]
+    after = [b for pe, b in stored if pe > period_end]
+    if not before or not after:
+        return None
+    return before[-1] if before[-1] == after[0] else False
+
+
+def holes_after(periods: list[str], since: str = "2016-06-30") -> list[str]:
+    """Quarter ends missing between stored quarters, from `since` on."""
+    def k(iso: str) -> int:
+        return int(iso[:4]) * 4 + (int(iso[5:7]) - 1) // 3
+    keys = sorted({k(p) for p in periods})
+    out = []
+    for a_, b_ in zip(keys, keys[1:]):
+        for x in range(a_ + 1, b_):
+            y, q = divmod(x, 4)
+            pe = f"{y}-{['03-31', '06-30', '09-30', '12-31'][q]}"
+            if pe >= since:
+                out.append(pe)
+    return out
 
 
 def oldest_units_wrong(con: sqlite3.Connection, sym: str, ptype: str, period_end: str,
@@ -235,7 +274,14 @@ def main() -> None:
             gaps = [s for (s,) in con.execute("SELECT SYMBOL FROM universe WHERE EXCHANGE='BSE'") if s in codes]
         else:
             nse = [s for (s,) in con.execute("SELECT SYMBOL FROM universe WHERE EXCHANGE='NSE'")]
-            gaps = [s for s in nse if s in codes and (first.get(s) is None or first[s] > XBRL_FROM)]
+            # ...and, since 18-Nov-2026 (owner, "fix F2"), any whose history has a
+            # hole from mid-2016 on, where BSE's XBRL exists (INFY, Mar/Jun-2018).
+            qs: dict[str, list[str]] = {}
+            for s_, pe_ in con.execute("SELECT DISTINCT symbol, period_end FROM results_history "
+                                       "WHERE period_type='quarterly' ORDER BY period_end"):
+                qs.setdefault(s_, []).append(pe_)
+            gaps = [s for s in nse if s in codes and (first.get(s) is None or first[s] > XBRL_FROM
+                                                      or holes_after(qs.get(s, []), XBRL_FROM))]
         log = dict(con.execute("SELECT symbol, fetched_at FROM bse_results_log"))
         cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=a.max_age_days)).strftime("%Y-%m-%d %H:%M:%S")
         # Never-checked first; among them the widest gap first - prices
@@ -266,15 +312,24 @@ def main() -> None:
         if not code:
             print(f"[{i}/{len(due)}] {sym}: no BSE listing found")
             continue
-        added = unread = refused = 0
+        added = unread = refused = mismatch = 0
         err = None
         try:
             rows = get(s, ARCH.format(code=code)).json().get("Table") or []
             have = {(pt, pe) for pt, pe in con.execute(
                 "SELECT DISTINCT period_type, period_end FROM results_history WHERE symbol=?", (sym,))}
+            stored = con.execute("SELECT period_end, MAX(basis) FROM results_history WHERE symbol=? "
+                                 "AND period_type='quarterly' GROUP BY period_end ORDER BY period_end", (sym,)).fetchall()
             for f in pick(rows):
                 if (f["ptype"], f["pe"]) in have:
                     continue
+                if f["ptype"] == "quarterly":
+                    want = inside_basis(stored, f["pe"])
+                    if want is False or (want and want not in f["alts"]):
+                        mismatch += 1           # no filing on the basis either side of it
+                        continue
+                    if want:
+                        f = f["alts"][want]
                 try:
                     facts = frh.parse_xbrl(get(s, f["xbrl"]).content, f["ptype"])
                 except Exception:  # noqa: BLE001 - one unreadable filing costs that filing
@@ -301,6 +356,7 @@ def main() -> None:
         added_total += added
         print(f"[{i}/{len(due)}] {sym} (BSE {code}): {added} periods added"
               + (f", {unread} unreadable" if unread else "") + (f", {refused} refused (units)" if refused else "")
+              + (f", {mismatch} left out (not on the basis either side)" if mismatch else "")
               + (f" - ERROR {err}" if err else ""), flush=True)
         time.sleep(a.sleep)
     con.close()

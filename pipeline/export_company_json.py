@@ -129,6 +129,14 @@ def coverage_notes(con: sqlite3.Connection) -> dict[str, dict]:
         y, m = int(d[:4]), int(d[5:7])
         return y * 4 + (m - 1) // 3
 
+    # Quarters worked out as the year minus its first nine months
+    # (derive_quarters.py) - said, never passed off as filed.
+    derived: dict[str, list[str]] = {}
+    if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='derived_quarters'").fetchone():
+        for s_, pe_ in con.execute("SELECT symbol, period_end FROM derived_quarters ORDER BY period_end"):
+            y, m = int(pe_[:4]), int(pe_[5:7])
+            derived.setdefault(s_, []).append(f"{y}-{['Mar', 'Jun', 'Sep', 'Dec'][(m - 1) // 3]}")
+
     for sym, periods in by_sym.items():
         if len(periods) < 2:
             out[sym] = {"quarters": len(periods), "from": periods[0] if periods else None, "gaps": []}
@@ -147,6 +155,9 @@ def coverage_notes(con: sqlite3.Connection) -> dict[str, dict]:
             "gaps": gaps[:12],
             "gap_count": len(gaps),
         }
+        if sym in derived:
+            out[sym]["derived"] = derived[sym][:12]
+            out[sym]["derived_count"] = len(derived[sym])
     return out
 
 

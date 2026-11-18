@@ -575,6 +575,16 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "65"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_bse_results.py --scope bse --max-minutes 60 --sleep 0.3
+      - name: Work out quarters filed only inside the full-year results
+        # Owner, 18-Nov-2026 ("fix F1"): TCS's Mar-2008 to Mar-2011 were never
+        # filed as quarters - only as audited full years. With the year and
+        # its first three quarters on record, on one basis, the fourth is their
+        # difference (pipeline/derive_quarters.py). Logged in derived_quarters
+        # and labelled on the page; a real filing arriving later replaces it.
+        # Local arithmetic, seconds: runs on every night, after the fetches.
+        env:
+          RSCREENER_STEP_MINUTES: "5"
+        run: bash pipeline/guarded_fetch.sh python pipeline/derive_quarters.py
       - name: Top up every price with the exchanges' own closes (NSE, BSE, Nifty indices)
         # Yahoo's daily history trails the market by a session or two: the
         # 28-Sep run ended every chart and 284 of 351 ETF prices on the 25th.

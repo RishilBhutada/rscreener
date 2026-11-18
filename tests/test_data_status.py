@@ -87,10 +87,22 @@ def test_q4_filed_inside_the_year_is_ours_other_gaps_are_the_archives():
     st = status(quarters=[q for q in qs if q not in gone], annual_ends=annual, on_bse=True)
     got = sides(st)
     assert ("ours", "Quarters Mar-2008, Mar-2009, Mar-2010, Mar-2011") in got
-    assert ("source", "Quarters Mar-2018, Jun-2018") in got
-    src = next(it for it in st["items"] if it["side"] == "source")
-    assert "not checked" in src["why"] and not src["whole"]
+    # Since F2 (18-Nov-2026) a hole after mid-2016 is BSE's to fill: queued until read...
+    assert ("queued", "Quarters Mar-2018, Jun-2018") in got
     assert st["worst"] == "ours"
+    # ...and once read with nothing on the neighbours' basis, missing at the source.
+    read = status(quarters=[q for q in qs if q not in gone], annual_ends=annual, on_bse=True,
+                  bse_log=("2026-11-19 01:00:00", None, 0))
+    src = next(it for it in read["items"] if it["side"] == "source")
+    assert src["what"] == "Quarters Mar-2018, Jun-2018" and "basis" in src["why"] and not src["whole"]
+
+
+def test_pre_2016_holes_say_bse_cannot_fill_them():
+    qs = [q for q in QS if q != "2023-06-30"]
+    old = [f"2010-{md}" for md in ("03-31", "06-30", "12-31")] + qs       # Sep-2010 missing
+    st = status(quarters=old, on_bse=True, bse_log=("2026-11-19 01:00:00", None, 0))
+    src = next(it for it in st["items"] if "Sep-2010" in it["what"])
+    assert src["side"] == "source" and "mid-2016" in src["why"]
 
 
 def test_late_starter_gap_after_2016_waits_for_the_bse_read():

@@ -139,19 +139,24 @@ def _gaps(quarters: list[str], annual_ends: set[str], exch: str, on_bse: bool | 
         # (TCS, Mar-2008 to Mar-2011).
         if _qiso(k) in annual_ends and all(k - j in have for j in (1, 2, 3)):
             q4.append(k)
-        # BSE's archive is read for every period not on record, but only for
-        # companies whose history starts late (fetch_bse_results.py).
-        elif (exch == "NSE" and on_bse and bse_log is None and first > XBRL_FROM
-              and _qiso(k) >= XBRL_FROM):
+        # BSE's archive is read for every period not on record - since
+        # 18-Nov-2026 for holes inside a history too - from mid-2016, where
+        # its XBRL begins (fetch_bse_results.py).
+        elif exch == "NSE" and on_bse and bse_log is None and _qiso(k) >= XBRL_FROM:
             queued.append(k)
         else:
             other.append(k)
     out = []
     breaks = " Each gap also breaks the 12-month lines (P/E, P/S, EV/EBITDA) for up to a year after it."
     if q4:
+        # derive_quarters.py works these out nightly; one still missing was
+        # refused there - the four filings on two bases, or the result failed
+        # its sanity check - or is waiting for tonight's run.
         out.append(_item("ours", f"Quarters {_labels(q4)}",
-                         "Filed only inside the full-year results. The quarter is the year minus its first "
-                         "nine months, which Rscreener does not work out yet." + breaks, FROM_QUARTERS, False))
+                         "Filed only inside the full-year results. The quarter is the year minus its first nine "
+                         "months; Rscreener works it out nightly, and has not for these - the year and its "
+                         "quarters are on different bases, the result failed a sanity check, or tonight's run "
+                         "has not reached them." + breaks, FROM_QUARTERS, False))
     if queued:
         out.append(_item("queued", f"Quarters {_labels(queued)}",
                          "Not in NSE's archive. Its BSE filings are queued to be read." + breaks, FROM_QUARTERS, False))
@@ -159,13 +164,15 @@ def _gaps(quarters: list[str], annual_ends: set[str], exch: str, on_bse: bool | 
         if exch == "BSE":
             why = "BSE's archive holds no readable filing for these quarters"
             why += f" (checked {_day(bse_log[0])})." if bse_log else "."
-        elif bse_log is not None and on_bse:
-            why = "Neither NSE's nor BSE's archive holds a readable filing for these quarters."
+        elif bse_log is not None and on_bse and all(_qiso(k) >= XBRL_FROM for k in other):
+            why = ("Neither NSE's nor BSE's archive holds a readable filing for these quarters on the basis "
+                   "(consolidated or standalone) of the quarters either side"
+                   f" (BSE read {_day(bse_log[0])}).")
         else:
             why = "NSE's results archive holds no readable filing for these quarters"
             why += f" (last read {_day(nse_log[0])})." if nse_log else "."
-            if on_bse:
-                why += " BSE's archive is read only for companies whose history starts late, so it was not checked."
+            if on_bse and any(_qiso(k) < XBRL_FROM for k in other):
+                why += " BSE's machine-readable filings begin in mid-2016, so it cannot fill the older ones."
         out.append(_item("source", f"Quarters {_labels(other)}", why + breaks, FROM_QUARTERS, False))
     return out
 
