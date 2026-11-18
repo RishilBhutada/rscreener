@@ -196,6 +196,18 @@ def bse_codes(con: sqlite3.Connection) -> dict[str, str]:
     return out
 
 
+def remember_codes(con: sqlite3.Connection, codes: dict[str, str]) -> None:
+    """Keep the NSE-to-BSE match for the page's data status (data_status.py):
+    whether a company is on BSE at all decides if "NSE has no results for it"
+    means "BSE's copy is not read yet" or "there is nowhere else to read it".
+    A day without the bhavcopy adds nothing and removes nothing."""
+    con.execute("CREATE TABLE IF NOT EXISTS bse_code_map (symbol TEXT PRIMARY KEY, bse_code TEXT, seen_at TEXT)")
+    seen = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    con.executemany("INSERT OR REPLACE INTO bse_code_map VALUES (?,?,?)",
+                    [(s_, str(c_), seen) for s_, c_ in codes.items()])
+    con.commit()
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbols", default="", help="comma list; overrides --scope")
@@ -211,6 +223,7 @@ def main() -> None:
     con.execute("CREATE TABLE IF NOT EXISTS bse_results_log (symbol TEXT PRIMARY KEY, fetched_at TEXT, error TEXT, n_periods INTEGER)")
     con.execute("CREATE TABLE IF NOT EXISTS filing_dates (symbol TEXT, period_end TEXT, announced_on TEXT, PRIMARY KEY (symbol, period_end))")
     codes = bse_codes(con)
+    remember_codes(con, codes)
 
     if a.symbols:
         due = [s.strip().upper() for s in a.symbols.split(",") if s.strip()]

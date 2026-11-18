@@ -20,6 +20,7 @@ import ChartPresets from "@/components/ChartPresets";
 import { fourInRow } from "@/lib/ttm";
 import { sma, ema, bollinger, rsi, IND_COLOUR } from "@/lib/indicators";
 import YearsChart from "@/components/YearsChart";
+import DataStatusButton, { whyMissing, type DataStatus } from "@/components/DataStatus";
 import {
   workingFor, growth, growthText, PE_WINDOWS, CA_LABEL, CA_ORDER, Q_LABEL,
   type ChartBand, type ChartTrendQ, type Quarter, type CorpAction, type Growth, type Working,
@@ -55,6 +56,8 @@ type Company = {
   actions?: CorpAction[] | null;
   peers?: { symbol?: unknown; name?: unknown }[] | null;
   coverage?: { quarters: number; from?: string | null; gaps?: string[]; gap_count?: number } | null;
+  /** Why the charts it lacks are missing (pipeline/data_status.py) - the star in the footer. */
+  data_status?: DataStatus | null;
   /** The yearly balance sheet - total debt and equity for the Debt choice. */
   statements?: { balance_sheet?: { periods: string[]; items: { label: string; values: (number | null)[] }[] } | null };
 };
@@ -1019,6 +1022,9 @@ export default function FullChart({ symbol }: { symbol: string }) {
   };
   // The saved view where this chart has it (an ETF or index has Price only).
   const view: View = viewSel === "price" || avail[viewSel] ? viewSel : "price";
+  // A company (not an ETF or index) asked for a chart it cannot draw: said,
+  // with the reason, rather than Price shown in silence (owner, 18-Nov-2026).
+  const fellBack = company && view !== viewSel ? { name: VIEW_LABEL[viewSel], why: whyMissing(company.data_status, viewSel) } : null;
   const spsOn = view === "pe" && perShare === "sps" && spsAvail;
   // Debt: total debt each year (Rs Cr) under a debt / equity line, as on the
   // company chart. Yearly, from the balance sheet.
@@ -2167,6 +2173,12 @@ export default function FullChart({ symbol }: { symbol: string }) {
           <ChartPresets current={presetPick} apply={applyPreset} sameRange={(a, b) => a === b} className="px-2 py-1.5" />
         </div>
       )}
+      {fellBack && !years && (
+        <p className="shrink-0 px-3 py-1 border-b border-[var(--line)] text-[11px] text-[var(--ink3)]">
+          <span className="font-semibold text-[var(--ink2)]">{fellBack.name}</span> cannot be drawn for this company
+          {fellBack.why ? <>: {fellBack.why.why}</> : "."} Showing Price.
+        </p>
+      )}
 
       {held && (
         <div className="shrink-0 flex items-center gap-2 flex-wrap px-3 py-1.5 border-b border-[var(--line)] bg-[var(--card2)] text-xs">
@@ -2271,6 +2283,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
           ))}
         </div>
         <div className="flex items-center gap-1 px-2 pb-1.5 [@media(max-height:500px)]:pb-1 overflow-x-auto [scrollbar-width:none]">
+          {!years && <DataStatusButton status={company?.data_status} view={viewSel} className="-ml-1" />}
           {view === "price" ? (
             <>
               <div role="radiogroup" aria-label="Candle size" className="flex items-center rounded-lg bg-[var(--card2)] p-0.5 shrink-0">

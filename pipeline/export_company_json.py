@@ -22,6 +22,7 @@ from trend_lib import adj_factor, build_trends, cr_round, net_debt_series, ratio
 import fund_units
 import business_updates
 import seasons_lib
+from data_status import data_status
 from export_indices_json import group_of, sym_of
 
 
@@ -200,6 +201,59 @@ def why_no_pe(con: sqlite3.Connection, listing: dict) -> dict[str, str]:
                 out[sym] = (f"Only {pos} of the {len(ttms)} twelve-month periods on record were "
                             f"profitable, which is too few points to draw a meaningful band.")
     return out
+
+
+def data_status_facts(con: sqlite3.Connection, listing: dict) -> dict:
+    """The records data_status() reads, gathered once for every company: the
+    quarters and years on record, the newest NSE results fetch, the BSE
+    archive read, the Yahoo statements fetch, the NSE listing date and which
+    NSE companies are on BSE too (bse_code_map, kept by fetch_bse_results)."""
+    def log(table: str, cols: str) -> dict:
+        if not _table_exists(con, table):
+            return {}
+        return {r[0]: tuple(r[1:]) for r in con.execute(f"SELECT symbol, {cols} FROM {table}")}
+
+    quarters: dict[str, list] = {}
+    annual: dict[str, set] = {}
+    for s_, ptype, pe_ in con.execute(
+            "SELECT DISTINCT symbol, period_type, period_end FROM results_history WHERE item='pat' "
+            "ORDER BY symbol, period_end"):
+        if ptype == "quarterly":
+            quarters.setdefault(s_, []).append(pe_)
+        elif ptype == "annual":
+            annual.setdefault(s_, set()).add(pe_)
+    nse_new = log("results_fetch_log", "fetched_at, error, n_periods")
+    nse_deep = log("results_fetch_log_full", "fetched_at, error, n_periods")
+    nse = {s_: max((x for x in (nse_new.get(s_), nse_deep.get(s_)) if x), key=lambda x: x[0] or "")
+           for s_ in set(nse_new) | set(nse_deep)}
+    on_bse: dict[str, bool] | None = None
+    if _table_exists(con, "bse_code_map"):
+        on_bse = {r[0]: True for r in con.execute("SELECT symbol FROM bse_code_map")}
+    listed: dict[str, str] = {}
+    try:
+        listed = {r[0]: r[1] for r in con.execute('SELECT SYMBOL, "DATE OF LISTING" FROM universe')}
+    except Exception:  # noqa: BLE001 - an older universe table has no such column
+        pass
+    return {"quarters": quarters, "annual": annual, "nse": nse,
+            "bse": log("bse_results_log", "fetched_at, error, n_periods"),
+            "stmt": log("stmt_fetch_log", "fetched_at, error"), "on_bse": on_bse, "listed": listed,
+            "listing": listing}
+
+
+def status_for(sym: str, f: dict, shares: dict, diag: dict, bands: dict, trend: dict | None) -> dict | None:
+    """data_status() for one company from the gathered facts."""
+    exch, code = f["listing"].get(sym, ("NSE", None))
+    if exch == "BSE" or code:
+        on_bse: bool | None = True
+    else:
+        on_bse = None if f["on_bse"] is None else f["on_bse"].get(sym, False)
+    eb = ((trend or {}).get("quarterly") or {}).get("ebitda") or []
+    return data_status(
+        exch=exch, on_bse=on_bse, listed_on=f["listed"].get(sym),
+        nse_log=f["nse"].get(sym), bse_log=f["bse"].get(sym),
+        quarters=f["quarters"].get(sym, []), annual_ends=f["annual"].get(sym, set()),
+        has_shares=sym in shares, diag=diag.get(sym), bands=bands or {},
+        ebitda_any=any(v is not None for v in eb), stmt_log=f["stmt"].get(sym))
 
 
 def piotroski(con) -> dict[str, dict]:
@@ -992,7 +1046,9 @@ def main() -> None:
     row_by_sym, peers_by_sym, ctx_by_sym = screener_context(OUT_DIR.parent / "data.json")
     trends = build_trends(con, shares_by_symbol, only)
     standalone = standalone_tables(con, only)
-    bands = ratio_bands(con, shares_by_symbol, netdebt_by_symbol, only)
+    band_diag: dict[str, dict] = {}
+    bands = ratio_bands(con, shares_by_symbol, netdebt_by_symbol, only, diag=band_diag)
+    status_facts = data_status_facts(con, listing)
     prices_by_symbol: dict[str, dict] = {}
     if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='prices'").fetchone():
         pr = pd.read_sql("SELECT symbol, freq, date, close, volume FROM prices ORDER BY date", con)
@@ -1116,6 +1172,11 @@ def main() -> None:
         sym = snap["symbol"]
         if only is not None and sym not in only:
             continue
+        # Why each chart or figure this company lacks is missing, and whose
+        # side the gap is on (data_status.py; owner, 18-Nov-2026).
+        status = status_for(sym, status_facts, shares_by_symbol, band_diag, bands.get(sym, {}), trends.get(sym))
+        pe_why = None if bands.get(sym, {}).get("pe") else next(
+            (it["why"] for it in (status or {}).get("items", []) if it["whole"] and "pe" in it["views"]), None)
         payload = {
             "generated_at": generated,
             "snapshot": snap.to_dict(),
@@ -1150,7 +1211,11 @@ def main() -> None:
             "insider": insider_by_symbol.get(sym),
             "logo": f"logos/{sym}.{logos[sym][0]}" if sym in logos else None,
             "updates": updates_by_symbol.get(sym),
-            "no_pe_reason": None if (bands.get(sym, {}) or {}).get("pe") else no_pe.get(sym),
+            # The data-status reason where it has one: it knows a company that
+            # files on BSE from one that never filed (ACGL read "no results
+            # filed" for a history BSE holds).
+            "no_pe_reason": None if (bands.get(sym, {}) or {}).get("pe") else (pe_why or no_pe.get(sym)),
+            "data_status": status,
             # Which exchange this company is listed on, because it decides what
             # can exist on the page. The as-filed quarterly table, the P/E band
             # and the shareholding pattern are all built from NSE endpoints; a

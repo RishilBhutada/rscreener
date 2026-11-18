@@ -2,6 +2,7 @@
  *  the figures the company page derives from it. */
 
 import { CorpAction, Quarter } from "@/components/StockChart";
+import type { DataStatus } from "@/components/DataStatus";
 import { Row } from "@/lib/query";
 import { Seasons } from "@/components/Seasons";
 
@@ -78,6 +79,9 @@ export type Company = {
   coverage?: Coverage | null;
   ratios?: WcRatios | null;
   no_pe_reason?: string | null;
+  /** Why each chart or figure this company lacks is missing, and whose side
+   *  the gap is on (pipeline/data_status.py). Absent from files exported before 19-Nov-2026. */
+  data_status?: DataStatus | null;
   /** Whether the filed figures are consolidated or standalone. Captioning one
    *  as the other says the numbers cover a different business than they do. */
   basis?: string | null;

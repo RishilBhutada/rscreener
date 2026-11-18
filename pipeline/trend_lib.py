@@ -1404,14 +1404,19 @@ def _band(series: list[list], round_to: int = 1) -> dict | None:
 
 
 def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = None,
-                only: set | None = None) -> dict[str, dict]:
+                only: set | None = None, diag: dict | None = None) -> dict[str, dict]:
     """Monthly PE / EV-EBITDA / Price-to-Book / MarketCap-to-Sales bands per symbol.
 
     All ratios use as-filed quarterly fundamentals (results_history) against the
     monthly close, mirroring screener.in. EV uses market cap + latest net debt;
     book value uses the most recent as-filed equity. Depth is bounded by the
     fundamental series (EV / book value are shallower than PE / P-S because free
-    balance-sheet history is short)."""
+    balance-sheet history is short).
+
+    `diag`, when given, is filled per symbol with how many price dates passed
+    each condition a ratio point needs - the reason a band is missing, counted
+    by the code that decided it rather than guessed at afterwards
+    (data_status.py, owner 18-Nov-2026: "why the data is missing")."""
     if not (_table_exists(con, "prices") and _table_exists(con, "results_history")):
         return {}
     netdebt = netdebt or {}
@@ -1602,9 +1607,13 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
         flows = flow_by_sym.get(sym)
         sh = shares.get(sym)
         if not flows or not sh:
+            if diag is not None:
+                diag[sym] = {"flows": len(flows or []), "shares": bool(sh)}
             continue
         eqs = equity_by_sym.get(sym, [])
         nd = netdebt.get(sym, [])  # list of (date, netdebt_cr) or []
+        # Price dates passing each condition a ratio point needs (see `diag`).
+        n_ttm = n_pe = n_ps = n_eb = n_ev = n_eq = n_eqpos = 0
         pe_s, ev_s, pb_s, ps_s = [], [], [], []
         # Inputs behind every point, aligned by index with the series above.
         # A ratio you cannot take apart is a ratio you have to take on faith, and
@@ -1621,6 +1630,10 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
         # The same latest-quarter-x4 window for Price / Sales (owner, 1-Nov-2026),
         # aligned by index with ps_s: market cap over the newest quarter's sales x4.
         ps_alt: dict[str, list] = {"q1": []}
+        # ...and for EV / EBITDA (owner, 18-Nov-2026: TTM / 1Q x4 on every
+        # ratio view): enterprise value over the newest quarter's EBITDA x4,
+        # aligned by index with ev_s.
+        ev_alt: dict[str, list] = {"q1": []}
         fi = 0  # pointer into `flows` (both it and the price series are date-sorted)
         avail = announced.get(sym, {})
         for date, close in zip(g["date"], g["close"]):
@@ -1647,9 +1660,13 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
             eff = next((f[4] for f in reversed(flows[:fi]) if len(f) > 4 and f[4]), None) or sh
             mcap_cr = close * eff / 1e7
             if len(recent) == 4:
+                n_ttm += 1
                 ttm_eps = sum(f[1] for f in recent) if all(f[1] is not None for f in recent) else None
                 ttm_rev = sum(f[2] for f in recent) if all(f[2] is not None for f in recent) else None
                 ttm_eb = sum(f[3] for f in recent) if all(f[3] is not None for f in recent) else None
+                n_pe += bool(ttm_eps and ttm_eps > 0)
+                n_ps += bool(ttm_rev and ttm_rev > 0)
+                n_eb += bool(ttm_eb and ttm_eb > 0)
                 if ttm_eps and ttm_eps > 0:
                     pe_s.append([date, round(close / ttm_eps, 1)])
                     pe_p.append([round(close, 2), round(ttm_eps, 2),
@@ -1669,9 +1686,14 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                                 if d <= date and (datetime.strptime(date, "%Y-%m-%d")
                                                   - datetime.strptime(d, "%Y-%m-%d")).days <= 400), None)
                     if ndv is not None:  # no current net debt -> no EV, rather than a guess
+                        n_ev += 1
                         ev_s.append([date, round((mcap_cr + ndv) / ttm_eb, 1)])
                         ev_p.append([round(mcap_cr, 1), round(ndv, 1), round(ttm_eb, 1)])
+                        q_eb = recent[-1][3]
+                        ev_alt["q1"].append(round((mcap_cr + ndv) / (q_eb * 4.0), 1) if (q_eb and q_eb > 0) else None)
             eq = equity_at(eqs, date)
+            n_eq += eq is not None
+            n_eqpos += bool(eq and eq > 0)
             if eq and eq > 0:
                 # price/book == market cap / shareholders' funds, which keeps the
                 # share count consistent on both sides of the ratio
@@ -1693,7 +1715,7 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
                         used = {q for pt in parts for q in pt[2]}
                         b["q_eps"] = {q: v for q, v in q_eps.items() if q in used}
                 bands[key] = b
-        for bkey, ser, alts, rnd in (("pe", pe_s, pe_alt, 1), ("ps", ps_s, ps_alt, 2)):
+        for bkey, ser, alts, rnd in (("pe", pe_s, pe_alt, 1), ("ps", ps_s, ps_alt, 2), ("ev", ev_s, ev_alt, 1)):
             if bkey not in bands or not ser:
                 continue
             cutoff = f"{int(ser[-1][0][:4]) - 5}{ser[-1][0][4:]}"
@@ -1708,6 +1730,10 @@ def ratio_bands(con: sqlite3.Connection, shares: dict, netdebt: dict | None = No
             if alt:
                 bands[bkey]["alt"] = alt
                 bands[bkey]["alt_median_5y"] = med
+        if diag is not None:
+            diag[sym] = {"flows": len(flows), "shares": True, "dates": len(g), "ttm": n_ttm,
+                         "pe": n_pe, "ps": n_ps, "ebitda": n_eb, "ev": n_ev, "netdebt": bool(nd),
+                         "equity": n_eq, "equity_pos": n_eqpos}
         if bands:
             out[sym] = bands
     return out

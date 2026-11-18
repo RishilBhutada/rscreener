@@ -13,6 +13,7 @@ import ChartPresets from "@/components/ChartPresets";
 import Hint from "@/components/Hint";
 import Link from "next/link";
 import { fourInRow } from "@/lib/ttm";
+import DataStatusButton, { whyMissing, type DataStatus } from "@/components/DataStatus";
 
 type Pt = [string, number] | [string, number, number | null];
 export type ChartPrices = { monthly?: Pt[]; weekly?: Pt[]; daily?: Pt[] };
@@ -390,8 +391,11 @@ const Q_COLOUR: Record<number, string> = {
 };
 export const Q_LABEL: Record<number, string> = { 1: "Q1 Apr–Jun", 2: "Q2 Jul–Sep", 3: "Q3 Oct–Dec", 4: "Q4 Jan–Mar" };
 
-export default function StockChart({ prices, peBand, evBand, pbBand, psBand, trendQ, livePrice, quarters, actions, symbol, peers, coverage, exchange, balance }: {
+export default function StockChart({ prices, peBand, evBand, pbBand, psBand, trendQ, livePrice, quarters, actions, symbol, peers, coverage, exchange, balance, status }: {
   prices: ChartPrices;
+  /** Why the charts this company lacks are missing, and whose side each gap is
+   *  on (pipeline/data_status.py) - the star beside the options button. */
+  status?: DataStatus | null;
   /** The yearly balance sheet, for the Debt choice under the ratio tab:
    *  total debt as bars, debt / equity as the line (owner, 8-Nov-2026). */
   balance?: { periods: string[]; items: { label: string; values: (number | null)[] }[] } | null;
@@ -420,6 +424,9 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   // choice itself is kept for the next company that has it.
   const availNow: Record<string, boolean> = { pe: !!peBand, sales: !!trendQ, ev: !!evBand, pb: !!pbBand, ps: !!psBand, ebitda: !!trendQ?.ebitda?.some((v) => v !== null) };
   const view: View = viewSel === "price" || viewSel === "years" || availNow[viewSel] ? viewSel : "price";
+  // Said, not silent: a preset or a saved pick asked for a chart this company
+  // cannot draw, so the reader sees Price and why (owner, 18-Nov-2026).
+  const fellBack = view !== viewSel ? { name: VIEW_NAME[viewSel], why: whyMissing(status, viewSel) } : null;
   // Views laid over the one on screen (long-press a tab). Each keeps its own
   // scale, so a P/E of 20 is not flattened under a price of 2,000.
   const [overlays, setOverlays] = useState<View[]>(() => (pick0?.overlays ?? []).filter((v) => v in VIEW_NAME && v !== "years") as View[]);
@@ -1422,6 +1429,12 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   };
   const plotAndLegend = (
     <>
+      {fellBack && (
+        <p className="text-[11px] text-[var(--ink3)] mb-2">
+          <span className="font-semibold text-[var(--ink2)]">{fellBack.name}</span> cannot be drawn for this company
+          {fellBack.why ? <>: {fellBack.why.why}</> : "."} Showing Price.
+        </p>
+      )}
       {(() => {
         // A ratio line that starts years after the price line is not a property of
         // the company - it is the depth of earnings we have fetched. 1,994 of 2,236
@@ -1844,7 +1857,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   );
 
   return (
-    <ChartShell {...shellProps} onOptions={() => setSheet(true)} optionsCount={activeCount}>
+    <ChartShell {...shellProps} onOptions={() => setSheet(true)} optionsCount={activeCount}
+      extra={<DataStatusButton status={status} view={viewSel} />}>
       {anyPanel}
       {plotAndLegend}
       {qLegend}
@@ -1866,10 +1880,12 @@ const MORE_VIEWS: [View, string][] = [
 
 function ChartShell({
   range, setRange, view, setView, setMoreOpen, avail, onViewChange, expandHref, peLabel = "PE Ratio", children,
-  onOptions, optionsCount = 0, overlays = [], setOverlays, top,
+  onOptions, optionsCount = 0, overlays = [], setOverlays, top, extra,
 }: {
   /** drawn above the tabs - the chart presets row */
   top?: React.ReactNode;
+  /** drawn before the options button - the missing-data star */
+  extra?: React.ReactNode;
   /** views laid over this one, and how to change them (long-press a tab) */
   overlays?: View[]; setOverlays?: (v: View[]) => void;
   /** The ratio tab's name: it reads P/S Ratio while sales per share is shown. */
@@ -1975,7 +1991,7 @@ function ChartShell({
         {top}
         <div className="flex items-center justify-between gap-2 border-b border-[var(--line)] mb-2">
           {tabs}
-          <div className="flex items-center gap-0.5 pb-1">{view !== "years" && opts}{full}</div>
+          <div className="flex items-center gap-0.5 pb-1">{view !== "years" && extra}{view !== "years" && opts}{full}</div>
         </div>
         {heldBar}
         {view !== "years" && <div className="mb-2">{rangesSeg}</div>}
