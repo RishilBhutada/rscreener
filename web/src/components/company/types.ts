@@ -137,7 +137,11 @@ export type WcRatios = {
 };
 
 /** What the filings behind this company actually cover. */
-export type Coverage = { quarters: number; from?: string | null; to?: string | null; gaps?: string[]; gap_count?: number };
+export type Coverage = {
+  quarters: number; from?: string | null; to?: string | null; gaps?: string[]; gap_count?: number;
+  /** Quarters worked out as the year minus its first nine months (pipeline/derive_quarters.py). */
+  derived?: string[]; derived_count?: number;
+};
 
 /** pipeline/business_updates.py summary(). */
 export type Updates = { n: number; of: number; typ: number | null; last: { q: string; d: string; at?: string; doc?: string } };

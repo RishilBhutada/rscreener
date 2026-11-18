@@ -852,7 +852,9 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [prefs, setPrefs] = useState<Prefs>({ kind: "candles", inds: ["vol", "dma50", "dma200"], log: false, lv: LV_DEFAULT, volBy: "candle", candleBy: "candle" });
   // The levels on screen, for the legend's one-line summary.
   const [lvl, setLvl] = useState<Levels | null>(null);
-  const [sheet, setSheet] = useState<null | "type" | "layers" | "cmp">(null);
+  // "adv": every setting in one sheet (owner, 19-Nov-2026: "in the advanced
+  // it should include all ... like absolutely everything").
+  const [sheet, setSheet] = useState<null | "type" | "layers" | "cmp" | "adv">(null);
   useBackClose(sheet !== null, () => setSheet(null));
   const [legend, setLegend] = useState<LegendData | null>(null);
   const [themeKey, setThemeKey] = useState(0);
@@ -2344,6 +2346,9 @@ export default function FullChart({ symbol }: { symbol: string }) {
               Levels
             </button>
           )}
+          {company && !years && (
+            <button onClick={() => setSheet("adv")} className={pill(false)} aria-label="Advanced: every chart setting">Advanced</button>
+          )}
           <button onClick={() => setSheet("cmp")} className={pill(cmps.length > 0)} aria-label="Compare with other charts">
             <svg viewBox="0 0 24 24" className="w-[18px] h-[18px] inline-block" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M7 4v16M17 4v16M4 8l3-4 3 4M14 16l3 4 3-4" />
@@ -2363,11 +2368,77 @@ export default function FullChart({ symbol }: { symbol: string }) {
           <div onClick={(e) => e.stopPropagation()}
             className="rs-sheet absolute bottom-0 inset-x-0 mx-auto max-w-md rounded-t-2xl border-t border-[var(--line)] bg-[var(--card)] p-2 pb-[calc(env(safe-area-inset-bottom)+10px)] max-h-[82vh] overflow-y-auto">
 
-            {sheet === "type" && (
+            {sheet === "adv" && (
+              <>
+                <Head>Chart</Head>
+                <div className="px-3 pb-2 flex flex-wrap gap-1.5">
+                  {VIEWS.filter(([v]) => avail[v]).map(([v, label]) => (
+                    <button key={v} onClick={() => pickView(v)} className={pill(view === v && !years)}>{label}</button>
+                  ))}
+                  <button onClick={() => { setYears(true); setSheet(null); }} className={pill(years)}>Years</button>
+                </div>
+                <Head>Range</Head>
+                <div className="px-3 pb-2 flex flex-wrap gap-1">
+                  {RANGES.map((r) => <button key={r} onClick={() => pickRange(r)} className={`${pill(range === r)} px-1.5`}>{r}</button>)}
+                </div>
+                {VIEWS.some(([v]) => avail[v] && v !== view && !(v === "price" && view === "ebitda")) && (
+                  <>
+                    <Head>Lay over this chart · own scale</Head>
+                    <div className="px-3 pb-2 flex flex-wrap gap-1.5">
+                      {VIEWS.filter(([v]) => avail[v] && v !== view && !(v === "price" && view === "ebitda")).map(([v, label]) => (
+                        <button key={v} onClick={() => { setOverlays(overlays.includes(v) ? overlays.filter((o) => o !== v) : [...overlays, v]); setCmps([]); }}
+                          className={pill(overlays.includes(v))}>{label}</button>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {view === "price" && (
+                  <>
+                    <Head>Candle size</Head>
+                    <div className="px-3 pb-2">
+                      <Seg value={interval} options={INTERVALS.filter(([iv]) => !!file?.[iv]?.length).map(([iv]) => [iv, iv === "d" ? "Daily" : iv === "w" ? "Weekly" : "Monthly"] as [Interval, string])}
+                        onChange={(iv) => { kept.current = null; setIv(iv); }} />
+                    </div>
+                  </>
+                )}
+                {view === "pe" && (spsAvail || debtAvail) && (
+                  <>
+                    <Head>Bars under the ratio</Head>
+                    <div className="px-3 pb-2">
+                      <Seg value={perShare}
+                        options={([["eps", "EPS"], ["sps", "SPS"], ["debt", "Debt"]] as [string, string][]).filter(([k]) => k === "eps" || (k === "sps" ? spsAvail : debtAvail))}
+                        onChange={(v) => { kept.current = null; setPerShare(v as "eps" | "sps" | "debt"); }} />
+                    </div>
+                  </>
+                )}
+                {(view === "pe" ? !debtOn && (spsOn ? company?.ps_band : company?.pe_band)?.alt?.q1
+                  : view === "ps" ? company?.ps_band?.alt?.q1 : view === "ev" ? company?.ev_band?.alt?.q1 : null) && (
+                  <>
+                    <Head>Window</Head>
+                    <div className="px-3 pb-2">
+                      <Seg value={peWin} options={PE_WINDOWS.map(([k, label]) => [k, label] as [string, string])} onChange={(v) => { kept.current = null; setPeWin(v); }} />
+                      <span className="block mt-1 text-[12px] text-[var(--ink3)]">{PE_WINDOWS.find(([k]) => k === peWin)?.[2]}</span>
+                    </div>
+                  </>
+                )}
+                {view === "sales" && tq && (
+                  <>
+                    <Head>Sales &amp; margins</Head>
+                    <div className="px-3 pb-2">
+                      <Seg value={salesWin} options={[["q", "Each quarter"], ["ttm", "TTM"]]} onChange={(v) => { kept.current = null; setSalesWin(v); }} />
+                    </div>
+                  </>
+                )}
+                <Toggle on={cmps.length > 0} label="Compare with other charts" sub={cmps.length ? cmps.map((c) => c.sym).join(", ") : "Peers, indices or any company"}
+                  onClick={() => setSheet("cmp")} />
+              </>
+            )}
+
+            {(sheet === "type" || (sheet === "adv" && view === "price")) && (
               <>
                 <Head>Chart type</Head>
                 {KINDS.map(([k, label]) => (
-                  <button key={k} onClick={() => { savePrefs({ ...prefs, kind: k }); setSheet(null); }}
+                  <button key={k} onClick={() => { savePrefs({ ...prefs, kind: k }); if (sheet !== "adv") setSheet(null); }}
                     className={`w-full min-h-[48px] px-3 rounded-xl flex items-center justify-between text-[15px] ${
                       prefs.kind === k ? "text-[var(--accent-ink)] bg-[var(--accent-soft)] font-semibold" : "text-[var(--ink)] active:bg-[var(--card2)]"}`}>
                     {label}
@@ -2386,7 +2457,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
               </>
             )}
 
-            {sheet === "layers" && (
+            {(sheet === "layers" || sheet === "adv") && (
               <>
                 {view === "price" ? (
                   <>
@@ -2449,7 +2520,9 @@ export default function FullChart({ symbol }: { symbol: string }) {
                     {LAYERS[view].map(([k, label]) => (
                       <Toggle key={k} on={!isHidden(k)}
                         label={debtOn ? ({ line: "Debt / Equity", median: "Median (not drawn)", bars: "Total debt bars" } as Record<string, string>)[k] ?? label
-                          : spsOn ? ({ line: "Price / Sales", median: "Median P/S (5 years)", bars: "SPS bars" } as Record<string, string>)[k] ?? label : label}
+                          : spsOn ? ({ line: "Price / Sales", median: "Median P/S (5 years)", bars: "SPS bars" } as Record<string, string>)[k] ?? label
+                          : (view === "ev" || view === "ps") && peWin === "q1" && (view === "ev" ? company?.ev_band : company?.ps_band)?.alt?.q1
+                            ? label.replace("(TTM)", "(1Q×4)") : label}
                         onClick={() => setHidden({ ...hidden, [`${view}:${k}`]: !isHidden(k) })} />
                     ))}
                   </>

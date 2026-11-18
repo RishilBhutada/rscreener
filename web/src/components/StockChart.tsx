@@ -13,7 +13,7 @@ import ChartPresets from "@/components/ChartPresets";
 import Hint from "@/components/Hint";
 import Link from "next/link";
 import { fourInRow, quarterX4, ttmMargins, ttmSums } from "@/lib/ttm";
-import DataStatusButton, { whyMissing, type DataStatus } from "@/components/DataStatus";
+import { whyMissing, type DataStatus } from "@/components/DataStatus";
 
 type Pt = [string, number] | [string, number, number | null];
 export type ChartPrices = { monthly?: Pt[]; weekly?: Pt[]; daily?: Pt[] };
@@ -1405,45 +1405,61 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   // What is switched on beyond the defaults - growth labels are on by default.
   const activeCount = [spsOn, showDates, showCA, !!cmpSym, !!pWin && peWin !== "ttm", !!pSales && salesWin === "ttm"].filter(Boolean).length + (view === "price" ? inds.length : 0);
   const label = (t: string) => <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">{t}</span>;
-  // Settled once and left alone: growth labels, the margin point and the
-  // event lines sit under Advanced, folded away (owner, 18-Nov-2026).
-  const advItems = [
-    pGrowth && <div key="g" className="flex flex-col items-start gap-1.5">{label("Growth on bars")}{pGrowth}</div>,
-    pMarginAt && <div key="m" className="flex flex-col items-start gap-1.5">{label("EBITDA margin point")}{pMarginAt}</div>,
-    (pDates || pCA) && <div key="s" className="flex flex-col items-start gap-1.5">{label("Show on chart")}
-      <div className="flex gap-1.5 flex-wrap">{pDates}{pCA}</div>{pCAKinds}</div>,
+  // Owner, 19-Nov-2026: the usual settings "present properly" on top, and
+  // Advanced holding "all the possible options, graphs, switches present in
+  // the chart, like absolutely everything" - every control below repeats
+  // there, with the ones that otherwise sit on the chart itself (chart,
+  // range, overlays, each line, volume).
+  const row = (key: string, t: string, body: React.ReactNode, sub?: React.ReactNode) => (
+    <div key={key} className="flex flex-col items-start gap-1.5 w-full">{label(t)}{body}{sub}</div>
+  );
+  const wrap = (kids: React.ReactNode) => <div className="flex gap-1.5 flex-wrap">{kids}</div>;
+  const nameOfView = (v: View) => (v === "pe" ? ratioLabel : VIEW_NAME[v]);
+  const winRow = pWin && row("w", winWord, pWin, note(PE_WINDOWS.find(([k]) => k === peWin)?.[2]));
+  const salesRow = pSales && row("sw", "Sales & margins", pSales,
+    note(salesWin === "ttm" ? "The twelve months to each quarter: sales added up, each margin the year's profit over the year's sales. Smooths the season out." : "Each quarter on its own - the season shows."));
+  const barsRow = pBars && row("b", "Bars", pBars);
+  const indRow = view === "price" && row("i", "Indicators",
+    wrap(SMALL_INDS.map(([k, name]) => <span key={k}>{chip(inds.includes(k), name, () => toggleInd(k))}</span>)),
+    inds.some((k) => k === "mvix" || k === "mfii" || k === "mpcr")
+      ? <span className="text-[11px] text-[var(--ink3)]">Market lines: Nifty-wide, from NSE&apos;s daily files, each on a scale of its own.</span> : null);
+  const showRow = (pDates || pCA) && row("s", "Show on chart", wrap(<>{pDates}{pCA}</>), pCAKinds);
+  const cmpRow = row("c", "Compare", pCompare, cmpErr ? <span className="text-[var(--neg)]">{cmpErr}</span> : null);
+  const ALL_VIEWS: View[] = ["price", "years", "pe", "sales", "ebitda", "ev", "pb", "ps"];
+  const canOverlay = (v: View) => v !== view && v !== "years" && !(v === "price" && view === "ebitda") && (v === "price" || availNow[v]);
+  const advRows = [
+    row("av", "Chart", wrap(ALL_VIEWS.filter((v) => v === "price" || v === "years" || availNow[v])
+      .map((v) => <span key={v}>{chip(viewSel === v, nameOfView(v), () => { setView(v); setHover(null); })}</span>))),
+    row("ar", "Range", seg(range, RANGES.map(([r]) => [r, r.replace("Yr", "Y")] as const), setRange)),
+    ALL_VIEWS.some(canOverlay) && row("ao", "Lay over this chart", wrap(ALL_VIEWS.filter(canOverlay).map((v) => (
+      <span key={v}>{chip(overlays.includes(v), nameOfView(v), () => {
+        setOverlays(overlays.includes(v) ? overlays.filter((o) => o !== v) : [...overlays, v]); setCmpSym(null); setHover(null);
+      })}</span>))), note("Each on a scale of its own. A comparison and overlays exclude each other.")),
+    model.some((s) => !s.link) && row("al", "Lines on this chart", wrap(model.filter((s) => !s.link).map((s) => (
+      <span key={s.key}>{chip(defOn(s), s.group ? `${nameOfView(s.group as View)}: ${s.label}` : s.label, () => toggle(s))}</span>)))),
+    barsRow, winRow, salesRow,
+    pGrowth && row("ag", "Growth on bars", pGrowth),
+    pMarginAt && row("am", "EBITDA margin point", pMarginAt),
+    indRow,
+    view === "price" && split && row("avol", "Volume shows",
+      seg(volMode, [["all", "All"], ["deliv", "Delivered"], ["intra", "Same day"], ["split", "Split"]] as const, setVolMode)),
+    showRow, cmpRow,
   ].filter(Boolean);
   const optionsSheet = sheet && (
     <InfoDialog title="Chart options" onClose={() => setSheet(false)}>
       <div className="flex flex-col gap-4 text-xs">
-        {pBars && <div className="flex flex-col items-start gap-1.5">{label("Bars")}{pBars}</div>}
-        {pWin && <div className="flex flex-col items-start gap-1.5">{label(winWord)}{pWin}
-          {note(PE_WINDOWS.find(([k]) => k === peWin)?.[2])}</div>}
-        {pSales && <div className="flex flex-col items-start gap-1.5">{label("Sales & margins")}{pSales}
-          {note(salesWin === "ttm" ? "The twelve months to each quarter: sales added up, each margin the year's profit over the year's sales. Smooths the season out." : "Each quarter on its own - the season shows.")}</div>}
-        {view === "price" && (
-          <div className="flex flex-col items-start gap-1.5">{label("Indicators")}
-            <div className="flex gap-1.5 flex-wrap">{SMALL_INDS.map(([k, name]) => <span key={k}>{chip(inds.includes(k), name, () => toggleInd(k))}</span>)}</div>
-            {inds.some((k) => k === "mvix" || k === "mfii" || k === "mpcr") && (
-              <span className="text-[11px] text-[var(--ink3)]">Market lines: Nifty-wide, from NSE&apos;s daily files, each on a scale of its own.</span>
-            )}
-          </div>
-        )}
-        <div className="flex flex-col items-start gap-1.5">{label("Compare")}{pCompare}
-          {cmpErr && <span className="text-[var(--neg)]">{cmpErr}</span>}</div>
-        {advItems.length > 0 && (
-          <div className="border-t border-[var(--line)] pt-3 flex flex-col gap-4">
-            <button type="button" onClick={() => setAdv(!adv)} aria-expanded={adv}
-              className="-my-1 py-1 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-[var(--ink2)]">
-              Advanced
-              <span className="inline-flex items-center gap-1 normal-case tracking-normal font-medium text-[var(--ink3)]">
-                {adv ? "Hide" : `${advItems.length} more`}
-                <span className={`inline-block transition-transform ${adv ? "rotate-180" : ""}`}><ChevronGlyph size={12} /></span>
-              </span>
-            </button>
-            {adv && advItems}
-          </div>
-        )}
+        {barsRow}{winRow}{salesRow}{indRow}{showRow}{cmpRow}
+        <div className="border-t border-[var(--line)] pt-3 flex flex-col gap-4">
+          <button type="button" onClick={() => setAdv(!adv)} aria-expanded={adv}
+            className="-my-1 py-1 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-[var(--ink2)]">
+            Advanced - every setting
+            <span className="inline-flex items-center gap-1 normal-case tracking-normal font-medium text-[var(--ink3)]">
+              {adv ? "Hide" : `${advRows.length} groups`}
+              <span className={`inline-block transition-transform ${adv ? "rotate-180" : ""}`}><ChevronGlyph size={12} /></span>
+            </span>
+          </button>
+          {adv && advRows}
+        </div>
       </div>
     </InfoDialog>
   );
@@ -1938,8 +1954,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   );
 
   return (
-    <ChartShell {...shellProps} onOptions={() => setSheet(true)} optionsCount={activeCount}
-      extra={<DataStatusButton status={status} view={viewSel} />}>
+    <ChartShell {...shellProps} onOptions={() => setSheet(true)} optionsCount={activeCount}>
       {anyPanel}
       {plotAndLegend}
       {qLegend}

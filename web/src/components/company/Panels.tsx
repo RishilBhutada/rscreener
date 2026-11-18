@@ -9,6 +9,7 @@ import Link from "next/link";
 import { Quarter } from "@/components/StockChart";
 import { Row } from "@/lib/query";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
+import DataStatusButton, { type DataStatus } from "@/components/DataStatus";
 import { markSaved } from "@/lib/sync";
 import { IconButton } from "@/components/QuoteUI";
 import { AnnualReport, Company, Coverage } from "@/components/company/types";
@@ -75,20 +76,35 @@ export function DataChecks({ symbol }: { symbol: string }) {
   );
 }
 
-export function CoverageNote({ cov, bandFrom }: { cov?: Coverage | null; bandFrom?: string | null }) {
-  if (!cov || !cov.from) return null;
-  const gaps = cov.gaps ?? [];
-  const nGaps = cov.gap_count ?? gaps.length;
+/** The line under the company chart: where the filings start, the quarters
+ *  missing and worked out, and the missing-data star beside them (owner,
+ *  19-Nov-2026: "the chart star should be below the chart where it is
+ *  written filings from and quarter missing"). */
+export function CoverageNote({ cov, bandFrom, status, view }: {
+  cov?: Coverage | null; bandFrom?: string | null; status?: DataStatus | null; view?: string;
+}) {
+  const star = <DataStatusButton status={status} view={view} className="-my-2 align-middle" />;
+  const gaps = cov?.gaps ?? [];
+  const nGaps = cov?.gap_count ?? gaps.length;
+  const nDer = cov?.derived_count ?? cov?.derived?.length ?? 0;
   // Nothing worth saying about a company with a full, unbroken record that
-  // already reaches back further than the chart's own range.
-  if (nGaps === 0 && cov.from <= "2008-12-31") return null;
+  // already reaches back further than the chart's own range - unless the
+  // star has something to say.
+  const quiet = !cov || !cov.from || (nGaps === 0 && nDer === 0 && cov.from <= "2008-12-31");
+  if (quiet) {
+    return status?.items?.length ? (
+      <p className="mt-3 text-[11px] text-[var(--ink3)] flex items-center gap-1">Missing data {star}</p>
+    ) : null;
+  }
   return (
     <p className="mt-3 text-[11px] text-[var(--ink3)]">
-      Filings from {monthYear(cov.from)}
+      Filings from {monthYear(cov.from as string)}
       {nGaps > 0 ? ` · ${nGaps} quarter${nGaps === 1 ? "" : "s"} missing` : ""}
+      {nDer > 0 ? ` · ${nDer} worked out from full-year results` : ""}
+      {star}
       <InfoTip title="Why the history starts where it does" className="ml-1">
         <p>
-          Filings on record for this company begin <strong>{monthYear(cov.from)}</strong> ({cov.quarters} quarters).
+          Filings on record for this company begin <strong>{monthYear(cov.from as string)}</strong> ({cov.quarters} quarters).
         </p>
         {nGaps > 0 && (
           <p>
@@ -98,7 +114,14 @@ export function CoverageNote({ cov, bandFrom }: { cov?: Coverage | null; bandFro
           </p>
         )}
         {bandFrom && <p>The valuation lines therefore begin <strong>{monthYear(bandFrom)}</strong>.</p>}
-        <p>Nothing here is estimated: a quarter that was never filed is left out rather than filled in.</p>
+        {nDer > 0 && (
+          <p>
+            {nDer === 1 ? "One quarter was" : `${nDer} quarters were`} filed only inside the full-year results
+            {cov.derived?.length ? <> ({cov.derived.slice(0, 6).join(", ")}{nDer > 6 ? " and others" : ""})</> : null}:
+            each is worked out as the year minus its first nine months, on the same basis.
+          </p>
+        )}
+        <p>Nothing else is estimated: a quarter that was never filed is left out rather than filled in. The star beside this line says, for anything missing, whose side the gap is on.</p>
       </InfoTip>
     </p>
   );
