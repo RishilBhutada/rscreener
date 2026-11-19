@@ -2392,18 +2392,18 @@ export default function FullChart({ symbol }: { symbol: string }) {
                     </div>
                   </>
                 )}
-                {view === "price" && (
+                {(
                   <>
-                    <Head>Candle size</Head>
+                    <Head>Price chart: candle size</Head>
                     <div className="px-3 pb-2">
                       <Seg value={interval} options={INTERVALS.filter(([iv]) => !!file?.[iv]?.length).map(([iv]) => [iv, iv === "d" ? "Daily" : iv === "w" ? "Weekly" : "Monthly"] as [Interval, string])}
                         onChange={(iv) => { kept.current = null; setIv(iv); }} />
                     </div>
                   </>
                 )}
-                {view === "pe" && (spsAvail || debtAvail) && (
+                {(spsAvail || debtAvail) && (
                   <>
-                    <Head>Bars under the ratio</Head>
+                    <Head>P/E chart: bars under the ratio</Head>
                     <div className="px-3 pb-2">
                       <Seg value={perShare}
                         options={([["eps", "EPS"], ["sps", "SPS"], ["debt", "Debt"]] as [string, string][]).filter(([k]) => k === "eps" || (k === "sps" ? spsAvail : debtAvail))}
@@ -2411,32 +2411,72 @@ export default function FullChart({ symbol }: { symbol: string }) {
                     </div>
                   </>
                 )}
-                {(view === "pe" ? !debtOn && (spsOn ? company?.ps_band : company?.pe_band)?.alt?.q1
-                  : view === "ps" ? company?.ps_band?.alt?.q1 : view === "ev" ? company?.ev_band?.alt?.q1 : null) && (
+                {(company?.pe_band?.alt?.q1 || company?.ps_band?.alt?.q1 || company?.ev_band?.alt?.q1) && (
                   <>
-                    <Head>Window</Head>
+                    <Head>P/E, MCap / Sales, EV / EBITDA: window</Head>
                     <div className="px-3 pb-2">
                       <Seg value={peWin} options={PE_WINDOWS.map(([k, label]) => [k, label] as [string, string])} onChange={(v) => { kept.current = null; setPeWin(v); }} />
                       <span className="block mt-1 text-[12px] text-[var(--ink3)]">{PE_WINDOWS.find(([k]) => k === peWin)?.[2]}</span>
                     </div>
                   </>
                 )}
-                {view === "sales" && tq && (
+                {tq && (
                   <>
-                    <Head>Sales &amp; margins</Head>
+                    <Head>Sales &amp; margin chart: basis</Head>
                     <div className="px-3 pb-2">
                       <Seg value={salesWin} options={[["q", "Each quarter"], ["ttm", "TTM"]]} onChange={(v) => { kept.current = null; setSalesWin(v); }} />
                     </div>
                   </>
                 )}
+                {/* The P/E and EBITDA charts' own settings, here whichever chart is on screen
+                    (owner, 20-Nov-2026: "not a single thing remaining"). */}
+                {view !== "pe" && view !== "ebitda" && (company?.quarters?.length ?? 0) > 0 && (
+                  <>
+                    <Head>P/E and EBITDA charts: growth on bars</Head>
+                    <Toggle on={showChg} label="Growth %" sub="Printed over each bar when there is room for every one" onClick={() => setShowChg(!showChg)} />
+                    {showChg && (
+                      <div className="px-3 pb-2">
+                        <Seg value={epsCmp} options={[["yoy", "Year ago"], ["prev", "Quarter before"]]} onChange={setEpsCmp} />
+                      </div>
+                    )}
+                    {avail.ebitda && (
+                      <div className="px-3 pt-1 pb-2">
+                        <span className="block text-[15px] text-[var(--ink)]">EBITDA margin point</span>
+                        <Seg value={marginAt} options={[["mid", "Mid-quarter"], ["day", "Result day"]]} onChange={setMarginAt} />
+                      </div>
+                    )}
+                  </>
+                )}
+                {VIEWS.filter(([v]) => v !== view && v !== "price" && avail[v]).map(([v, label]) => (
+                  <div key={v}>
+                    <Head>{label} chart: lines</Head>
+                    {LAYERS[v as Exclude<View, "price">].map(([k, name]) => (
+                      <Toggle key={k} on={!hid(`${v}:${k}`)} label={name} onClick={() => setHidden({ ...hidden, [`${v}:${k}`]: !hid(`${v}:${k}`) })} />
+                    ))}
+                  </div>
+                ))}
+                {view !== "price" && (
+                  <>
+                    <Head>Price chart: indicators and market lines</Head>
+                    {INDS.map(([k, label]) => (
+                      <Toggle key={k} on={indOn(k)} label={label} dot={indColour(k)}
+                        onClick={() => savePrefs({ ...prefs, inds: indOn(k) ? prefs.inds.filter((x) => x !== k) : [...prefs.inds, k] })} />
+                    ))}
+                    <Toggle on={prefs.lv.on} label="Levels" sub="Support / resistance, trend lines and volume shelves on the price chart"
+                      onClick={() => savePrefs({ ...prefs, lv: { ...prefs.lv, on: !prefs.lv.on } })} />
+                  </>
+                )}
+                <Head>Screen</Head>
                 <Toggle on={cmps.length > 0} label="Compare with other charts" sub={cmps.length ? cmps.map((c) => c.sym).join(", ") : "Peers, indices or any company"}
                   onClick={() => setSheet("cmp")} />
+                {canFull && <Toggle on={full} label="Full screen" onClick={() => { void toggleFull(); }} />}
+                <Toggle on={false} label="Reset zoom" sub="Back to the whole range" onClick={() => { resetView(); setSheet(null); }} />
               </>
             )}
 
-            {(sheet === "type" || (sheet === "adv" && view === "price")) && (
+            {(sheet === "type" || sheet === "adv") && (
               <>
-                <Head>Chart type</Head>
+                <Head>{sheet === "adv" ? "Price chart: type" : "Chart type"}</Head>
                 {KINDS.map(([k, label]) => (
                   <button key={k} onClick={() => { savePrefs({ ...prefs, kind: k }); if (sheet !== "adv") setSheet(null); }}
                     className={`w-full min-h-[48px] px-3 rounded-xl flex items-center justify-between text-[15px] ${

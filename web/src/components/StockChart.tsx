@@ -1437,18 +1437,36 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       })}</span>))), note("Each on a scale of its own. A comparison and overlays exclude each other.")),
     model.some((s) => !s.link) && row("al", "Lines on this chart", wrap(model.filter((s) => !s.link).map((s) => (
       <span key={s.key}>{chip(defOn(s), s.group ? `${nameOfView(s.group as View)}: ${s.label}` : s.label, () => toggle(s))}</span>)))),
-    barsRow, winRow, salesRow,
-    pGrowth && row("ag", "Growth on bars", pGrowth),
-    pMarginAt && row("am", "EBITDA margin point", pMarginAt),
-    indRow,
-    view === "price" && split && row("avol", "Volume shows",
+    // Owner, 20-Nov-2026: "a lot of things are still missing in the advanced
+    // changes like the DMAs ... not a single thing remaining". Advanced now
+    // holds every view's settings whichever chart is on screen - each set
+    // here applies the next time that chart is opened.
+    ...ALL_VIEWS.filter((v) => v !== view && v !== "years" && (v === "price" || availNow[v])).map((v) => {
+      const lines = VIEW_LINES[v] ?? [];
+      return lines.length > 0 && row(`al_${v}`, `${nameOfView(v)} chart: lines`, wrap(lines.map(([k, name]) => (
+        <span key={k}>{chip(isOn(k, true), name, () => setOn({ ...on, [k]: !isOn(k, true) }))}</span>))));
+    }),
+    row("ab", "P/E chart: bars", barOpts.length > 1 ? seg(perShare, barOpts, setPerShare) : note("EPS only - no sales per share or debt history for this company.")),
+    (peBand?.alt?.q1 || psBand?.alt?.q1 || evBand?.alt?.q1) && row("aw", "P/E, Market cap / Sales, EV / EBITDA: window",
+      seg(peWin as "ttm" | "q1", [["ttm", "TTM"], ["q1", "1Q×4"]] as const, (k) => setPeWin(k)), note(PE_WINDOWS.find(([k]) => k === peWin)?.[2])),
+    trendQ && row("asw", "Sales & margin chart: basis", seg(salesWin, [["q", "Each quarter"], ["ttm", "TTM"]] as const, setSalesWin)),
+    ((quarters?.length ?? 0) > 0 || !!trendQ) && row("ag", "P/E and EBITDA charts: growth on bars",
+      seg(growthVal, [["off", "No growth"], ["yoy", peWin === "ttm" ? "vs year before" : "vs year ago"], ["prev", "vs quarter before"]] as const, setGrowth)),
+    availNow.ebitda && (quarters?.length ?? 0) > 0 && row("am", "EBITDA chart: margin point",
+      seg(marginAt, [["mid", "Margin: mid-quarter"], ["day", "Margin: result day"]] as const, setMarginAt)),
+    row("ai", "Price chart: indicators and market lines",
+      wrap(SMALL_INDS.map(([k, name]) => <span key={k}>{chip(inds.includes(k), name, () => toggleInd(k))}</span>))),
+    split && row("avol", "Price chart: volume shows",
       seg(volMode, [["all", "All"], ["deliv", "Delivered"], ["intra", "Same day"], ["split", "Split"]] as const, setVolMode)),
     showRow, cmpRow,
   ].filter(Boolean);
   const optionsSheet = sheet && (
     <InfoDialog title="Chart options" onClose={() => setSheet(false)}>
       <div className="flex flex-col gap-4 text-xs">
-        {barsRow}{winRow}{salesRow}{indRow}{showRow}{cmpRow}
+        {barsRow}{winRow}{salesRow}
+        {pGrowth && row("g", "Growth on bars", pGrowth)}
+        {pMarginAt && row("m", "EBITDA margin point", pMarginAt)}
+        {indRow}{showRow}{cmpRow}
         <div className="border-t border-[var(--line)] pt-3 flex flex-col gap-4">
           <button type="button" onClick={() => setAdv(!adv)} aria-expanded={adv}
             className="-my-1 py-1 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-[var(--ink2)]">
@@ -1969,6 +1987,18 @@ const VIEW_NAME: Record<View, string> = {
 };
 // Never green or red: those read as good and bad.
 const OVERLAY_COLOURS = ["var(--chart-alt)", "#d946ef", "#14b8a6", "#a16207", "var(--chart-line2)", "var(--chart-dma200)", "var(--chart-dma50)"];
+
+/** Every line each view draws, by its series key - for Advanced, which sets
+ *  them for any view, not only the one on screen (owner, 20-Nov-2026). */
+const VIEW_LINES: Partial<Record<View, [string, string][]>> = {
+  price: [["price", "Price"], ["dma50", "50 DMA"], ["dma200", "200 DMA"], ["volume", "Volume"]],
+  pe: [["pe_line", "P/E line"], ["pe_median", "Median"], ["pe_bar", "EPS bars"]],
+  sales: [["sales", "Sales bars"], ["gpm", "GPM %"], ["opm", "OPM %"], ["npm", "NPM %"]],
+  ebitda: [["eb_price", "Price"], ["eb_ttm", "EBITDA, last 4 quarters"], ["ebitda", "Quarter EBITDA"], ["eb_eps", "Quarter EPS"], ["ebitda_m", "EBITDA margin %"]],
+  ev: [["ev_line", "EV / EBITDA line"], ["ev_median", "Median"], ["ev_bar", "EBITDA bars"]],
+  pb: [["pb_line", "Price / Book line"], ["pb_median", "Median"], ["pb_bar", "Book value bars"]],
+  ps: [["ps_line", "Market cap / Sales line"], ["ps_median", "Median"], ["ps_bar", "Sales bars"]],
+};
 
 const MORE_VIEWS: [View, string][] = [
   ["sales", "Sales & Margin"], ["ebitda", "EBITDA"], ["ev", "EV / EBITDA"], ["pb", "Price to Book"], ["ps", "Market Cap / Sales"],
