@@ -18,6 +18,7 @@ import { useBackClose } from "@/lib/backclose";
 import { readPick, writePick, type ChartPick } from "@/lib/chartpick";
 import ChartPresets from "@/components/ChartPresets";
 import { fourInRow, quarterX4, ttmMargins, ttmSums } from "@/lib/ttm";
+import { CASH_COLOUR, cashYears, priceToCash } from "@/lib/cashflow";
 import { sma, ema, bollinger, rsi, IND_COLOUR } from "@/lib/indicators";
 import YearsChart from "@/components/YearsChart";
 import DataStatusButton, { whyMissing, type DataStatus } from "@/components/DataStatus";
@@ -59,7 +60,11 @@ type Company = {
   /** Why the charts it lacks are missing (pipeline/data_status.py) - the star in the footer. */
   data_status?: DataStatus | null;
   /** The yearly balance sheet - total debt and equity for the Debt choice. */
-  statements?: { balance_sheet?: { periods: string[]; items: { label: string; values: (number | null)[] }[] } | null };
+  statements?: {
+    balance_sheet?: { periods: string[]; items: { label: string; values: (number | null)[] }[] } | null;
+    /** Yearly cash flow, for the Cash flow bars (20-Nov-2026, lib/cashflow.ts). */
+    cash_flow?: { periods: string[]; items: { label: string; values: (number | null)[] }[] } | null;
+  };
 };
 
 type View = "price" | "pe" | "sales" | "ebitda" | "ev" | "pb" | "ps";
@@ -118,7 +123,7 @@ const FIXED: Partial<Record<Ind, string>> = { sma20: IND_COLOUR.sma20, ema21: IN
 
 /** The series each non-price view draws, for its on/off switches. */
 const LAYERS: Record<Exclude<View, "price">, [string, string][]> = {
-  pe: [["line", "PE"], ["median", "Median PE (5 years)"], ["bars", "EPS bars"]],
+  pe: [["line", "PE"], ["median", "Median PE (5 years)"], ["bars", "EPS bars"], ["pe_fcf", "Free cash flow bars (Cash flow)"]],
   ev: [["line", "EV / EBITDA"], ["median", "Median EV multiple"], ["bars", "EBITDA (TTM)"]],
   pb: [["line", "Price / Book"], ["median", "Median P/B"], ["bars", "Book value"]],
   ps: [["line", "Market cap / Sales"], ["median", "Median MCap / Sales"], ["bars", "Sales (TTM)"]],
@@ -866,7 +871,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [salesWin, setSalesWin] = useState<"q" | "ttm">(() => (pick0?.sw === "ttm" ? "ttm" : "q"));
   /** EPS under the P/E line, or sales per share under the Price / Sales line -
    *  the company chart's switch (StockChart.tsx); the line follows the bars. */
-  const [perShare, setPerShare] = useState<"eps" | "sps" | "debt">(() => pick0?.per ?? "eps");
+  const [perShare, setPerShare] = useState<"eps" | "sps" | "debt" | "cash">(() => pick0?.per ?? "eps");
   // Events are on by default in the full view - the owner chose to see them.
   const [showDates, setShowDates] = useState(true);
   const [showChg, setShowChg] = useState(() => pick0?.chg ?? true);
@@ -1043,6 +1048,11 @@ export default function FullChart({ symbol }: { symbol: string }) {
   })();
   const debtAvail = !!debtRows;
   const debtOn = view === "pe" && perShare === "debt" && debtAvail;
+  // Cash flow: operating and free cash flow each year under a Price / Cash
+  // flow line - the company chart's choice (owner, 20-Nov-2026, 3 + A).
+  const cashRows = cashYears(company?.statements?.cash_flow);
+  const cashAvail = !!cashRows;
+  const cashOn = view === "pe" && perShare === "cash" && cashAvail;
 
   const rangeDays = (r: Range, last: number) => {
     if (r !== "YTD") return RANGE_DAYS[r];
@@ -1578,6 +1588,58 @@ export default function FullChart({ symbol }: { symbol: string }) {
         }
         return { date: dateOf(d), tag: j >= 0 ? `Quarter to ${dateOf(qd[j], "month")}` : undefined, items };
       };
+    } else if (cashOn && cashRows) {
+      keyWin = "pe:cash";
+      const pcf = priceToCash(company?.ps_band, cashRows);
+      let ln: ISeriesApi<SeriesType> | null = null;
+      const ld = pcf ? pcf.series.map((q) => dayOf(q[0])) : [];
+      if (pcf) {
+        ln = chart.addSeries(AreaSeries, {
+          lineColor: p.accent, topColor: alpha(p.accent, 0.2), bottomColor: alpha(p.accent, 0), lineWidth: 2,
+          priceFormat: fmt(ratio), lastValueVisible: true, priceLineVisible: false, visible: !isHidden("line"),
+        });
+        ln.setData(pcf.series.map((q, i) => ({ time: toTime(ld[i]), value: q[1] })));
+        if (!isHidden("median") && pcf.median_5y !== null) {
+          ln.createPriceLine({ price: pcf.median_5y, color: p.axisCol, lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: true, title: `Median ${ratio(pcf.median_5y)}` });
+        }
+      }
+      const yd = cashRows.map((y) => dayOf(y.end));
+      const showCfo = !isHidden("bars"), showFcf = !isHidden("pe_fcf");
+      if (showCfo || showFcf) {
+        const bs = chart.addSeries(HistogramSeries, {
+          priceLineVisible: false, lastValueVisible: false, priceFormat: fmt((x) => Math.round(x).toLocaleString("en-IN")),
+        }, 1);
+        bs.setData(cashRows.map((y, i) => ({ time: toTime(yd[i]), value: Math.max(y.cfo ?? 0, y.fcf ?? 0), color: "rgba(0, 0, 0, 0)" })));
+        const blocks: ConstructorParameters<typeof PeriodBars>[0] = [];
+        cashRows.forEach((y, i) => {
+          const start = i > 0 ? yd[i - 1] : yd[i] - 365, mid = Math.round((start + yd[i]) / 2);
+          for (const [k, on, from, to, col] of [["cfo", showCfo, start, mid, CASH_COLOUR.cfo], ["fcf", showFcf, mid, yd[i], CASH_COLOUR.fcf]] as const) {
+            const v = y[k];
+            if (!on || v === null) continue;
+            const pv = i > 0 ? cashRows[i - 1][k] : null;
+            const g = pv !== null && pv !== undefined ? growth(v, pv) : undefined;
+            blocks.push({ from, to, v, color: alpha(col, v < 0 ? 0.5 : 0.9),
+              label: showChg && g && g.kind !== "none" ? growthText(g) : undefined, labelColor: growthCol(g, p) });
+          }
+        });
+        bs.attachPrimitive(new PeriodBars(blocks, [...new Set([...ld, ...yd])].sort((a, b) => a - b), p.font));
+        chart.panes()[0]?.setStretchFactor(3);
+        chart.panes()[1]?.setStretchFactor(1.3);
+        if (!ln) { anchor = bs; anchorDays = yd; }
+      }
+      if (ln) { anchor = ln; anchorDays = ld; }
+      legendAt = (day) => {
+        const items: LItem[] = [];
+        const i = day === null ? cashRows.length - 1 : Math.max(0, atOrBefore(yd, day));
+        if (pcf && ln && !isHidden("line")) {
+          const j = day === null ? ld.length - 1 : atOrBefore(ld, day);
+          if (j >= 0) items.push({ label: "Price / Cash flow", value: ratio(pcf.series[j][1]), color: p.accent });
+        }
+        const y = cashRows[i];
+        if (showCfo && y.cfo !== null) items.push({ label: "Operating cash flow", value: crore(y.cfo), color: CASH_COLOUR.cfo });
+        if (showFcf && y.fcf !== null) items.push({ label: "Free cash flow", value: crore(y.fcf), color: CASH_COLOUR.fcf });
+        return { date: `Year to ${dateOf(yd[i], "month")}`, items };
+      };
     } else if (debtOn && debtRows) {
       keyWin = "pe:debt";
       // Debt / equity is often below one: three decimals there (0.085, not 0.1).
@@ -2001,7 +2063,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
     };
     // `range` is applied below without a rebuild.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, company, view, interval, prefs, peWin, salesWin, showDates, showChg, epsCmp, marginAt, showCA, caOn, hidden, cmps, themeKey, symbol, etfDoc, spsOn, overlays, debtOn, fv, fvMode, mkt, showMkt]);
+  }, [file, company, view, interval, prefs, peWin, salesWin, showDates, showChg, epsCmp, marginAt, showCA, caOn, hidden, cmps, themeKey, symbol, etfDoc, spsOn, overlays, debtOn, cashOn, fv, fvMode, mkt, showMkt]);
 
   const applyRange = () => {
     const chart = chartRef.current, sp = spanRef.current;
@@ -2318,14 +2380,14 @@ export default function FullChart({ symbol }: { symbol: string }) {
               </div>
               <button onClick={() => setSheet("type")} className={pill(prefs.log)}>{kindLabel}{prefs.log ? " · Log" : ""} <ChevronGlyph size={11} /></button>
             </>
-          ) : view === "pe" && (spsAvail || debtAvail || company?.pe_band?.alt?.q1) ? (
+          ) : view === "pe" && (spsAvail || debtAvail || cashAvail || company?.pe_band?.alt?.q1) ? (
             <>
-              {(spsAvail || debtAvail) && (
+              {(spsAvail || debtAvail || cashAvail) && (
                 <Seg value={perShare}
-                  options={([["eps", "EPS"], ["sps", "SPS"], ["debt", "Debt"]] as [string, string][]).filter(([k]) => k === "eps" || (k === "sps" ? spsAvail : debtAvail))}
-                  onChange={(v) => { kept.current = null; setPerShare(v as "eps" | "sps" | "debt"); }} />
+                  options={([["eps", "EPS"], ["sps", "SPS"], ["debt", "Debt"], ["cash", "Cash flow"]] as [string, string][]).filter(([k]) => k === "eps" || (k === "sps" ? spsAvail : k === "cash" ? cashAvail : debtAvail))}
+                  onChange={(v) => { kept.current = null; setPerShare(v as "eps" | "sps" | "debt" | "cash"); }} />
               )}
-              {!debtOn && (spsOn ? company?.ps_band?.alt?.q1 : company?.pe_band?.alt?.q1) && (
+              {!debtOn && !cashOn && (spsOn ? company?.ps_band?.alt?.q1 : company?.pe_band?.alt?.q1) && (
                 <Seg value={peWin} options={PE_WINDOWS.map(([k, label]) => [k, label] as [string, string])} onChange={(v) => { kept.current = null; setPeWin(v); }} />
               )}
             </>
@@ -2401,13 +2463,13 @@ export default function FullChart({ symbol }: { symbol: string }) {
                     </div>
                   </>
                 )}
-                {(spsAvail || debtAvail) && (
+                {(spsAvail || debtAvail || cashAvail) && (
                   <>
                     <Head>P/E chart: bars under the ratio</Head>
                     <div className="px-3 pb-2">
                       <Seg value={perShare}
-                        options={([["eps", "EPS"], ["sps", "SPS"], ["debt", "Debt"]] as [string, string][]).filter(([k]) => k === "eps" || (k === "sps" ? spsAvail : debtAvail))}
-                        onChange={(v) => { kept.current = null; setPerShare(v as "eps" | "sps" | "debt"); }} />
+                        options={([["eps", "EPS"], ["sps", "SPS"], ["debt", "Debt"], ["cash", "Cash flow"]] as [string, string][]).filter(([k]) => k === "eps" || (k === "sps" ? spsAvail : k === "cash" ? cashAvail : debtAvail))}
+                        onChange={(v) => { kept.current = null; setPerShare(v as "eps" | "sps" | "debt" | "cash"); }} />
                     </div>
                   </>
                 )}

@@ -13,6 +13,7 @@ import ChartPresets from "@/components/ChartPresets";
 import Hint from "@/components/Hint";
 import Link from "next/link";
 import { fourInRow, quarterX4, ttmMargins, ttmSums } from "@/lib/ttm";
+import { CASH_COLOUR, cashYears, priceToCash } from "@/lib/cashflow";
 import { whyMissing, type DataStatus } from "@/components/DataStatus";
 
 type Pt = [string, number] | [string, number, number | null];
@@ -412,7 +413,7 @@ const Q_COLOUR: Record<number, string> = {
 };
 export const Q_LABEL: Record<number, string> = { 1: "Q1 Apr–Jun", 2: "Q2 Jul–Sep", 3: "Q3 Oct–Dec", 4: "Q4 Jan–Mar" };
 
-export default function StockChart({ prices, peBand, evBand, pbBand, psBand, trendQ, livePrice, quarters, actions, symbol, peers, coverage, exchange, balance, status }: {
+export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cashflow, trendQ, livePrice, quarters, actions, symbol, peers, coverage, exchange, balance, status }: {
   prices: ChartPrices;
   /** Why the charts this company lacks are missing, and whose side each gap is
    *  on (pipeline/data_status.py) - the star beside the options button. */
@@ -425,6 +426,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   evBand?: ChartBand;
   pbBand?: ChartBand;
   psBand?: ChartBand;
+  /** The yearly cash flow statement, for the Cash flow bars under the P/E chart (20-Nov-2026). */
+  cashflow?: { periods: string[]; items: { label: string; values: (number | null)[] }[] } | null;
   trendQ?: ChartTrendQ;
   livePrice: number | null;
   quarters?: Quarter[] | null;
@@ -461,7 +464,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
    *  per share IS market cap over sales, so the line has to change with the
    *  bars - a P/E line over sales bars would be a ratio built from figures the
    *  chart is not showing. */
-  const [perShare, setPerShare] = useState<"eps" | "sps" | "debt">(() => pick0?.per ?? "eps");
+  const [perShare, setPerShare] = useState<"eps" | "sps" | "debt" | "cash">(() => pick0?.per ?? "eps");
   // The chart's options open in a sheet - the one layout kept of four
   // (owner, 16-Nov-2026: "only the sheet option to remain").
   const [sheet, setSheet] = useState(false);
@@ -660,7 +663,12 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   }, [balance]);
   const debtAvail = !!debtSeries;
   const debtOn = perShare === "debt" && debtAvail;
-  const ratioLabel = debtOn ? "Debt / Equity" : spsOn ? "P/S Ratio" : "PE Ratio";
+  // Cash flow: operating and free cash flow each year, side by side, under a
+  // Price / Cash flow line (owner, 20-Nov-2026, picked 3 + A; lib/cashflow.ts).
+  const cashSeries = useMemo(() => cashYears(cashflow), [cashflow]);
+  const cashAvail = !!cashSeries;
+  const cashOn = perShare === "cash" && cashAvail;
+  const ratioLabel = debtOn ? "Debt / Equity" : cashOn ? "P/Cash flow" : spsOn ? "P/S Ratio" : "PE Ratio";
   const defOn = (s: SeriesDef) => isOn(s.link ?? s.key, s.group ? !(s.kind === "bars" || s.kind === "dashed") : s.dflt ?? true);
   const toggle = (s: SeriesDef) => setOn({ ...on, [s.key]: !defOn(s) });
 
@@ -917,6 +925,34 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       });
       if (line.length) defs.push({ key: "pe_line", label: "Debt / Equity", color: "var(--accent)", kind: "line", axis: "R", data: line, fmt: "plain" });
       if (bars.length) defs.push({ key: "pe_bar", label: "Total debt", color: "var(--chart-bar)", kind: "bars", axis: "L", data: bars, fmt: "cr" });
+    } else if (view === "pe" && cashOn && cashSeries) {
+      // Each financial year split in two: operating cash flow on the left half
+      // (light teal), free cash flow on the right (dark), on one scale so the
+      // capex between them shows; each with its change on the year before.
+      const band = priceToCash(psBand, cashSeries);
+      if (band) {
+        const pts = xy(band.series.filter((p) => toT(p[0]) >= cutoff));
+        defs.push({ key: "pe_line", label: "Price / Cash flow", color: "var(--accent)", kind: "line", axis: "R", data: pts, fmt: "plain" });
+        if (pts.length && band.median_5y !== null) defs.push({
+          key: "pe_median", label: `Median P/CF = ${band.median_5y}`, color: "var(--chart-axis)", kind: "dashed", axis: "R",
+          data: [{ t: pts[0].t, v: band.median_5y }, { t: pts[pts.length - 1].t, v: band.median_5y }], fmt: "plain" });
+      }
+      const half = (k: "cfo" | "fcf"): XY[] => {
+        const out: XY[] = [];
+        cashSeries.forEach((y, i) => {
+          const v = y[k];
+          const end = toT(y.end), start = i > 0 ? toT(cashSeries[i - 1].end) + 86400000 : end - 365 * 86400000;
+          const mid = start + (end - start) / 2;
+          if (v === null || end < cutoff) return;
+          const pv = i > 0 ? cashSeries[i - 1][k] : null;
+          out.push({ t: end, v, from: k === "cfo" ? start : mid, to: k === "cfo" ? mid : end + 86400000,
+            chg: pv !== null && pv !== undefined ? growth(v, pv) : { kind: "none" } });
+        });
+        return out;
+      };
+      const cfo = half("cfo"), fcf = half("fcf");
+      if (cfo.length) defs.push({ key: "pe_bar", label: "Operating cash flow (year)", color: CASH_COLOUR.cfo, kind: "bars", axis: "L", data: cfo, fmt: "cr" });
+      if (fcf.length) defs.push({ key: "pe_fcf", label: "Free cash flow (year)", color: CASH_COLOUR.fcf, kind: "bars", axis: "L", data: fcf, fmt: "cr" });
     } else if (view === "pe") {
       // earnings bars follow the selected window, annualised the same way the
       // PE line is, so the two always describe the same earnings. Sales per
@@ -1131,7 +1167,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         return base ? src.map((d) => ({ t: d.t, v: (d.v / base - 1) * 100 })) : [];
       };
       const band: ChartBand =
-        view === "pe" ? (debtOn ? null : spsOn ? peer.ps ?? null : peer.pe ?? null) : view === "pb" ? peer.pb ?? null
+        view === "pe" ? (debtOn || cashOn ? null : spsOn ? peer.ps ?? null : peer.pe ?? null) : view === "pb" ? peer.pb ?? null
         : view === "ps" ? peer.ps ?? null : view === "ev" ? peer.ev ?? null : null;
       if (view === "price") {
         const src: Pt[] = peer.prices?.weekly ?? peer.prices?.monthly ?? [];
@@ -1185,7 +1221,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
     });
 
     return defs;
-  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, salesWin, cutoff, livePrice, now, epsCmp, marginAt, inds, mkt, quarters, cmp, symbol, exchange, years, spsOn, overlays, debtOn, debtSeries, volMode, split, daily10]);
+  }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, salesWin, cutoff, livePrice, now, epsCmp, marginAt, inds, mkt, quarters, cmp, symbol, exchange, years, spsOn, overlays, debtOn, debtSeries, cashOn, cashSeries, volMode, split, daily10]);
 
   // With the quarterly-results overlay on, the per-quarter EPS bars are already
   // on screen. Keeping the summed TTM bars too puts two different quantities in
@@ -1310,7 +1346,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
 
   const primary = visible.find((s) => !s.group && s.kind !== "bars" && s.kind !== "dashed") ?? visible.find((s) => !s.group) ?? visible[0];
   const activeBand: ChartBand =
-    view === "pe" ? (debtOn ? null : spsOn ? psBand ?? null : peBand ?? null) : view === "pb" ? pbBand ?? null
+    view === "pe" ? (debtOn || cashOn ? null : spsOn ? psBand ?? null : peBand ?? null) : view === "pb" ? pbBand ?? null
     : view === "ps" ? psBand ?? null : view === "ev" ? evBand ?? null : null;
   const hoverPt = hover && primary ? nearest(primary.data, hover.t) : null;
   const barW = (s: SeriesDef) => Math.max(1.5, Math.min(26, (plotW / Math.max(1, s.data.length)) * 0.62));
@@ -1351,13 +1387,13 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
   const growthVal: "off" | "yoy" | "prev" = showChg ? epsCmp : "off";
   const setGrowth = (g: "off" | "yoy" | "prev") => { if (g === "off") setShowChg(false); else { setShowChg(true); setEpsCmp(g); } };
   const isPe = view === "pe";
-  const barOpts = ([["eps", "EPS"], ["sps", "SPS"], ["debt", "Debt"]] as const).filter(([k]) => k === "eps" || (k === "sps" ? spsAvail : debtAvail));
+  const barOpts = ([["eps", "EPS"], ["sps", "SPS"], ["debt", "Debt"], ["cash", "Cash flow"]] as const).filter(([k]) => k === "eps" || (k === "sps" ? spsAvail : k === "cash" ? cashAvail : debtAvail));
   const pBars = isPe && barOpts.length > 1 ? seg(perShare, barOpts, setPerShare) : null;
   const isEb = view === "ebitda";
   // TTM or the latest quarter x4 on every ratio view that carries it - P/E,
   // Market cap / Sales, EV / EBITDA (owner, 18-Nov-2026). One choice for all
   // three, so a preset's window means the same on each.
-  const winBand = view === "pe" ? (debtOn ? null : spsOn ? psBand : peBand) : view === "ps" ? psBand : view === "ev" ? evBand : null;
+  const winBand = view === "pe" ? (debtOn || cashOn ? null : spsOn ? psBand : peBand) : view === "ps" ? psBand : view === "ev" ? evBand : null;
   const winWord = view === "ev" ? "Operating profit" : view === "ps" || spsOn ? "Sales" : "Earnings";
   const pWin = winBand?.alt?.q1 ? seg(peWin as "ttm" | "q1", [["ttm", "TTM"], ["q1", "1Q×4"]] as const, (k) => setPeWin(k)) : null;
   const pSales = view === "sales" && trendQ ? seg(salesWin, [["q", "Each quarter"], ["ttm", "TTM"]] as const, setSalesWin) : null;
@@ -1394,7 +1430,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
       <option value="__any__">Any company...</option>
     </select>
   );
-  const qLegend = (isPe && !debtOn) || isEb ? (
+  const qLegend = (isPe && !debtOn && !cashOn) || isEb ? (
     <div className="flex items-center justify-center gap-3 flex-wrap text-[11px] text-[var(--ink3)] mt-1">
       {[1, 2, 3, 4].map((n) => (
         <span key={n} className="inline-flex items-center gap-1"><i className="inline-block w-2 h-2 rounded-full" style={{ background: Q_COLOUR[n] }} />{Q_LABEL[n].slice(0, 2)}</span>
@@ -1556,7 +1592,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, tre
         // companies hold 20 quarters or fewer because the full-depth pass runs at a
         // bounded rate, so silence here would have the reader inferring something
         // about the business from a gap in our own coverage.
-        if (view === "price" || view === "ebitda" || debtOn || !primary?.data?.length) return null;
+        if (view === "price" || view === "ebitda" || debtOn || cashOn || !primary?.data?.length) return null;
         const priceStart = (prices.monthly?.[0] ?? prices.weekly?.[0])?.[0];
         if (!priceStart) return null;
         const gapYears = (primary.data[0].t - toT(priceStart)) / (365.25 * 86400000);
@@ -1992,7 +2028,7 @@ const OVERLAY_COLOURS = ["var(--chart-alt)", "#d946ef", "#14b8a6", "#a16207", "v
  *  them for any view, not only the one on screen (owner, 20-Nov-2026). */
 const VIEW_LINES: Partial<Record<View, [string, string][]>> = {
   price: [["price", "Price"], ["dma50", "50 DMA"], ["dma200", "200 DMA"], ["volume", "Volume"]],
-  pe: [["pe_line", "P/E line"], ["pe_median", "Median"], ["pe_bar", "EPS bars"]],
+  pe: [["pe_line", "P/E line"], ["pe_median", "Median"], ["pe_bar", "Bars (EPS, SPS, debt or operating cash flow)"], ["pe_fcf", "Free cash flow bars"]],
   sales: [["sales", "Sales bars"], ["gpm", "GPM %"], ["opm", "OPM %"], ["npm", "NPM %"]],
   ebitda: [["eb_price", "Price"], ["eb_ttm", "EBITDA, last 4 quarters"], ["ebitda", "Quarter EBITDA"], ["eb_eps", "Quarter EPS"], ["ebitda_m", "EBITDA margin %"]],
   ev: [["ev_line", "EV / EBITDA line"], ["ev_median", "Median"], ["ev_bar", "EBITDA bars"]],

@@ -21,7 +21,7 @@ export type ChartPick = {
    *  Market cap / Sales and EV / EBITDA (P/E alone before 18-Nov-2026) */
   win: string;
   cmp: "yoy" | "prev";
-  per: "eps" | "sps" | "debt";
+  per: "eps" | "sps" | "debt" | "cash";
   chg: boolean;
   /** Sales & margin: each quarter ("q", the default) or twelve months to each ("ttm") */
   sw?: "q" | "ttm";
