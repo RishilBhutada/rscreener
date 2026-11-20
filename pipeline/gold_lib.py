@@ -86,6 +86,25 @@ FAMILIES: dict[str, tuple[int, str, str]] = {
     "mcx_expiry": (2, "MCX gold contract expiry",
                    "The month's MCX gold contract stops trading; positions roll to the next month or settle. "
                    "It matters to anyone holding MCX futures, not to the world price."),
+    # Owner, 20-Nov-2026: "include more imp events too like elections of us etc".
+    "us_election": (4, "US election",
+                    "A new president or Congress can change taxes, spending, tariffs and the Fed's leadership - "
+                    "the deficits and the dollar gold answers to. The result usually lands overnight, so gold "
+                    "reacts in the next session."),
+    "india_election": (3, "India election results",
+                       "Counting day moves the rupee and Indian markets; MCX gold, priced in rupees, moves with "
+                       "the rupee even when the world price is flat."),
+    "us_fiscal": (3, "US shutdown / debt ceiling",
+                  "A shutdown delays the US data the Fed relies on, and a debt-ceiling standoff raises doubt "
+                  "about US credit - both have sent buyers to gold as a safe haven."),
+    "trade": (3, "Tariff deadline",
+              "Tariffs feed inflation and slow growth at the same time and unsettle the dollar; sudden ones "
+              "have sent buyers to gold."),
+    "opec": (2, "OPEC+ meeting",
+             "Oil output decisions move oil prices, and oil feeds inflation expectations and with them rate bets."),
+    "cb_gold": (3, "World gold demand report",
+                "The World Gold Council's quarterly count of demand, including central banks' buying - the "
+                "largest new source of demand since 2022."),
     "other_high": (1, "Major data elsewhere", "A high-impact release in a smaller economy; it reaches gold, if at all, through the dollar."),
     "other": (1, "Other data", "Little direct link to gold."),
 }
@@ -96,7 +115,59 @@ NOT_MEASURED = {"mcx_expiry", "announced"}
 
 # India's own events reach gold through the rupee and the duty: they are
 # measured on MCX, not COMEX.
-MEASURE_ON_MCX = {"rbi", "india_budget", "india_duty", "festival"}
+MEASURE_ON_MCX = {"rbi", "india_budget", "india_duty", "festival", "india_election"}
+
+
+def us_elections(first: int = 2000, last: int = 2028) -> list[tuple[str, str]]:
+    """US federal elections by law (2 U.S.C. 7, 3 U.S.C. 1): the Tuesday after
+    the first Monday in November of every even year - presidential when the
+    year divides by four, midterm otherwise. [(date, title)]."""
+    from datetime import date, timedelta
+    out = []
+    for y in range(first + first % 2, last + 1, 2):
+        d = date(y, 11, 1)
+        d += timedelta(days=(0 - d.weekday()) % 7)      # first Monday
+        d += timedelta(days=1)                          # the Tuesday after it
+        out.append((d.isoformat(), "US presidential election" if y % 4 == 0 else "US midterm election"))
+    return out
+
+
+# Elections, fiscal deadlines, tariffs, OPEC+ and gold-demand reports, kept by
+# hand: each set case by case by a parliament, a cartel or a publisher, not by
+# a rule a program can follow. Each line:
+# (date, local time, zone "NY" / "IST" / "UTC", family, country, title, source).
+# A date only trackers have reported, not an official notice, says "reported".
+# Checked 20-Nov-2026; add new ones as they are announced.
+WORLD_EVENTS: list[tuple[str, str, str, str, str, str, str]] = [
+    # India: counting day, from 8am IST.
+    ("2004-05-13", "08:00", "IST", "india_election", "INR", "Lok Sabha results (14th)", "Election Commission of India; counting 13 May 2004"),
+    ("2009-05-16", "08:00", "IST", "india_election", "INR", "Lok Sabha results (15th)", "Election Commission of India; counting 16 May 2009 (public record; not re-checked 20-Nov-2026)"),
+    ("2014-05-16", "08:00", "IST", "india_election", "INR", "Lok Sabha results (16th)", "Election Commission of India; counting 16 May 2014 (public record; not re-checked 20-Nov-2026)"),
+    ("2019-05-23", "08:00", "IST", "india_election", "INR", "Lok Sabha results (17th)", "Election Commission of India; counting 23 May 2019 (public record; not re-checked 20-Nov-2026)"),
+    ("2024-06-04", "08:00", "IST", "india_election", "INR", "Lok Sabha results (18th)", "Election Commission of India; counting 4 Jun 2024"),
+    # US shutdowns (the first day without funding) and debt-ceiling dates.
+    ("2011-08-02", "12:00", "NY", "us_fiscal", "USD", "Debt-ceiling deadline (Budget Control Act signed)", "Treasury's 2 Aug 2011 deadline; S&P downgrade followed on 5 Aug (public record; not re-checked 20-Nov-2026)"),
+    ("2013-10-01", "00:01", "NY", "us_fiscal", "USD", "US government shutdown begins (16 days)", "Shutdown 1-17 Oct 2013 (public record; not re-checked 20-Nov-2026)"),
+    ("2013-10-17", "00:01", "NY", "us_fiscal", "USD", "Debt-ceiling deadline", "Treasury's 17 Oct 2013 estimate; deal signed late on the 16th (public record; not re-checked 20-Nov-2026)"),
+    ("2018-12-22", "00:01", "NY", "us_fiscal", "USD", "US government shutdown begins (35 days)", "Shutdown 22 Dec 2018 - 25 Jan 2019 (public record; not re-checked 20-Nov-2026)"),
+    ("2023-06-05", "00:01", "NY", "us_fiscal", "USD", "Debt-ceiling deadline (Fiscal Responsibility Act signed 3 Jun)", "Treasury's 5 Jun 2023 estimate (public record; not re-checked 20-Nov-2026)"),
+    ("2025-10-01", "00:01", "NY", "us_fiscal", "USD", "US government shutdown begins (43 days)", "Shutdown 1 Oct - 12 Nov 2025; ended by P.L. 119-37"),
+    ("2026-01-31", "00:01", "NY", "us_fiscal", "USD", "Partial US shutdown begins (4 days, reported)", "Reported: lapse 31 Jan - 3 Feb 2026 after P.L. 119-37's funding ended 30 Jan"),
+    ("2026-12-12", "00:01", "NY", "us_fiscal", "USD", "US funding runs out unless Congress acts (reported)", "Reported: stopgap H.R. 6500 funds the government through 11 Dec 2026"),
+    # Tariffs.
+    ("2025-04-02", "16:00", "NY", "trade", "USD", "US 'reciprocal' tariffs announced", "White House announcement, 2 Apr 2025 (public record; not re-checked 20-Nov-2026)"),
+    ("2025-04-09", "13:00", "NY", "trade", "USD", "US pauses reciprocal tariffs for 90 days", "White House announcement, 9 Apr 2025 (public record; not re-checked 20-Nov-2026)"),
+    ("2027-01-10", "00:01", "NY", "trade", "USD", "US-China tariff truce due to end (reported)", "Reported extension from 10 Nov 2026; not yet in the Federal Register"),
+    ("2027-12-31", "23:59", "NY", "trade", "USD", "US Section 232 steel and aluminium measures due to lapse (reported)", "Reported by trade trackers; check CBP notices"),
+    # OPEC+ (meetings are on Sundays: the reaction is the next session).
+    ("2026-10-04", "12:00", "UTC", "opec", "OPEC", "OPEC+ group-of-seven output meeting", "OPEC press release, 4 Oct 2026"),
+    ("2026-11-01", "12:00", "UTC", "opec", "OPEC", "OPEC+ group-of-seven output meeting", "OPEC press release, 4 Oct 2026"),
+    ("2026-11-29", "12:00", "UTC", "opec", "OPEC", "OPEC+ ministerial meeting (42nd, reported)", "Reported by meeting trackers; not yet confirmed on opec.org"),
+    # World Gold Council, Gold Demand Trends (London morning).
+    ("2026-04-29", "08:00", "UTC", "cb_gold", "WORLD", "Gold Demand Trends Q1 2026", "World Gold Council press release, 29 Apr 2026"),
+    ("2026-07-30", "08:00", "UTC", "cb_gold", "WORLD", "Gold Demand Trends Q2 2026", "World Gold Council press release, 30 Jul 2026"),
+    ("2026-11-03", "08:00", "UTC", "cb_gold", "WORLD", "Gold Demand Trends Q3 2026", "World Gold Council press release, 3 Nov 2026"),
+]
 
 # India's scheduled events, kept by hand because their publishers cannot be
 # read by a program (rbi.org.in answers robots.txt with HTTP 418). Each line:

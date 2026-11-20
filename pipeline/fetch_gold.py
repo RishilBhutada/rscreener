@@ -23,8 +23,11 @@
     feeds publishers put out for readers' apps (each feed's robots.txt
     allows it). GDELT often refuses GitHub's shared runners; the feeds
     keep the page fed when it does.
-  - COMEX gold's daily closes (Yahoo GC=F) and its history from 2020, to
+  - COMEX gold's daily closes (Yahoo GC=F) and its history from 2000, to
     measure how gold moved around each event.
+  - Elections (US by law; India's counting days), US shutdowns and
+    debt-ceiling dates, tariff deadlines, OPEC+ meetings and the World Gold
+    Council's demand reports: gold_lib.WORLD_EVENTS, kept by hand.
 
 Each source is asked once a run. The feeds rate-limit; a refusal is logged
 and yesterday's rows stand.
@@ -46,7 +49,8 @@ from zoneinfo import ZoneInfo
 import requests
 
 from commodities_lib import futures_day
-from gold_lib import ANNOUNCE, ECB_PAST, INDIA_EVENTS, clean_title, family_of, rate_headline
+from gold_lib import (ANNOUNCE, ECB_PAST, INDIA_EVENTS, WORLD_EVENTS, clean_title, family_of, rate_headline,
+                      us_elections)
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
@@ -412,6 +416,30 @@ def india(con, today: str) -> None:
     print(f"India: {len(INDIA_EVENTS)} scheduled events from the hand-kept list")
 
 
+def world(con, today: str) -> None:
+    """US elections (by law) and the hand-kept elections, fiscal deadlines,
+    tariffs, OPEC+ meetings and gold-demand reports in gold_lib (owner,
+    20-Nov-2026: "include more imp events too like elections of us etc").
+    Past ones count towards each family's measured stars; the calendar shows
+    a year each way."""
+    zones = {"NY": NY, "IST": timezone(timedelta(hours=5, minutes=30)), "UTC": timezone.utc}
+    n = 0
+    for d, title in us_elections(2000, int(today[:4]) + 2):
+        # Polls close from 7pm ET; the result lands overnight.
+        upsert_event(con, f"world|us_election|{d}", stamp(ny_time(date.fromisoformat(d), (20, 0))), "USD", title,
+                     "High", "", "", "", "US law: the Tuesday after the first Monday in November", today,
+                     family="us_election")
+        n += 1
+    for d, hm, zone, fam, ctry, title, src in WORLD_EVENTS:
+        day = date.fromisoformat(d)
+        when = datetime(day.year, day.month, day.day, int(hm[:2]), int(hm[3:]), tzinfo=zones[zone])
+        upsert_event(con, f"world|{fam}|{d}", stamp(when.astimezone(timezone.utc)), ctry, title, "High",
+                     "", "", "", src, today, family=fam)
+        n += 1
+    con.commit()
+    print(f"World: {n} elections, fiscal deadlines, tariffs, OPEC+ meetings and gold-demand reports")
+
+
 def boj(con, today: str) -> None:
     """Bank of Japan decisions since 2021 and the ones scheduled: the last
     day of each meeting. The Bank announces when the meeting ends, usually
@@ -670,10 +698,11 @@ def headlines(con) -> None:
 
 def comex(con) -> None:
     first, last = con.execute("SELECT MIN(date), MAX(date) FROM commodity_world WHERE ticker='GC=F'").fetchone()
-    # From 2020 until the store reaches back that far - the Fed's calendar
-    # starts in 2021 and each meeting needs the day before it - then the
-    # last ten days.
-    p1 = (int(datetime(2020, 6, 1).timestamp()) if not first or first > "2021-01-01"
+    # From 2000 until the store reaches back that far, then the last ten
+    # days. 2000 since 20-Nov-2026: elections and fiscal deadlines come every
+    # few years, and measuring them needs a dozen past ones (it was 2020,
+    # enough for the Fed's calendar, which starts in 2021).
+    p1 = (int(datetime(2000, 8, 1).timestamp()) if not first or first > "2001-01-01"
           else int(datetime.fromisoformat(last).timestamp()) - 10 * 86400)
     r = requests.get(YAHOO.format(p1=p1, p2=int(time.time())), headers={"User-Agent": UA}, timeout=60)
     r.raise_for_status()
@@ -767,7 +796,8 @@ def main() -> None:
         print(f"Forex Factory: {gone} stored rows removed")
     steps = [lambda: fomc_dates(con, today), lambda: fed_calendar(con, today), lambda: bea(con, today),
              lambda: census(con, today), lambda: treasury(con, today), lambda: ecb(con, today),
-             lambda: boj(con, today), lambda: ism(con, today), lambda: india(con, today)]
+             lambda: boj(con, today), lambda: ism(con, today), lambda: india(con, today),
+             lambda: world(con, today)]
     if os.environ.get("FRED_API_KEY", "").strip():
         steps += [lambda: fred_dates(con, today), lambda: fred_actuals(con)]
     else:

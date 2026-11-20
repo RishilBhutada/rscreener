@@ -77,4 +77,5 @@ export function ago(t: string, now: number): string {
 /** Countries as two letters a reader knows. */
 export const COUNTRY: Record<string, string> = {
   USD: "US", EUR: "EU", CNY: "CN", JPY: "JP", GBP: "UK", INR: "IN", AUD: "AU", CAD: "CA", CHF: "CH", NZD: "NZ",
+  OPEC: "OPEC", WORLD: "World",
 };
