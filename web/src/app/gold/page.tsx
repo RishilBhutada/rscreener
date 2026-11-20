@@ -4,6 +4,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
+import GoldChart from "@/components/GoldChart";
 import { StarGlyph, ExternalGlyph } from "@/components/Glyphs";
 import { Chips, Icon, Stat, signed, tone } from "@/components/QuoteUI";
 import MacroCharts from "@/components/MacroCharts";
@@ -208,6 +209,12 @@ export default function GoldPage() {
                 every tab is a list a week to a year long, so a card after them
                 would sit below a year of events, and the figures are context
                 for all three tabs, not part of any one. */}
+            {/* Gold's own history with the events that moved it (owner,
+                20-Nov-2026: "improve the gold section about the details chart"). */}
+            <Card title="Gold and its events">
+              <GoldChart families={doc.families} />
+            </Card>
+
             <Card title="US economy" tip={
               <InfoTip title="US economy">
                 <p>The US figures gold answers to - inflation, jobs, interest rates, growth, the dollar and oil - each as far back as its publisher&apos;s records go, from FRED, the St. Louis Fed&apos;s database. The &quot;i&quot; beside each chart says what it measures and who publishes it.</p>

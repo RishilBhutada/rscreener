@@ -35,6 +35,8 @@ from gold_lib import (ANNOUNCE, FAMILIES, MEASURE_ON_MCX, MIN_MEASURED, NOT_MEAS
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "rscreener.db"
 OUT = ROOT / "web" / "public" / "gold.json"
+# The gold chart's history, loaded only when the chart comes on screen.
+OUT_PRICES = ROOT / "web" / "public" / "gold_prices.json"
 NY = ZoneInfo("America/New_York")
 IST = timezone(timedelta(hours=5, minutes=30))
 TROY_OZ_G = 31.1034768
@@ -394,6 +396,30 @@ def main() -> None:
         "generated_at": now.strftime("%Y-%m-%d %H:%M UTC"),
         "snapshot": snap, "events": out_events, "families": families, "news": out_news,
         "min_measured": MIN_MEASURED,
+    }, separators=(",", ":"), ensure_ascii=False, allow_nan=False), encoding="utf-8")
+    # ── the gold chart's history (owner, 20-Nov-2026: "improve the gold
+    # section about the details chart") ──
+    # COMEX since 2000 and MCX at its real front-contract closes, and every
+    # past event of three stars or more with gold's move the session after,
+    # so the chart can mark them across the whole history, not just the
+    # calendar's year.
+    hist = []
+    for key, when, country, title, impact, forecast, previous, actual, family, source in events:
+        fam = families.get(family)
+        w = datetime.fromisoformat(when.replace("Z", "+00:00"))
+        if not fam or fam["stars"] < 3 or w >= now or family in NOT_MEASURED or source == "forexfactory":
+            continue
+        cday, mday = reaction_days(w)
+        cm, mm = comex.move_from(cday), mcx.move_from(mday)
+        if not cm and not mm:
+            continue
+        hist.append([w.strftime("%Y-%m-%d"), title, family, fam["stars"],
+                     [cm[0], r2(cm[1])] if cm else None, [mm[0], r2(mm[1])] if mm else None])
+    OUT_PRICES.write_text(json.dumps({
+        "generated_at": now.strftime("%Y-%m-%d %H:%M UTC"),
+        "comex": [[d, c] for d, c in sorted(world["GC=F"])],
+        "mcx": [[d, round(c)] for d, c in mcx_raw],
+        "events": hist,
     }, separators=(",", ":"), ensure_ascii=False, allow_nan=False), encoding="utf-8")
     measured = [f"{k} {v['stars']}* ({v['n']}, {v['ratio']}x)" for k, v in families.items() if "ratio" in v]
     print(f"gold: {len(out_events)} events, {len(out_news)} headlines; measured: {', '.join(measured) or 'none yet'}")

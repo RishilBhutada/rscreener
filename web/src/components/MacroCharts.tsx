@@ -169,6 +169,27 @@ export default function MacroCharts({ fredUsed = false }: { fredUsed?: boolean }
   const [range, setRange] = useState<Range>("10Y");
   const [hoverT, setHoverT] = useState<number | null>(null);
   const [W, setW] = useState(0);
+  // Gold drawn over any series, on its own scale (owner, 20-Nov-2026: improve
+  // the US economy charts - gold against real yields, the dollar, inflation).
+  const [goldOn, setGoldOn] = useState(false);
+  const [gold, setGold] = useState<[number, number][] | null>(null);
+  useEffect(() => {
+    try { setGoldOn(localStorage.getItem("rs_macro_gold") === "1"); } catch { /* off */ } // eslint-disable-line react-hooks/set-state-in-effect
+  }, []);
+  useEffect(() => {
+    if (!goldOn || gold) return;
+    let live = true;
+    fetch(`${BASE}/gold_prices.json`).then((r) => (r.ok ? r.json() : null))
+      .then((d: { comex?: [string, number][] } | null) => {
+        if (live && d?.comex?.length) setGold(d.comex.map(([dd, c]) => [toT(dd), c]));
+      }).catch(() => {});
+    return () => { live = false; };
+  }, [goldOn, gold]);
+  const flipGold = () => {
+    const v = !goldOn;
+    setGoldOn(v);
+    try { localStorage.setItem("rs_macro_gold", v ? "1" : "0"); } catch { /* private mode */ }
+  };
 
   // Fetched when the card comes near the screen, not with the page: decades of
   // two dozen series come to a few times the size of the gold page's own file,
@@ -322,11 +343,25 @@ export default function MacroCharts({ fredUsed = false }: { fredUsed?: boolean }
       if (t >= d0 && t <= d1 && x(t) >= ML + 14) yearTicks.push(t);
     }
 
+    // Gold on its own scale across the same window, top to bottom of the plot.
+    let goldLine = "", goldLo = 0, goldHi = 0;
+    if (goldOn && gold) {
+      const seen = gold.filter(([t]) => t >= d0 && t <= d1);
+      if (seen.length > 1) {
+        goldLo = Math.min(...seen.map(([, c]) => c));
+        goldHi = Math.max(...seen.map(([, c]) => c));
+        const gy = (v: number) => MT + plotH * 0.06 + (1 - (v - goldLo) / Math.max(1e-9, goldHi - goldLo)) * plotH * 0.88;
+        // a point every pixel or so is enough: decades of daily closes otherwise
+        const every = Math.max(1, Math.floor(seen.length / Math.max(1, plotW)));
+        seen.forEach(([t, c], k) => { if (k % every === 0 || k === seen.length - 1) goldLine += `${goldLine ? "L" : "M"}${f(x(t))},${f(gy(c))}`; });
+      }
+    }
     return {
+      goldLine, goldLo, goldHi,
       i0, vis, bars, ticks, labels, bands, yearTicks, line, up, down, x, y, ML, MR, MT, plotW, plotH,
       zero: yLo < 0 && yHi > 0 ? y(0) : bars ? y(0) : null, d0, d1,
     };
-  }, [cur, times, eff, W, H, u, doc]);
+  }, [cur, times, eff, W, H, u, doc, goldOn, gold]);
 
   const point = (e: React.PointerEvent<SVGSVGElement>) => {
     if (!g) return;
@@ -427,7 +462,17 @@ export default function MacroCharts({ fredUsed = false }: { fredUsed?: boolean }
                 </span>
               )}
             </p>
-            <p className="text-[12px] text-[var(--ink3)] tabular-nums">{period(at.date, cur.freq)}</p>
+            <p className="text-[12px] text-[var(--ink3)] tabular-nums">
+              {period(at.date, cur.freq)}
+              {goldOn && gold && (() => {
+                const t = toT(at.date);
+                let k = -1;
+                for (let a = 0, b = gold.length - 1; a <= b;) { const m = (a + b) >> 1; if (gold[m][0] <= t + 31 * 86400000) { k = m; a = m + 1; } else b = m - 1; }
+                // the month's last close for a monthly figure, the day's for a daily one
+                return k >= 0 && gold[k][0] >= t - 40 * 86400000
+                  ? <span style={{ color: "#d4a017" }}> · Gold ${Math.round(gold[k][1]).toLocaleString("en-US")}</span> : null;
+              })()}
+            </p>
           </div>
 
           <div ref={boxRef} className="mt-1" style={{ height: H }}>
@@ -470,6 +515,9 @@ export default function MacroCharts({ fredUsed = false }: { fredUsed?: boolean }
                 ) : (
                   <path d={g.line} fill="none" stroke="var(--accent)" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
                 )}
+                {g.goldLine && (
+                  <path d={g.goldLine} fill="none" stroke="#d4a017" strokeWidth="1.3" strokeLinejoin="round" opacity="0.85" pointerEvents="none" />
+                )}
                 {hi !== null && (
                   <g pointerEvents="none">
                     <line x1={g.x(times[hi])} x2={g.x(times[hi])} y1={g.MT} y2={g.MT + g.plotH} stroke="var(--chart-axis)" strokeWidth="1" strokeDasharray="2 3" />
@@ -481,8 +529,8 @@ export default function MacroCharts({ fredUsed = false }: { fredUsed?: boolean }
             )}
           </div>
 
-          {(showRange || showBands) && (
-            <div className="flex items-center gap-1 px-2 pt-1">
+          {(
+            <div className="flex items-center gap-1 px-2 pt-1 flex-wrap">
               {showRange && (
                 <div role="radiogroup" aria-label="Range" className="flex items-center gap-1">
                   {RANGES.filter(([r]) => avail.includes(r)).map(([r]) => (
@@ -493,6 +541,17 @@ export default function MacroCharts({ fredUsed = false }: { fredUsed?: boolean }
                   ))}
                 </div>
               )}
+              <button type="button" onClick={flipGold} aria-pressed={goldOn}
+                className={`min-h-[34px] px-2.5 rounded-lg text-[13px] font-semibold inline-flex items-center gap-1.5 ${goldOn ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]" : "text-[var(--ink2)] active:bg-[var(--card2)]"}`}>
+                <i className="inline-block w-3 h-[3px] rounded-full" style={{ background: "#d4a017" }} aria-hidden="true" />
+                Gold
+              </button>
+              {goldOn && g?.goldLine && (
+                <span className="text-[11px] text-[var(--ink3)] tabular-nums">
+                  ${Math.round(g.goldLo).toLocaleString("en-US")}-${Math.round(g.goldHi).toLocaleString("en-US")} on its own scale
+                </span>
+              )}
+              {goldOn && gold && !g?.goldLine && <span className="text-[11px] text-[var(--ink3)]">No gold prices in this range (COMEX from 2000)</span>}
               {showBands && (
                 <span className="ml-auto pr-1 inline-flex items-center gap-1.5 text-[11px] text-[var(--ink3)]">
                   <i className="inline-block w-2.5 h-3 rounded-[2px] bg-[var(--ink3)] opacity-40" aria-hidden="true" />

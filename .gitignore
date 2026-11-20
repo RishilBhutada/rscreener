@@ -28,6 +28,7 @@ web/public/sectors.json
 web/public/news-home.json
 web/public/checks/
 web/public/gold.json
+web/public/gold_prices.json
 web/public/macro.json
 web/public/news.json
 web/public/inst/
