@@ -1,20 +1,5 @@
 [
  {
-  "at": "2026-09-07 14:52 UTC",
-  "overall": 89.5,
-  "complete": 80.9,
-  "correct": 94.7,
-  "fresh": 100.0,
-  "deep": 66.7,
-  "measured": [
-   "complete",
-   "correct",
-   "deep",
-   "fresh"
-  ],
-  "companies": 4910
- },
- {
   "at": "2026-09-07 23:21 UTC",
   "overall": 89.5,
   "complete": 81.0,
@@ -2986,6 +2971,21 @@
  },
  {
   "at": "2026-11-20 16:46 UTC",
+  "overall": 91.0,
+  "complete": 80.3,
+  "correct": 94.7,
+  "fresh": 100.0,
+  "deep": 83.3,
+  "measured": [
+   "complete",
+   "correct",
+   "deep",
+   "fresh"
+  ],
+  "companies": 4996
+ },
+ {
+  "at": "2026-11-20 19:50 UTC",
   "overall": 91.0,
   "complete": 80.3,
   "correct": 94.7,
