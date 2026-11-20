@@ -83,22 +83,31 @@ def parity(mcx: list[tuple[str, float]], comex: list[tuple[str, float]], fx: lis
            duty_on, days: int = 60) -> dict | None:
     """MCX against COMEX x USD/INR x duty for 10 g, each MCX day with all three
     on that day. `duty_on(day)` -> (percent, ...) or None. Flags the days the
-    gap jumped by more than GAP_JUMP since the day before."""
+    gap jumped by more than GAP_JUMP since the day before.
+
+    A row may carry its contract as a third item. The day MCX moves to its
+    next contract the gap steps by that contract's carry - about 1-2% for
+    two months - which is not a wrong price: found live on 20-Nov-2026, when
+    the Oct-to-Dec switch on 1 Oct 2026 (+2.19%) was flagged. A day whose
+    contract differs from the day before is not compared; `rolls` counts them."""
     gaps = []
-    for d, m in mcx:
+    for row in mcx:
+        d, m = row[0], row[1]
+        key = row[2] if len(row) > 2 else None
         c, f, du = _on(comex, d), _on(fx, d), duty_on(d)
         if c and f and du and m:
             world = c * f * OZ_PER_10G * (1 + du[0] / 100)
-            gaps.append((d, (m / world - 1) * 100))
+            gaps.append((d, (m / world - 1) * 100, key))
     gaps = gaps[-days:]
     if len(gaps) < 10:
         return None
+    roll = [i for i in range(1, len(gaps)) if gaps[i][2] is not None and gaps[i][2] != gaps[i - 1][2]]
     jumps = [(gaps[i][0], round(gaps[i][1] - gaps[i - 1][1], 2)) for i in range(1, len(gaps))
-             if abs(gaps[i][1] - gaps[i - 1][1]) > GAP_JUMP]
-    vals = [g for _, g in gaps]
+             if i not in roll and abs(gaps[i][1] - gaps[i - 1][1]) > GAP_JUMP]
+    vals = [g for _, g, _k in gaps]
     return {"what": "MCX vs COMEX", "against": "COMEX x USD/INR x India's duty", "n": len(gaps),
             "gap_lo": round(min(vals), 2), "gap_hi": round(max(vals), 2), "gap_now": round(vals[-1], 2),
-            "jumps": jumps[-5:], "n_jumps": len(jumps), "ok": not jumps}
+            "jumps": jumps[-5:], "n_jumps": len(jumps), "rolls": len(roll), "ok": not jumps}
 
 
 def expected_day(today: date) -> date:

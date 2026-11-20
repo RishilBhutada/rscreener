@@ -102,7 +102,7 @@ function Checks({ c }: { c: NonNullable<GoldDoc["snapshot"]["checks"]> }) {
   const dayYear = (d: string) => `${istDay(`${d}T12:00:00Z`)} ${d.slice(0, 4)}`;
   const line = (x: GoldCheck): string => {
     if (x.what === "MCX vs COMEX") {
-      return `MCX vs COMEX: ${x.n_jumps ? `${x.n_jumps} day${x.n_jumps > 1 ? "s" : ""} out of line (${(x.jumps ?? []).map(([d]) => dayYear(d)).join(", ")})` : `consistent on all ${x.n} days`}; the gap between them ran ${x.gap_lo}% to ${x.gap_hi}%, ${x.gap_now}% now (the local premium or discount plus carry).`;
+      return `MCX vs COMEX: ${x.n_jumps ? `${x.n_jumps} day${x.n_jumps > 1 ? "s" : ""} out of line (${(x.jumps ?? []).map(([d]) => dayYear(d)).join(", ")})` : `consistent on all ${x.n} days`}${x.rolls ? ` (${x.rolls} move${x.rolls > 1 ? "s" : ""} to the next contract set aside - its carry, not an error)` : ""}; the gap between them ran ${x.gap_lo}% to ${x.gap_hi}%, ${x.gap_now}% now (the local premium or discount plus carry).`;
     }
     if (x.median !== undefined) {
       return `${x.what}: within ${x.median}% of the ${x.against} on a typical day over ${x.n} days, at most ${x.worst}%${x.dropped?.length ? `; ${x.dropped.length} bad day${x.dropped.length > 1 ? "s" : ""} from Yahoo removed (${x.dropped.map(dayYear).join(", ")})` : ""}.`;

@@ -115,11 +115,13 @@ def front_series(con, root: str) -> Closes:
     return Closes(rows)
 
 
-def front_raw(con, root: str) -> list[tuple[str, float]]:
+def front_raw(con, root: str) -> list[tuple[str, float, str]]:
     """The same front contract each day as front_series, at its real close -
-    not chained back across rolls - for comparing against another market."""
+    not chained back across rolls - for comparing against another market.
+    Each day carries its contract, so a comparison can tell a roll from a
+    wrong price (gold_check.parity)."""
     exp = dict(con.execute("SELECT key, expiry FROM commodity_contracts WHERE root=?", (root,)))
-    by_day: dict[str, tuple[str, float]] = {}
+    by_day: dict[str, tuple[str, float, str]] = {}
     for key, d, c in con.execute(
             "SELECT key, date, close FROM commodity_bars WHERE volume > 0 AND close > 0 AND key IN "
             "(SELECT key FROM commodity_contracts WHERE root=?) ORDER BY date", (root,)):
@@ -127,8 +129,8 @@ def front_raw(con, root: str) -> list[tuple[str, float]]:
         if not e or (date.fromisoformat(e) - date.fromisoformat(d)).days < EXPIRING_DAYS:
             continue
         if d not in by_day or e < by_day[d][0]:
-            by_day[d] = (e, c)
-    return [(d, by_day[d][1]) for d in sorted(by_day)]
+            by_day[d] = (e, c, key)
+    return [(d, by_day[d][1], by_day[d][2]) for d in sorted(by_day)]
 
 
 def reaction_days(when_utc: datetime) -> tuple[str, str]:
@@ -418,7 +420,7 @@ def main() -> None:
     OUT_PRICES.write_text(json.dumps({
         "generated_at": now.strftime("%Y-%m-%d %H:%M UTC"),
         "comex": [[d, c] for d, c in sorted(world["GC=F"])],
-        "mcx": [[d, round(c)] for d, c in mcx_raw],
+        "mcx": [[d, round(c)] for d, c, _k in mcx_raw],
         "events": hist,
     }, separators=(",", ":"), ensure_ascii=False, allow_nan=False), encoding="utf-8")
     measured = [f"{k} {v['stars']}* ({v['n']}, {v['ratio']}x)" for k, v in families.items() if "ratio" in v]

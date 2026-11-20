@@ -42,7 +42,7 @@ export type GoldNews = { t: string; title: string; url: string; src: string; sta
 export type GoldCheck = {
   what: string; ok: boolean; against?: string; n?: number;
   median?: number; worst?: number; worst_day?: string; dropped?: string[];
-  gap_lo?: number; gap_hi?: number; gap_now?: number; jumps?: [string, number][]; n_jumps?: number;
+  gap_lo?: number; gap_hi?: number; gap_now?: number; jumps?: [string, number][]; n_jumps?: number; rolls?: number;
   last?: string | null; behind?: number | null;
 };
 

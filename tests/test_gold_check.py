@@ -60,3 +60,17 @@ def test_clean_fx_drops_the_26_aug_blip_and_days_off_the_fed():
     fed = [("2026-08-25", 95.7), ("2026-08-26", 95.6), ("2026-08-27", 95.5)]
     assert gc.clean_fx(y, fed)[1] == ["2026-08-26"]
     assert gc.clean_fx([("2026-08-25", 95.9)], fed)[1] == []
+
+
+def test_parity_a_contract_roll_is_not_a_wrong_price():
+    # live 20-Nov-2026: the Oct-to-Dec switch on 1 Oct stepped the gap +2.19%
+    duty = lambda d: (15.0, "2026-05-13", "")  # noqa: E731
+    comex = [(d, 3700.0) for d in DAYS]
+    fx = [(d, 92.0) for d in DAYS]
+    world = 3700 * 92 * gc.OZ_PER_10G * 1.15
+    mcx = [(d, world * (1.0 if i < 20 else 1.022), "OCT" if i < 20 else "DEC") for i, d in enumerate(DAYS)]
+    r = gc.parity(mcx, comex, fx, duty)
+    assert r["ok"] and r["n_jumps"] == 0 and r["rolls"] == 1
+    # the same step with no change of contract is still flagged
+    same = [(d, v, "DEC") for d, v, _k in mcx]
+    assert not gc.parity(same, comex, fx, duty)["ok"]
