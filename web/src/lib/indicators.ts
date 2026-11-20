@@ -14,6 +14,24 @@ export function sma(v: number[], n: number): (number | null)[] {
   return out;
 }
 
+/** The Nifty put-call ratio as drawn: its 10-day average. The daily figure
+ *  swings 0.6 to 1.4 from one day to the next, and five years of it on a
+ *  phone was a solid pink block with no line to read (owner, 20-Nov-2026:
+ *  "I tried turning on the put call ratio but its not showing any result").
+ *  Gaps (null) are skipped, not counted as zero; null until 10 values. */
+export const PCR_DAYS = 10;
+export function pcrAvg(v: (number | null)[], n = PCR_DAYS): (number | null)[] {
+  const win: number[] = [];
+  let sum = 0;
+  return v.map((x) => {
+    if (x === null || x === undefined) return null;
+    win.push(x);
+    sum += x;
+    if (win.length > n) sum -= win.shift() as number;
+    return win.length === n ? Math.round((sum / n) * 1000) / 1000 : null;
+  });
+}
+
 export function ema(v: number[], n: number): (number | null)[] {
   const out: (number | null)[] = [];
   const k = 2 / (n + 1);

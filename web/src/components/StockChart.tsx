@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckGlyph, ChevronGlyph } from "@/components/Glyphs";
-import { ema, bollinger, rsi, IND_COLOUR } from "@/lib/indicators";
+import { ema, bollinger, rsi, IND_COLOUR, PCR_DAYS, pcrAvg } from "@/lib/indicators";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import TabIndicator from "@/components/TabIndicator";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
@@ -311,7 +311,7 @@ function axisVal(v: number, kind: FmtKind, short: boolean): string {
 type SmallInd = "sma20" | "ema21" | "bb" | "rsi" | "mvix" | "mfii" | "mpcr" | "events";
 const SMALL_INDS: [SmallInd, string][] = [
   ["sma20", "SMA 20"], ["ema21", "EMA 21"], ["bb", "Bollinger (20, 2)"], ["rsi", "RSI (14)"],
-  ["mvix", "India VIX"], ["mfii", "FII index futures long %"], ["mpcr", "Nifty put-call ratio"], ["events", "RBI policy and Budget days"],
+  ["mvix", "India VIX"], ["mfii", "FII index futures long %"], ["mpcr", "Nifty put-call ratio (10-day avg)"], ["events", "RBI policy and Budget days"],
 ];
 
 function sma(vals: number[], win: number): (number | null)[] {
@@ -858,7 +858,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cas
             arr.flatMap((v, i) => (v === null || v === undefined || mkt.t[i] < cutoff ? [] : [{ t: mkt.t[i], v }]));
           if (inds.includes("mvix")) defs.push({ key: "mvix", label: "India VIX", color: IND_COLOUR.mvix, kind: "line", axis: "R", scale: "mvix", zone: [0.55, 0.95], data: mk(mkt.vix), fmt: "plain" });
           if (inds.includes("mfii")) defs.push({ key: "mfii", label: "FII long %", color: IND_COLOUR.mfii, kind: "line", axis: "R", scale: "mfii", zone: [0.55, 0.95], data: mk(mkt.fii), fmt: "pct" });
-          if (inds.includes("mpcr")) defs.push({ key: "mpcr", label: "Nifty PCR", color: IND_COLOUR.mpcr, kind: "line", axis: "R", scale: "mpcr", zone: [0.55, 0.95], data: mk(mkt.pcr), fmt: "plain" });
+          if (inds.includes("mpcr")) defs.push({ key: "mpcr", label: `Nifty PCR (${PCR_DAYS}-day avg)`, color: IND_COLOUR.mpcr, kind: "line", axis: "R", scale: "mpcr", zone: [0.55, 0.95], data: mk(pcrAvg(mkt.pcr)), fmt: "plain" });
         }
       }
       // Volume bars green or red on the close before them, as on the full

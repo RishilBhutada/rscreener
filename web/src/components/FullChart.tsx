@@ -19,7 +19,7 @@ import { readPick, writePick, type ChartPick } from "@/lib/chartpick";
 import ChartPresets from "@/components/ChartPresets";
 import { fourInRow, quarterX4, ttmMargins, ttmSums } from "@/lib/ttm";
 import { CASH_COLOUR, cashYears, priceToCash } from "@/lib/cashflow";
-import { sma, ema, bollinger, rsi, IND_COLOUR } from "@/lib/indicators";
+import { sma, ema, bollinger, rsi, IND_COLOUR, PCR_DAYS, pcrAvg } from "@/lib/indicators";
 import YearsChart from "@/components/YearsChart";
 import DataStatusButton, { whyMissing, type DataStatus } from "@/components/DataStatus";
 import {
@@ -116,7 +116,7 @@ const INDS: [Ind, string][] = [
   ["vol", "Volume"], ["dma50", "50 DMA"], ["dma200", "200 DMA"], ["sma20", "SMA 20"],
   ["ema21", "EMA 21"], ["bb", "Bollinger Bands (20, 2)"], ["rsi", "RSI (14)"],
   // The market's backdrop under a stock (owner, 16-Nov-2026): lab/index.json.
-  ["mvix", "India VIX"], ["mfii", "FII index futures long %"], ["mpcr", "Nifty put-call ratio"],
+  ["mvix", "India VIX"], ["mfii", "FII index futures long %"], ["mpcr", "Nifty put-call ratio (10-day avg)"],
 ];
 const MARKET_INDS: Ind[] = ["mvix", "mfii", "mpcr"];
 const FIXED: Partial<Record<Ind, string>> = { sma20: IND_COLOUR.sma20, ema21: IND_COLOUR.ema21, rsi: IND_COLOUR.rsi, mvix: IND_COLOUR.mvix, mfii: IND_COLOUR.mfii, mpcr: IND_COLOUR.mpcr };
@@ -1341,7 +1341,8 @@ export default function FullChart({ symbol }: { symbol: string }) {
       });
       const mVals: Partial<Record<Ind, (number | null)[]>> = {};
       if (mkt) {
-        for (const [k, arr] of [["mvix", mkt.vix], ["mfii", mkt.fii], ["mpcr", mkt.pcr]] as [Ind, (number | null)[]][]) {
+        // PCR as its 10-day average (lib/indicators.ts pcrAvg), as on the company chart
+        for (const [k, arr] of [["mvix", mkt.vix], ["mfii", mkt.fii], ["mpcr", pcrAvg(mkt.pcr)]] as [Ind, (number | null)[]][]) {
           if (!onInd.has(k)) continue;
           mVals[k] = mAt(arr);
           chart.addSeries(LineSeries, {
@@ -1374,7 +1375,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
         add(onInd.has("rsi"), "RSI", r14, FIXED.rsi!, (x) => x.toFixed(1));
         if (mVals.mvix) add(true, "VIX", mVals.mvix, FIXED.mvix!, (x) => x.toFixed(1));
         if (mVals.mfii) add(true, "FII long", mVals.mfii, FIXED.mfii!, (x) => `${x.toFixed(0)}%`);
-        if (mVals.mpcr) add(true, "PCR", mVals.mpcr, FIXED.mpcr!, (x) => x.toFixed(2));
+        if (mVals.mpcr) add(true, `PCR ${PCR_DAYS}d`, mVals.mpcr, FIXED.mpcr!, (x) => x.toFixed(2));
         const nav = navArr[i];
         if (nav !== null && nav !== undefined) {
           const prem = (c / nav - 1) * 100;
