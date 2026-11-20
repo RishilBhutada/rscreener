@@ -19,6 +19,7 @@ import { readPick, writePick, type ChartPick } from "@/lib/chartpick";
 import ChartPresets from "@/components/ChartPresets";
 import { fourInRow, quarterX4, ttmMargins, ttmSums } from "@/lib/ttm";
 import { CASH_COLOUR, cashPrevStep, cashRows as pickCash, priceToCash } from "@/lib/cashflow";
+import SwipeSections from "@/components/SwipeSections";
 import { sma, ema, bollinger, rsi, IND_COLOUR, PCR_DAYS, pcrAvg } from "@/lib/indicators";
 import YearsChart from "@/components/YearsChart";
 import DataStatusButton, { whyMissing, type DataStatus } from "@/components/DataStatus";
@@ -2187,6 +2188,286 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const indColour = (k: Ind) =>
     k === "dma50" ? "var(--chart-dma50)" : k === "dma200" ? "var(--chart-dma200)" : k === "vol" ? "var(--chart-vol)" : FIXED[k] ?? "var(--ink3)";
 
+  // The Type and Layers sheets' blocks, also sections of Advanced (owner,
+  // 20-Nov-2026: "in sections with right and left swipe rather than a very
+  // long scrolling page").
+  const typeBlock = (
+    <>
+                <Head>{sheet === "adv" ? "Price chart: type" : "Chart type"}</Head>
+                {KINDS.map(([k, label]) => (
+                  <button key={k} onClick={() => { savePrefs({ ...prefs, kind: k }); if (sheet !== "adv") setSheet(null); }}
+                    className={`w-full min-h-[48px] px-3 rounded-xl flex items-center justify-between text-[15px] ${
+                      prefs.kind === k ? "text-[var(--accent-ink)] bg-[var(--accent-soft)] font-semibold" : "text-[var(--ink)] active:bg-[var(--card2)]"}`}>
+                    {label}
+                    {prefs.kind === k && <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>}
+                  </button>
+                ))}
+                <div className="mt-1.5 pt-1.5 border-t border-[var(--line)]">
+                  <Toggle on={prefs.log} label="Log scale" sub="Equal percentage moves take equal height"
+                    onClick={() => savePrefs({ ...prefs, log: !prefs.log })} />
+                  <div className="px-3 pt-2 pb-2">
+                    <span className="block text-[15px] text-[var(--ink)]">Candle and bar colour</span>
+                    <span className="block text-[12px] text-[var(--ink3)] mb-1.5">Open to close: green up, red down. Previous close: teal up, orange down</span>
+                    <Seg value={prefs.candleBy} options={COLOUR_BY} onChange={(v) => savePrefs({ ...prefs, candleBy: v })} />
+                  </div>
+                </div>
+    </>
+  );
+  const layersBlock = (
+    <>
+                {view === "price" ? (
+                  <>
+                    <Head>Indicators</Head>
+                    {INDS.map(([k, label]) => (
+                      <Toggle key={k} on={indOn(k)} label={label} dot={indColour(k)}
+                        sub={cmps.length > 0 && k !== "vol" && k !== "rsi" ? "Hidden while comparing - averages mean nothing once rebased" : undefined}
+                        onClick={() => savePrefs({ ...prefs, inds: indOn(k) ? prefs.inds.filter((x) => x !== k) : [...prefs.inds, k] })} />
+                    ))}
+                    {indOn("vol") && (
+                      <div className="px-3 pt-1 pb-2">
+                        <span className="block text-[15px] text-[var(--ink)]">Volume colour</span>
+                        <span className="block text-[12px] text-[var(--ink3)] mb-1.5">Open to close: green up, red down. Previous close: teal up, orange down - the same shades as the candles</span>
+                        <Seg value={prefs.volBy} options={COLOUR_BY} onChange={(v) => savePrefs({ ...prefs, volBy: v })} />
+                      </div>
+                    )}
+                    {fv && indOn("vol") && (
+                      <>
+                        <Head>Volume shows</Head>
+                        {([["all", "All volume", undefined], ["deliv", "Delivered", "Shares taken into demat"],
+                          ["intra", "Same day", "Bought and sold within the session"], ["split", "Split", "Delivered over the total, as a stack"]] as const).map(([k, label, sub]) => (
+                          <Toggle key={k} on={fvMode === k} label={label} sub={sub} onClick={() => setFvMode(k)} />
+                        ))}
+                      </>
+                    )}
+                    <Head>
+                      <span className="inline-flex items-center gap-1">
+                        Levels
+                        <InfoTip title="Levels">
+                          <p>Worked out from the bars on screen, so they change as you zoom. They show where the price turned before - not where it will turn next.</p>
+                          <p><b>Support / resistance</b>: prices where it turned at least twice. Green below today&apos;s price, red above; the number is how many turns.</p>
+                          <p><b>Trend lines</b>: the line through past turns that price has touched most (three or more) without closing through it.</p>
+                          <p><b>Volume shelves</b>: bars on the right, longest where the most shares changed hands.</p>
+                          <p><b>Sensitivity</b>: High counts smaller turns, so more and weaker levels; Low only the big ones.</p>
+                        </InfoTip>
+                      </span>
+                    </Head>
+                    <Toggle on={prefs.lv.on} label="Show levels"
+                      sub={cmps.length > 0 ? "Off while comparing - levels are prices, the axis is % change" : undefined}
+                      onClick={() => savePrefs({ ...prefs, lv: { ...prefs.lv, on: !prefs.lv.on } })} />
+                    {prefs.lv.on && (
+                      <div className="pl-6">
+                        <Toggle on={prefs.lv.zones} label="Support / resistance" dot="var(--chart-pos)"
+                          onClick={() => savePrefs({ ...prefs, lv: { ...prefs.lv, zones: !prefs.lv.zones } })} />
+                        <Toggle on={prefs.lv.trend} label="Trend lines" dot={TREND_COLOUR}
+                          onClick={() => savePrefs({ ...prefs, lv: { ...prefs.lv, trend: !prefs.lv.trend } })} />
+                        <Toggle on={prefs.lv.vol} label="Volume shelves" dot="var(--chart-bar)"
+                          onClick={() => savePrefs({ ...prefs, lv: { ...prefs.lv, vol: !prefs.lv.vol } })} />
+                        <div className="px-3 pt-1 pb-2 flex items-center gap-3">
+                          <span className="text-[15px] text-[var(--ink)] flex-1">Sensitivity</span>
+                          <Seg value={prefs.lv.sens} options={SENS.map(([k, label]) => [k, label] as [Sens, string])}
+                            onChange={(v) => savePrefs({ ...prefs, lv: { ...prefs.lv, sens: v } })} />
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <Head>On this chart</Head>
+                    {LAYERS[view].map(([k, label]) => (
+                      <Toggle key={k} on={!isHidden(k)}
+                        label={debtOn ? ({ line: "Debt / Equity", median: "Median (not drawn)", bars: "Total debt bars" } as Record<string, string>)[k] ?? label
+                          : spsOn ? ({ line: "Price / Sales", median: "Median P/S (5 years)", bars: "SPS bars" } as Record<string, string>)[k] ?? label
+                          : (view === "ev" || view === "ps") && peWin === "q1" && (view === "ev" ? company?.ev_band : company?.ps_band)?.alt?.q1
+                            ? label.replace("(TTM)", "(1Q×4)") : label}
+                        onClick={() => setHidden({ ...hidden, [`${view}:${k}`]: !isHidden(k) })} />
+                    ))}
+                  </>
+                )}
+
+                {overlays.filter((o) => o !== view && !(o === "price" && view === "ebitda")).map((ov) => {
+                  const ks: [string, string][] = ov === "price" ? [["price", "Price"]] : ov === "sales" ? [["gpm", "GPM %"], ["opm", "OPM %"], ["npm", "NPM %"]]
+                    : ov === "ebitda" ? [["eb_ttm", "EBITDA, last 4 quarters"], ["ebitda_m", "EBITDA margin %"]] : [["line", VIEW_LABEL[ov]]];
+                  return (
+                    <div key={ov}>
+                      <Head>
+                        <span className="flex items-center">
+                          {VIEW_LABEL[ov]} · own scale
+                          <button onClick={() => setOverlays(overlays.filter((o) => o !== ov))} aria-label={`Remove the ${VIEW_LABEL[ov]} overlay`}
+                            className="ml-2 w-7 h-7 -my-1 rounded-lg inline-flex items-center justify-center text-[var(--ink3)] active:bg-[var(--card2)]">
+                            <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                          </button>
+                        </span>
+                      </Head>
+                      {ks.map(([k, label]) => {
+                        const hk = `ov:${ov}:${k}`;
+                        return <Toggle key={k} on={!hid(hk)} label={label} onClick={() => setHidden({ ...hidden, [hk]: !hid(hk) })} />;
+                      })}
+                    </div>
+                  );
+                })}
+
+                {(view === "pe" || view === "ebitda") && (
+                  <>
+                    <Head>{view === "pe" ? "Earnings" : "Quarters"}</Head>
+                    {/* The EPS blocks are always in their quarter's colour. */}
+                    <div className="px-3 pb-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--ink3)]">
+                      {[1, 2, 3, 4].map((n) => (
+                        <span key={n} className="inline-flex items-center gap-1">
+                          <i className="inline-block w-3 h-3 rounded-sm" style={{ background: `var(--q${n})` }} />{Q_LABEL[n]}
+                        </span>
+                      ))}
+                    </div>
+                    {view === "ebitda" && !isHidden("ebitda_m") && (company?.quarters?.length ?? 0) > 0 && (
+                      <div className="px-3 pt-1 pb-2">
+                        <span className="block text-[15px] text-[var(--ink)]">EBITDA margin point</span>
+                        <span className="block text-[12px] text-[var(--ink3)] mb-1.5">Over the middle of its quarter, or on the day its results came out</span>
+                        <Seg value={marginAt} options={[["mid", "Mid-quarter"], ["day", "Result day"]]} onChange={setMarginAt} />
+                      </div>
+                    )}
+                    <Toggle on={showChg} label="Growth %" sub="Printed over each bar when there is room for every one" onClick={() => setShowChg(!showChg)} />
+                    {showChg && (
+                      <div className="px-3 pb-2">
+                        <Seg value={epsCmp}
+                          options={view === "pe" && peWin === "ttm" ? [["yoy", "Year before"], ["prev", "Quarter before"]] : [["yoy", "Year ago"], ["prev", "Previous"]]}
+                          onChange={setEpsCmp} />
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {company && <Head>Events</Head>}
+                {company && (
+                  <Toggle on={showMkt} label="RBI policy and Budget days" sub="A hand-kept list, not checked line by line" onClick={() => setShowMkt(!showMkt)} />
+                )}
+                {(company?.quarters?.length ?? 0) > 0 && (
+                  <Toggle on={showDates} label="Result dates" sub="The day each quarter's results were declared" onClick={() => setShowDates(!showDates)} />
+                )}
+                {(company?.actions?.length ?? 0) > 0 && (
+                  <Toggle on={showCA} label="Corporate actions" sub="Dividends, bonuses, splits and rights, on their ex-date" onClick={() => setShowCA(!showCA)} />
+                )}
+                {showCA && (
+                  <div className="pl-6">
+                    {CA_ORDER.filter((k) => (company?.actions ?? []).some((a) => (CA_LABEL[a.kind] ? a.kind : "other") === k)).map((k) => (
+                      <Toggle key={k} on={!!caOn[k]} label={`${CA_LABEL[k]} (${caCount[k] ?? 0} in view)`} dot={`var(--ca-${({ dividend: "div", bonus: "bon", split: "spl", rights: "rgt", buyback: "buy", other: "oth" } as Record<string, string>)[k]})`}
+                        onClick={() => setCaOn({ ...caOn, [k]: !caOn[k] })} />
+                    ))}
+                  </div>
+                )}
+    </>
+  );
+  const advChartBlock = (
+    <>
+                <Head>Chart</Head>
+                <div className="px-3 pb-2 flex flex-wrap gap-1.5">
+                  {VIEWS.filter(([v]) => avail[v]).map(([v, label]) => (
+                    <button key={v} onClick={() => pickView(v)} className={pill(view === v && !years)}>{label}</button>
+                  ))}
+                  <button onClick={() => { setYears(true); setSheet(null); }} className={pill(years)}>Years</button>
+                </div>
+                <Head>Range</Head>
+                <div className="px-3 pb-2 flex flex-wrap gap-1">
+                  {RANGES.map((r) => <button key={r} onClick={() => pickRange(r)} className={`${pill(range === r)} px-1.5`}>{r}</button>)}
+                </div>
+                {VIEWS.some(([v]) => avail[v] && v !== view && !(v === "price" && view === "ebitda")) && (
+                  <>
+                    <Head>Lay over this chart · own scale</Head>
+                    <div className="px-3 pb-2 flex flex-wrap gap-1.5">
+                      {VIEWS.filter(([v]) => avail[v] && v !== view && !(v === "price" && view === "ebitda")).map(([v, label]) => (
+                        <button key={v} onClick={() => { setOverlays(overlays.includes(v) ? overlays.filter((o) => o !== v) : [...overlays, v]); setCmps([]); }}
+                          className={pill(overlays.includes(v))}>{label}</button>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {(
+                  <>
+                    <Head>Price chart: candle size</Head>
+                    <div className="px-3 pb-2">
+                      <Seg value={interval} options={INTERVALS.filter(([iv]) => !!file?.[iv]?.length).map(([iv]) => [iv, iv === "d" ? "Daily" : iv === "w" ? "Weekly" : "Monthly"] as [Interval, string])}
+                        onChange={(iv) => { kept.current = null; setIv(iv); }} />
+                    </div>
+                  </>
+                )}
+                <Head>Screen</Head>
+                <Toggle on={cmps.length > 0} label="Compare with other charts" sub={cmps.length ? cmps.map((c) => c.sym).join(", ") : "Peers, indices or any company"}
+                  onClick={() => setSheet("cmp")} />
+                {canFull && <Toggle on={full} label="Full screen" onClick={() => { void toggleFull(); }} />}
+                <Toggle on={false} label="Reset zoom" sub="Back to the whole range" onClick={() => { resetView(); setSheet(null); }} />
+    </>
+  );
+  const advRatioBlock = (
+    <>
+                {(spsAvail || debtAvail || cashAvail) && (
+                  <>
+                    <Head>P/E chart: bars under the ratio</Head>
+                    <div className="px-3 pb-2">
+                      <Seg value={perShare}
+                        options={([["eps", "EPS"], ["sps", "SPS"], ["debt", "Debt"], ["cash", "Cash flow"]] as [string, string][]).filter(([k]) => k === "eps" || (k === "sps" ? spsAvail : k === "cash" ? cashAvail : debtAvail))}
+                        onChange={(v) => { kept.current = null; setPerShare(v as "eps" | "sps" | "debt" | "cash"); }} />
+                    </div>
+                  </>
+                )}
+                {(company?.pe_band?.alt?.q1 || company?.ps_band?.alt?.q1 || company?.ev_band?.alt?.q1) && (
+                  <>
+                    <Head>P/E, MCap / Sales, EV / EBITDA: window</Head>
+                    <div className="px-3 pb-2">
+                      <Seg value={peWin} options={PE_WINDOWS.map(([k, label]) => [k, label] as [string, string])} onChange={(v) => { kept.current = null; setPeWin(v); }} />
+                      <span className="block mt-1 text-[12px] text-[var(--ink3)]">{PE_WINDOWS.find(([k]) => k === peWin)?.[2]}</span>
+                    </div>
+                  </>
+                )}
+                {tq && (
+                  <>
+                    <Head>Sales &amp; margin chart: basis</Head>
+                    <div className="px-3 pb-2">
+                      <Seg value={salesWin} options={[["q", "Each quarter"], ["ttm", "TTM"]]} onChange={(v) => { kept.current = null; setSalesWin(v); }} />
+                    </div>
+                  </>
+                )}
+                {/* The P/E and EBITDA charts' own settings, here whichever chart is on screen
+                    (owner, 20-Nov-2026: "not a single thing remaining"). */}
+                {view !== "pe" && view !== "ebitda" && (company?.quarters?.length ?? 0) > 0 && (
+                  <>
+                    <Head>P/E and EBITDA charts: growth on bars</Head>
+                    <Toggle on={showChg} label="Growth %" sub="Printed over each bar when there is room for every one" onClick={() => setShowChg(!showChg)} />
+                    {showChg && (
+                      <div className="px-3 pb-2">
+                        <Seg value={epsCmp} options={[["yoy", "Year ago"], ["prev", "Quarter before"]]} onChange={setEpsCmp} />
+                      </div>
+                    )}
+                    {avail.ebitda && (
+                      <div className="px-3 pt-1 pb-2">
+                        <span className="block text-[15px] text-[var(--ink)]">EBITDA margin point</span>
+                        <Seg value={marginAt} options={[["mid", "Mid-quarter"], ["day", "Result day"]]} onChange={setMarginAt} />
+                      </div>
+                    )}
+                  </>
+                )}
+                {VIEWS.filter(([v]) => v !== view && v !== "price" && avail[v]).map(([v, label]) => (
+                  <div key={v}>
+                    <Head>{label} chart: lines</Head>
+                    {LAYERS[v as Exclude<View, "price">].map(([k, name]) => (
+                      <Toggle key={k} on={!hid(`${v}:${k}`)} label={name} onClick={() => setHidden({ ...hidden, [`${v}:${k}`]: !hid(`${v}:${k}`) })} />
+                    ))}
+                  </div>
+                ))}
+    </>
+  );
+  const advPriceBlock = (
+    <>
+                {view !== "price" && (
+                  <>
+                    <Head>Price chart: indicators and market lines</Head>
+                    {INDS.map(([k, label]) => (
+                      <Toggle key={k} on={indOn(k)} label={label} dot={indColour(k)}
+                        onClick={() => savePrefs({ ...prefs, inds: indOn(k) ? prefs.inds.filter((x) => x !== k) : [...prefs.inds, k] })} />
+                    ))}
+                    <Toggle on={prefs.lv.on} label="Levels" sub="Support / resistance, trend lines and volume shelves on the price chart"
+                      onClick={() => savePrefs({ ...prefs, lv: { ...prefs.lv, on: !prefs.lv.on } })} />
+                  </>
+                )}
+    </>
+  );
   return (
     <div ref={pageRef} className="fixed inset-0 z-[60] flex flex-col bg-[var(--bg)] text-[var(--ink)] select-none" style={{ touchAction: "pan-x pan-y" }}>
       <header className="shrink-0 flex items-center gap-2 px-2 pt-[env(safe-area-inset-top)] h-[calc(52px+env(safe-area-inset-top))] border-b border-[var(--line)]">
@@ -2439,276 +2720,19 @@ export default function FullChart({ symbol }: { symbol: string }) {
             className="rs-sheet absolute bottom-0 inset-x-0 mx-auto max-w-md rounded-t-2xl border-t border-[var(--line)] bg-[var(--card)] p-2 pb-[calc(env(safe-area-inset-bottom)+10px)] max-h-[82vh] overflow-y-auto">
 
             {sheet === "adv" && (
-              <>
-                <Head>Chart</Head>
-                <div className="px-3 pb-2 flex flex-wrap gap-1.5">
-                  {VIEWS.filter(([v]) => avail[v]).map(([v, label]) => (
-                    <button key={v} onClick={() => pickView(v)} className={pill(view === v && !years)}>{label}</button>
-                  ))}
-                  <button onClick={() => { setYears(true); setSheet(null); }} className={pill(years)}>Years</button>
-                </div>
-                <Head>Range</Head>
-                <div className="px-3 pb-2 flex flex-wrap gap-1">
-                  {RANGES.map((r) => <button key={r} onClick={() => pickRange(r)} className={`${pill(range === r)} px-1.5`}>{r}</button>)}
-                </div>
-                {VIEWS.some(([v]) => avail[v] && v !== view && !(v === "price" && view === "ebitda")) && (
-                  <>
-                    <Head>Lay over this chart · own scale</Head>
-                    <div className="px-3 pb-2 flex flex-wrap gap-1.5">
-                      {VIEWS.filter(([v]) => avail[v] && v !== view && !(v === "price" && view === "ebitda")).map(([v, label]) => (
-                        <button key={v} onClick={() => { setOverlays(overlays.includes(v) ? overlays.filter((o) => o !== v) : [...overlays, v]); setCmps([]); }}
-                          className={pill(overlays.includes(v))}>{label}</button>
-                      ))}
-                    </div>
-                  </>
-                )}
-                {(
-                  <>
-                    <Head>Price chart: candle size</Head>
-                    <div className="px-3 pb-2">
-                      <Seg value={interval} options={INTERVALS.filter(([iv]) => !!file?.[iv]?.length).map(([iv]) => [iv, iv === "d" ? "Daily" : iv === "w" ? "Weekly" : "Monthly"] as [Interval, string])}
-                        onChange={(iv) => { kept.current = null; setIv(iv); }} />
-                    </div>
-                  </>
-                )}
-                {(spsAvail || debtAvail || cashAvail) && (
-                  <>
-                    <Head>P/E chart: bars under the ratio</Head>
-                    <div className="px-3 pb-2">
-                      <Seg value={perShare}
-                        options={([["eps", "EPS"], ["sps", "SPS"], ["debt", "Debt"], ["cash", "Cash flow"]] as [string, string][]).filter(([k]) => k === "eps" || (k === "sps" ? spsAvail : k === "cash" ? cashAvail : debtAvail))}
-                        onChange={(v) => { kept.current = null; setPerShare(v as "eps" | "sps" | "debt" | "cash"); }} />
-                    </div>
-                  </>
-                )}
-                {(company?.pe_band?.alt?.q1 || company?.ps_band?.alt?.q1 || company?.ev_band?.alt?.q1) && (
-                  <>
-                    <Head>P/E, MCap / Sales, EV / EBITDA: window</Head>
-                    <div className="px-3 pb-2">
-                      <Seg value={peWin} options={PE_WINDOWS.map(([k, label]) => [k, label] as [string, string])} onChange={(v) => { kept.current = null; setPeWin(v); }} />
-                      <span className="block mt-1 text-[12px] text-[var(--ink3)]">{PE_WINDOWS.find(([k]) => k === peWin)?.[2]}</span>
-                    </div>
-                  </>
-                )}
-                {tq && (
-                  <>
-                    <Head>Sales &amp; margin chart: basis</Head>
-                    <div className="px-3 pb-2">
-                      <Seg value={salesWin} options={[["q", "Each quarter"], ["ttm", "TTM"]]} onChange={(v) => { kept.current = null; setSalesWin(v); }} />
-                    </div>
-                  </>
-                )}
-                {/* The P/E and EBITDA charts' own settings, here whichever chart is on screen
-                    (owner, 20-Nov-2026: "not a single thing remaining"). */}
-                {view !== "pe" && view !== "ebitda" && (company?.quarters?.length ?? 0) > 0 && (
-                  <>
-                    <Head>P/E and EBITDA charts: growth on bars</Head>
-                    <Toggle on={showChg} label="Growth %" sub="Printed over each bar when there is room for every one" onClick={() => setShowChg(!showChg)} />
-                    {showChg && (
-                      <div className="px-3 pb-2">
-                        <Seg value={epsCmp} options={[["yoy", "Year ago"], ["prev", "Quarter before"]]} onChange={setEpsCmp} />
-                      </div>
-                    )}
-                    {avail.ebitda && (
-                      <div className="px-3 pt-1 pb-2">
-                        <span className="block text-[15px] text-[var(--ink)]">EBITDA margin point</span>
-                        <Seg value={marginAt} options={[["mid", "Mid-quarter"], ["day", "Result day"]]} onChange={setMarginAt} />
-                      </div>
-                    )}
-                  </>
-                )}
-                {VIEWS.filter(([v]) => v !== view && v !== "price" && avail[v]).map(([v, label]) => (
-                  <div key={v}>
-                    <Head>{label} chart: lines</Head>
-                    {LAYERS[v as Exclude<View, "price">].map(([k, name]) => (
-                      <Toggle key={k} on={!hid(`${v}:${k}`)} label={name} onClick={() => setHidden({ ...hidden, [`${v}:${k}`]: !hid(`${v}:${k}`) })} />
-                    ))}
-                  </div>
-                ))}
-                {view !== "price" && (
-                  <>
-                    <Head>Price chart: indicators and market lines</Head>
-                    {INDS.map(([k, label]) => (
-                      <Toggle key={k} on={indOn(k)} label={label} dot={indColour(k)}
-                        onClick={() => savePrefs({ ...prefs, inds: indOn(k) ? prefs.inds.filter((x) => x !== k) : [...prefs.inds, k] })} />
-                    ))}
-                    <Toggle on={prefs.lv.on} label="Levels" sub="Support / resistance, trend lines and volume shelves on the price chart"
-                      onClick={() => savePrefs({ ...prefs, lv: { ...prefs.lv, on: !prefs.lv.on } })} />
-                  </>
-                )}
-                <Head>Screen</Head>
-                <Toggle on={cmps.length > 0} label="Compare with other charts" sub={cmps.length ? cmps.map((c) => c.sym).join(", ") : "Peers, indices or any company"}
-                  onClick={() => setSheet("cmp")} />
-                {canFull && <Toggle on={full} label="Full screen" onClick={() => { void toggleFull(); }} />}
-                <Toggle on={false} label="Reset zoom" sub="Back to the whole range" onClick={() => { resetView(); setSheet(null); }} />
-              </>
+              <div className="px-1 pt-1">
+                <SwipeSections storeKey="rs_fullchart_adv_sec" sections={[
+                  { key: "chart", title: "Chart", body: advChartBlock },
+                  { key: "this", title: "This chart", body: layersBlock },
+                  { key: "ratios", title: "Ratio charts", body: advRatioBlock },
+                  { key: "price", title: "Price chart", body: <>{typeBlock}{advPriceBlock}</> },
+                ]} />
+              </div>
             )}
 
-            {(sheet === "type" || sheet === "adv") && (
-              <>
-                <Head>{sheet === "adv" ? "Price chart: type" : "Chart type"}</Head>
-                {KINDS.map(([k, label]) => (
-                  <button key={k} onClick={() => { savePrefs({ ...prefs, kind: k }); if (sheet !== "adv") setSheet(null); }}
-                    className={`w-full min-h-[48px] px-3 rounded-xl flex items-center justify-between text-[15px] ${
-                      prefs.kind === k ? "text-[var(--accent-ink)] bg-[var(--accent-soft)] font-semibold" : "text-[var(--ink)] active:bg-[var(--card2)]"}`}>
-                    {label}
-                    {prefs.kind === k && <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>}
-                  </button>
-                ))}
-                <div className="mt-1.5 pt-1.5 border-t border-[var(--line)]">
-                  <Toggle on={prefs.log} label="Log scale" sub="Equal percentage moves take equal height"
-                    onClick={() => savePrefs({ ...prefs, log: !prefs.log })} />
-                  <div className="px-3 pt-2 pb-2">
-                    <span className="block text-[15px] text-[var(--ink)]">Candle and bar colour</span>
-                    <span className="block text-[12px] text-[var(--ink3)] mb-1.5">Open to close: green up, red down. Previous close: teal up, orange down</span>
-                    <Seg value={prefs.candleBy} options={COLOUR_BY} onChange={(v) => savePrefs({ ...prefs, candleBy: v })} />
-                  </div>
-                </div>
-              </>
-            )}
+            {sheet === "type" && typeBlock}
 
-            {(sheet === "layers" || sheet === "adv") && (
-              <>
-                {view === "price" ? (
-                  <>
-                    <Head>Indicators</Head>
-                    {INDS.map(([k, label]) => (
-                      <Toggle key={k} on={indOn(k)} label={label} dot={indColour(k)}
-                        sub={cmps.length > 0 && k !== "vol" && k !== "rsi" ? "Hidden while comparing - averages mean nothing once rebased" : undefined}
-                        onClick={() => savePrefs({ ...prefs, inds: indOn(k) ? prefs.inds.filter((x) => x !== k) : [...prefs.inds, k] })} />
-                    ))}
-                    {indOn("vol") && (
-                      <div className="px-3 pt-1 pb-2">
-                        <span className="block text-[15px] text-[var(--ink)]">Volume colour</span>
-                        <span className="block text-[12px] text-[var(--ink3)] mb-1.5">Open to close: green up, red down. Previous close: teal up, orange down - the same shades as the candles</span>
-                        <Seg value={prefs.volBy} options={COLOUR_BY} onChange={(v) => savePrefs({ ...prefs, volBy: v })} />
-                      </div>
-                    )}
-                    {fv && indOn("vol") && (
-                      <>
-                        <Head>Volume shows</Head>
-                        {([["all", "All volume", undefined], ["deliv", "Delivered", "Shares taken into demat"],
-                          ["intra", "Same day", "Bought and sold within the session"], ["split", "Split", "Delivered over the total, as a stack"]] as const).map(([k, label, sub]) => (
-                          <Toggle key={k} on={fvMode === k} label={label} sub={sub} onClick={() => setFvMode(k)} />
-                        ))}
-                      </>
-                    )}
-                    <Head>
-                      <span className="inline-flex items-center gap-1">
-                        Levels
-                        <InfoTip title="Levels">
-                          <p>Worked out from the bars on screen, so they change as you zoom. They show where the price turned before - not where it will turn next.</p>
-                          <p><b>Support / resistance</b>: prices where it turned at least twice. Green below today&apos;s price, red above; the number is how many turns.</p>
-                          <p><b>Trend lines</b>: the line through past turns that price has touched most (three or more) without closing through it.</p>
-                          <p><b>Volume shelves</b>: bars on the right, longest where the most shares changed hands.</p>
-                          <p><b>Sensitivity</b>: High counts smaller turns, so more and weaker levels; Low only the big ones.</p>
-                        </InfoTip>
-                      </span>
-                    </Head>
-                    <Toggle on={prefs.lv.on} label="Show levels"
-                      sub={cmps.length > 0 ? "Off while comparing - levels are prices, the axis is % change" : undefined}
-                      onClick={() => savePrefs({ ...prefs, lv: { ...prefs.lv, on: !prefs.lv.on } })} />
-                    {prefs.lv.on && (
-                      <div className="pl-6">
-                        <Toggle on={prefs.lv.zones} label="Support / resistance" dot="var(--chart-pos)"
-                          onClick={() => savePrefs({ ...prefs, lv: { ...prefs.lv, zones: !prefs.lv.zones } })} />
-                        <Toggle on={prefs.lv.trend} label="Trend lines" dot={TREND_COLOUR}
-                          onClick={() => savePrefs({ ...prefs, lv: { ...prefs.lv, trend: !prefs.lv.trend } })} />
-                        <Toggle on={prefs.lv.vol} label="Volume shelves" dot="var(--chart-bar)"
-                          onClick={() => savePrefs({ ...prefs, lv: { ...prefs.lv, vol: !prefs.lv.vol } })} />
-                        <div className="px-3 pt-1 pb-2 flex items-center gap-3">
-                          <span className="text-[15px] text-[var(--ink)] flex-1">Sensitivity</span>
-                          <Seg value={prefs.lv.sens} options={SENS.map(([k, label]) => [k, label] as [Sens, string])}
-                            onChange={(v) => savePrefs({ ...prefs, lv: { ...prefs.lv, sens: v } })} />
-                        </div>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <Head>On this chart</Head>
-                    {LAYERS[view].map(([k, label]) => (
-                      <Toggle key={k} on={!isHidden(k)}
-                        label={debtOn ? ({ line: "Debt / Equity", median: "Median (not drawn)", bars: "Total debt bars" } as Record<string, string>)[k] ?? label
-                          : spsOn ? ({ line: "Price / Sales", median: "Median P/S (5 years)", bars: "SPS bars" } as Record<string, string>)[k] ?? label
-                          : (view === "ev" || view === "ps") && peWin === "q1" && (view === "ev" ? company?.ev_band : company?.ps_band)?.alt?.q1
-                            ? label.replace("(TTM)", "(1Q×4)") : label}
-                        onClick={() => setHidden({ ...hidden, [`${view}:${k}`]: !isHidden(k) })} />
-                    ))}
-                  </>
-                )}
-
-                {overlays.filter((o) => o !== view && !(o === "price" && view === "ebitda")).map((ov) => {
-                  const ks: [string, string][] = ov === "price" ? [["price", "Price"]] : ov === "sales" ? [["gpm", "GPM %"], ["opm", "OPM %"], ["npm", "NPM %"]]
-                    : ov === "ebitda" ? [["eb_ttm", "EBITDA, last 4 quarters"], ["ebitda_m", "EBITDA margin %"]] : [["line", VIEW_LABEL[ov]]];
-                  return (
-                    <div key={ov}>
-                      <Head>
-                        <span className="flex items-center">
-                          {VIEW_LABEL[ov]} · own scale
-                          <button onClick={() => setOverlays(overlays.filter((o) => o !== ov))} aria-label={`Remove the ${VIEW_LABEL[ov]} overlay`}
-                            className="ml-2 w-7 h-7 -my-1 rounded-lg inline-flex items-center justify-center text-[var(--ink3)] active:bg-[var(--card2)]">
-                            <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
-                          </button>
-                        </span>
-                      </Head>
-                      {ks.map(([k, label]) => {
-                        const hk = `ov:${ov}:${k}`;
-                        return <Toggle key={k} on={!hid(hk)} label={label} onClick={() => setHidden({ ...hidden, [hk]: !hid(hk) })} />;
-                      })}
-                    </div>
-                  );
-                })}
-
-                {(view === "pe" || view === "ebitda") && (
-                  <>
-                    <Head>{view === "pe" ? "Earnings" : "Quarters"}</Head>
-                    {/* The EPS blocks are always in their quarter's colour. */}
-                    <div className="px-3 pb-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--ink3)]">
-                      {[1, 2, 3, 4].map((n) => (
-                        <span key={n} className="inline-flex items-center gap-1">
-                          <i className="inline-block w-3 h-3 rounded-sm" style={{ background: `var(--q${n})` }} />{Q_LABEL[n]}
-                        </span>
-                      ))}
-                    </div>
-                    {view === "ebitda" && !isHidden("ebitda_m") && (company?.quarters?.length ?? 0) > 0 && (
-                      <div className="px-3 pt-1 pb-2">
-                        <span className="block text-[15px] text-[var(--ink)]">EBITDA margin point</span>
-                        <span className="block text-[12px] text-[var(--ink3)] mb-1.5">Over the middle of its quarter, or on the day its results came out</span>
-                        <Seg value={marginAt} options={[["mid", "Mid-quarter"], ["day", "Result day"]]} onChange={setMarginAt} />
-                      </div>
-                    )}
-                    <Toggle on={showChg} label="Growth %" sub="Printed over each bar when there is room for every one" onClick={() => setShowChg(!showChg)} />
-                    {showChg && (
-                      <div className="px-3 pb-2">
-                        <Seg value={epsCmp}
-                          options={view === "pe" && peWin === "ttm" ? [["yoy", "Year before"], ["prev", "Quarter before"]] : [["yoy", "Year ago"], ["prev", "Previous"]]}
-                          onChange={setEpsCmp} />
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {company && <Head>Events</Head>}
-                {company && (
-                  <Toggle on={showMkt} label="RBI policy and Budget days" sub="A hand-kept list, not checked line by line" onClick={() => setShowMkt(!showMkt)} />
-                )}
-                {(company?.quarters?.length ?? 0) > 0 && (
-                  <Toggle on={showDates} label="Result dates" sub="The day each quarter's results were declared" onClick={() => setShowDates(!showDates)} />
-                )}
-                {(company?.actions?.length ?? 0) > 0 && (
-                  <Toggle on={showCA} label="Corporate actions" sub="Dividends, bonuses, splits and rights, on their ex-date" onClick={() => setShowCA(!showCA)} />
-                )}
-                {showCA && (
-                  <div className="pl-6">
-                    {CA_ORDER.filter((k) => (company?.actions ?? []).some((a) => (CA_LABEL[a.kind] ? a.kind : "other") === k)).map((k) => (
-                      <Toggle key={k} on={!!caOn[k]} label={`${CA_LABEL[k]} (${caCount[k] ?? 0} in view)`} dot={`var(--ca-${({ dividend: "div", bonus: "bon", split: "spl", rights: "rgt", buyback: "buy", other: "oth" } as Record<string, string>)[k]})`}
-                        onClick={() => setCaOn({ ...caOn, [k]: !caOn[k] })} />
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
+            {sheet === "layers" && layersBlock}
 
             {sheet === "cmp" && (
               <>

@@ -13,6 +13,7 @@ import ChartPresets from "@/components/ChartPresets";
 import Hint from "@/components/Hint";
 import Link from "next/link";
 import { fourInRow, quarterX4, ttmMargins, ttmSums } from "@/lib/ttm";
+import SwipeSections, { type Section } from "@/components/SwipeSections";
 import { CASH_COLOUR, cashPrevStep, cashRows, priceToCash } from "@/lib/cashflow";
 import { whyMissing, type DataStatus } from "@/components/DataStatus";
 
@@ -307,6 +308,12 @@ function axisVal(v: number, kind: FmtKind, short: boolean): string {
   if ((kind === "rupee" || kind === "plain") && Math.abs(v) >= 1e4) return `${trim(v / 1e3, 1)}k`;
   return fmtVal(v, kind);
 }
+
+/** The market-line strip: the main chart takes the top 70%, a gap, then
+ *  VIX / FII / PCR in the bottom 24% (see the series memo). */
+const MAIN_SHARE = 0.7;
+const STRIP_ZONE: [number, number] = [0.76, 1];
+const isMarketKey = (k: string) => /(^|_)m(vix|fii|pcr)$/.test(k);
 
 type SmallInd = "sma20" | "ema21" | "bb" | "rsi" | "mvix" | "mfii" | "mpcr" | "events";
 const SMALL_INDS: [SmallInd, string][] = [
@@ -1229,6 +1236,21 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cas
       }
     });
 
+    // Market lines in a strip of their own under the chart (owner,
+    // 20-Nov-2026: "yes, give market lines their own strip"). They shared
+    // the volume bars' band and could not be read; now everything else is
+    // fitted into the top part and VIX / FII / PCR share the bottom strip,
+    // each on its own scale.
+    if (defs.some((d) => isMarketKey(d.key))) {
+      for (const d of defs) {
+        if (isMarketKey(d.key)) d.zone = STRIP_ZONE;
+        else {
+          const [a, b] = d.zone ?? [0, 1];
+          d.zone = [a * MAIN_SHARE, b * MAIN_SHARE];
+        }
+      }
+    }
+
     return defs;
   }, [prices, peBand, evBand, pbBand, psBand, trendQ, view, peWin, salesWin, cutoff, livePrice, now, epsCmp, marginAt, inds, mkt, quarters, cmp, symbol, exchange, years, spsOn, overlays, debtOn, debtSeries, cashOn, cashSeries, volMode, split, daily10]);
 
@@ -1472,7 +1494,9 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cas
   const cmpRow = row("c", "Compare", pCompare, cmpErr ? <span className="text-[var(--neg)]">{cmpErr}</span> : null);
   const ALL_VIEWS: View[] = ["price", "years", "pe", "sales", "ebitda", "ev", "pb", "ps"];
   const canOverlay = (v: View) => v !== view && v !== "years" && !(v === "price" && view === "ebitda") && (v === "price" || availNow[v]);
-  const advRows = [
+  // Advanced in sections, swiped left and right (owner, 20-Nov-2026: "in
+  // sections with right and left swipe rather than a very long scrolling page").
+  const advChart = [
     row("av", "Chart", wrap(ALL_VIEWS.filter((v) => v === "price" || v === "years" || availNow[v])
       .map((v) => <span key={v}>{chip(viewSel === v, nameOfView(v), () => { setView(v); setHover(null); })}</span>))),
     row("ar", "Range", seg(range, RANGES.map(([r]) => [r, r.replace("Yr", "Y")] as const), setRange)),
@@ -1480,6 +1504,9 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cas
       <span key={v}>{chip(overlays.includes(v), nameOfView(v), () => {
         setOverlays(overlays.includes(v) ? overlays.filter((o) => o !== v) : [...overlays, v]); setCmpSym(null); setHover(null);
       })}</span>))), note("Each on a scale of its own. A comparison and overlays exclude each other.")),
+    showRow, cmpRow,
+  ].filter(Boolean);
+  const advLines = [
     model.some((s) => !s.link) && row("al", "Lines on this chart", wrap(model.filter((s) => !s.link).map((s) => (
       <span key={s.key}>{chip(defOn(s), s.group ? `${nameOfView(s.group as View)}: ${s.label}` : s.label, () => toggle(s))}</span>)))),
     // Owner, 20-Nov-2026: "a lot of things are still missing in the advanced
@@ -1491,6 +1518,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cas
       return lines.length > 0 && row(`al_${v}`, `${nameOfView(v)} chart: lines`, wrap(lines.map(([k, name]) => (
         <span key={k}>{chip(isOn(k, true), name, () => setOn({ ...on, [k]: !isOn(k, true) }))}</span>))));
     }),
+  ].filter(Boolean);
+  const advRatios = [
     row("ab", "P/E chart: bars", barOpts.length > 1 ? seg(perShare, barOpts, setPerShare) : note("EPS only - no sales per share or debt history for this company.")),
     (peBand?.alt?.q1 || psBand?.alt?.q1 || evBand?.alt?.q1) && row("aw", "P/E, Market cap / Sales, EV / EBITDA: window",
       seg(peWin as "ttm" | "q1", [["ttm", "TTM"], ["q1", "1Q×4"]] as const, (k) => setPeWin(k)), note(PE_WINDOWS.find(([k]) => k === peWin)?.[2])),
@@ -1499,12 +1528,17 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cas
       seg(growthVal, [["off", "No growth"], ["yoy", peWin === "ttm" ? "vs year before" : "vs year ago"], ["prev", "vs quarter before"]] as const, setGrowth)),
     availNow.ebitda && (quarters?.length ?? 0) > 0 && row("am", "EBITDA chart: margin point",
       seg(marginAt, [["mid", "Margin: mid-quarter"], ["day", "Margin: result day"]] as const, setMarginAt)),
+  ].filter(Boolean);
+  const advPrice = [
     row("ai", "Price chart: indicators and market lines",
       wrap(SMALL_INDS.map(([k, name]) => <span key={k}>{chip(inds.includes(k), name, () => toggleInd(k))}</span>))),
     split && row("avol", "Price chart: volume shows",
       seg(volMode, [["all", "All"], ["deliv", "Delivered"], ["intra", "Same day"], ["split", "Split"]] as const, setVolMode)),
-    showRow, cmpRow,
   ].filter(Boolean);
+  const advSections: Section[] = ([
+    ["chart", "Chart", advChart], ["lines", "Lines", advLines], ["ratios", "Ratio charts", advRatios], ["price", "Price chart", advPrice],
+  ] as [string, string, unknown[]][]).filter(([, , r]) => r.length > 0).map(([key, title, r]) => ({ key, title, body: r as React.ReactNode[] }));
+  const advCount = advSections.reduce((a, x) => a + (x.body as unknown[]).length, 0);
   const optionsSheet = sheet && (
     <InfoDialog title="Chart options" onClose={() => setSheet(false)}>
       <div className="flex flex-col gap-4 text-xs">
@@ -1517,11 +1551,11 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cas
             className="-my-1 py-1 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-[var(--ink2)]">
             Advanced - every setting
             <span className="inline-flex items-center gap-1 normal-case tracking-normal font-medium text-[var(--ink3)]">
-              {adv ? "Hide" : `${advRows.length} groups`}
+              {adv ? "Hide" : `${advCount} settings in ${advSections.length} sections`}
               <span className={`inline-block transition-transform ${adv ? "rotate-180" : ""}`}><ChevronGlyph size={12} /></span>
             </span>
           </button>
-          {adv && advRows}
+          {adv && <SwipeSections sections={advSections} storeKey="rs_chart_adv_sec" />}
         </div>
       </div>
     </InfoDialog>
@@ -1646,6 +1680,15 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cas
           onPointerCancel={() => setDragging(false)}
           onPointerLeave={(e) => { if (e.pointerType === "mouse") setHover(null); }}>
 
+          {visible.some((s) => isMarketKey(s.key)) && (() => {
+            const y = MT + plotH * ((MAIN_SHARE + STRIP_ZONE[0]) / 2);
+            return (
+              <g>
+                <line x1={ML} x2={W - MR} y1={y} y2={y} stroke="var(--chart-axis)" strokeWidth="1" opacity="0.5" />
+                <text x={ML + 4} y={y + FS + 2} fontSize={FS * 0.8} fill="var(--chart-axis)">Market</text>
+              </g>
+            );
+          })()}
           {axR && axR.ticks.map((v) => (
             <g key={`r${v}`}>
               <line x1={ML} x2={W - MR} y1={axR.scale(v)} y2={axR.scale(v)} stroke="var(--chart-grid)" strokeWidth="1" strokeDasharray="3 5" />
