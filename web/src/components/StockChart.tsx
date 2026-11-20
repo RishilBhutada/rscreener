@@ -13,7 +13,7 @@ import ChartPresets from "@/components/ChartPresets";
 import Hint from "@/components/Hint";
 import Link from "next/link";
 import { fourInRow, quarterX4, ttmMargins, ttmSums } from "@/lib/ttm";
-import { CASH_COLOUR, cashYears, priceToCash } from "@/lib/cashflow";
+import { CASH_COLOUR, cashPrevStep, cashRows, priceToCash } from "@/lib/cashflow";
 import { whyMissing, type DataStatus } from "@/components/DataStatus";
 
 type Pt = [string, number] | [string, number, number | null];
@@ -413,7 +413,7 @@ const Q_COLOUR: Record<number, string> = {
 };
 export const Q_LABEL: Record<number, string> = { 1: "Q1 Apr–Jun", 2: "Q2 Jul–Sep", 3: "Q3 Oct–Dec", 4: "Q4 Jan–Mar" };
 
-export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cashflow, trendQ, livePrice, quarters, actions, symbol, peers, coverage, exchange, balance, status }: {
+export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cashflow, cashHalf, trendQ, livePrice, quarters, actions, symbol, peers, coverage, exchange, balance, status }: {
   prices: ChartPrices;
   /** Why the charts this company lacks are missing, and whose side each gap is
    *  on (pipeline/data_status.py) - the star beside the options button. */
@@ -428,6 +428,8 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cas
   psBand?: ChartBand;
   /** The yearly cash flow statement, for the Cash flow bars under the P/E chart (20-Nov-2026). */
   cashflow?: { periods: string[]; items: { label: string; values: (number | null)[] }[] } | null;
+  /** Half-yearly cash flow from the filings, used over the yearly one when there are 4+ halves. */
+  cashHalf?: { periods: string[]; cfo: (number | null)[]; fcf: (number | null)[]; basis?: string } | null;
   trendQ?: ChartTrendQ;
   livePrice: number | null;
   quarters?: Quarter[] | null;
@@ -665,7 +667,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cas
   const debtOn = perShare === "debt" && debtAvail;
   // Cash flow: operating and free cash flow each year, side by side, under a
   // Price / Cash flow line (owner, 20-Nov-2026, picked 3 + A; lib/cashflow.ts).
-  const cashSeries = useMemo(() => cashYears(cashflow), [cashflow]);
+  const cashSeries = useMemo(() => cashRows(cashflow, cashHalf), [cashflow, cashHalf]);
   const cashAvail = !!cashSeries;
   const cashOn = perShare === "cash" && cashAvail;
   const ratioLabel = debtOn ? "Debt / Equity" : cashOn ? "P/Cash flow" : spsOn ? "P/S Ratio" : "PE Ratio";
@@ -926,10 +928,14 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cas
       if (line.length) defs.push({ key: "pe_line", label: "Debt / Equity", color: "var(--accent)", kind: "line", axis: "R", data: line, fmt: "plain" });
       if (bars.length) defs.push({ key: "pe_bar", label: "Total debt", color: "var(--chart-bar)", kind: "bars", axis: "L", data: bars, fmt: "cr" });
     } else if (view === "pe" && cashOn && cashSeries) {
-      // Each financial year split in two: operating cash flow on the left half
-      // (light teal), free cash flow on the right (dark), on one scale so the
-      // capex between them shows; each with its change on the year before.
+      // Each half-year (or year, where the filings give no halves) split in
+      // two: operating cash flow on the left (light teal), free cash flow on
+      // the right (dark), on one scale so the capex between them shows; each
+      // with its change on the same period a year before.
       const band = priceToCash(psBand, cashSeries);
+      const rows = cashSeries.rows, step = cashPrevStep(cashSeries.months);
+      const span = cashSeries.months === 6 ? 182 : 365;
+      const per = cashSeries.months === 6 ? "half-year" : "year";
       if (band) {
         const pts = xy(band.series.filter((p) => toT(p[0]) >= cutoff));
         defs.push({ key: "pe_line", label: "Price / Cash flow", color: "var(--accent)", kind: "line", axis: "R", data: pts, fmt: "plain" });
@@ -939,20 +945,23 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cas
       }
       const half = (k: "cfo" | "fcf"): XY[] => {
         const out: XY[] = [];
-        cashSeries.forEach((y, i) => {
+        rows.forEach((y, i) => {
           const v = y[k];
-          const end = toT(y.end), start = i > 0 ? toT(cashSeries[i - 1].end) + 86400000 : end - 365 * 86400000;
+          const end = toT(y.end);
+          const prevEnd = i > 0 ? toT(rows[i - 1].end) : null;
+          // a gap in the halves draws one period wide, not across the gap
+          const start = prevEnd !== null && end - prevEnd <= (span + 20) * 86400000 ? prevEnd + 86400000 : end - span * 86400000;
           const mid = start + (end - start) / 2;
           if (v === null || end < cutoff) return;
-          const pv = i > 0 ? cashSeries[i - 1][k] : null;
+          const pv = i >= step ? rows[i - step][k] : null;
           out.push({ t: end, v, from: k === "cfo" ? start : mid, to: k === "cfo" ? mid : end + 86400000,
             chg: pv !== null && pv !== undefined ? growth(v, pv) : { kind: "none" } });
         });
         return out;
       };
       const cfo = half("cfo"), fcf = half("fcf");
-      if (cfo.length) defs.push({ key: "pe_bar", label: "Operating cash flow (year)", color: CASH_COLOUR.cfo, kind: "bars", axis: "L", data: cfo, fmt: "cr" });
-      if (fcf.length) defs.push({ key: "pe_fcf", label: "Free cash flow (year)", color: CASH_COLOUR.fcf, kind: "bars", axis: "L", data: fcf, fmt: "cr" });
+      if (cfo.length) defs.push({ key: "pe_bar", label: `Operating cash flow (${per})`, color: CASH_COLOUR.cfo, kind: "bars", axis: "L", data: cfo, fmt: "cr" });
+      if (fcf.length) defs.push({ key: "pe_fcf", label: `Free cash flow (${per})`, color: CASH_COLOUR.fcf, kind: "bars", axis: "L", data: fcf, fmt: "cr" });
     } else if (view === "pe") {
       // earnings bars follow the selected window, annualised the same way the
       // PE line is, so the two always describe the same earnings. Sales per

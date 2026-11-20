@@ -18,7 +18,7 @@ import { useBackClose } from "@/lib/backclose";
 import { readPick, writePick, type ChartPick } from "@/lib/chartpick";
 import ChartPresets from "@/components/ChartPresets";
 import { fourInRow, quarterX4, ttmMargins, ttmSums } from "@/lib/ttm";
-import { CASH_COLOUR, cashYears, priceToCash } from "@/lib/cashflow";
+import { CASH_COLOUR, cashPrevStep, cashRows as pickCash, priceToCash } from "@/lib/cashflow";
 import { sma, ema, bollinger, rsi, IND_COLOUR, PCR_DAYS, pcrAvg } from "@/lib/indicators";
 import YearsChart from "@/components/YearsChart";
 import DataStatusButton, { whyMissing, type DataStatus } from "@/components/DataStatus";
@@ -65,6 +65,8 @@ type Company = {
     /** Yearly cash flow, for the Cash flow bars (20-Nov-2026, lib/cashflow.ts). */
     cash_flow?: { periods: string[]; items: { label: string; values: (number | null)[] }[] } | null;
   };
+  /** Half-yearly cash flow from the filings, used over the yearly one when there are 4+ halves. */
+  cashflow_half?: { periods: string[]; cfo: (number | null)[]; fcf: (number | null)[]; basis?: string } | null;
 };
 
 type View = "price" | "pe" | "sales" | "ebitda" | "ev" | "pb" | "ps";
@@ -1050,7 +1052,9 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const debtOn = view === "pe" && perShare === "debt" && debtAvail;
   // Cash flow: operating and free cash flow each year under a Price / Cash
   // flow line - the company chart's choice (owner, 20-Nov-2026, 3 + A).
-  const cashRows = cashYears(company?.statements?.cash_flow);
+  const cash = pickCash(company?.statements?.cash_flow, company?.cashflow_half);
+  const cashRows = cash?.rows ?? null;
+  const cashHalves = cash?.months === 6;
   const cashAvail = !!cashRows;
   const cashOn = view === "pe" && perShare === "cash" && cashAvail;
 
@@ -1591,7 +1595,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
       };
     } else if (cashOn && cashRows) {
       keyWin = "pe:cash";
-      const pcf = priceToCash(company?.ps_band, cashRows);
+      const pcf = priceToCash(company?.ps_band, cash);
       let ln: ISeriesApi<SeriesType> | null = null;
       const ld = pcf ? pcf.series.map((q) => dayOf(q[0])) : [];
       if (pcf) {
@@ -1612,12 +1616,15 @@ export default function FullChart({ symbol }: { symbol: string }) {
         }, 1);
         bs.setData(cashRows.map((y, i) => ({ time: toTime(yd[i]), value: Math.max(y.cfo ?? 0, y.fcf ?? 0), color: "rgba(0, 0, 0, 0)" })));
         const blocks: ConstructorParameters<typeof PeriodBars>[0] = [];
+        // halves where the filings give them (lib/cashflow.ts); a bar's change
+        // is on the same half a year earlier, and a gap draws one period wide
+        const span = cashHalves ? 182 : 365, step = cashPrevStep(cashHalves ? 6 : 12);
         cashRows.forEach((y, i) => {
-          const start = i > 0 ? yd[i - 1] : yd[i] - 365, mid = Math.round((start + yd[i]) / 2);
+          const start = i > 0 && yd[i] - yd[i - 1] <= span + 20 ? yd[i - 1] : yd[i] - span, mid = Math.round((start + yd[i]) / 2);
           for (const [k, on, from, to, col] of [["cfo", showCfo, start, mid, CASH_COLOUR.cfo], ["fcf", showFcf, mid, yd[i], CASH_COLOUR.fcf]] as const) {
             const v = y[k];
             if (!on || v === null) continue;
-            const pv = i > 0 ? cashRows[i - 1][k] : null;
+            const pv = i >= step ? cashRows[i - step][k] : null;
             const g = pv !== null && pv !== undefined ? growth(v, pv) : undefined;
             blocks.push({ from, to, v, color: alpha(col, v < 0 ? 0.5 : 0.9),
               label: showChg && g && g.kind !== "none" ? growthText(g) : undefined, labelColor: growthCol(g, p) });
@@ -1639,7 +1646,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
         const y = cashRows[i];
         if (showCfo && y.cfo !== null) items.push({ label: "Operating cash flow", value: crore(y.cfo), color: CASH_COLOUR.cfo });
         if (showFcf && y.fcf !== null) items.push({ label: "Free cash flow", value: crore(y.fcf), color: CASH_COLOUR.fcf });
-        return { date: `Year to ${dateOf(yd[i], "month")}`, items };
+        return { date: `${cashHalves ? "Half-year" : "Year"} to ${dateOf(yd[i], "month")}`, items };
       };
     } else if (debtOn && debtRows) {
       keyWin = "pe:debt";

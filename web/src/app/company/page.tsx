@@ -188,7 +188,7 @@ function CompanyView() {
       <div id="chart" className="scroll-mt-32 space-y-4">
         {company.prices && (company.prices.monthly?.length || company.prices.weekly?.length) ? (
           <>
-            <StockChart prices={company.prices} peBand={company.pe_band} evBand={company.ev_band} pbBand={company.pb_band} psBand={company.ps_band} cashflow={company.statements.cash_flow} trendQ={company.trend?.quarterly} livePrice={price} quarters={company.quarters} actions={company.actions} symbol={symbol} peers={peers} coverage={company.coverage} exchange={company.exchange} balance={company.statements.balance_sheet} status={company.data_status} />
+            <StockChart prices={company.prices} peBand={company.pe_band} evBand={company.ev_band} pbBand={company.pb_band} psBand={company.ps_band} cashflow={company.statements.cash_flow} cashHalf={company.cashflow_half} trendQ={company.trend?.quarterly} livePrice={price} quarters={company.quarters} actions={company.actions} symbol={symbol} peers={peers} coverage={company.coverage} exchange={company.exchange} balance={company.statements.balance_sheet} status={company.data_status} />
             {/* BSE-only companies too, since their results come from BSE's
                 archive (17-Nov-2026) - and they are most of the star's amber. */}
             <CoverageNote cov={company.coverage} bandFrom={company.pe_band?.series?.[0]?.[0] ?? null} status={company.data_status} />

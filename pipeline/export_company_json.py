@@ -21,6 +21,7 @@ from fetch_corporate_actions import dividend_detail, split_detail
 from trend_lib import adj_factor, build_trends, cr_round, net_debt_series, ratio_bands, split_factors, standalone_tables
 import fund_units
 import business_updates
+import cashflow_half
 import seasons_lib
 from data_status import data_status
 from export_indices_json import group_of, sym_of
@@ -1060,6 +1061,8 @@ def main() -> None:
     band_diag: dict[str, dict] = {}
     bands = ratio_bands(con, shares_by_symbol, netdebt_by_symbol, only, diag=band_diag)
     status_facts = data_status_facts(con, listing)
+    # Half-yearly cash flow from the filings (cashflow_half.py; 20-Nov-2026).
+    cash_half = cashflow_half.load(con)
     prices_by_symbol: dict[str, dict] = {}
     if con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='prices'").fetchone():
         pr = pd.read_sql("SELECT symbol, freq, date, close, volume FROM prices ORDER BY date", con)
@@ -1219,6 +1222,7 @@ def main() -> None:
             "face_value": face_value.get(sym),
             "fno": True if sym in fno else None,
             "segments": segs_by_symbol.get(sym),
+            "cashflow_half": cash_half.get(sym),
             "insider": insider_by_symbol.get(sym),
             "logo": f"logos/{sym}.{logos[sym][0]}" if sym in logos else None,
             "updates": updates_by_symbol.get(sym),

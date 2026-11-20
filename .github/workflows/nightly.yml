@@ -575,6 +575,16 @@ jobs:
         env:
           RSCREENER_STEP_MINUTES: "65"
         run: bash pipeline/guarded_fetch.sh python pipeline/fetch_bse_results.py --scope bse --max-minutes 60 --sleep 0.3
+      - name: Half-yearly cash flow from the filings (back to FY21, rotating)
+        if: steps.plan.outputs.earnings == '1'
+        # Owner, 20-Nov-2026: "yes, add half-yearly cash flow". Each half-year
+        # and year-end results XBRL carries the cash flow statement year to
+        # date (pipeline/cashflow_half.py); this reads about a dozen per
+        # company back to FY21, biggest companies first, each again after
+        # 180 days. The weekly results pass keeps the newest halves current.
+        env:
+          RSCREENER_STEP_MINUTES: "35"
+        run: bash pipeline/guarded_fetch.sh python pipeline/fetch_cashflow_half.py --max-minutes 30 --sleep 0.3
       - name: Work out quarters filed only inside the full-year results
         # Owner, 18-Nov-2026 ("fix F1"): TCS's Mar-2008 to Mar-2011 were never
         # filed as quarters - only as audited full years. With the year and

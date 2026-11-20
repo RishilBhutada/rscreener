@@ -101,6 +101,8 @@ export type Company = {
   /** The company's icon, relative to the site root (logos/SYM.png). */
   logo?: string | null;
   segments?: { quarterly?: Segments; annual?: Segments } | null;
+  /** Half-yearly cash flow from the filings, Rs Cr (pipeline/cashflow_half.py, 20-Nov-2026). */
+  cashflow_half?: { basis: string; periods: string[]; cfo: (number | null)[]; fcf: (number | null)[] } | null;
   /** [day, name, category, Buy/Sell, shares, value Rs, mode] - newest first. */
   insider?: [string, string, string, string, number | null, number | null, string][] | null;
   exchange?: string | null;

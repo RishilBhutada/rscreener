@@ -26,6 +26,7 @@ from pathlib import Path
 import requests
 
 import budget
+import cashflow_half
 import nse_session
 from filing_checks import unit_outliers
 
@@ -667,6 +668,7 @@ def main() -> None:
                         filings.append(f)
             time.sleep(args.sleep)
             for f in filings:
+                body_x = None
                 try:
                     segs = {}
                     if _has_xbrl(f):
@@ -703,6 +705,15 @@ def main() -> None:
                     (sym, f["_ptype"], ps, pe),
                 ))
                 db_retry(lambda: con.executemany(f"INSERT INTO {store} VALUES (?,?,?,?,?,?,?)", rows_in))
+                # Half-year and year-end filings carry the cash flow statement
+                # year-to-date (cashflow_half.py); keep it while the file is here.
+                if body_x is not None and not args.standalone:
+                    try:
+                        cf_cols = cashflow_half.parse(body_x)
+                        if cf_cols:
+                            db_retry(lambda: cashflow_half.store(con, sym, basis, cf_cols))
+                    except ET.ParseError:
+                        pass
                 if segs and not args.standalone:
                     db_retry(lambda: con.execute("DELETE FROM results_segments WHERE symbol=? AND period_type=? AND period_end=?",
                                                  (sym, f["_ptype"], pe)))
