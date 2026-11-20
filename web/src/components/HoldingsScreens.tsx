@@ -79,7 +79,7 @@ export default function HoldingsScreens({ symbols, nameOf }: { symbols: string[]
 
   const list = (title: string, syms: string[]) => syms.length ? (
     <div>
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)] mb-1">{title} ({syms.length})</p>
+      <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink2)] mb-1">{title} ({syms.length})</p>
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[12.5px]">
         {syms.map((s) => <Link key={s} href={`/company?s=${encodeURIComponent(s)}`} className="whitespace-nowrap">{nameOf(s)}</Link>)}
       </div>

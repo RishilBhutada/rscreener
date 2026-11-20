@@ -57,11 +57,13 @@ const THEMES = [["light", "Light"], ["dark", "Dark"], ["black", "Black"], ["syst
 const LAYOUTS = [["scroll", "Scroll"], ["swipe", "Swipe"]] as const;
 const LAB_SWITCH: readonly (readonly ["off" | "on", string])[] = [["off", "Off"], ["on", "On"]];
 
-const ACCENTS = ["mono", "indigo", "emerald", "rose", "amber"] as const;
+// Sapphire leads: the default since the Midnight sapphire design (20-Nov-2026).
+const ACCENTS = ["sapphire", "mono", "indigo", "emerald", "rose", "amber"] as const;
 
 /** Taken from globals.css, both themes - the swatch has to be the colour the
  *  app will actually paint, and the dark theme uses lighter accents. */
 const ACCENT_DOT: Record<string, { light: string; dark: string }> = {
+  sapphire: { light: "#2955e8", dark: "#5b8cff" },
   mono: { light: "#27272a", dark: "#e4e4e7" },
   emerald: { light: "#059669", dark: "#10b981" },
   indigo: { light: "#5a4fca", dark: "#818cf8" },
@@ -104,14 +106,14 @@ function apply(theme: string, accent: string) {
   else delete d.dataset.shade;
   d.dataset.accent = accent;
   document.querySelector('meta[name="theme-color"]')
-    ?.setAttribute("content", theme === "black" ? "#000000" : dark ? "#0b1017" : "#f5f6f8");
+    ?.setAttribute("content", theme === "black" ? "#000000" : dark ? "#060a13" : "#f2f5fb");
 }
 
 /** The surfaces of each theme, for the preview tiles. Copied from globals.css
  *  so each tile shows the theme it selects rather than a picture of one. */
 const PREVIEW: Record<string, { bg: string; card: string; line: string; ink: string }> = {
-  light: { bg: "#f5f6f8", card: "#ffffff", line: "#e5e8ee", ink: "#0f1729" },
-  dark: { bg: "#0b1017", card: "#121924", line: "#223048", ink: "#e8edf5" },
+  light: { bg: "#f2f5fb", card: "#ffffff", line: "#b9c6dd", ink: "#0a1430" },
+  dark: { bg: "#060a13", card: "#0d1424", line: "#2b416b", ink: "#eef3ff" },
   black: { bg: "#000000", card: "#0b0b0b", line: "#262626", ink: "#f5f5f5" },
 };
 
@@ -222,7 +224,7 @@ export function SettingsScreen() {
 function MainScreen() {
   const { user, hint } = useAuth();
   const [theme, setTheme] = useState("system");
-  const [accent, setAccent] = useState("indigo");
+  const [accent, setAccent] = useState("sapphire");
   const [sections, setSections] = useState<SectionMode>("scroll");
   // The Options lab (Research hub): off until switched on here.
   const [lab, setLab] = useState(false);
@@ -242,10 +244,10 @@ function MainScreen() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- read from this browser's storage after mount; the prerendered page has none
     setTheme(localStorage.getItem("rs_theme") || "system");
-    setAccent(localStorage.getItem("rs_accent") || "indigo");
+    setAccent(localStorage.getItem("rs_accent2") || "sapphire");
     setSections(loadSectionMode());
     setLab(labOn());
-    setOpened({ theme: localStorage.getItem("rs_theme") || "system", accent: localStorage.getItem("rs_accent") || "indigo", sections: loadSectionMode(), lab: labOn() });
+    setOpened({ theme: localStorage.getItem("rs_theme") || "system", accent: localStorage.getItem("rs_accent2") || "sapphire", sections: loadSectionMode(), lab: labOn() });
     setRowOrders(customOrders());
     setSecOrder(loadOrder("sections"));
     const resolve = () => setIsDark(document.documentElement.dataset.theme === "dark");
@@ -260,7 +262,7 @@ function MainScreen() {
     setIsDark(document.documentElement.dataset.theme === "dark");
   };
   const pickAccent = (a: string) => {
-    setAccent(a); localStorage.setItem("rs_accent", a); apply(theme, a);
+    setAccent(a); localStorage.setItem("rs_accent2", a); apply(theme, a);
   };
   const nameOf = (list: readonly (readonly [string, string])[], k: string) => list.find(([x]) => x === k)?.[1] ?? k;
   const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1);
@@ -273,7 +275,7 @@ function MainScreen() {
   const undoAll = () => {
     if (!opened) return;
     if (theme !== opened.theme || accent !== opened.accent) {
-      localStorage.setItem("rs_theme", opened.theme); localStorage.setItem("rs_accent", opened.accent);
+      localStorage.setItem("rs_theme", opened.theme); localStorage.setItem("rs_accent2", opened.accent);
       apply(opened.theme, opened.accent);
     }
     if (sections !== opened.sections) pickSections(opened.sections);
@@ -573,7 +575,7 @@ function AccountScreen() {
         {/* For the phone alerts' ALERT_UID secret: the runs that send the
             pushes read this account's stars and holdings by this ID. Not a
             secret - it identifies the account, it does not open it. */}
-        <div className="mb-5 rounded-2xl border border-[var(--line)] bg-[var(--card)] px-4 py-3">
+        <div className="mb-5 rounded-2xl border border-[var(--edge)] bg-[var(--card)] px-4 py-3">
           <p className="text-[12px] text-[var(--ink3)]">Account ID, for phone alerts</p>
           <div className="mt-1 flex items-center gap-2">
             <code className="flex-1 min-w-0 truncate text-[13px] text-[var(--ink)]">{user.uid}</code>
@@ -741,7 +743,7 @@ function ReorderScreen({ kind, title, caption, items, split }: {
   const reset = () => { setOrder([]); clearOrder(kind); };
 
   const divider = (text: string) => (
-    <div className="px-4 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)] bg-[var(--card2)]">
+    <div className="px-4 pt-3 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-[var(--ink2)] bg-[var(--card2)]">
       {text}
     </div>
   );
@@ -764,7 +766,7 @@ function ReorderScreen({ kind, title, caption, items, split }: {
       <PageTitle>{title}</PageTitle>
       <p className="-mt-4 mb-5 px-1 text-sm text-[var(--ink3)]">{caption}</p>
 
-      <div className="rounded-2xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
+      <div className="rounded-2xl border border-[var(--edge)] bg-[var(--card)] overflow-hidden">
         {shown.map((it, i) => (
           <Fragment key={`${it.id}-${moved.id === it.id ? moved.n : 0}`}>
             {split !== undefined && i === 0 && divider("In the bar")}

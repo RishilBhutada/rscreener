@@ -131,7 +131,7 @@ function SectorsView() {
           </InfoTip>
         </h1>
         <Segmented label="Show" value={show} options={SHOWS} onChange={setShow} />
-        <ul className="rounded-xl border border-[var(--line)] bg-[var(--card)] divide-y divide-[var(--line)] overflow-hidden">
+        <ul className="rounded-xl border border-[var(--edge)] bg-[var(--card)] divide-y divide-[var(--line)] overflow-hidden">
           {sectors.map((a) => {
             const [text, cls] = cell(a);
             return (
@@ -164,7 +164,7 @@ function SectorsView() {
         <h1 className="text-xl font-bold">{sector}</h1>
         <p className="text-sm text-[var(--ink2)]">{agg.count.toLocaleString("en-IN")} companies · {crore(agg.mcap)}</p>
       </header>
-      <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] px-3 py-3 grid grid-cols-4 gap-2">
+      <section className="rounded-xl border border-[var(--edge)] bg-[var(--card)] px-3 py-3 grid grid-cols-4 gap-2">
         <Stat label="Median P/E" value={agg.pe === null ? "—" : agg.pe.toFixed(1)} />
         <Stat label="Median ROE" value={agg.roe === null ? "—" : `${agg.roe.toFixed(1)}%`} />
         <Stat label="Median 1Y" value={agg.ret === null ? "—" : `${signed(agg.ret, 1)}%`} className={tone(agg.ret)} />
@@ -185,7 +185,7 @@ function SectorsView() {
 
       <Chips value={sortKey} options={SORTS} onChange={(k) => setSortKey(k)} />
 
-      <ul className="rounded-xl border border-[var(--line)] bg-[var(--card)] divide-y divide-[var(--line)] overflow-hidden">
+      <ul className="rounded-xl border border-[var(--edge)] bg-[var(--card)] divide-y divide-[var(--line)] overflow-hidden">
         {shown.slice(0, limit).map((r) => {
           const sym = String(r.symbol);
           const price = n(r.price), chg = n(r.ret_1d);

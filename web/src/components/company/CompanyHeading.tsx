@@ -9,10 +9,11 @@ import Link from "next/link";
 import { titleCase } from "@/lib/names";
 import { Row } from "@/lib/query";
 import WatchStar from "@/components/WatchStar";
-import { IconButton, dayMove, signed as signedNum, tone } from "@/components/QuoteUI";
+import { IconButton, dayMove, signed as signedNum } from "@/components/QuoteUI";
 import { Company } from "@/components/company/types";
 import { fmtNum, num } from "@/components/company/format";
 import { IndexChips, PriceAsOf, CompanyMark, RefetchButton } from "@/components/company/Panels";
+import ChangePill from "@/components/ChangePill";
 
 /** Opened from a watchlist or screen results: step to the previous or next
  *  company in it (M1). */
@@ -104,11 +105,11 @@ export function PriceLine({ symbol, price, fullRow, s, onAlerts, onExport }: {
           <div>
             <div className="flex items-center gap-2">
               <div className="min-w-0 flex flex-wrap items-baseline gap-x-2.5">
-                <span className="text-3xl font-bold text-[var(--ink)] tabular-nums">₹ {fmtNum(price)}</span>
+                <span className="text-3xl font-extrabold tracking-tight text-[var(--ink)] tabular-nums">₹ {fmtNum(price)}</span>
                 {chg !== null && (
-                  <span className={`text-[15px] font-semibold tabular-nums ${tone(chg)}`}>
+                  <ChangePill value={chg} className="self-center">
                     {signedNum(dayMove(price, chg))} ({signedNum(chg)}%)
-                  </span>
+                  </ChangePill>
                 )}
               </div>
             <div className="ml-auto flex items-center gap-1 shrink-0 self-center">

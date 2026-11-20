@@ -11,7 +11,17 @@ import { move } from "@/lib/order";
 import { Stmt, Company, WcRatios, NextResults, Segments } from "@/components/company/types";
 import { amtDec, fmtNum, periodLabel, declaredLabel, RECENT_PERIODS, quarterAfter, quarterBefore, isQuarterly, yearBefore, heatTint } from "@/components/company/format";
 
+import { SectionTitle } from "@/components/SectionCard";
+import { IconCalendarStats, IconCash, IconPercentage, IconReportMoney, IconScale, IconTable } from "@tabler/icons-react";
 /** One row's last few periods as a line; the end dot says which way it last moved. */
+
+/** Each statement's icon, from its title (Midnight sapphire headings, 20-Nov-2026). */
+function tableIcon(title: string) {
+  const t = title.toLowerCase();
+  return t.includes("quarter") ? IconCalendarStats : t.includes("profit") || t.includes("p&l") ? IconReportMoney
+    : t.includes("balance") ? IconScale : t.includes("cash") ? IconCash : t.includes("ratio") ? IconPercentage : IconTable;
+}
+
 export function Spark({ values }: { values: (number | null)[] }) {
   const W = 48, H = 18, P = 2;
   const pts: [number, number][] = [];
@@ -113,10 +123,10 @@ export function StatementTable({ title, stmt, subtitle, boldRows, next, kind, sy
   };
   const keep = (scope: "company" | "all") => { if (draft) saved.save(draft, scope); setDraft(null); setAsking(false); };
   return (
-    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--edge)] overflow-hidden">
       <div className="px-4 pt-3.5 pb-2 flex items-start gap-1.5">
         <div className="flex-1 min-w-0">
-          <h2 className="text-base font-semibold text-[var(--ink)]">{title}{info}</h2>
+          <SectionTitle icon={tableIcon(title)}>{title}{info}</SectionTitle>
           <p className="text-xs text-[var(--ink3)] mt-0.5">
             {draft ? "Move rows with the arrows, then Done"
               : `${subtitle ?? "₹ Cr"}`}

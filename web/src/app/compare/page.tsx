@@ -96,7 +96,7 @@ function CompareView() {
         </div>
       )}
       {syms.length > 0 && (
-        <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-x-auto">
+        <section className="bg-[var(--card)] rounded-xl border border-[var(--edge)] overflow-x-auto">
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr className="border-b border-[var(--line)]">

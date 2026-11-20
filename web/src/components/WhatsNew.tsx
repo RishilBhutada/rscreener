@@ -34,7 +34,7 @@ export default function WhatsNew() {
   return (
     <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center" role="dialog" aria-modal="true" aria-label="What's new">
       <div className="absolute inset-0 bg-black/50" onClick={close} aria-hidden="true" />
-      <div className="rs-fade relative w-full sm:max-w-md max-h-[80vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-[var(--card)] border border-[var(--line)] p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <div className="rs-fade relative w-full sm:max-w-md max-h-[80vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-[var(--card)] border border-[var(--edge)] p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <h2 className="text-lg font-bold text-[var(--ink)]">What&apos;s new</h2>
         <p className="text-[12.5px] text-[var(--ink3)] mt-0.5">
           {news.list.length === 1 ? "1 update" : `${news.list.length} updates`} since you last opened the app

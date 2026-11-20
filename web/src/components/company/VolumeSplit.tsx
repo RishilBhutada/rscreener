@@ -9,6 +9,8 @@ import { useEffect, useMemo, useState } from "react";
 import InfoTip from "@/components/InfoTip";
 import { Segmented } from "@/components/ListUI";
 
+import { SectionTitle } from "@/components/SectionCard";
+import { IconArrowsSplit2 } from "@tabler/icons-react";
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 type Bar = [string, number, number];   // period, traded, delivered
 type Vol = { d: Bar[]; w: Bar[]; m: Bar[] };
@@ -53,15 +55,15 @@ export default function VolumeSplit({ symbol }: { symbol: string }) {
   const sel = pick !== null && bars[pick] ? bars[pick] : bars[bars.length - 1];
 
   return (
-    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4 mt-4">
-      <h2 className="text-base font-semibold text-[var(--ink)] flex items-center gap-1.5">
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--edge)] p-3 sm:p-4 mt-4">
+      <SectionTitle icon={IconArrowsSplit2}>
         Volume split
         <InfoTip title="Volume split">
           <p><b>Delivered</b>: shares that went into a buyer&apos;s demat account. <b>Same day</b>: shares bought and sold again before the close (traded minus delivered).</p>
           <p>Delivered is <b>not</b> the same as long-term: a share bought today and sold tomorrow counts as delivered, and every delivered share also had a seller.</p>
           <p>From NSE&apos;s daily delivery file (BSE&apos;s for BSE-only companies), back to about 2016. Not checked further.</p>
         </InfoTip>
-      </h2>
+      </SectionTitle>
       <div className="mt-2 flex items-center justify-between gap-2 flex-wrap">
         <Segmented label="Range" value={range} options={RANGES} onChange={(r) => { setRange(r); setPick(null); }} />
         {avgPct !== null && <span className="text-[12px] text-[var(--ink3)]">Delivered over the range: <b className="text-[var(--ink)]">{avgPct.toFixed(0)}%</b></span>}

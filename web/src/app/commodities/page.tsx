@@ -6,6 +6,7 @@ import TopNav from "@/components/TopNav";
 import InfoTip from "@/components/InfoTip";
 import { Segmented } from "@/components/ListUI";
 import { GROUP_ORDER, dayLabel, expiryLabel, rupees, signClass, signed, type CommodityListItem } from "@/lib/commodity";
+import { SectionTitle } from "@/components/SectionCard";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -76,8 +77,8 @@ export default function CommoditiesPage() {
 
             {groups.map(([g, xs]) => (
               <section key={g}>
-                <h2 className="px-1 pt-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">{g}</h2>
-                <ul className="rounded-xl border border-[var(--line)] bg-[var(--card)] divide-y divide-[var(--line)] overflow-hidden">
+                <SectionTitle className="mx-1 mt-2 mb-1.5">{g}</SectionTitle>
+                <ul className="rounded-xl border border-[var(--edge)] bg-[var(--card)] divide-y divide-[var(--line)] overflow-hidden">
                   {xs.map((x) => {
                     const [text, cls] = cell(x);
                     return (

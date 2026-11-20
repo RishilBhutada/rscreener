@@ -7,6 +7,7 @@ import { Segmented } from "@/components/ListUI";
 import { HeatLegend, HeatTile, HeatTiles } from "@/components/Heatmap";
 import { HEAT_FULL, HeatPeriod, modal } from "@/lib/treemap";
 import { dayLabel, signClass, signed } from "@/lib/commodity";
+import { SectionTitle } from "@/components/SectionCard";
 
 /** The world's stock markets as a heatmap: one tile a market, in blocks by
  *  region, each on its own last finished close. Written by
@@ -86,9 +87,9 @@ export default function WorldPage() {
               }));
               return (
                 <section key={region}>
-                  <h2 className="px-1 pt-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
+                  <SectionTitle className="mx-1 mt-2 mb-1.5">
                     {region} · {xs.length}<span className="normal-case tracking-normal font-normal"> · {dayLabel(day)}</span>
-                  </h2>
+                  </SectionTitle>
                   <HeatTiles tiles={tiles} full={full} digits={digits} min={136} />
                 </section>
               );
@@ -100,10 +101,10 @@ export default function WorldPage() {
 
             {data.extras.length > 0 && (
               <section>
-                <h2 className="px-1 pt-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
+                <SectionTitle className="mx-1 mt-2 mb-1.5">
                   Alongside<span className="normal-case tracking-normal font-normal"> · {dayLabel(extraDate)}</span>
-                </h2>
-                <ul className="rounded-xl border border-[var(--line)] bg-[var(--card)] divide-y divide-[var(--line)]">
+                </SectionTitle>
+                <ul className="rounded-xl border border-[var(--edge)] bg-[var(--card)] divide-y divide-[var(--line)]">
                   {data.extras.map((x) => (
                     <li key={x.s} className="flex items-center gap-3 px-3 py-2.5">
                       <span className="flex-1 min-w-0">

@@ -121,7 +121,7 @@ export default function StatusPage() {
                 ["Data built", s.generated_at],
                 ["Refresh schedule", "Nightly, from 22:00 IST"],
               ].map(([k, v]) => (
-                <div key={k} className="bg-[var(--card)] border border-[var(--line)] rounded-xl px-4 py-3">
+                <div key={k} className="bg-[var(--card)] border border-[var(--edge)] rounded-xl px-4 py-3">
                   <p className="text-xs text-[var(--ink3)]">{k}</p>
                   <p className="text-sm font-semibold mt-0.5 text-[var(--ink)]">{v}</p>
                 </div>
@@ -132,7 +132,7 @@ export default function StatusPage() {
 
             <RefreshPanel />
 
-            <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
+            <section className="bg-[var(--card)] rounded-xl border border-[var(--edge)] overflow-hidden">
               {s.sources.map((src, i) => {
                 const t = tone(src.pct);
                 const age = tradingDaysOld(src.newest);

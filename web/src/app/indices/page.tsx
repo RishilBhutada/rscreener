@@ -10,6 +10,7 @@ import { Segmented } from "@/components/ListUI";
 import { HeatLegend, HeatTiles } from "@/components/Heatmap";
 import { HEAT_FULL, HeatPeriod } from "@/lib/treemap";
 import MarketPulse from "@/components/MarketPulse";
+import { SectionTitle } from "@/components/SectionCard";
 
 /** Every NSE index and the Sensex, grouped as NSE groups them, with one
  *  chosen figure on the right. A filter box, because there are 145. */
@@ -96,7 +97,7 @@ export default function IndicesPage() {
             <p className="text-sm text-[var(--ink2)]">Closes of {dayLabel(data.asof, true)}</p>
             <div className="flex items-center gap-2 flex-wrap">
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter" aria-label="Filter indices"
-                className="flex-1 min-w-[120px] h-[38px] px-3 rounded-xl border border-[var(--line)] bg-[var(--card)] text-[14px] outline-none focus:border-[var(--accent-line)]" />
+                className="flex-1 min-w-[120px] h-[38px] px-3 rounded-xl border border-[var(--edge)] bg-[var(--card)] text-[14px] outline-none focus:border-[var(--accent-line)]" />
               <Segmented label="View" value={view} options={VIEWS} onChange={pickView} />
             </div>
 
@@ -108,7 +109,7 @@ export default function IndicesPage() {
             )}
             {view === "map" && groups.map(([g, xs]) => (
               <section key={g}>
-                <h2 className="px-1 pt-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">{g} · {xs.length}</h2>
+                <SectionTitle className="mx-1 mt-2 mb-1.5">{g} · {xs.length}</SectionTitle>
                 <HeatTiles full={HEAT_FULL[period]} digits={period === "d1" ? 2 : 1} tiles={xs.map((x) => ({
                   key: x.s, label: x.name, v: x[HEAT_FIELD[period]], href: `/indices/view?s=${encodeURIComponent(x.s)}`,
                   note: x.date !== data.asof ? dayLabel(x.date) : undefined,
@@ -118,8 +119,8 @@ export default function IndicesPage() {
 
             {view === "list" && groups.map(([g, xs]) => (
               <section key={g}>
-                <h2 className="px-1 pt-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">{g} · {xs.length}</h2>
-                <div className="overflow-x-auto rounded-xl border border-[var(--line)] bg-[var(--card)] [scrollbar-width:none]">
+                <SectionTitle className="mx-1 mt-2 mb-1.5">{g} · {xs.length}</SectionTitle>
+                <div className="overflow-x-auto rounded-xl border border-[var(--edge)] bg-[var(--card)] [scrollbar-width:none]">
                   <table className="w-full text-[13px] border-collapse tabular-nums">
                     <thead>
                       <tr className="text-[11px] text-[var(--ink3)] border-b border-[var(--line)]">

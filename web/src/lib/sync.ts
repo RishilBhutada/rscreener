@@ -29,7 +29,10 @@ export const SYNCED_KEYS = [
   "rscreener_watchlists_at",
   "rscreener_ratios",
   "rs_theme",
-  "rs_accent",
+  // rs_accent2 since 20-Nov-2026: the old key's synced value would have
+  // overwritten the new default (a plain value takes the cloud copy), so the
+  // Midnight sapphire design starts everyone on sapphire under a new key.
+  "rs_accent2",
   "rs_pct_tables",
   "rs_row_order",
   "rs_table_view",

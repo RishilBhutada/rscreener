@@ -4,6 +4,8 @@
 import InfoTip from "@/components/InfoTip";
 import { signed, tone } from "@/components/QuoteUI";
 
+import { SectionTitle } from "@/components/SectionCard";
+import { IconCalendarRepeat } from "@tabler/icons-react";
 export const SEASON_QUARTERS = ["Apr–Jun", "Jul–Sep", "Oct–Dec", "Jan–Mar"];
 
 /** Each quarter against an average quarter of the same year (1.25 = 25% above). */
@@ -52,8 +54,8 @@ export default function SeasonsCard({ seasons }: { seasons?: Seasons | null }) {
   if (!seasons || !(seasons.sales || seasons.profit || seasons.price)) return null;
   const { sales, profit, price } = seasons;
   return (
-    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-3">
-      <h3 className="text-[15px] font-semibold flex items-center gap-1.5">
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--edge)] p-4 space-y-3">
+      <SectionTitle icon={IconCalendarRepeat} as="h3">
         Seasons
         <InfoTip title="Seasons">
           <p>Whether the company&apos;s sales, profit and share price follow the quarter of the financial year (Apr–Jun is Q1, Jan–Mar is Q4).</p>
@@ -63,7 +65,7 @@ export default function SeasonsCard({ seasons }: { seasons?: Seasons | null }) {
           <p>Across 1,612 companies, 54% of sales patterns pass the first test where luck would give 5%. Share-price patterns are far weaker: a stock&apos;s best quarter of its early years is its best of the later years a third of the time, against a quarter by luck. And much of a smaller stock&apos;s pattern is the whole market&apos;s - the typical stock trailed the Nifty in Jan–Mar in 22 of the last 26 years.</p>
           <p>What happened, not a forecast, and not a reason to buy or sell.</p>
         </InfoTip>
-      </h3>
+      </SectionTitle>
       <div className="grid grid-cols-[minmax(0,1fr)_repeat(4,auto)] gap-x-3 sm:gap-x-6 gap-y-1.5 items-baseline">
         <span />
         {SEASON_QUARTERS.map((q) => <span key={q} className="text-[11px] text-[var(--ink3)] text-right whitespace-nowrap">{q}</span>)}

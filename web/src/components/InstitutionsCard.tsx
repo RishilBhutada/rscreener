@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import InfoTip from "@/components/InfoTip";
 import { InstDoc, inr, loadInst, qtyShort, since, tally } from "@/lib/news";
 
+import { SectionTitle } from "@/components/SectionCard";
+import { IconBriefcase } from "@tabler/icons-react";
 /** What institutions say and do about one company (owner, 15-Oct-2026): the
  *  latest call per broker as headlines reported them (180 days), bulk/block
  *  deals and SAST stake filings (a year), and the month's headlines.
@@ -28,16 +30,16 @@ export default function InstitutionsCard({ symbol, onLoad }: {
   if (!doc) return null;
   const t = tally(doc.calls);
   const tone = (b: string | null) => (b === "Buy" ? "text-[var(--pos)]" : b === "Sell" ? "text-[var(--neg)]" : "text-[var(--ink2)]");
-  const head = "px-3 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]";
+  const head = "px-3 pt-3 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-[var(--ink2)]";
   return (
-    <section id="institutions" className="scroll-mt-32 rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
-      <h2 className={`${head} flex items-center gap-1`}>
+    <section id="institutions" className="scroll-mt-32 rounded-xl border border-[var(--edge)] bg-[var(--card)] overflow-hidden">
+      <SectionTitle icon={IconBriefcase} className="mx-3 mt-3 mb-1.5">
         Institutions
         <InfoTip title="Institutions">
           <p><b>Broker calls</b> are other people&apos;s ratings as news headlines reported them, read automatically - each links to its article. The latest call per broker in the last six months is counted. Brokers often have conflicts of interest; none of this is Rscreener&apos;s view or advice.</p>
           <p><b>Deals</b> are NSE&apos;s bulk and block deals; <b>stake filings</b> are SAST disclosures by acquirers and promoters - the exchange&apos;s own records.</p>
         </InfoTip>
-      </h2>
+      </SectionTitle>
 
       {t.latest.length > 0 && (
         <div className="px-3 pb-3">

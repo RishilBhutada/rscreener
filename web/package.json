@@ -13,6 +13,7 @@
     "@capacitor/android": "^8.4.1",
     "@capacitor/cli": "^8.4.1",
     "@capacitor/core": "^8.4.1",
+    "@tabler/icons-react": "3.35.0",
     "firebase": "^12.17.0",
     "lightweight-charts": "5.2.1",
     "next": "16.2.10",

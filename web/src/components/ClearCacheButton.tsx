@@ -20,7 +20,7 @@ export default function ClearCache({ trigger }: { trigger: (open: () => void) =>
       {ask && createPortal(
         <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="rs-clear-title">
           <div className="rs-fade absolute inset-0 bg-black/50" onClick={() => setAsk(false)} />
-          <div className="rs-sheet relative w-full max-w-sm rounded-2xl border border-[var(--line)] bg-[var(--card)] p-4 shadow-xl">
+          <div className="rs-sheet relative w-full max-w-sm rounded-2xl border border-[var(--edge)] bg-[var(--card)] p-4 shadow-xl">
             <h2 id="rs-clear-title" className="text-[16px] font-semibold text-[var(--ink)]">Clear cache data?</h2>
             <p className="mt-2 text-[14px] text-[var(--ink2)]">
               Deletes the prices, charts and company files saved on this device and loads the latest version of the app and its data.

@@ -12,6 +12,8 @@ import { allWatched, loadLists } from "@/lib/watchlists";
 import { Holding, loadPortfolio } from "@/lib/portfolio";
 import { shortName } from "@/lib/names";
 import { buildIndex, search, didYouMean, type SearchIndex, type SearchRow } from "@/lib/search";
+import { SectionTitle } from "@/components/SectionCard";
+import { IconCalendarDue, IconCalendarTime, IconNews, IconStar } from "@tabler/icons-react";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -194,7 +196,7 @@ export default function Home() {
     syms.length === 0 ? null : (
       <div className="mt-6">
         <div className="flex items-baseline justify-between gap-3">
-          <p className="text-xs uppercase tracking-wide text-[var(--ink3)]">{title}</p>
+          <SectionTitle as="h3">{title}</SectionTitle>
           {more && (
             <Link href={more.href} className="text-xs text-[var(--accent-ink)] hover:underline shrink-0">
               {more.label}
@@ -310,7 +312,7 @@ export default function Home() {
         {(today.out > 0 || today.dueN > 0 || today.dealN > 0) && (
           <section className="mt-6">
             <div className="flex items-baseline justify-between mb-2">
-              <h2 className="text-[13.5px] font-semibold text-[var(--ink)]">Today</h2>
+              <SectionTitle icon={IconCalendarDue}>Today</SectionTitle>
               <Link href="/calendar" className="text-xs font-semibold text-[var(--accent-ink)]">Calendar</Link>
             </div>
             <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
@@ -327,7 +329,7 @@ export default function Home() {
               ))}
             </div>
             {today.dueTop.length > 0 && (
-              <div className="mt-2 rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
+              <div className="mt-2 rounded-xl border border-[var(--edge)] bg-[var(--card)] overflow-hidden">
                 <p className="px-3.5 pt-2 pb-1 text-[10.5px] font-semibold uppercase tracking-wide text-[var(--ink3)]">
                   Due {dayLabel(today.dueDay)} · largest first
                 </p>
@@ -354,12 +356,12 @@ export default function Home() {
         {watchRows.length > 0 && (
           <section className="mt-7">
             <div className="flex items-baseline justify-between mb-2">
-              <h2 className="text-[13.5px] font-semibold text-[var(--ink)]">
+              <SectionTitle icon={IconStar}>
                 {lists > 1 ? `Watchlists (${lists})` : "Watchlist"}
-              </h2>
+              </SectionTitle>
               <Link href="/watchlists" className="text-xs font-semibold text-[var(--accent-ink)]">Manage</Link>
             </div>
-            <div className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
+            <div className="rounded-xl border border-[var(--edge)] bg-[var(--card)] overflow-hidden">
               {/* The column is labelled once, here, instead of a sentence under
                   the list saying what the percentages are. */}
               <div className="flex items-center gap-3 px-3.5 pt-2 pb-1 text-[11px] text-[var(--ink3)]">
@@ -410,10 +412,10 @@ export default function Home() {
         {upcoming.length > 0 && (
           <section className="mt-7">
             <div className="flex items-baseline justify-between mb-2">
-              <h2 className="text-xs uppercase tracking-wide text-[var(--ink3)]">Coming up</h2>
+              <SectionTitle icon={IconCalendarTime}>Coming up</SectionTitle>
               <Link href="/calendar" className="text-xs font-semibold text-[var(--accent-ink)]">Calendar</Link>
             </div>
-            <div className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden divide-y divide-[var(--line)]">
+            <div className="rounded-xl border border-[var(--edge)] bg-[var(--card)] overflow-hidden divide-y divide-[var(--line)]">
               {upcoming.map((e, i) => (
                 <Link key={`${e.symbol}-${e.date}-${i}`} href={symbolHref(e.symbol)}
                   className="flex items-center gap-3 px-3.5 min-h-[46px] hover:bg-[var(--card2)] active:bg-[var(--card2)]">
@@ -435,10 +437,10 @@ export default function Home() {
         {heads.length > 0 && (
           <section className="mt-7">
             <div className="flex items-baseline justify-between mb-2">
-              <h2 className="text-[13.5px] font-semibold text-[var(--ink)]">News</h2>
+              <SectionTitle icon={IconNews}>News</SectionTitle>
               <Link href="/news" className="text-xs font-semibold text-[var(--accent-ink)]">All news</Link>
             </div>
-            <div className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden divide-y divide-[var(--line)]">
+            <div className="rounded-xl border border-[var(--edge)] bg-[var(--card)] overflow-hidden divide-y divide-[var(--line)]">
               {heads.map((h) => (
                 <a key={h.url} href={h.url} target="_blank" rel="noopener noreferrer" className="block px-3.5 py-2.5 hover:bg-[var(--card2)] active:bg-[var(--card2)]">
                   <span className="block text-[13.5px] leading-snug text-[var(--ink)] line-clamp-2">{h.title}</span>
@@ -454,7 +456,7 @@ export default function Home() {
 
         {/* The portfolio in one line: what it is worth and what today did to it. */}
         {pf && (
-          <Link href="/portfolio" className="mt-7 flex items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--card)] px-3.5 py-3 active:bg-[var(--card2)]">
+          <Link href="/portfolio" className="mt-7 flex items-center gap-3 rounded-xl border border-[var(--edge)] bg-[var(--card)] px-3.5 py-3 active:bg-[var(--card2)]">
             <span className="flex-1 min-w-0">
               <span className="block text-xs uppercase tracking-wide text-[var(--ink3)]">Portfolio · {pf.n}</span>
               <span className="block text-lg font-semibold tabular-nums text-[var(--ink)]">₹{Math.round(pf.current).toLocaleString("en-IN")}</span>

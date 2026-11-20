@@ -236,7 +236,7 @@ export default function PortfolioPage() {
         </div>
 
         {ready && holdings.length === 0 && (
-          <div className="rounded-2xl border border-[var(--line)] bg-[var(--card)] px-5 py-10 text-center">
+          <div className="rounded-2xl border border-[var(--edge)] bg-[var(--card)] px-5 py-10 text-center">
             <p className="text-[15px] font-semibold mb-1">No holdings yet</p>
             <p className="text-[13px] text-[var(--ink3)] mb-5">Bring them in from your broker&apos;s holdings file, or add them one at a time.</p>
             <div className="flex flex-col sm:flex-row gap-2 justify-center">
@@ -255,7 +255,7 @@ export default function PortfolioPage() {
         {holdings.length > 0 && (
           <>
             {/* ── totals ── */}
-            <section className="rounded-2xl border border-[var(--line)] bg-[var(--card)] p-4 mb-4">
+            <section className="rounded-2xl border border-[var(--edge)] bg-[var(--card)] p-4 mb-4">
               <div className="grid grid-cols-2 gap-4">
                 <Stat label="Invested" value={rupees(totals.invested)} />
                 <div className="text-right"><Stat label="Current" value={rupees(totals.current)} /></div>

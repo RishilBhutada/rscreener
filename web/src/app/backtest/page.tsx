@@ -173,7 +173,7 @@ function BacktestInner() {
         }}
           className="flex gap-2">
           <input name="q" defaultValue={q} aria-label="Screen"
-            className="flex-1 min-w-0 rounded-xl border border-[var(--line)] bg-[var(--card)] px-3 py-2 text-[13px] font-mono" />
+            className="flex-1 min-w-0 rounded-xl border border-[var(--edge)] bg-[var(--card)] px-3 py-2 text-[13px] font-mono" />
           <button className="rs-press shrink-0 rounded-xl bg-[var(--accent-fill)] text-[var(--accent-fill-ink)] px-4 text-[13px] font-semibold">Run</button>
         </form>
         <p className="text-[11px] text-[var(--ink3)] flex items-center gap-1 flex-wrap">
@@ -193,7 +193,7 @@ function BacktestInner() {
 
         {err && <p className="text-sm text-[var(--neg)]">{err}</p>}
         {result.error && (
-          <p className="rounded-xl border border-[var(--line)] bg-[var(--card)] p-3 text-[13px] text-[var(--ink2)]">
+          <p className="rounded-xl border border-[var(--edge)] bg-[var(--card)] p-3 text-[13px] text-[var(--ink2)]">
             This screen cannot be tested: {result.error}.
             {" "}Only fields with history can be used here.
           </p>
@@ -204,7 +204,7 @@ function BacktestInner() {
           <>
             <section className="grid grid-cols-3 gap-2">
               {([["Screen", total.screen, typical.screen], ["All companies", total.all, typical.all], ["Nifty 50", total.nifty, null]] as [string, number, number | null][]).map(([k, v, m]) => (
-                <div key={k} className="rounded-xl border border-[var(--line)] bg-[var(--card)] p-2.5">
+                <div key={k} className="rounded-xl border border-[var(--edge)] bg-[var(--card)] p-2.5">
                   <p className="text-[11px] text-[var(--ink3)]">{k}</p>
                   <p className="text-[17px] font-bold tabular-nums">₹{Math.round(v).toLocaleString("en-IN")}</p>
                   <p className={`text-[11px] tabular-nums ${tone(cagr(v))}`}>{fmt(cagr(v))} a year</p>
@@ -219,7 +219,7 @@ function BacktestInner() {
               {skipped > 0 ? ` ${skipped} year${skipped === 1 ? "" : "s"} left out: too few companies had the figures this screen needs.` : ""}
             </p>
 
-            <div className="overflow-x-auto rounded-xl border border-[var(--line)] bg-[var(--card)]">
+            <div className="overflow-x-auto rounded-xl border border-[var(--edge)] bg-[var(--card)]">
               <table className="w-full text-[12.5px] tabular-nums">
                 <thead className="text-[var(--ink3)] text-[11px]">
                   <tr className="border-b border-[var(--line)]">

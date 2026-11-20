@@ -5,6 +5,8 @@ import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import InfoTip from "@/components/InfoTip";
 import { Segmented } from "@/components/ListUI";
+import { SectionTitle } from "@/components/SectionCard";
+import { IconChartArea } from "@tabler/icons-react";
 
 /** The 200-day average: how often each stock has closed below it, for how
  *  long, and where it stands now; and how much of the market is above it.
@@ -93,9 +95,9 @@ export default function DmaPage() {
         </section>
 
         {now && (
-          <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3">
+          <section className="bg-[var(--card)] rounded-xl border border-[var(--edge)] p-3">
             <div className="flex items-baseline justify-between gap-2">
-              <h2 className="text-[13px] font-semibold">NSE stocks above their 200-day average</h2>
+              <SectionTitle icon={IconChartArea}>NSE stocks above their 200-day average</SectionTitle>
               <span className="text-lg font-bold tabular-nums">{now[1]}%</span>
             </div>
             <Spark pts={br.map((b) => b[1])} />
@@ -112,7 +114,7 @@ export default function DmaPage() {
           <>
             <div className="flex items-center gap-2 flex-wrap">
               <input value={q} onChange={(e) => { setQ(e.target.value); setLimit(PAGE); }} placeholder="Search stock" aria-label="Search stocks"
-                className="flex-1 min-w-[120px] h-[38px] px-3 rounded-xl border border-[var(--line)] bg-[var(--card)] text-[14px] outline-none focus:border-[var(--accent-line)]" />
+                className="flex-1 min-w-[120px] h-[38px] px-3 rounded-xl border border-[var(--edge)] bg-[var(--card)] text-[14px] outline-none focus:border-[var(--accent-line)]" />
               <Segmented label="Size" value={size} options={SIZES} onChange={(v) => { setSize(v); setLimit(PAGE); }} />
             </div>
             <Segmented label="Order" value={sort} options={SORTS} onChange={(v) => { setSort(v); setLimit(PAGE); }} />
@@ -120,7 +122,7 @@ export default function DmaPage() {
               {list.length.toLocaleString("en-IN")} stocks. The typical stock spent {d.median_pct_below}% of weeks below the line.
             </p>
 
-            <div className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
+            <div className="bg-[var(--card)] rounded-xl border border-[var(--edge)] overflow-hidden">
               <div className="grid grid-cols-[minmax(0,1fr)_52px_46px_46px_62px] gap-1 px-3 py-2 text-[10.5px] font-semibold uppercase tracking-wide text-[var(--ink3)] border-b border-[var(--line)]">
                 <span>Stock</span><span className="text-right">Below</span><span className="text-right">Dip</span><span className="text-right">Max</span><span className="text-right">Now</span>
               </div>

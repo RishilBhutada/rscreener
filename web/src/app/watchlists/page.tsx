@@ -248,7 +248,7 @@ export default function WatchlistsPage() {
         {/* ── search and add ── */}
         {active && !editing && (
           <div className="flex items-center gap-1 mb-2">
-            <label className="flex-1 flex items-center gap-2 h-11 px-3 rounded-xl border border-[var(--line)] bg-[var(--card)] focus-within:border-[var(--accent-line)]">
+            <label className="flex-1 flex items-center gap-2 h-11 px-3 rounded-xl border border-[var(--edge)] bg-[var(--card)] focus-within:border-[var(--accent-line)]">
               <Icon name="search" className="text-[var(--ink3)] shrink-0" />
               <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Escape") setQuery(""); }}

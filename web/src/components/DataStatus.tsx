@@ -84,13 +84,13 @@ export default function DataStatusButton({ status, view, className = "" }: {
             </div>
             {here.length > 0 && (
               <section className="space-y-1.5">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">This chart</p>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink2)]">This chart</p>
                 <ul className="space-y-1.5">{here.map((it, i) => <Row key={`h${i}`} it={it} />)}</ul>
               </section>
             )}
             {rest.length > 0 && (
               <section className="space-y-1.5">
-                {here.length > 0 && <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">Other charts</p>}
+                {here.length > 0 && <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink2)]">Other charts</p>}
                 <ul className="space-y-1.5">{rest.map((it, i) => <Row key={`r${i}`} it={it} />)}</ul>
               </section>
             )}

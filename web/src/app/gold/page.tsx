@@ -9,6 +9,10 @@ import { StarGlyph, ExternalGlyph } from "@/components/Glyphs";
 import { Chips, Icon, Stat, signed, tone } from "@/components/QuoteUI";
 import MacroCharts from "@/components/MacroCharts";
 import { COUNTRY, GoldCheck, GoldDoc, GoldEvent, GoldFamily, GoldNews, ago, istDate, istDay, istTime } from "@/lib/gold";
+import Card from "@/components/SectionCard";
+import { IconChartDots, IconChartHistogram, IconStar } from "@tabler/icons-react";
+import { SectionTitle } from "@/components/SectionCard";
+import ChangePill from "@/components/ChangePill";
 
 /** Gold: what it costs now, and what moves it - the scheduled releases and
  *  decisions of the week, every Fed meeting, and the headlines - each rated
@@ -99,15 +103,6 @@ function Checks({ c }: { c: NonNullable<GoldDoc["snapshot"]["checks"]> }) {
   );
 }
 
-function Card({ title, tip, children }: { title: string; tip?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
-      <h2 className="px-3 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)] flex items-center gap-1">{title}{tip}</h2>
-      {children}
-    </section>
-  );
-}
-
 export default function GoldPage() {
   const [doc, setDoc] = useState<GoldDoc | null>(null);
   const [error, setError] = useState("");
@@ -170,17 +165,17 @@ export default function GoldPage() {
 
         {doc && s && (
           <>
-            <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] px-3 py-3">
+            <section className="rounded-xl border border-[var(--edge)] bg-[var(--card)] px-3 py-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <p className="text-xs text-[var(--ink3)]">MCX gold · ₹ per 10 g</p>
-                  <p className="text-2xl font-bold tabular-nums">{s.mcx ? `₹${s.mcx.close.toLocaleString("en-IN")}` : "—"}</p>
-                  {s.mcx && <p className={`text-[13px] font-semibold tabular-nums ${tone(s.mcx.chg)}`}>{signed(s.mcx.chg)}% <span className="font-normal text-[var(--ink3)]">· {istDay(`${s.mcx.date}T12:00:00Z`)}</span></p>}
+                  <p className="text-2xl font-extrabold tracking-tight tabular-nums">{s.mcx ? `₹${s.mcx.close.toLocaleString("en-IN")}` : "—"}</p>
+                  {s.mcx && <p className="mt-0.5 flex items-center gap-1.5 flex-wrap"><ChangePill value={s.mcx.chg}>{signed(s.mcx.chg)}%</ChangePill><span className="text-[12px] text-[var(--ink3)]">{istDay(`${s.mcx.date}T12:00:00Z`)}</span></p>}
                 </div>
                 <div className="text-right">
                   <p className="text-xs text-[var(--ink3)]">COMEX gold · $ per oz</p>
-                  <p className="text-2xl font-bold tabular-nums">{s.comex ? `$${s.comex.close.toLocaleString("en-US")}` : "—"}</p>
-                  {s.comex && <p className={`text-[13px] font-semibold tabular-nums ${tone(s.comex.chg)}`}>{signed(s.comex.chg)}% <span className="font-normal text-[var(--ink3)]">· {istDay(`${s.comex.date}T12:00:00Z`)}</span></p>}
+                  <p className="text-2xl font-extrabold tracking-tight tabular-nums">{s.comex ? `$${s.comex.close.toLocaleString("en-US")}` : "—"}</p>
+                  {s.comex && <p className="mt-0.5 flex items-center justify-end gap-1.5 flex-wrap"><ChangePill value={s.comex.chg}>{signed(s.comex.chg)}%</ChangePill><span className="text-[12px] text-[var(--ink3)]">{istDay(`${s.comex.date}T12:00:00Z`)}</span></p>}
                 </div>
               </div>
               <div className="mt-3 pt-3 border-t border-[var(--line)] grid grid-cols-3 gap-x-2 gap-y-3">
@@ -211,11 +206,11 @@ export default function GoldPage() {
                 for all three tabs, not part of any one. */}
             {/* Gold's own history with the events that moved it (owner,
                 20-Nov-2026: "improve the gold section about the details chart"). */}
-            <Card title="Gold and its events">
+            <Card icon={IconChartDots} title="Gold and its events">
               <GoldChart families={doc.families} />
             </Card>
 
-            <Card title="US economy" tip={
+            <Card icon={IconChartHistogram} title="US economy" tip={
               <InfoTip title="US economy">
                 <p>The US figures gold answers to - inflation, jobs, interest rates, growth, the dollar and oil - each as far back as its publisher&apos;s records go, from FRED, the St. Louis Fed&apos;s database. The &quot;i&quot; beside each chart says what it measures and who publishes it.</p>
                 <p>Why they matter: gold pays no interest, so holding it costs more when interest rates after inflation are high and less when they fall - the 10-year real yield measures that most directly. Gold is priced in dollars, so a stronger dollar tends to weigh on it. Inflation, jobs and growth reach gold mostly through what the Fed is expected to do with rates.</p>
@@ -264,20 +259,20 @@ export default function GoldPage() {
                 </div>
                 {/* Owner, 13-Oct-2026: a full 1-5 range, not just 3+ / All. */}
                 <div className="flex items-center gap-2">
-                  <span className="text-[12px] font-semibold uppercase tracking-wider text-[var(--ink3)]">Stars</span>
+                  <span className="text-[12px] font-bold uppercase tracking-wider text-[var(--ink2)]">Stars</span>
                   <Chips value={minEv} options={STAR_MINS} onChange={setMinEv} />
                 </div>
                 {days.length === 0 && <p className="py-10 text-center text-[13px] text-[var(--ink3)]">{minEv === "1" ? "Nothing" : minEv === "5" ? "Nothing rated five stars" : `Nothing rated ${minEv} stars or more`} {words.length ? `matching “${find.trim()}” in the two years` : when === "next" ? "in the year ahead" : "in the past year"}</p>}
                 {days.map(([d, list], i) => (
                   <Fragment key={d}>
-                  {words.length > 0 && i === 0 && pastAt !== 0 && <h2 className="pt-1 text-[13px] font-bold">Year ahead</h2>}
-                  {i === pastAt && <h2 className="pt-3 text-[13px] font-bold">Past year</h2>}
+                  {words.length > 0 && i === 0 && pastAt !== 0 && <SectionTitle className="mt-1">Year ahead</SectionTitle>}
+                  {i === pastAt && <SectionTitle className="mt-3">Past year</SectionTitle>}
                   {(i === 0 || days[i - 1][0].slice(0, 7) !== d.slice(0, 7)) && (
-                    <h3 className="pt-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
+                    <SectionTitle className="mx-1 mt-3 mb-0.5" as="h3">
                       {new Date(`${d}T12:00:00Z`).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" })}
-                    </h3>
+                    </SectionTitle>
                   )}
-                  <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
+                  <section className="rounded-xl border border-[var(--edge)] bg-[var(--card)] overflow-hidden">
                     <h3 className="px-3 py-2 text-[13px] font-semibold border-b border-[var(--line)]">{istDay(list[0].t)}</h3>
                     <ul className="divide-y divide-[var(--line)]">
                       {list.map((e) => (
@@ -326,7 +321,7 @@ export default function GoldPage() {
                     <p>The rating reads the headline only, not the article. Tap one for the rule it matched.</p>
                   </InfoTip>
                 </div>
-                <ul className="rounded-xl border border-[var(--line)] bg-[var(--card)] divide-y divide-[var(--line)] overflow-hidden">
+                <ul className="rounded-xl border border-[var(--edge)] bg-[var(--card)] divide-y divide-[var(--line)] overflow-hidden">
                   {news.length === 0 && <li className="py-10 text-center text-[13px] text-[var(--ink3)]">No headlines this week</li>}
                   {news.map((n) => (
                     <li key={n.url}>
@@ -344,7 +339,7 @@ export default function GoldPage() {
             )}
 
             {tab === "ratings" && (
-              <Card title="Stars by kind of event" tip={
+              <Card icon={IconStar} title="Stars by kind of event" tip={
                 <InfoTip title="How it's rated">
                   <p>Every kind of event starts with stars set by rule, from how it reaches gold: through US interest rates and the dollar, through India&apos;s duty and the rupee, or through demand.</p>
                   <p>Once {doc.min_measured} past events of a kind have gold prices around them, the stars are measured instead: the median move in gold the session after those events, divided by the median move on any day over the same years. Twice an ordinary day or more is five stars; 1.6x four; 1.3x three; 1.1x two.</p>

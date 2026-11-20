@@ -10,6 +10,8 @@ import {
   Chain, DEFAULTS, DTE_BANDS, FII_BANDS, GroupRow, Hold, Leg, MOVE_BANDS, Market, PCR_BANDS, PRESETS, Params, US_BANDS, VIX_BANDS, WEEKDAYS,
   dteBand, fiiBand, group, moveBand, pcrBand, run, stats, usBand, vixBand,
 } from "@/lib/optlab";
+import { SectionTitle } from "@/components/SectionCard";
+import { IconChartBar, IconListDetails, IconTarget } from "@tabler/icons-react";
 
 /** The Lab: any mix of bought and sold calls, puts and futures on an index
  *  or an F&O stock, tested on ten years of the exchanges' daily files.
@@ -56,8 +58,8 @@ function Num({ value, onChange, step = 1, min, label }: { value: number | null; 
 function Breakdown({ title, rows, note, lot }: { title: string; rows: GroupRow[]; note?: string; lot: number }) {
   if (rows.length < 2) return null;
   return (
-    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
-      <h3 className="px-3 pt-2.5 text-[13px] font-semibold">{title}</h3>
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--edge)] overflow-hidden">
+      <SectionTitle className="mx-3 mt-2.5" as="h3">{title}</SectionTitle>
       {note && <p className="px-3 text-[11px] text-[var(--ink3)]">{note}</p>}
       <div className="grid grid-cols-[minmax(0,1fr)_40px_40px_54px_82px] gap-1 px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-[var(--ink3)] border-b border-[var(--line)]">
         <span /><span className="text-right">Trades</span><span className="text-right">Win</span><span className="text-right">Avg pts</span><span className="text-right">Total / lot</span>
@@ -155,8 +157,8 @@ export default function OptLabPage() {
 
         {index && (
           <>
-            <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3">
-              <h2 className="text-[13px] font-semibold mb-1">The trade</h2>
+            <section className="bg-[var(--card)] rounded-xl border border-[var(--edge)] p-3">
+              <SectionTitle icon={IconTarget} className="mb-2">The trade</SectionTitle>
               <Line label="Instrument">
                 <select value={sym} onChange={(e) => { setError(""); setSym(e.target.value); }} aria-label="Instrument" className={`${field} max-w-[170px]`}>
                   <optgroup label="Indices">{index.instruments.filter((x) => x[1] === "index").map((x) => <option key={x[0]} value={x[0]}>{x[0]} · from {x[3].slice(0, 4)}</option>)}</optgroup>
@@ -246,8 +248,8 @@ export default function OptLabPage() {
             {ready && !st && <p className="text-[13px] text-[var(--ink3)]">No day matches these settings.</p>}
             {ready && st && (
               <>
-                <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3">
-                  <h2 className="text-[13px] font-semibold">{sym} · after costs · {day(trades[0].d0)} to {day(trades[trades.length - 1].d0)}</h2>
+                <section className="bg-[var(--card)] rounded-xl border border-[var(--edge)] p-3">
+                  <SectionTitle icon={IconChartBar}>{sym} · after costs · {day(trades[0].d0)} to {day(trades[trades.length - 1].d0)}</SectionTitle>
                   <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                     {([
                       ["Trades", st.n.toLocaleString("en-IN"), "", `${st.avgPaid >= 0 ? "Pays" : "Collects"} ${Math.abs(st.avgPaid).toFixed(0)} pts on average`],
@@ -296,8 +298,8 @@ export default function OptLabPage() {
                 <Breakdown title="By how far the price moved while held" lot={p.lot} rows={group(trades, (t) => moveBand(t.move), MOVE_BANDS)}
                   note="Known only afterwards: it explains a result, it cannot pick a day." />
 
-                <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
-                  <h3 className="px-3 pt-2.5 pb-1.5 text-[13px] font-semibold">Latest trades</h3>
+                <section className="bg-[var(--card)] rounded-xl border border-[var(--edge)] overflow-hidden">
+                  <SectionTitle icon={IconListDetails} className="mx-3 mt-2.5 mb-1.5" as="h3">Latest trades</SectionTitle>
                   {trades.slice(-12).reverse().map((t) => (
                     <div key={t.d0} className="grid grid-cols-[minmax(0,1fr)_56px_56px] gap-1 px-3 py-1.5 text-[12.5px] tabular-nums border-t border-[var(--line)]">
                       <span className="min-w-0 truncate">{day(t.d0)} <span className="text-[var(--ink3)]">to {day(t.d1)} · {t.dte}d</span></span>

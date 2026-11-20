@@ -15,6 +15,8 @@ import { IconButton } from "@/components/QuoteUI";
 import { AnnualReport, Company, Coverage } from "@/components/company/types";
 import { BASE, monthYear, fmtNum, num } from "@/components/company/format";
 
+import { SectionTitle } from "@/components/SectionCard";
+import { IconTimeline } from "@tabler/icons-react";
 /** Says why the history starts where it starts, instead of leaving a short chart
  *  to look like a fault in the site.
  *
@@ -321,8 +323,8 @@ export function PriceHistory({ row, snapshot }: { row: Row | null; snapshot: Row
   const beta = g("beta");
   if (shown.length === 0 && at === null) return null;
   return (
-    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
-      <h2 className="text-base font-semibold text-[var(--ink)]">
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--edge)] p-4">
+      <SectionTitle icon={IconTimeline}>
         Price history
         <InfoTip title="Price history" className="ml-1.5">
           <p>Change in the share price alone.</p>
@@ -335,7 +337,7 @@ export function PriceHistory({ row, snapshot }: { row: Row | null; snapshot: Row
             </p>
           )}
         </InfoTip>
-      </h2>
+      </SectionTitle>
       {shown.length > 0 && (
         <div className="mt-2.5 grid grid-cols-6 gap-1 text-center">
           {shown.map(([label, v]) => (
@@ -528,7 +530,7 @@ export function AboutCompany({ about }: { about?: Company["about"] }) {
         <ChevronGlyph size={12} className={`transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
-        <div className="mt-2 rounded-xl border border-[var(--line)] bg-[var(--card)] p-3 text-[13px] leading-relaxed text-[var(--ink2)] space-y-2">
+        <div className="mt-2 rounded-xl border border-[var(--edge)] bg-[var(--card)] p-3 text-[13px] leading-relaxed text-[var(--ink2)] space-y-2">
           {(about.text ?? "").split("\n\n").filter(Boolean).map((para, i) => <p key={i}>{para}</p>)}
           <p className="text-[11px] text-[var(--ink3)]">
             From Wikipedia&apos;s article{" "}

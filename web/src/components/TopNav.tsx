@@ -567,16 +567,16 @@ export default function TopNav({ active }: { active?: "home" | "screens" | "sect
             }}
             placeholder="Search a company, index, ETF or commodity"
             aria-label="Search a company, index, ETF or commodity"
-            className="w-full text-sm bg-[var(--card2)] border border-[var(--line)] rounded-full px-4 py-2.5 sm:py-1.5 focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:bg-[var(--card)]"
+            className="w-full text-sm bg-[var(--card2)] border border-[var(--edge)] rounded-full px-4 py-2.5 sm:py-1.5 focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:bg-[var(--card)]"
           />
           {waiting && !idx && (
-            <p role="status" className="absolute z-40 mt-1.5 w-full bg-[var(--card)] border border-[var(--line)] rounded-xl shadow-xl px-4 py-2.5 text-sm text-[var(--ink2)] flex items-center gap-2">
+            <p role="status" className="absolute z-40 mt-1.5 w-full bg-[var(--card)] border border-[var(--edge)] rounded-xl shadow-xl px-4 py-2.5 text-sm text-[var(--ink2)] flex items-center gap-2">
               <span aria-hidden="true" className="w-3.5 h-3.5 shrink-0 rounded-full border-2 border-[var(--line2)] border-t-[var(--accent)] animate-spin" />
               Loading the company list&hellip; opens as soon as it is in
             </p>
           )}
           {(matches.length > 0 || suggestion || (ql.trim().length >= 2 && idx)) && (
-            <div className="absolute z-40 mt-1.5 w-full bg-[var(--card)] border border-[var(--line)] rounded-xl shadow-xl overflow-hidden hidden group-focus-within:block">
+            <div className="absolute z-40 mt-1.5 w-full bg-[var(--card)] border border-[var(--edge)] rounded-xl shadow-xl overflow-hidden hidden group-focus-within:block">
               {matches.map((m, i) => (
                 <button
                   key={m.symbol}

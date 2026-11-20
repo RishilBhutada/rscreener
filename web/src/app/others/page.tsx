@@ -4,6 +4,7 @@ import { FormEvent, ReactNode, useEffect, useState } from "react";
 import TopNav from "@/components/TopNav";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { PageTitle } from "@/components/ListUI";
+import { SectionTitle } from "@/components/SectionCard";
 
 /** Other people's sites, grouped by what you would go to them for, as small
  *  tiles with each site's own logo (Step 5, owner 31-Oct-2026). You can add a
@@ -149,7 +150,7 @@ function Tile({ s, onRemove }: { s: Site; onRemove?: () => void }) {
   return (
     <div className="relative">
       <a href={s.url} target="_blank" rel="noopener noreferrer" title={s.what ? `${s.name} - ${s.what}` : s.name}
-        className="rs-press flex flex-col items-center gap-1 rounded-xl border border-[var(--line)] bg-[var(--card)] px-1 pt-2.5 pb-2 active:bg-[var(--card2)]">
+        className="rs-press flex flex-col items-center gap-1 rounded-xl border border-[var(--edge)] bg-[var(--card)] px-1 pt-2.5 pb-2 active:bg-[var(--card2)]">
         {/* The initials sit underneath; the logo covers them once it loads, so a
             slow or missing icon still leaves a mark rather than a gap. */}
         <span className="relative w-7 h-7 rounded-md bg-[var(--card2)] flex items-center justify-center text-[11px] font-bold text-[var(--ink2)]">
@@ -253,7 +254,7 @@ export default function OthersPage() {
         {sections.map((sec) => (
           <section key={sec.id} className="mt-5">
             <div className="flex items-center gap-1.5 mb-2 px-0.5">
-              <h2 className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink3)]">{sec.title}</h2>
+              <SectionTitle>{sec.title}</SectionTitle>
               {sec.tip && <InfoTip title={sec.tipTitle ?? sec.title}>{sec.tip}</InfoTip>}
               {editing && sec.own && (
                 <button type="button" onClick={() => save({ ...custom, sections: custom.sections.filter((x) => x.id !== sec.id) })}

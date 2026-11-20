@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import InfoTip from "@/components/InfoTip";
 
+import { SectionTitle } from "@/components/SectionCard";
+import { IconShieldCheck } from "@tabler/icons-react";
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 type Check = { measured: number; agree: number; pct: number | null; what: string };
@@ -76,10 +78,10 @@ export default function Scorecard() {
   const hist = c.history.slice(-30).filter((h) => h.overall !== null);
 
   return (
-    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 sm:p-5">
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--edge)] p-4 sm:p-5">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h2 className="text-base font-bold text-[var(--ink)]">
+          <SectionTitle icon={IconShieldCheck}>
             Data quality
             <InfoTip title="Data quality" className="ml-1.5">
               <p>Measured after every refresh, not asserted.</p>
@@ -88,7 +90,7 @@ export default function Scorecard() {
                 of each other.
               </p>
             </InfoTip>
-          </h2>
+          </SectionTitle>
         </div>
         <div className="text-right">
           <div className="flex items-baseline gap-0.5">

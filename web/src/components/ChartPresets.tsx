@@ -83,7 +83,7 @@ export default function ChartPresets({ current, apply, sameRange, className = "-
           <div className="space-y-3">
             {input}
             {taken(name) >= 0 && <p className="text-xs text-[var(--ink3)]">Replaces the preset already called &ldquo;{list[taken(name)].name}&rdquo;.</p>}
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">What it sets</p>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink2)]">What it sets</p>
             {lines(current)}
             <p className="text-xs text-[var(--ink3)]">Works on any company; one without this view shows Price. Hold a preset to update, rename or delete it.</p>
             <div className="flex gap-2 pt-1">

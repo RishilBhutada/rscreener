@@ -13,6 +13,8 @@ import { markSaved } from "@/lib/sync";
 import { Trend, Shareholding, Prices, PeBand, Company, Updates, NextResults, FScoreData, Cohort, Tile } from "@/components/company/types";
 import { amtDec, fmtNum, periodLabel, quarterBefore, cagr, num, crShort, industryMedian } from "@/components/company/format";
 
+import { SectionTitle } from "@/components/SectionCard";
+import { IconChecklist, IconHistory, IconLayoutDashboard, IconUserDollar, IconUsersGroup } from "@tabler/icons-react";
 /** Peer comparison, with screener.in's columns: the quarter's profit and sales
  *  and their change from a year before, a median row across the companies
  *  shown, and a column picker (rs_peer_cols, synced). */
@@ -68,10 +70,10 @@ export function PeerTable({ symbol, self, peers, industry }: { symbol: string; s
     );
   };
   return (
-    <section id="peers" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--line)] overflow-hidden">
+    <section id="peers" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--edge)] overflow-hidden">
       <div className="px-4 pt-3.5 pb-2 flex items-start gap-2">
         <div className="flex-1 min-w-0">
-          <h2 className="text-base font-semibold text-[var(--ink)]">Peers</h2>
+          <SectionTitle icon={IconUsersGroup}>Peers</SectionTitle>
           <p className="text-xs text-[var(--ink3)] mt-0.5">{industry}</p>
         </div>
         <Link href={`/compare?s=${[symbol, ...peers.slice(0, 3).map((p) => String(p.symbol))].map(encodeURIComponent).join(",")}`}
@@ -200,11 +202,11 @@ export function InsiderTrades({ list }: { list: [string, string, string, string,
   const shown = all ? list : list.slice(0, 5);
   const day = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
   return (
-    <div className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-2">
-      <h3 className="text-[13px] font-semibold text-[var(--ink)]">
+    <div className="bg-[var(--card)] rounded-xl border border-[var(--edge)] p-4 space-y-2">
+      <SectionTitle icon={IconUserDollar} as="h3">
         Insider trades
         <InfoTip title="Insider trades" className="ml-1"><p>From NSE&apos;s insider-trading disclosures; its feed lists the latest twenty at most and can be incomplete.</p></InfoTip>
-      </h3>
+      </SectionTitle>
       <ul className="divide-y divide-[var(--line)]">
         {shown.map((t, i) => (
           <li key={i} className="py-1.5 flex items-baseline justify-between gap-3 text-[13px]">
@@ -272,7 +274,7 @@ export function CompoundedGrowth({ trend, prices }: { trend?: { annual?: Trend }
     cards.push(["Return on equity", [["10 years", roeAvg(10)], ["5 years", roeAvg(5)], ["3 years", roeAvg(3)], ["Last year", roeAvg(1)]]]);
   }
   return (
-    <section className={`bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 grid sm:grid-cols-2 ${cards.length > 3 ? "lg:grid-cols-4" : "lg:grid-cols-3"} gap-6`}>
+    <section className={`bg-[var(--card)] rounded-xl border border-[var(--edge)] p-4 grid sm:grid-cols-2 ${cards.length > 3 ? "lg:grid-cols-4" : "lg:grid-cols-3"} gap-6`}>
       {cards.map(([title, rows]) => (
         <GrowthCard key={title} title={title} rows={rows} />
       ))}
@@ -378,9 +380,9 @@ export function FScore({ f }: { f: FScoreData }) {
   const failed = f.checks.filter((c) => c.pass !== true);
   const listed = all ? f.checks : failed;
   return (
-    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--edge)] p-4">
       <div className="flex items-baseline gap-2">
-        <h2 className="flex-1 text-base font-semibold text-[var(--ink)]">
+        <SectionTitle icon={IconChecklist} className="flex-1">
           Nine tests
           <InfoTip title="Nine tests on the accounts" className="ml-1.5">
             <p>
@@ -392,7 +394,7 @@ export function FScore({ f }: { f: FScoreData }) {
               turn missing data into bad news, which is not what it is.
             </p>
           </InfoTip>
-        </h2>
+        </SectionTitle>
         <span className="text-sm font-semibold tabular-nums text-[var(--ink)]">{f.score}/{f.measured}</span>
         <button type="button" onClick={() => setAll(!all)} aria-expanded={all}
           className="text-[12px] font-semibold text-[var(--accent-ink)]">{all ? "Failed only" : `All ${f.checks.length}`}</button>
@@ -470,8 +472,8 @@ export function ValuationHistory({ company }: { company: Company }) {
   if (rows.length === 0) return null;
 
   return (
-    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-4">
-      <h2 className="text-base font-semibold text-[var(--ink)] mb-1">
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--edge)] p-4">
+      <SectionTitle icon={IconHistory} className="mb-2">
         Against its own history
         <InfoTip title="Against its own history" className="ml-1.5">
           <p>Where today&rsquo;s valuation sits in this company&rsquo;s own record.</p>
@@ -485,7 +487,7 @@ export function ValuationHistory({ company }: { company: Company }) {
             not today&rsquo;s price.
           </p>
         </InfoTip>
-      </h2>
+      </SectionTitle>
       <div className="divide-y divide-[var(--line)]">
         {rows.map((r) => {
           // Today's value against the median of its own record, on one scale
@@ -752,8 +754,8 @@ export function RatioGrid({ snapshot, row, cohort, next, updates, faceValue }: {
   ];
 
   return (
-    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4">
-      <h2 className="text-base font-semibold text-[var(--ink)] px-1">
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--edge)] p-3 sm:p-4">
+      <SectionTitle icon={IconLayoutDashboard} className="mx-1">
         Key figures
         <InfoTip title="Key figures" label="How these figures are worked out" className="ml-1.5">
           {groups.flatMap(([, tiles]) => tiles).map((t) => {
@@ -768,11 +770,11 @@ export function RatioGrid({ snapshot, row, cohort, next, updates, faceValue }: {
           })}
           <p className="text-[var(--ink3)]">The bar under a figure puts this company (grey) and its industry median (blue line) on one scale. Neither colour means good or bad.</p>
         </InfoTip>
-      </h2>
+      </SectionTitle>
       <div className="mt-1 space-y-3">
         {groups.filter(([, tiles]) => tiles.length > 0).map(([heading, tiles]) => (
           <div key={heading}>
-            <h3 className="text-[10.5px] font-semibold uppercase tracking-wide text-[var(--ink3)] mb-1.5 px-1">{heading}</h3>
+            <h3 className="text-[11px] font-bold uppercase tracking-wide text-[var(--ink2)] mb-1.5 px-1">{heading}</h3>
             <div className="grid grid-cols-4 gap-1.5">
               {tiles.map((t) => {
                 const med = t.field && cohort ? industryMedian(cohort, t.field) : null;

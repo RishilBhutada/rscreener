@@ -13,6 +13,7 @@ import { shortName } from "@/lib/names";
 import {
   CalEvent, CalKind, GROUPS, KIND_LABEL, PastDoc, UpcomingDoc, clock, crore, dayLabel, docUrl, fromPast, fromUpcoming, matches, quarterDue,
 } from "@/lib/calendar";
+import { SectionTitle } from "@/components/SectionCard";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 /** Rows drawn at a time: the past year holds about 11,000 events. */
@@ -343,7 +344,7 @@ export default function CalendarPage() {
         {stripOn && (() => {
           const top = Math.max(1, ...strip.map(([, c]) => c));
           return (
-            <div role="group" aria-label="Days" className="grid grid-cols-7 gap-0.5 rounded-xl border border-[var(--line)] bg-[var(--card)] p-1">
+            <div role="group" aria-label="Days" className="grid grid-cols-7 gap-0.5 rounded-xl border border-[var(--edge)] bg-[var(--card)] p-1">
               {strip.map(([d, c]) => {
                 const on = pickedDay === d;
                 const dt = new Date(`${d}T00:00:00`);
@@ -382,7 +383,7 @@ export default function CalendarPage() {
         {!loadingPast && (next || past) && drawn.map((s) => (
           <Fragment key={s.title || "list"}>
             {s.title && (
-              <h2 className="pt-2 text-[13px] font-bold">{s.title} <span className="font-normal text-[var(--ink3)]">· {s.total.toLocaleString("en-IN")}</span></h2>
+              <SectionTitle className="mt-2">{s.title} <span className="font-normal text-[var(--ink3)]">· {s.total.toLocaleString("en-IN")}</span></SectionTitle>
             )}
             {s.total === 0 && pickedDay && !searching && !dayKnown(pickedDay) && (
               <p className={`py-6 text-center text-[13px] ${pastError ? "text-[var(--neg)]" : "text-[var(--ink3)]"}`}>
@@ -397,11 +398,11 @@ export default function CalendarPage() {
             {s.days.map(([d, list], i) => (
               <Fragment key={`${s.title}${d}${list[0]?.upcoming ? "-next" : "-out"}`}>
                 {(i === 0 || s.days[i - 1][0].slice(0, 7) !== d.slice(0, 7)) && s.days[i - 1]?.[0] !== d && (
-                  <h3 className="pt-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
+                  <SectionTitle className="mx-1 mt-3 mb-0.5" as="h3">
                     {new Date(`${d}T12:00:00Z`).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" })}
-                  </h3>
+                  </SectionTitle>
                 )}
-                <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
+                <section className="rounded-xl border border-[var(--edge)] bg-[var(--card)] overflow-hidden">
                   <h3 className="px-3 py-2 text-[13px] font-semibold border-b border-[var(--line)] flex items-center gap-3">
                     <span className="flex-1">
                       {d === today ? "Today" : dayLabel(d)}
@@ -462,7 +463,7 @@ export default function CalendarPage() {
 
         {hidden > 0 && !loadingPast && (
           <button type="button" onClick={() => setShown(shown + PAGE)}
-            className="rs-press w-full min-h-[44px] rounded-xl border border-[var(--line)] bg-[var(--card)] text-[14px] font-medium text-[var(--accent-ink)]">
+            className="rs-press w-full min-h-[44px] rounded-xl border border-[var(--edge)] bg-[var(--card)] text-[14px] font-medium text-[var(--accent-ink)]">
             Show {Math.min(PAGE, hidden).toLocaleString("en-IN")} more <span className="text-[var(--ink3)] font-normal">of {hidden.toLocaleString("en-IN")}</span>
           </button>
         )}
@@ -490,7 +491,7 @@ function Earlier({ list, basis, pickBasis }: { list: CalEvent[]; basis: Basis; p
   return (
     <div>
       <div className="flex items-center justify-between gap-2 pb-1.5">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">Its last {list.length === 1 ? "result" : `${list.length} results`}</p>
+        <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink2)]">Its last {list.length === 1 ? "result" : `${list.length} results`}</p>
         <Chips value={basis} options={[["y", "Yearly"], ["q", "Quarterly"]] as [Basis, string][]} onChange={pickBasis} />
       </div>
       <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 gap-y-1 text-[12px]">

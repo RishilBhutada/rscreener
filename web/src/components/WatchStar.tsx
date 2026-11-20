@@ -69,7 +69,7 @@ export default function WatchStar({ symbol, size = "lg" }: { symbol: string; siz
       </button>
 
       {open && !single && (
-        <div role="menu" aria-label={`Watchlists for ${symbol}`} className="absolute right-0 z-40 mt-2 w-60 bg-[var(--card)] border border-[var(--line)] rounded-xl shadow-xl overflow-hidden text-sm">
+        <div role="menu" aria-label={`Watchlists for ${symbol}`} className="absolute right-0 z-40 mt-2 w-60 bg-[var(--card)] border border-[var(--edge)] rounded-xl shadow-xl overflow-hidden text-sm">
           <div className="px-3 py-2 text-xs font-semibold text-[var(--ink3)] border-b border-[var(--line)]">
             Lists for {symbol}
           </div>

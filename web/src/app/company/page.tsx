@@ -24,6 +24,8 @@ import { ListStrip, CompanyTitle, PriceLine } from "@/components/company/Company
 import { exportCompanyXlsx } from "@/components/company/exportXlsx";
 import VolumeSplit from "@/components/company/VolumeSplit";
 
+import { SectionTitle } from "@/components/SectionCard";
+import { IconFileText, IconNotes } from "@tabler/icons-react";
 /** "26 L" holders, "4.2 K", or the plain count. */
 function holdersShort(n: number): string {
   if (n >= 1e5) return `${(n / 1e5).toFixed(n >= 1e6 ? 0 : 1)} L`;
@@ -305,8 +307,8 @@ function CompanyView() {
         </div>
       )}
 
-      <section id="documents" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-3">
-        <h2 className="text-base font-semibold text-[var(--ink)]">
+      <section id="documents" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--edge)] p-4 space-y-3">
+        <SectionTitle icon={IconFileText}>
           Filings
           <InfoTip title="Filings" className="ml-1.5">
             <p>
@@ -314,7 +316,7 @@ function CompanyView() {
               is unverified.
             </p>
           </InfoTip>
-        </h2>
+        </SectionTitle>
         {(company.documents?.announcements?.length ?? 0) > 0 && <Announcements list={company.documents!.announcements!} />}
         <FilingLists docs={company.documents} quarters={company.quarters} />
         <div className="flex gap-4 flex-wrap text-sm">
@@ -329,8 +331,8 @@ function CompanyView() {
 
       {/* Named, because in swipe mode an unnamed pane is only reachable by
           swiping past every other one. */}
-      <section id="notes" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--line)] p-4 space-y-2">
-        <h2 className="text-sm font-bold text-[var(--ink)]">Your notes</h2>
+      <section id="notes" className="scroll-mt-32 bg-[var(--card)] rounded-xl border border-[var(--edge)] p-4 space-y-2">
+        <SectionTitle icon={IconNotes}>Your notes</SectionTitle>
         <textarea
           value={note}
           onChange={(e) => { setNote(e.target.value); saveNote(symbol, e.target.value); }}

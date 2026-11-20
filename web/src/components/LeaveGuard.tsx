@@ -89,7 +89,7 @@ export default function LeaveGuard({ changes, undo }: { changes: Change[]; undo:
   return createPortal(
     <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="rs-leave-title">
       <div className="rs-fade absolute inset-0 bg-black/50" onClick={stay} />
-      <div className="rs-sheet relative w-full max-w-sm rounded-2xl border border-[var(--line)] bg-[var(--card)] p-4 shadow-xl">
+      <div className="rs-sheet relative w-full max-w-sm rounded-2xl border border-[var(--edge)] bg-[var(--card)] p-4 shadow-xl">
         <h2 id="rs-leave-title" className="text-[16px] font-semibold text-[var(--ink)]">Keep these changes?</h2>
         <ul className="mt-3 space-y-1.5 text-[14px]">
           {changes.map((c) => (

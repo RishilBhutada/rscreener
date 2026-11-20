@@ -16,6 +16,8 @@ import { shortName } from "@/lib/names";
 import {
   Chips, Icon, IconButton, SheetAction, Stat, dayMove, money, shortDay, shownSymbol, signed, tone,
 } from "@/components/QuoteUI";
+import { SectionTitle } from "@/components/SectionCard";
+import { IconFilter } from "@tabler/icons-react";
 
 /** The screener, built for a phone: filters as chips, a searchable field
  *  picker, results as one line per company, and everything else in sheets.
@@ -488,9 +490,9 @@ function ScreensInner() {
                 with the figure's spread. Beside it, how many pass that filter on
                 its own, and the median for scale (Step 4, A). */}
             {parsed ? (
-              <div className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden mb-3">
+              <div className="rounded-xl border border-[var(--edge)] bg-[var(--card)] overflow-hidden mb-3">
                 <div className="flex items-center gap-2 px-3 py-2">
-                  <h2 className="text-[13px] font-semibold text-[var(--ink)]">Filters</h2>
+                  <SectionTitle icon={IconFilter}>Filters</SectionTitle>
                   {parsed.conds.length > 1 && (
                     <div role="radiogroup" aria-label="Match" className="inline-flex gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs">
                       {([["and", "Match all"], ["or", "Any"]] as const).map(([j, label]) => (

@@ -3,6 +3,8 @@
 import { CloseGlyph } from "@/components/Glyphs";
 import { useCallback, useEffect, useState } from "react";
 import { loadIndex as loadLite } from "@/lib/index-data";
+import { SectionTitle } from "@/components/SectionCard";
+import { IconRefresh } from "@tabler/icons-react";
 
 
 
@@ -217,10 +219,10 @@ export default function RefreshPanel() {
   const tone = TONE[key];
 
   return (
-    <section className="bg-[var(--card)] border border-[var(--line)] rounded-xl overflow-hidden">
+    <section className="bg-[var(--card)] border border-[var(--edge)] rounded-xl overflow-hidden">
       <div className="px-4 py-3.5 border-b border-[var(--line)]">
         <div className="flex items-baseline justify-between gap-3 flex-wrap">
-          <h2 className="text-base font-semibold text-[var(--ink)]">Refresh</h2>
+          <SectionTitle icon={IconRefresh}>Refresh</SectionTitle>
           <span className="text-xs text-[var(--ink3)]">Next automatic run {nextRun()} · 22:00 IST daily</span>
         </div>
 

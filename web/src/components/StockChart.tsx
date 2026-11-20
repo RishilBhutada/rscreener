@@ -1471,7 +1471,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cas
   ) : null;
   // What is switched on beyond the defaults - growth labels are on by default.
   const activeCount = [spsOn, showDates, showCA, !!cmpSym, !!pWin && peWin !== "ttm", !!pSales && salesWin === "ttm"].filter(Boolean).length + (view === "price" ? inds.length : 0);
-  const label = (t: string) => <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">{t}</span>;
+  const label = (t: string) => <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink2)]">{t}</span>;
   // Owner, 19-Nov-2026: the usual settings "present properly" on top, and
   // Advanced holding "all the possible options, graphs, switches present in
   // the chart, like absolutely everything" - every control below repeats
@@ -2012,7 +2012,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cas
 
       {view === "price" && split && (
         <div className="mt-2 flex items-center justify-center gap-2 flex-wrap">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">Volume</span>
+          <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink2)]">Volume</span>
           <div className="inline-flex gap-0.5 rounded-lg bg-[var(--card2)] p-0.5 text-xs" role="radiogroup" aria-label="Which volume to show">
             {([["all", "All"], ["deliv", "Delivered"], ["intra", "Same day"], ["split", "Split"]] as const).map(([k, label]) => (
               <button key={k} type="button" role="radio" aria-checked={volMode === k} onClick={() => setVolMode(k)}
@@ -2041,7 +2041,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cas
           <div className="mt-2 space-y-2">
             {groups.map(([g, list]) => (
               <div key={g ?? "main"} className="flex items-center gap-x-4 gap-y-1 flex-wrap">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)] w-full flex items-center">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--ink2)] w-full flex items-center">
                   {nameOf(g ?? view)}{g ? " \u00b7 own scale" : ""}
                   {g && (
                     <button onClick={() => { setOverlays(overlays.filter((o) => o !== g)); setHover(null); }}
@@ -2159,7 +2159,7 @@ function ChartShell({
         : held === "years" || view === "years" ? <span className="text-[var(--ink2)]">Years has its own day-of-year axis and cannot be combined.</span>
         : overlays.includes(held)
           ? <button onClick={() => { setOverlays?.(overlays.filter((o) => o !== held)); setHeld(null); }}
-              className="rounded-md bg-[var(--card)] border border-[var(--line)] px-2.5 py-1 font-semibold text-[var(--ink)]">Remove {nm(held)} overlay</button>
+              className="rounded-md bg-[var(--card)] border border-[var(--edge)] px-2.5 py-1 font-semibold text-[var(--ink)]">Remove {nm(held)} overlay</button>
           : <button onClick={() => { setOverlays?.([...overlays, held]); setHeld(null); }}
               className="rounded-md bg-[var(--accent)] px-2.5 py-1 font-semibold text-white">Overlay {nm(held)} on {nm(view)}</button>}
       <button onClick={() => setHeld(null)} className="ml-auto px-2 py-1 text-[var(--ink3)]">Cancel</button>
@@ -2201,7 +2201,7 @@ function ChartShell({
       </div>
     );
     return (
-      <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3 sm:p-4 shadow-[0_1px_3px_rgba(0,0,0,0.10)]">
+      <section className="bg-[var(--card)] rounded-xl border border-[var(--edge)] p-3 sm:p-4 shadow-[0_1px_3px_rgba(0,0,0,0.10)]">
         {top}
         <div className="flex items-center justify-between gap-2 border-b border-[var(--line)] mb-2">
           {tabs}

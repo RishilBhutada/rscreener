@@ -28,33 +28,36 @@
 
 :root,
 :root[data-theme="light"] {
-  --bg: #f5f6f8;
+  --bg: #f2f5fb;
+  /* Midnight sapphire (owner's pick, 20-Nov-2026): every card's own edge -
+     stronger than --line, which stays for the dividers inside a card. */
+  --edge: #b9c6dd;
   --card: #ffffff;
-  --card2: #f0f2f5;
-  --line: #e5e8ee;
-  --line2: #cbd3de;
-  --ink: #0f1729;
-  --ink2: #49566b;
-  --ink3: #5f6b7a;
-  --btn: #101828;
+  --card2: #edf1f9;
+  --line: #dae2ef;
+  --line2: #b5c3dc;
+  --ink: #0a1430;
+  --ink2: #43506b;
+  --ink3: #5f6c86;
+  --btn: #0a1430;
   --btn-ink: #ffffff;
-  --pos: #059669;
-  --neg: #dc2626;
-  --neg-soft: #fdf1f1;
-  --neg-line: #f3c1c1;
+  --pos: #0b8a5f;
+  --neg: #e11d48;
+  --neg-soft: #fdeef1;
+  --neg-line: #f5bccb;
   --warn-ink: #92610b;
   --warn-soft: #fdf6e7;
   --warn-line: #ecc878;
-  --chart-pos: #059669;
-  --chart-neg: #dc2626;
+  --chart-pos: #0e9f6e;
+  --chart-neg: #e11d48;
   /* Up / down against the PREVIOUS close (owner's pick B, 17-Nov-2026): teal
      and orange, so the rule on screen is never mistaken for open to close. */
   --chart-pos2: #0d9488;
   --chart-neg2: #ea580c;
   --chart-line2: #7c3aed;
   --chart-alt: #0891b2;
-  --chart-axis: #94a3b8;
-  --chart-grid: #eef0f3;   /* very faint, the owner's call 30-Sep-2026: the only lines besides events */
+  --chart-axis: #8a97b0;
+  --chart-grid: #e8edf6;   /* very faint, the owner's call 30-Sep-2026: the only lines besides events */
   /* Quarter colours, fixed per Indian fiscal quarter and repeating every year, so
      the same quarter always reads the same. Q3 is red by the owner's choice - it
      marks the quarter, not a loss. */
@@ -77,31 +80,32 @@
 }
 
 :root[data-theme="dark"] {
-  --bg: #0b1017;
-  --card: #121924;
-  --card2: #1a2432;
-  --line: #223048;
-  --line2: #35476b;
-  --ink: #e8edf5;
-  --ink2: #a2b2c8;
-  --ink3: #828fa5;
-  --btn: #e8edf5;
-  --btn-ink: #0b1017;
+  --bg: #060a13;
+  --edge: #2b416b;
+  --card: #0d1424;
+  --card2: #132036;
+  --line: #1e2c48;
+  --line2: #2f4673;
+  --ink: #eef3ff;
+  --ink2: #a8b6d6;
+  --ink3: #7a8aad;
+  --btn: #eef3ff;
+  --btn-ink: #060a13;
   --pos: #34d399;
-  --neg: #f87171;
-  --neg-soft: #34181c;
-  --neg-line: #7a3a3a;
+  --neg: #fb7185;
+  --neg-soft: #351822;
+  --neg-line: #7d3346;
   --warn-ink: #f2c14e;
   --warn-soft: #2b2213;
   --warn-line: #6e5620;
   --chart-pos: #34d399;
-  --chart-neg: #f87171;
+  --chart-neg: #fb7185;
   --chart-pos2: #14b8a6;
   --chart-neg2: #f97316;
   --chart-line2: #a78bfa;
   --chart-alt: #22d3ee;
   --chart-axis: #64748b;
-  --chart-grid: #151d29;
+  --chart-grid: #0f1a2e;
   --q1: #5d82ad;
   --q2: #4e8a6b;
   --q3: #a86259;
@@ -115,10 +119,13 @@
   --chart-value: #a2b2c8;
   --chart-dma50: #fbbf24;
   --chart-dma200: #818cf8;
-  --chart-vol: #31517e;
+  --chart-vol: #2a4a7e;
   --chart-bar: #55499b;
 }
 
+/* Sapphire: the default since 20-Nov-2026 (design 2, "Midnight sapphire"). */
+:root[data-accent="sapphire"] { --accent: #2955e8; --accent-strong: #1e44c8; }
+:root[data-theme="dark"][data-accent="sapphire"] { --accent: #5b8cff; --accent-strong: #8db0ff; }
 :root[data-accent="emerald"] { --accent: #059669; --accent-strong: #047857; }
 :root[data-accent="indigo"] { --accent: #5a4fca; --accent-strong: #4b40b9; }
 :root[data-accent="rose"] { --accent: #e11d48; --accent-strong: #be123c; }
@@ -135,7 +142,7 @@
 /* ── Black ─────────────────────────────────────────────────────────────────
  * True black, for OLED phones, layered ON the dark theme: every dark rule
  * still applies - accents, chart colours, the quarter palette - and only the
- * surfaces change. Dark is navy (#0b1017 has blue in it by design); this has
+ * surfaces change. Dark is navy (#060a13 has blue in it by design); this has
  * none - every grey below is neutral, R = G = B. Cards sit just far enough
  * off the black to read as layers, and borders are hairlines rather than
  * shadows, which disappear on black.
@@ -146,6 +153,7 @@
   --card2: #161616;
   --line: #1f1f1f;
   --line2: #303030;
+  --edge: #2e2e2e;
   --ink: #f5f5f5;
   --ink2: #b3b3b3;
   --ink3: #8c8c8c;
@@ -217,9 +225,9 @@ html { background: var(--bg); }
  * theme, instead of one hardcoded colour that can only ever suit half of them.
  */
 :root, :root[data-theme="light"] { --accent-fill: var(--accent-strong); --accent-fill-ink: #ffffff; }
-:root[data-theme="dark"] { --accent-fill: var(--accent); --accent-fill-ink: #0b1017; }
+:root[data-theme="dark"] { --accent-fill: var(--accent); --accent-fill-ink: #060a13; }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --accent-fill: var(--accent); --accent-fill-ink: #0b1017; }
+  :root:not([data-theme="light"]) { --accent-fill: var(--accent); --accent-fill-ink: #060a13; }
 }
 
 /* Referenced in two places as var(--warn, #d97706) and var(--warn, #b45309) -

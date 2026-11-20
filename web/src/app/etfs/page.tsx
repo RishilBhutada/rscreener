@@ -101,12 +101,12 @@ export default function EtfsPage() {
               {above > 0 && <> · <span className="text-[var(--warn-ink)] font-semibold">{above} trading 2%+ above NAV</span></>}
             </p>
             <input value={q} onChange={(e) => { setQ(e.target.value); setLimit(PAGE); }} placeholder="Search ETF, index or fund house" aria-label="Search ETFs"
-              className="w-full rounded-xl border border-[var(--line)] bg-[var(--card)] px-3 py-2.5 text-[15px] text-[var(--ink)] placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)]" />
+              className="w-full rounded-xl border border-[var(--edge)] bg-[var(--card)] px-3 py-2.5 text-[15px] text-[var(--ink)] placeholder:text-[var(--ink3)] focus:outline-none focus:border-[var(--accent)]" />
             <div className="flex items-center gap-2 overflow-x-auto [scrollbar-width:none] -mx-4 px-4">
               <Segmented label="Type" value={klass} options={CLASSES} onChange={pickKlass} />
             </div>
 
-            <div className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden tabular-nums">
+            <div className="rounded-xl border border-[var(--edge)] bg-[var(--card)] overflow-hidden tabular-nums">
               <div className="grid grid-cols-[minmax(0,1fr)_50px_62px_38px_44px] gap-1 px-3 border-b border-[var(--line)] text-[11px] text-[var(--ink3)]">
                 {([["s", "ETF"], ["prem", "Prem"], ["price", "Price ₹"], ["r1y", "1Y"], ["liq", "₹Cr/day"]] as [Sort, string][]).map(([k, label]) => (
                   <button key={k} type="button" onClick={() => tap(k)} aria-pressed={sort.key === k} aria-label={`Sort by ${label}`}

@@ -14,6 +14,9 @@ import {
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 // The chart library touches the window, so it loads in the browser only.
 import { YearsSwitch } from "@/components/YearsChart";
+import Card from "@/components/SectionCard";
+import { IconArrowsDiff, IconBoxMultiple, IconCalendarTime, IconChartCandle, IconChartLine, IconCoin, IconInfoCircle, IconWorld } from "@tabler/icons-react";
+import ChangePill from "@/components/ChangePill";
 const CommodityChart = dynamic(() => import("@/components/CommodityChart"), {
   ssr: false,
   loading: () => <div className="rs-skel h-[420px]" aria-busy="true" aria-label="Loading chart" />,
@@ -22,17 +25,6 @@ const SpreadChart = dynamic(() => import("@/components/SpreadChart"), {
   ssr: false,
   loading: () => <div className="rs-skel h-[250px]" aria-busy="true" aria-label="Loading chart" />,
 });
-
-function Card({ title, tip, action, children }: { title: string; tip?: React.ReactNode; action?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
-      <h2 className="px-3 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)] flex items-center gap-1">
-        {title}{tip}{action && <span className="ml-auto normal-case tracking-normal flex gap-1.5">{action}</span>}
-      </h2>
-      {children}
-    </section>
-  );
-}
 
 function Stat({ label, value, sub, cls = "" }: { label: string; value: string; sub?: string; cls?: string }) {
   return (
@@ -213,11 +205,11 @@ function CommodityView() {
         )}
       </header>
 
-      <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] px-3 py-3">
+      <section className="rounded-xl border border-[var(--edge)] bg-[var(--card)] px-3 py-3">
         <p className="text-xs text-[var(--ink3)]">{expiryLabel(act.expiry)} contract · most traded · {dayLabel(act.date, true)}</p>
         <p className="mt-0.5 flex items-baseline gap-2 tabular-nums">
-          <span className="text-2xl font-bold">{rupees(act.close)}</span>
-          <span className={`text-[15px] font-semibold ${signClass(act.chg)}`}>{signed(act.chg, 2)}</span>
+          <span className="text-2xl font-extrabold tracking-tight">{rupees(act.close)}</span>
+          <ChangePill value={act.chg} className="self-center">{signed(act.chg, 2)}</ChangePill>
         </p>
         <div className="mt-3 grid grid-cols-3 gap-2">
           <Stat label="Next expiry" value={signed(next?.prem_front, 2)}
@@ -239,7 +231,7 @@ function CommodityView() {
         </div>
       </section>
 
-      <Card title="Expiries" tip={
+      <Card icon={IconCalendarTime} title="Expiries" tip={
         <InfoTip title="Expiries">
           <p>Every delivery month {doc.exchange} has open for {doc.name}, nearest first. Tap one to chart it. The dot marks the most traded month.</p>
           <p><b>vs nearest</b>: the price over the nearest month&apos;s. Below it, that premium spread over the days between the two expiries, as % a year - for metals, roughly the interest and storage the later buyer is paying for.</p>
@@ -250,7 +242,7 @@ function CommodityView() {
         <Expiries doc={doc} pick={pick} onPick={setPick} />
       </Card>
 
-      <Card title="The curve" tip={
+      <Card icon={IconChartLine} title="The curve" tip={
         <InfoTip title="The curve">
           <p>Each month&apos;s premium over the nearest, plotted by days to expiry. Rising: later delivery costs more (contango). Falling: the market pays up to have it now (backwardation) - for gas and electricity, mostly the season.</p>
           {doc.spot && <p>Hollow dot: today&apos;s {doc.spot.label} price, where the curve starts from. A curve rising from it means later delivery costs more than buying in the mandi now.</p>}
@@ -260,7 +252,7 @@ function CommodityView() {
         <TermCurve doc={doc} />
       </Card>
 
-      <Card title={`Chart · ${expiryLabel(pick)}`} action={doc.charts && (
+      <Card icon={IconChartCandle} title={`Chart · ${expiryLabel(pick)}`} action={doc.charts && (
         <>
           {[[doc.charts.by_expiry[pick], "Full view", `${expiryLabel(pick)} contract full screen - candles, indicators, levels`],
             [doc.charts.continuous, "Continuous", "The front month, rolling to the next before expiry - full screen"]]
@@ -299,7 +291,7 @@ function CommodityView() {
       </Card>
 
       {doc.spread.length > 5 && (
-        <Card title="Next expiry over nearest, each day" tip={
+        <Card icon={IconArrowsDiff} title="Next expiry over nearest, each day" tip={
           <InfoTip title="Next expiry over nearest">
             <p>Each day, the second-nearest month over the nearest (a month in its last 5 days, or with under 10 contracts open, is skipped). When the nearest expires the pair moves on a month, so the line can step.</p>
             <p>The history starts with the contracts trading today - the oldest about a year back - and lengthens by a day each night.</p>
@@ -310,7 +302,7 @@ function CommodityView() {
       )}
 
       {doc.world && act.world && (
-        <Card title="World price" tip={
+        <Card icon={IconWorld} title="World price" tip={
           <InfoTip title="World price">
             <p>{doc.world.label}, the same delivery month, converted: price × USD/INR × the change of unit to MCX&apos;s ({doc.quoted}).</p>
             <p>What is left between the two is import duty and taxes MCX prices carry, Indian supply and demand, and the hour between the two closes. Crude and gas settle on the US price, so theirs should stay near zero; gold and silver carry the duty.</p>
@@ -330,7 +322,7 @@ function CommodityView() {
       )}
 
       {doc.spot && act.spot && (
-        <Card title="Spot price" tip={
+        <Card icon={IconCoin} title="Spot price" tip={
           <InfoTip title="Spot price">
             <p>The physical price {doc.spot.label === "Kerala average" ? "across Kerala's pepper markets, weighted by what arrived" : `at ${doc.spot.label.replace(/ mandi$/, "")}, the contract's delivery centre`}, as reported to Agmarknet, the Government of India&apos;s mandi-price service, in the contract&apos;s unit.</p>
             <p>What is left between the two is mostly grade and place: a contract specifies a quality and delivery terms, while a mandi&apos;s price averages whatever arrived that day. A steady gap is normal; a gap that suddenly widens or closes is the news.</p>
@@ -348,7 +340,7 @@ function CommodityView() {
       )}
 
       {family.length > 0 && (
-        <Card title="Other sizes">
+        <Card icon={IconBoxMultiple} title="Other sizes">
           <ul className="divide-y divide-[var(--line)]">
             {family.map((x) => (
               <li key={x.s}>
@@ -368,7 +360,7 @@ function CommodityView() {
         </Card>
       )}
 
-      <Card title="About">
+      <Card icon={IconInfoCircle} title="About">
         <dl className="px-3 pb-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
           <dt className="text-[var(--ink3)]">Exchange</dt><dd>{doc.exchange} · {doc.code ?? doc.s}</dd>
           <dt className="text-[var(--ink3)]">Quoted</dt><dd>{doc.quoted}</dd>

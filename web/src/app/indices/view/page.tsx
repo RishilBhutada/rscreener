@@ -20,23 +20,15 @@ import { HEAT_FULL, HeatPeriod } from "@/lib/treemap";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 import { YearsSwitch } from "@/components/YearsChart";
+import Card from "@/components/SectionCard";
+import { IconCalculator, IconChartCandle, IconInfoCircle, IconLayoutGrid, IconListDetails, IconStack2, IconTrendingUp } from "@tabler/icons-react";
+import ChangePill from "@/components/ChangePill";
 const IndexChart = dynamic(() => import("@/components/IndexChart"), {
   ssr: false, loading: () => <div className="rs-skel h-[300px]" aria-busy="true" aria-label="Loading chart" />,
 });
 const EtfValChart = dynamic(() => import("@/components/EtfValChart"), {
   ssr: false, loading: () => <div className="rs-skel h-[300px]" aria-busy="true" aria-label="Loading chart" />,
 });
-
-function Card({ title, tip, action, children }: { title: string; tip?: React.ReactNode; action?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
-      <h2 className="px-3 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)] flex items-center gap-1">
-        {title}{tip}{action && <span className="ml-auto normal-case tracking-normal flex gap-1.5">{action}</span>}
-      </h2>
-      {children}
-    </section>
-  );
-}
 
 function Stat({ label, value, sub, cls = "" }: { label: string; value: string; sub?: string; cls?: string }) {
   return (
@@ -170,13 +162,13 @@ function IndexView() {
         {doc.members.length > 0 && <p className="text-sm text-[var(--ink2)]">{doc.members.length} companies</p>}
       </header>
 
-      <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] px-3 py-3">
+      <section className="rounded-xl border border-[var(--edge)] bg-[var(--card)] px-3 py-3">
         <p className="text-xs text-[var(--ink3)]">Close · {dayLabel(doc.asof, true)}</p>
         <p className="mt-0.5 flex items-baseline gap-2 tabular-nums flex-wrap">
-          <span className="text-2xl font-bold">{points(doc.close)}</span>
-          <span className={`text-[15px] font-semibold ${signClass(doc.chg)}`}>
+          <span className="text-2xl font-extrabold tracking-tight">{points(doc.close)}</span>
+          <ChangePill value={doc.chg} className="self-center">
             {doc.chg !== null ? `${doc.chg > 0 ? "+" : ""}${points(doc.chg)}` : ""} ({signed(doc.chg_pct, 2)})
-          </span>
+          </ChangePill>
         </p>
         <div className="mt-3 grid grid-cols-3 gap-2">
           <Stat label="Day low" value={points(doc.low, 0)} sub={`high ${points(doc.high, 0)} · open ${points(doc.open, 0)}`} />
@@ -191,7 +183,7 @@ function IndexView() {
         <RangeBar lo={doc.lo52} hi={doc.hi52} now={doc.close} />
       </section>
 
-      <Card title="Chart" tip={
+      <Card icon={IconChartCandle} title="Chart" tip={
         <InfoTip title="Chart">
           <p>The index&apos;s daily close; Max reaches back to {dayLabel(doc.since, true)} in weekly steps. Full view opens the full chart with candles, indicators and drawing tools.</p>
         </InfoTip>
@@ -210,7 +202,7 @@ function IndexView() {
         </YearsSwitch>
       </Card>
 
-      <Card title="Returns" tip={
+      <Card icon={IconTrendingUp} title="Returns" tip={
         <InfoTip title="Returns">
           <p>Price returns from the close nearest each date: the change for spans up to a year, and the compounded rate a year beyond that. Dividends are not included - the total-return index runs ahead by roughly the dividend yield.</p>
         </InfoTip>
@@ -226,7 +218,7 @@ function IndexView() {
       </Card>
 
       {!vix && (doc.val.pe || doc.val.pb || doc.val.dy) && (
-        <Card title="Valuation" tip={
+        <Card icon={IconCalculator} title="Valuation" tip={
           <InfoTip title="Valuation">
             <p>The index&apos;s P/E, P/B and dividend yield as NSE publishes them each day, against the index&apos;s own past: the median of the last five years, and where today sits among the last ten years&apos; days.</p>
             <p>&ldquo;Cheaper than 99% of 10y&rdquo; means the measure was dearer on 99% of the last ten years&apos; days. Red when dearer than 80% of them, green when cheaper than 80% - a description of history, not a forecast or advice.</p>
@@ -252,7 +244,7 @@ function IndexView() {
         const sized = heat.filter((h) => typeof h.size === "number" && h.size > 0).length;
         const digits = heatPeriod === "d1" ? 2 : 1;
         return (
-          <Card title="Heatmap" tip={
+          <Card icon={IconLayoutGrid} title="Heatmap" tip={
             <InfoTip title="Heatmap">
               <p>Every member as a tile, coloured by its change: green a rise, red a fall, at full strength from 3% for a day, 10% for a month and 40% for a year.</p>
               <p><b>Size</b> draws each tile by the company&apos;s full market cap, gathered by industry. It is a guide to what moves the index, not its official weights: NSE weights by free float.</p>
@@ -289,7 +281,7 @@ function IndexView() {
       })()}
 
       {members.length > 0 && (
-        <Card title={`Members · ${members.length}`} tip={
+        <Card icon={IconListDetails} title={`Members · ${members.length}`} tip={
           <InfoTip title="Members">
             <p>The companies in the index, from NSE Indices&apos; list, with today&apos;s close and change.</p>
             <p>Weight is each company&apos;s share of the members&apos; total market cap. NSE weights by free float, so the official weights differ - most for companies whose promoters hold a lot.</p>
@@ -338,7 +330,7 @@ function IndexView() {
       )}
 
       {doc.etfs.length > 0 && (
-        <Card title={`ETFs tracking it · ${doc.etfs.length}`}>
+        <Card icon={IconStack2} title={`ETFs tracking it · ${doc.etfs.length}`}>
           <ul className="divide-y divide-[var(--line)]">
             {(showEtfs ? doc.etfs : doc.etfs.slice(0, 5)).map((s) => {
               const r = bySym.get(s);
@@ -367,7 +359,7 @@ function IndexView() {
         </Card>
       )}
 
-      <Card title="About">
+      <Card icon={IconInfoCircle} title="About">
         <dl className="px-3 pb-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
           <dt className="text-[var(--ink3)]">Exchange</dt><dd>{doc.exch}</dd>
           <dt className="text-[var(--ink3)]">History</dt><dd>From {dayLabel(doc.since, true)}</dd>

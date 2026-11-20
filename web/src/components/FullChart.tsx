@@ -781,7 +781,7 @@ const Toggle = ({ on, label, sub, dot, onClick }: { on: boolean; label: string; 
   </button>
 );
 const Head = ({ children }: { children: React.ReactNode }) => (
-  <p className="px-3 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">{children}</p>
+  <p className="px-3 pt-3 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-[var(--ink2)]">{children}</p>
 );
 const Seg = <T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) => (
   <div className="flex items-center rounded-lg bg-[var(--card2)] p-0.5 shrink-0">
@@ -2591,7 +2591,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
             : held === "price" && view === "ebitda" ? <span className="text-[var(--ink2)]">The price is already on this chart.</span>
             : overlays.includes(held)
               ? <button onClick={() => { setOverlays(overlays.filter((o) => o !== held)); setHeld(null); }}
-                  className="rounded-md bg-[var(--card)] border border-[var(--line)] px-2.5 py-1 font-semibold text-[var(--ink)]">Remove {VIEW_LABEL[held]} overlay</button>
+                  className="rounded-md bg-[var(--card)] border border-[var(--edge)] px-2.5 py-1 font-semibold text-[var(--ink)]">Remove {VIEW_LABEL[held]} overlay</button>
               : <button onClick={() => { setOverlays([...overlays, held]); setCmps([]); setHeld(null); }}
                   className="rounded-md bg-[var(--accent)] px-2.5 py-1 font-semibold text-white">Overlay {VIEW_LABEL[held]} on {VIEW_LABEL[view]}</button>}
           <button onClick={() => setHeld(null)} className="ml-auto px-2 py-1 text-[var(--ink3)]">Cancel</button>

@@ -3,6 +3,7 @@
 import { ReactNode } from "react";
 import Link from "next/link";
 import InfoTip from "@/components/InfoTip";
+import { SectionTitle } from "@/components/SectionCard";
 
 /** Grouped lists, in the shape every phone's own Settings screen uses: a small
  *  capitalised heading, then a rounded card of rows, each row an icon tile, a
@@ -56,11 +57,11 @@ export function Group({ title, tip, tipTitle, note, children }: {
 }) {
   return (
     <section className="mb-7">
-      <h2 className="px-1 mb-2 flex items-center text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">
+      <SectionTitle className="mx-1 mb-2">
         {title}
         {tip && <InfoTip title={tipTitle ?? title} className="ml-1.5">{tip}</InfoTip>}
-      </h2>
-      <div className="rounded-2xl border border-[var(--line)] bg-[var(--card)] overflow-hidden divide-y divide-[var(--line)]">
+      </SectionTitle>
+      <div className="rounded-2xl border border-[var(--edge)] bg-[var(--card)] overflow-hidden divide-y divide-[var(--line)]">
         {children}
       </div>
       {note && <p className="px-1 mt-2 text-xs text-[var(--ink3)]">{note}</p>}

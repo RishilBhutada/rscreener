@@ -8,6 +8,8 @@ import Link from "next/link";
 import TopNav from "@/components/TopNav";
 import InfoTip from "@/components/InfoTip";
 import { CLASS_LABEL, pctRankText, pctText, premClass, premIsStale, premSentence, premText, type EtfDoc, type Returns } from "@/lib/etf";
+import Card from "@/components/SectionCard";
+import { IconCalculator, IconInfoCircle, IconPercentage, IconScale, IconStack2, IconTrendingUp } from "@tabler/icons-react";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 // The chart library touches the window, so it loads in the browser only.
@@ -24,17 +26,6 @@ const money = (v: number | null | undefined) =>
   v === null || v === undefined ? "—" : `₹${v.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 const when = (d: string | null | undefined) =>
   d ? new Date(`${d}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : "—";
-
-function Card({ title, tip, action, children }: { title: string; tip?: React.ReactNode; action?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">
-      <h2 className="px-3 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)] flex items-center gap-1">
-        {title}{tip}{action && <span className="ml-auto normal-case tracking-normal">{action}</span>}
-      </h2>
-      {children}
-    </section>
-  );
-}
 
 function Stat({ label, value, sub, cls = "" }: { label: string; value: string; sub?: string; cls?: string }) {
   return (
@@ -86,7 +77,7 @@ function SameIndex({ doc }: { doc: EtfDoc }) {
     ...(doc.same_index ?? []).map((x) => ({ ...x, self: false })),
   ].sort((a, b) => (b.turnover_cr ?? 0) - (a.turnover_cr ?? 0));
   return (
-    <Card title={`Same index · ${rows.length} ETFs`}>
+    <Card icon={IconStack2} title={`Same index · ${rows.length} ETFs`}>
       <table className="w-full table-fixed text-[13px] tabular-nums">
         <thead>
           <tr className="text-xs text-[var(--ink3)]">
@@ -147,7 +138,7 @@ function EtfView() {
         <p className="text-sm text-[var(--ink2)]">{doc.name}</p>
       </header>
 
-      <section className="rounded-xl border border-[var(--line)] bg-[var(--card)] px-3 py-3">
+      <section className="rounded-xl border border-[var(--edge)] bg-[var(--card)] px-3 py-3">
         <p className={`text-lg font-bold ${premClass(doc.prem)}`}>{premSentence(doc.prem, premIsStale(doc.prem_date, doc.nav_date) ? when(doc.prem_date) : null)}</p>
         <div className="mt-2 grid grid-cols-3 gap-2 tabular-nums">
           <div>
@@ -174,7 +165,7 @@ function EtfView() {
         )}
       </section>
 
-      <Card title="Price vs what it holds" action={
+      <Card icon={IconScale} title="Price vs what it holds" action={
         <Link href={`/chart?s=${encodeURIComponent(doc.s)}`}
           // Remembered so the full chart's back arrow returns here.
           onClick={() => { try { sessionStorage.setItem("rs_chart_from", location.pathname + location.search); } catch { /* private mode */ } }}
@@ -198,7 +189,7 @@ function EtfView() {
       </Card>
 
       {doc.valuation && (
-        <Card title="Valuation of what it holds" tip={
+        <Card icon={IconCalculator} title="Valuation of what it holds" tip={
           <InfoTip title="Valuation of what it holds">
             <p>An ETF has no earnings of its own. Its PE is the PE of the index it holds: the index companies&apos; combined price over their combined earnings - as for a share.</p>
             <p>Published daily by NSE Indices for {doc.valuation.name}. Gold, silver, debt and foreign-index ETFs have none here: metal earns nothing, and no free source gives the others.</p>
@@ -220,7 +211,7 @@ function EtfView() {
         </Card>
       )}
 
-      <Card title="Premium">
+      <Card icon={IconPercentage} title="Premium">
         <div className="grid grid-cols-2">
           <Stat label="Now" value={premText(doc.prem)} cls={premClass(doc.prem)} sub={when(doc.prem_date)} />
           <Stat label="Last month, average" value={premText(doc.prem_avg_1m)} cls={premClass(doc.prem_avg_1m)} />
@@ -236,14 +227,14 @@ function EtfView() {
 
       {(doc.same_index?.length ?? 0) > 0 && <SameIndex doc={doc} />}
 
-      <Card title="Returns">
+      <Card icon={IconTrendingUp} title="Returns">
         <ReturnsTable doc={doc} />
         <p className="px-3 py-2 text-[11px] text-[var(--ink3)]">
           Price returns include any change in the premium; NAV returns do not.
         </p>
       </Card>
 
-      <Card title="About">
+      <Card icon={IconInfoCircle} title="About">
         <dl className="px-3 pb-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
           <dt className="text-[var(--ink3)]">Tracks</dt><dd>{doc.underlying || "—"}</dd>
           <dt className="text-[var(--ink3)]">Fee</dt>

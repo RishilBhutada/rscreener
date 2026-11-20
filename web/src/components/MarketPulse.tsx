@@ -6,6 +6,8 @@
 
 import { useEffect, useState } from "react";
 import InfoTip from "@/components/InfoTip";
+import { SectionTitle } from "@/components/SectionCard";
+import { IconActivity } from "@tabler/icons-react";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
@@ -40,8 +42,8 @@ export default function MarketPulse() {
   ].filter(Boolean) as { label: string; value: string; cls: string; sub: string }[];
   if (!tiles.length) return null;
   return (
-    <section className="bg-[var(--card)] rounded-xl border border-[var(--line)] p-3">
-      <h2 className="text-[13px] font-semibold text-[var(--ink)] px-1 flex items-center gap-1">
+    <section className="bg-[var(--card)] rounded-xl border border-[var(--edge)] p-3">
+      <SectionTitle icon={IconActivity} className="mx-1">
         Market pulse
         <InfoTip title="Market pulse">
           <p><b>FII / DII cash</b>: net buying by foreign and domestic institutions in the cash market, from NSE&apos;s daily report. NSE gives one day at a time, so the running total grows night by night.</p>
@@ -49,7 +51,7 @@ export default function MarketPulse() {
           <p><b>Above 200 DMA</b>: the share of NSE stocks closing above their 200-day average, from this app&apos;s own daily closes. A measure of how broad a move is.</p>
           <p>All of it describes what happened. None of it has been tested here as a forecast.</p>
         </InfoTip>
-      </h2>
+      </SectionTitle>
       <div className="mt-1.5 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
         {tiles.map((t) => (
           <div key={t.label} className="min-w-0 rounded-lg bg-[var(--card2)] px-2 py-1.5">

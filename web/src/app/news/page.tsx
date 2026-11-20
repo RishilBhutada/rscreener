@@ -10,6 +10,7 @@ import { loadIndex, symbolHref } from "@/lib/index-data";
 import { allWatched } from "@/lib/watchlists";
 import { loadPortfolio } from "@/lib/portfolio";
 import { COMMODITY_WORDS, NewsDoc, inr, loadNews, qtyShort, since } from "@/lib/news";
+import { SectionTitle } from "@/components/SectionCard";
 
 /** News, broker calls, deals and stake changes (owner, 15-Oct-2026), kept
  *  current through the day by the news watcher. Headlines and calls are other
@@ -53,7 +54,7 @@ function Grid<T>({ rows, cols, first, sortBy, limit }: { rows: T[]; cols: Col<T>
   }, [rows, cols, sort, limit]);
   return (
     <>
-    <div className="overflow-x-auto rounded-xl border border-[var(--line)] bg-[var(--card)] [scrollbar-width:none]">
+    <div className="overflow-x-auto rounded-xl border border-[var(--edge)] bg-[var(--card)] [scrollbar-width:none]">
       <table className="w-full text-[13px] border-collapse tabular-nums">
         <thead>
           <tr className="text-[11px] text-[var(--ink3)] border-b border-[var(--line)]">
@@ -194,13 +195,13 @@ export default function NewsPage() {
         {doc && tab === "news" && (days.length === 0 ? empty("headlines") : (
           <div className="space-y-4">
             <section>
-              <h2 className="px-1 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">{dayName(days[0][0])} · {days[0][1].length}</h2>
-              <div className="rounded-xl border border-[var(--line)] bg-[var(--card)] overflow-hidden">{headlines(days[0][0], days[0][1])}</div>
+              <SectionTitle className="mx-1 mb-1.5">{dayName(days[0][0])} · {days[0][1].length}</SectionTitle>
+              <div className="rounded-xl border border-[var(--edge)] bg-[var(--card)] overflow-hidden">{headlines(days[0][0], days[0][1])}</div>
             </section>
             {days.length > 1 && (
               <section>
-                <h2 className="px-1 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--ink3)]">Earlier days</h2>
-                <ul className="rounded-xl border border-[var(--line)] bg-[var(--card)] divide-y divide-[var(--line)] overflow-hidden">
+                <SectionTitle className="mx-1 mb-1.5">Earlier days</SectionTitle>
+                <ul className="rounded-xl border border-[var(--edge)] bg-[var(--card)] divide-y divide-[var(--line)] overflow-hidden">
                   {days.slice(1).map(([d, xs]) => {
                     const open = shownOf(d) > 0;
                     return (
