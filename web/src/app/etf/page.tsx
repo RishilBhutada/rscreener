@@ -9,7 +9,13 @@ import TopNav from "@/components/TopNav";
 import InfoTip from "@/components/InfoTip";
 import { CLASS_LABEL, pctRankText, pctText, premClass, premIsStale, premSentence, premText, type EtfDoc, type Returns } from "@/lib/etf";
 import Card from "@/components/SectionCard";
-import { IconCalculator, IconInfoCircle, IconPercentage, IconScale, IconStack2, IconTrendingUp } from "@tabler/icons-react";
+import { IconCalculator, IconChartLine, IconChartPie, IconCoin, IconInfoCircle, IconPercentage, IconReceipt, IconScale, IconStack2, IconTrendingUp, IconWorld, type TablerIcon } from "@tabler/icons-react";
+import ChangePill from "@/components/ChangePill";
+
+/** Each kind of ETF's icon beside its label. */
+const CLASS_ICON: Record<string, TablerIcon> = {
+  equity: IconChartLine, international: IconWorld, gold: IconCoin, silver: IconCoin, debt: IconReceipt, hybrid: IconChartPie,
+};
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 // The chart library touches the window, so it loads in the browser only.
@@ -126,39 +132,60 @@ function EtfView() {
   if (error) return <p className="text-[var(--neg)] text-sm">{error}</p>;
   if (!doc) return <div className="rs-skel h-96" aria-busy="true" aria-label="Loading" />;
 
+  const traded = doc.rows.filter((r) => r.length < 5 || r[4] !== 0);
+  const dayChg = traded.length > 1 && traded[traded.length - 2][1]
+    ? (traded[traded.length - 1][1] / traded[traded.length - 2][1] - 1) * 100 : null;
   return (
     <div className="space-y-3">
       <header>
-        <div className="flex items-baseline gap-2 flex-wrap">
-          <h1 className="text-xl font-bold">{doc.s}</h1>
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ink3)] border border-[var(--line2)] rounded px-1.5">
-            {CLASS_LABEL[doc.class] ?? doc.class}
-          </span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <h1 className="text-xl font-extrabold tracking-tight">{doc.s}</h1>
+          {(() => {
+            const I = CLASS_ICON[doc.class] ?? IconChartLine;
+            return (
+              <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold text-[var(--accent-ink)] bg-[var(--accent-soft)]">
+                <I size={12} stroke={2.2} aria-hidden="true" />
+                {CLASS_LABEL[doc.class] ?? doc.class}
+              </span>
+            );
+          })()}
         </div>
         <p className="text-sm text-[var(--ink2)]">{doc.name}</p>
       </header>
 
-      <section className="rounded-xl border border-[var(--edge)] bg-[var(--card)] px-3 py-3">
-        <p className={`text-lg font-bold ${premClass(doc.prem)}`}>{premSentence(doc.prem, premIsStale(doc.prem_date, doc.nav_date) ? when(doc.prem_date) : null)}</p>
-        <div className="mt-2 grid grid-cols-3 gap-2 tabular-nums">
-          <div>
-            <p className="text-xs text-[var(--ink3)]">Price</p>
-            <p className="font-semibold">{money(doc.price)}</p>
-            <p className="text-[11px] text-[var(--ink3)]">{when(doc.price_date)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-[var(--ink3)]">NAV</p>
-            <p className="font-semibold">{money(doc.nav)}</p>
+      {/* The price first, big, with the day's move as a pill - as on every
+          other page since the Midnight sapphire look (20-Nov-2026) - then the
+          premium, which is what an ETF page is for, then the figures. */}
+      <section className="rounded-xl border border-[var(--edge)] bg-[var(--card)] overflow-hidden">
+        <div className="px-3 pt-3 pb-2.5">
+          <p className="text-xs text-[var(--ink3)]">Price · {when(doc.price_date)}</p>
+          <p className="mt-0.5 flex items-center gap-2 flex-wrap tabular-nums">
+            <span className="text-2xl font-extrabold tracking-tight">{money(doc.price)}</span>
+            {dayChg !== null && (
+              <ChangePill value={dayChg}>{dayChg > 0 ? "+" : dayChg < 0 ? "−" : ""}{Math.abs(dayChg).toFixed(2)}%</ChangePill>
+            )}
+          </p>
+          <p className={`mt-2 text-[15px] font-bold ${premClass(doc.prem)}`}>{premSentence(doc.prem, premIsStale(doc.prem_date, doc.nav_date) ? when(doc.prem_date) : null)}</p>
+        </div>
+        <div className="grid grid-cols-3 border-t border-[var(--line)] tabular-nums">
+          <div className="px-3 py-2">
+            <p className="text-[11px] text-[var(--ink3)]">NAV</p>
+            <p className="text-[14px] font-bold">{money(doc.nav)}</p>
             <p className="text-[11px] text-[var(--ink3)]">{when(doc.nav_date)}</p>
           </div>
-          <div>
-            <p className="text-xs text-[var(--ink3)]">Premium</p>
-            <p className={`font-semibold ${premClass(doc.prem)}`}>{premText(doc.prem)}</p>
+          <div className="px-3 py-2 border-l border-[var(--line)]">
+            <p className="text-[11px] text-[var(--ink3)]">Premium</p>
+            <p className={`text-[14px] font-bold ${premClass(doc.prem)}`}>{premText(doc.prem)}</p>
             <p className="text-[11px] text-[var(--ink3)]">{when(doc.prem_date)}</p>
+          </div>
+          <div className="px-3 py-2 border-l border-[var(--line)]">
+            <p className="text-[11px] text-[var(--ink3)]">1M avg</p>
+            <p className={`text-[14px] font-bold ${premClass(doc.prem_avg_1m)}`}>{premText(doc.prem_avg_1m)}</p>
+            <p className="text-[11px] text-[var(--ink3)]">Last month</p>
           </div>
         </div>
         {doc.thin && (
-          <p className="mt-2 text-xs text-[var(--warn-ink)]">
+          <p className="px-3 py-2 border-t border-[var(--line)] text-xs text-[var(--warn-ink)]">
             Thinly traded — {doc.traded_days_20} of the last 20 sessions, about ₹{doc.turnover_cr.toLocaleString("en-IN")} Cr a day.
             The closing price may be stale, so the premium is less reliable.
           </p>

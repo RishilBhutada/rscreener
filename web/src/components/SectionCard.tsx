@@ -26,7 +26,7 @@ export function SectionHead({ icon: Icon, title, tip, action, className = "", as
     <div className={`flex items-center gap-2 min-w-0 ${className}`}>
       <Tag className="flex items-center gap-1.5 min-w-0 pl-2.5 border-l-[3px] border-[var(--accent)] text-[12px] leading-[18px] font-extrabold uppercase tracking-[0.07em] text-[var(--ink)]">
         {Icon && <Icon size={15} stroke={2} className="shrink-0 text-[var(--accent)]" aria-hidden="true" />}
-        <span className="truncate">{title}</span>
+        <span className="min-w-0 break-words">{title}</span>
         {tip}
       </Tag>
       {action && <div className="ml-auto shrink-0 flex items-center gap-1.5">{action}</div>}

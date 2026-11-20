@@ -780,8 +780,9 @@ const Toggle = ({ on, label, sub, dot, onClick }: { on: boolean; label: string; 
     <Switch on={on} />
   </button>
 );
+// The sheets' headings carry the sapphire rail like every section (20-Nov-2026).
 const Head = ({ children }: { children: React.ReactNode }) => (
-  <p className="px-3 pt-3 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-[var(--ink2)]">{children}</p>
+  <p className="mx-3 mt-3 mb-1.5 pl-2.5 border-l-[3px] border-[var(--accent)] text-[11px] leading-[16px] font-extrabold uppercase tracking-[0.07em] text-[var(--ink)]">{children}</p>
 );
 const Seg = <T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) => (
   <div className="flex items-center rounded-lg bg-[var(--card2)] p-0.5 shrink-0">

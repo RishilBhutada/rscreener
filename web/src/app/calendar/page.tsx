@@ -14,6 +14,8 @@ import {
   CalEvent, CalKind, GROUPS, KIND_LABEL, PastDoc, UpcomingDoc, clock, crore, dayLabel, docUrl, fromPast, fromUpcoming, matches, quarterDue,
 } from "@/lib/calendar";
 import { SectionTitle } from "@/components/SectionCard";
+import DateTile from "@/components/DateTile";
+import { IconArrowBackUp, IconArrowsSplit, IconBell, IconCoins, IconDots, IconGift, IconReportAnalytics, IconRocket, IconTicket, IconUsers, type TablerIcon } from "@tabler/icons-react";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 /** Rows drawn at a time: the past year holds about 11,000 events. */
@@ -28,10 +30,18 @@ const COLOR: Record<CalKind, string> = {
   update: "var(--accent)",
 };
 
+/** Each kind's drawn icon, beside its label (Midnight sapphire, 20-Nov-2026). */
+const KIND_ICON: Record<CalKind, TablerIcon> = {
+  results: IconReportAnalytics, dividend: IconCoins, bonus: IconGift, split: IconArrowsSplit, rights: IconTicket,
+  buyback: IconArrowBackUp, other: IconDots, ipo: IconRocket, meeting: IconUsers, update: IconBell,
+};
+
 function Badge({ kind }: { kind: CalKind }) {
+  const I = KIND_ICON[kind];
   return (
-    <span className="shrink-0 text-[10px] font-semibold rounded px-1.5 py-0.5"
+    <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold rounded px-1.5 py-0.5"
       style={{ color: COLOR[kind], background: `color-mix(in srgb, ${COLOR[kind]} 14%, transparent)` }}>
+      <I size={11} stroke={2.2} aria-hidden="true" />
       {KIND_LABEL[kind]}
     </span>
   );
@@ -403,9 +413,10 @@ export default function CalendarPage() {
                   </SectionTitle>
                 )}
                 <section className="rounded-xl border border-[var(--edge)] bg-[var(--card)] overflow-hidden">
-                  <h3 className="px-3 py-2 text-[13px] font-semibold border-b border-[var(--line)] flex items-center gap-3">
+                  <h3 className="px-3 py-2 text-[13px] font-bold border-b border-[var(--line)] flex items-center gap-3">
+                    <DateTile day={d} />
                     <span className="flex-1">
-                      {d === today ? "Today" : dayLabel(d)}
+                      {d === today ? "Today" : new Date(`${d}T12:00:00Z`).toLocaleDateString("en-IN", { weekday: "long", timeZone: "UTC" })}
                       {d === today && (when === "next" || searching) && s.title !== "Past year" && list.some((e) => e.kind === "results") && (
                         <span className="font-normal text-[var(--ink2)]">{list[0].upcoming ? " · still to come" : " · out"}</span>
                       )}
@@ -427,7 +438,7 @@ export default function CalendarPage() {
                             <span className="flex-1 min-w-0">
                               {/* The name gets the whole first line: beside three
                                   columns of figures it had room for five letters. */}
-                              <span className="block text-[14px] font-medium truncate">{e.name}</span>
+                              <span className="block text-[14px] font-semibold truncate">{e.name}</span>
                               <span className="flex items-center gap-1.5 min-w-0 text-[12px] text-[var(--ink3)] tabular-nums">
                                 {timeOf(e) && <span className="shrink-0 font-semibold text-[var(--ink2)]">{timeOf(e)}</span>}
                                 <Badge kind={e.kind} />

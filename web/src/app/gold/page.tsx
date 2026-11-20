@@ -13,6 +13,8 @@ import Card from "@/components/SectionCard";
 import { IconChartDots, IconChartHistogram, IconStar } from "@tabler/icons-react";
 import { SectionTitle } from "@/components/SectionCard";
 import ChangePill from "@/components/ChangePill";
+import DateTile from "@/components/DateTile";
+import { IconBook, IconBriefcase, IconBuildingBank, IconCalendarX, IconChartLine as IconChartLineFam, IconCoin, IconConfetti, IconDroplet, IconFlag, IconFlame, IconGavel, IconMoodSmile, IconPoint, IconReceipt, IconReceiptTax, IconShip, IconSpeakerphone, IconWorld, type TablerIcon } from "@tabler/icons-react";
 
 /** Gold: what it costs now, and what moves it - the scheduled releases and
  *  decisions of the week, every Fed meeting, and the headlines - each rated
@@ -24,9 +26,26 @@ type Tab = "calendar" | "news" | "ratings";
 type StarMin = "1" | "2" | "3" | "4" | "5";
 const STAR_MINS: [StarMin, string][] = [["1", "1+"], ["2", "2+"], ["3", "3+"], ["4", "4+"], ["5", "5"]];
 
+/** Each kind of event's drawn icon on its calendar row (Midnight sapphire, 20-Nov-2026). */
+const FAM_ICON: Record<string, TablerIcon> = {
+  fomc: IconBuildingBank, fomc_minutes: IconBuildingBank, fed_chair: IconBuildingBank, fed_member: IconBuildingBank,
+  beige_book: IconBook, ecb: IconBuildingBank, boj: IconBuildingBank, rbi: IconBuildingBank,
+  us_cpi: IconFlame, us_pce: IconFlame, us_ppi: IconFlame, us_expect: IconFlame,
+  us_jobs: IconBriefcase, us_labour_minor: IconBriefcase, us_claims: IconBriefcase,
+  us_growth: IconChartLineFam, us_sentiment: IconMoodSmile, us_yields: IconReceipt, china: IconWorld,
+  india_budget: IconReceiptTax, india_duty: IconReceiptTax, festival: IconConfetti, announced: IconSpeakerphone,
+  mcx_expiry: IconCalendarX, us_election: IconFlag, india_election: IconFlag, us_fiscal: IconGavel,
+  trade: IconShip, opec: IconDroplet, cb_gold: IconCoin,
+};
+
+function FamIcon({ fam }: { fam: string }) {
+  const I = FAM_ICON[fam] ?? IconPoint;
+  return <I size={14} stroke={2} className="shrink-0 text-[var(--ink2)]" aria-hidden="true" />;
+}
+
 function Stars({ n, size = 13 }: { n: number; size?: number }) {
   return (
-    <span className="inline-flex shrink-0 text-[var(--warn)]" aria-label={`${n} of 5`} title={`${n} of 5`}>
+    <span className="inline-flex shrink-0 text-[var(--accent)]" aria-label={`${n} of 5`} title={`${n} of 5`}>
       {[1, 2, 3, 4, 5].map((i) => <StarGlyph key={i} filled={i <= n} size={size} className={i <= n ? "" : "opacity-30"} />)}
     </span>
   );
@@ -273,7 +292,11 @@ export default function GoldPage() {
                     </SectionTitle>
                   )}
                   <section className="rounded-xl border border-[var(--edge)] bg-[var(--card)] overflow-hidden">
-                    <h3 className="px-3 py-2 text-[13px] font-semibold border-b border-[var(--line)]">{istDay(list[0].t)}</h3>
+                    <h3 className="px-3 py-2 text-[13px] font-bold border-b border-[var(--line)] flex items-center gap-3">
+                      <DateTile day={d} />
+                      <span>{new Date(`${d}T12:00:00Z`).toLocaleDateString("en-IN", { weekday: "long", timeZone: "UTC" })}
+                        <span className="font-normal text-[var(--ink3)]"> · {list.length}</span></span>
+                    </h3>
                     <ul className="divide-y divide-[var(--line)]">
                       {list.map((e) => (
                         <li key={`${e.t}${e.title}`}>
@@ -282,7 +305,8 @@ export default function GoldPage() {
                             <span className="flex-1 min-w-0">
                               <span className="flex items-center gap-1.5">
                                 <span className="text-[10px] font-semibold rounded px-1 py-0.5 bg-[var(--card2)] text-[var(--ink3)]">{COUNTRY[e.c] ?? e.c}</span>
-                                <span className="text-[14px] font-medium truncate">{e.title}</span>
+                                <FamIcon fam={e.fam} />
+                                <span className="text-[14px] font-semibold truncate">{e.title}</span>
                               </span>
                               <span className="block text-[11px] text-[var(--ink3)] tabular-nums truncate">
                                 {[e.actual && `Actual ${e.actual}`, e.previous && `Previous ${e.previous}`,
