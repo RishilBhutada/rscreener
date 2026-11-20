@@ -39,6 +39,13 @@ export type GoldFamily = {
 
 export type GoldNews = { t: string; title: string; url: string; src: string; stars: number; why: string };
 
+export type GoldCheck = {
+  what: string; ok: boolean; against?: string; n?: number;
+  median?: number; worst?: number; worst_day?: string; dropped?: string[];
+  gap_lo?: number; gap_hi?: number; gap_now?: number; jumps?: [string, number][]; n_jumps?: number;
+  last?: string | null; behind?: number | null;
+};
+
 export type GoldDoc = {
   generated_at: string;
   snapshot: {
@@ -46,6 +53,8 @@ export type GoldDoc = {
     parity?: number; parity_date?: string; mcx_prem?: number; gold_silver?: number;
     /** India's import duty in force (%), since when and why; the world price with it; MCX against that */
     duty?: number; duty_since?: string; duty_why?: string; landed?: number; mcx_vs_landed?: number;
+    /** Each price set against an independent source (pipeline/gold_check.py, 20-Nov-2026) */
+    checks?: { on: string; items: GoldCheck[] };
   };
   events: GoldEvent[];
   families: Record<string, GoldFamily>;

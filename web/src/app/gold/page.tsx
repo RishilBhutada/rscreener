@@ -7,7 +7,7 @@ import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { StarGlyph, ExternalGlyph } from "@/components/Glyphs";
 import { Chips, Icon, Stat, signed, tone } from "@/components/QuoteUI";
 import MacroCharts from "@/components/MacroCharts";
-import { COUNTRY, GoldDoc, GoldEvent, GoldFamily, GoldNews, ago, istDate, istDay, istTime } from "@/lib/gold";
+import { COUNTRY, GoldCheck, GoldDoc, GoldEvent, GoldFamily, GoldNews, ago, istDate, istDay, istTime } from "@/lib/gold";
 
 /** Gold: what it costs now, and what moves it - the scheduled releases and
  *  decisions of the week, every Fed meeting, and the headlines - each rated
@@ -70,6 +70,33 @@ function verdict(e: GoldEvent): string | null {
 }
 
 const pct = (v?: number) => (v === undefined ? "" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(2)}%`);
+
+/** Each price against an independent source (owner, 20-Nov-2026: "improve
+ *  the data accuracy"): one line, the detail behind the "i". */
+function Checks({ c }: { c: NonNullable<GoldDoc["snapshot"]["checks"]> }) {
+  const bad = c.items.filter((x) => !x.ok);
+  const dayYear = (d: string) => `${istDay(`${d}T12:00:00Z`)} ${d.slice(0, 4)}`;
+  const line = (x: GoldCheck): string => {
+    if (x.what === "MCX vs COMEX") {
+      return `MCX vs COMEX: ${x.n_jumps ? `${x.n_jumps} day${x.n_jumps > 1 ? "s" : ""} out of line (${(x.jumps ?? []).map(([d]) => dayYear(d)).join(", ")})` : `consistent on all ${x.n} days`}; the gap between them ran ${x.gap_lo}% to ${x.gap_hi}%, ${x.gap_now}% now (the local premium or discount plus carry).`;
+    }
+    if (x.median !== undefined) {
+      return `${x.what}: within ${x.median}% of the ${x.against} on a typical day over ${x.n} days, at most ${x.worst}%${x.dropped?.length ? `; ${x.dropped.length} bad day${x.dropped.length > 1 ? "s" : ""} from Yahoo removed (${x.dropped.map(dayYear).join(", ")})` : ""}.`;
+    }
+    if (x.dropped?.length) return `${x.what}: ${x.dropped.length} one-day blip${x.dropped.length > 1 ? "s" : ""} from Yahoo removed (${x.dropped.map(dayYear).join(", ")}).`;
+    if (x.last !== undefined) return `${x.what}: last price ${x.last ? istDay(`${x.last}T12:00:00Z`) : "none"}${x.ok ? "" : ` - ${x.behind} days behind`}.`;
+    return x.what;
+  };
+  return (
+    <p className={`mt-2 text-[12px] flex items-center gap-1 ${bad.length ? "text-[var(--neg)]" : "text-[var(--ink3)]"}`}>
+      {bad.length ? `Check ${istDay(`${c.on}T12:00:00Z`)}: ${[...new Set(bad.map((x) => x.what))].join(", ")} need a look` : `Checked ${istDay(`${c.on}T12:00:00Z`)} against independent sources: all consistent`}
+      <InfoTip title="How the prices are checked">
+        <p>Every night each price is set against a source that does not depend on it. USD/INR against the Federal Reserve&apos;s own noon rate. MCX against COMEX × USD/INR × India&apos;s duty: two exchanges held together by arbitrage, so the gap between them drifts slowly, and a jump in it from one day to the next means one side&apos;s price is wrong. And each price&apos;s last day, to catch a feed that has stopped.</p>
+        {c.items.map((x, i) => <p key={`${x.what}${i}`}><b>{x.ok ? "✓" : "✗"}</b> {line(x)}</p>)}
+      </InfoTip>
+    </p>
+  );
+}
 
 function Card({ title, tip, children }: { title: string; tip?: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -171,9 +198,10 @@ export default function GoldPage() {
                 <InfoTip title="Prices">
                   <p>MCX: the nearest gold contract not in its last five days, closing price. COMEX: the front-month settlement, via Yahoo. World in ₹ is COMEX × USD/INR for 10 grams, on the same day as the MCX close.</p>
                   {s.duty !== undefined && <p>India charges {s.duty}% import duty on gold{s.duty_since ? ` since ${istDay(`${s.duty_since}T12:00:00Z`)} ${s.duty_since.slice(0, 4)}` : ""}{s.duty_why ? ` - ${s.duty_why.charAt(0).toLowerCase()}${s.duty_why.slice(1)}` : ""}. MCX prices carry it and COMEX does not, so it is most of the gap. What is left - MCX vs the world price with duty - is the local premium or discount plus a month or two of carry. GST is not in either price.</p>}
-                  <p>Gold/silver: grams of silver one gram of gold buys at MCX prices. Prices are as published, not checked further.</p>
+                  <p>Gold/silver: grams of silver one gram of gold buys at MCX prices. Each price is checked against an independent source every night - see the line below.</p>
                 </InfoTip>
               </div>
+              {s.checks && s.checks.items.length > 0 && <Checks c={s.checks} />}
             </section>
 
             {/* Between the price and the tabs rather than inside or after them:

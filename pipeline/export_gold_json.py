@@ -28,6 +28,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import gold_check
 from gold_lib import (ANNOUNCE, FAMILIES, MEASURE_ON_MCX, MIN_MEASURED, NOT_MEASURED, clean_title, duty_on,
                       rate_headline, stars_from_ratio)
 
@@ -112,6 +113,22 @@ def front_series(con, root: str) -> Closes:
     return Closes(rows)
 
 
+def front_raw(con, root: str) -> list[tuple[str, float]]:
+    """The same front contract each day as front_series, at its real close -
+    not chained back across rolls - for comparing against another market."""
+    exp = dict(con.execute("SELECT key, expiry FROM commodity_contracts WHERE root=?", (root,)))
+    by_day: dict[str, tuple[str, float]] = {}
+    for key, d, c in con.execute(
+            "SELECT key, date, close FROM commodity_bars WHERE volume > 0 AND close > 0 AND key IN "
+            "(SELECT key FROM commodity_contracts WHERE root=?) ORDER BY date", (root,)):
+        e = exp.get(key)
+        if not e or (date.fromisoformat(e) - date.fromisoformat(d)).days < EXPIRING_DAYS:
+            continue
+        if d not in by_day or e < by_day[d][0]:
+            by_day[d] = (e, c)
+    return [(d, by_day[d][1]) for d in sorted(by_day)]
+
+
 def reaction_days(when_utc: datetime) -> tuple[str, str]:
     # COMEX's daily close is the 1:30pm New York settlement - before the Fed
     # announces at 2pm. Measured against the same day, the Fed looked like a
@@ -171,6 +188,14 @@ def main() -> None:
         world[t].append((d, c))
     comex, fx = Closes(world["GC=F"]), Closes(world["INR=X"])
     mcx, silver = front_series(con, "GOLD"), front_series(con, "SILVER")
+    # For the cross-checks (gold_check.py): MCX at its real closes, and the
+    # Fed's USD/INR (fetch_gold.fred_fx).
+    mcx_raw = front_raw(con, "GOLD")
+    fed_fx = con.execute("SELECT date, close FROM commodity_world WHERE ticker='FRED:DEXINUS' ORDER BY date").fetchall()
+    # Yahoo's bad USD/INR days out before anything uses the rate.
+    fx_raw = sorted(world["INR=X"])
+    world["INR=X"], fx_dropped = gold_check.clean_fx(fx_raw, fed_fx)
+    fx = Closes(world["INR=X"])
     events = con.execute("SELECT key, when_utc, country, title, impact, forecast, previous, actual, family, source "
                          "FROM gold_events ORDER BY when_utc").fetchall()
     has = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -346,6 +371,22 @@ def main() -> None:
                 landed = parity * (1 + duty[0] / 100)
                 snap.update({"duty": duty[0], "duty_since": duty[1], "duty_why": duty[2], "landed": r2(landed, 0),
                              "mcx_vs_landed": r2((snap["mcx"]["close"] / landed - 1) * 100)})
+    # Every price set against an independent source (owner, 20-Nov-2026:
+    # "improve the data accuracy").
+    # Scored on the rate the page uses - after the bad days are out - with
+    # those days listed: a removed blip is fixed, not a failure.
+    fx_check = gold_check.usdinr(world["INR=X"], fed_fx)
+    if fx_check is not None:
+        fx_check["dropped"] = fx_dropped[-10:]
+    elif fx_dropped:
+        fx_check = {"what": "USD/INR", "against": "its own neighbouring days", "dropped": fx_dropped[-10:], "ok": True}
+    checks = [c for c in (fx_check,
+                          gold_check.parity(mcx_raw, sorted(world["GC=F"]), sorted(world["INR=X"]), duty_on))
+              if c]
+    today = now.date()
+    checks += [gold_check.fresh(n, sorted(rows), today)
+               for n, rows in (("MCX gold", mcx_raw), ("COMEX gold", world["GC=F"]), ("USD/INR", world["INR=X"]))]
+    snap["checks"] = {"on": today.isoformat(), "items": checks}
     if "mcx" in snap and "silver" in snap:
         snap["gold_silver"] = r2((snap["mcx"]["close"] / 10) / (snap["silver"]["close"] / 1000), 1)
 

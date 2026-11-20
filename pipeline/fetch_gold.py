@@ -490,6 +490,18 @@ def fred(path: str, **params) -> dict:
     return r.json()
 
 
+def fred_fx(con) -> None:
+    """The Federal Reserve's noon USD/INR (FRED DEXINUS), last 150 days: the
+    independent source the gold page's rupee rate is checked against
+    (gold_check.py; owner, 20-Nov-2026). Stored beside Yahoo's INR=X."""
+    start = (date.today() - timedelta(days=150)).isoformat()
+    obs = fred("series/observations", series_id="DEXINUS", observation_start=start).get("observations", [])
+    rows = [("FRED:DEXINUS", d, v) for d, v in readings(obs)]
+    con.executemany("INSERT OR REPLACE INTO commodity_world VALUES (?,?,?)", rows)
+    con.commit()
+    print(f"FRED USD/INR: {len(rows)} days")
+
+
 def fred_dates(con, today: str) -> None:
     for rid, (fam, title, hm, word) in FRED_RELEASES.items():
         try:
@@ -799,7 +811,7 @@ def main() -> None:
              lambda: boj(con, today), lambda: ism(con, today), lambda: india(con, today),
              lambda: world(con, today)]
     if os.environ.get("FRED_API_KEY", "").strip():
-        steps += [lambda: fred_dates(con, today), lambda: fred_actuals(con)]
+        steps += [lambda: fred_dates(con, today), lambda: fred_actuals(con), lambda: fred_fx(con)]
     else:
         print("FRED: no FRED_API_KEY secret - CPI, jobs, PPI, JOLTS and claims are not on the calendar, "
               "and no actual figures are filled in")
