@@ -1127,6 +1127,43 @@ export default function FullChart({ symbol }: { symbol: string }) {
     setHeld(null); pickView(v);
   };
 
+  /* Lines that stay still when the chart is dragged (owner, 20-Nov-2026: "Why
+     does the graph lines move of the price P ratio EBITDA etc. when I move the
+     full view chart ... to see more history? Fix it"). Every scale re-fitted
+     itself to the bars on screen, so dragging into older years stretched each
+     one, and lines on different scales - P/E and its median, EPS bars,
+     EBITDA and its margin - slid against each other. On every view but Price,
+     each series now keeps one scale for its whole history: dragging only
+     slides it sideways. A series that sets its own range keeps it. Price keeps
+     the usual trading-chart fit to the window, or a month of twenty years'
+     history would be a flat line. Stretching an axis by hand still works;
+     double-tap it to fit again. */
+  const holdScales = (chart: IChartApi) => {
+    const add = chart.addSeries.bind(chart);
+    const patched = ((def, opts, pane) => {
+      const s = add(def, opts, pane);
+      if (opts && "autoscaleInfoProvider" in opts) return s;
+      const set = s.setData.bind(s);
+      const bars = def === HistogramSeries;
+      s.setData = ((data: Parameters<typeof set>[0]) => {
+        set(data);
+        let lo = Infinity, hi = -Infinity;
+        for (const d of data as unknown as Record<string, unknown>[]) {
+          for (const k of ["value", "low", "high"]) {
+            const v = d[k];
+            if (typeof v === "number" && Number.isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; }
+          }
+        }
+        if (!Number.isFinite(lo)) return;
+        if (bars) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
+        const priceRange = { minValue: lo, maxValue: hi === lo ? lo + 1 : hi };
+        s.applyOptions({ autoscaleInfoProvider: () => ({ priceRange }) });
+      }) as typeof s.setData;
+      return s;
+    }) as IChartApi["addSeries"];
+    chart.addSeries = patched;
+  };
+
   /* Build the chart. Rebuilt whole on any change; the window you were looking
      at is carried across so switching a layer does not lose your zoom. */
   useEffect(() => {
@@ -1168,6 +1205,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
       // finger while the time axis could.
       handleScroll: { horzTouchDrag: true, vertTouchDrag: true, mouseWheel: true, pressedMouseMove: true },
     });
+    if (view !== "price") holdScales(chart);
     chartRef.current = chart;
     const cleanups: (() => void)[] = [];
     const fmt = (f: (x: number) => string) => ({ type: "custom" as const, formatter: f, minMove: 0.01 });
