@@ -15,7 +15,7 @@ import { loadIndex } from "@/lib/index-data";
 import { levelsOf, SENS, type Levels, type Sens } from "@/lib/levels";
 import InfoTip, { InfoDialog } from "@/components/InfoTip";
 import { useBackClose } from "@/lib/backclose";
-import { readPick, writePick, type ChartPick } from "@/lib/chartpick";
+import { writePick, type ChartPick } from "@/lib/chartpick";
 import ChartPresets from "@/components/ChartPresets";
 import { fourInRow, quarterX4, ttmMargins, ttmSums } from "@/lib/ttm";
 import { CASH_COLOUR, cashPrevStep, cashRows as pickCash, priceToCash } from "@/lib/cashflow";
@@ -27,6 +27,8 @@ import {
   workingFor, growth, growthText, PE_WINDOWS, CA_LABEL, CA_ORDER, Q_LABEL,
   type ChartBand, type ChartTrendQ, type Quarter, type CorpAction, type Growth, type Working,
 } from "@/components/StockChart";
+import { carryOver, declineOffer, pickChanges } from "@/lib/chartpresets";
+import ConfirmChanges from "@/components/ConfirmChanges";
 
 /** The full-screen chart - the view a trading terminal opens when you tap a
  *  chart, with everything the company-page chart can do.
@@ -705,6 +707,34 @@ const COLOUR_BY: [ColourBy, string][] = [["candle", "Open to close"], ["prev", "
 const upDown = (by: ColourBy, up: boolean, p: { pos: string; neg: string; pos2: string; neg2: string }) =>
   by === "prev" ? (up ? p.pos2 : p.neg2) : (up ? p.pos : p.neg);
 type Prefs = { kind: Kind; inds: Ind[]; log: boolean; lv: LvPrefs; volBy: ColourBy; candleBy: ColourBy };
+
+/** Advanced edits are confirmed when the Advanced sheet closes (owner,
+ *  21-Nov-2026): the set-up as it opened, against the one now. */
+type FullSnap = { pick: ChartPick; prefs: Prefs; iv: string; showDates: boolean; showCA: boolean; showMkt: boolean; marginAt: string; fvMode: string };
+const onOff = (b: boolean) => (b ? "On" : "Off");
+function fullSnapLines(a: FullSnap, b: FullSnap): string[] {
+  const out = pickChanges(a.pick, b.pick);
+  const kind = (k: string) => KINDS.find(([x]) => x === k)?.[1] ?? k;
+  if (a.prefs.kind !== b.prefs.kind) out.push(`Chart type: ${kind(a.prefs.kind)} → ${kind(b.prefs.kind)}`);
+  for (const [k, name] of INDS) {
+    if (a.prefs.inds.includes(k) !== b.prefs.inds.includes(k)) out.push(`${name}: ${onOff(a.prefs.inds.includes(k))} → ${onOff(b.prefs.inds.includes(k))}`);
+  }
+  if (a.prefs.log !== b.prefs.log) out.push(`Log scale: ${onOff(a.prefs.log)} → ${onOff(b.prefs.log)}`);
+  if (a.prefs.lv.on !== b.prefs.lv.on) out.push(`Levels: ${onOff(a.prefs.lv.on)} → ${onOff(b.prefs.lv.on)}`);
+  const by = (c: string) => COLOUR_BY.find(([x]) => x === c)?.[1] ?? c;
+  if (a.prefs.candleBy !== b.prefs.candleBy) out.push(`Candle colour: ${by(a.prefs.candleBy)} → ${by(b.prefs.candleBy)}`);
+  if (a.prefs.volBy !== b.prefs.volBy) out.push(`Volume colour: ${by(a.prefs.volBy)} → ${by(b.prefs.volBy)}`);
+  const ivw = (v: string) => (v === "d" ? "Daily" : v === "w" ? "Weekly" : "Monthly");
+  if (a.iv !== b.iv) out.push(`Candle size: ${ivw(a.iv)} → ${ivw(b.iv)}`);
+  if (a.showDates !== b.showDates) out.push(`Result dates: ${onOff(a.showDates)} → ${onOff(b.showDates)}`);
+  if (a.showCA !== b.showCA) out.push(`Corporate actions: ${onOff(a.showCA)} → ${onOff(b.showCA)}`);
+  if (a.showMkt !== b.showMkt) out.push(`RBI policy and Budget days: ${onOff(a.showMkt)} → ${onOff(b.showMkt)}`);
+  const mp = (m: string) => (m === "day" ? "Result day" : "Mid-quarter");
+  if (a.marginAt !== b.marginAt) out.push(`EBITDA margin point: ${mp(a.marginAt)} → ${mp(b.marginAt)}`);
+  const fv: Record<string, string> = { all: "All volume", deliv: "Delivered", intra: "Same day", split: "Split" };
+  if (a.fvMode !== b.fvMode) out.push(`Volume shows: ${fv[a.fvMode] ?? a.fvMode} → ${fv[b.fvMode] ?? b.fvMode}`);
+  return out;
+}
 const PREF_KEY = "rs_fullchart";
 function loadPrefs(): Prefs {
   const dflt: Prefs = { kind: "candles", inds: ["vol", "dma50", "dma200"], log: false, lv: LV_DEFAULT, volBy: "candle", candleBy: "candle" };
@@ -838,7 +868,12 @@ export default function FullChart({ symbol }: { symbol: string }) {
   const [index, setIndex] = useState<{ symbol: string; name: string; mcap: number }[]>([]);
   // What the reader picked on this company's chart - here or on the company
   // page - opens as it was left (lib/chartpick.ts).
-  const [pick0] = useState(() => readPick());
+  // If the company chart changed the shared set-up since this chart was last
+  // set, start on this chart's own and list the other's changes before
+  // applying them (owner, 21-Nov-2026; lib/chartpresets.carryOver).
+  const [carry] = useState(() => carryOver("full"));
+  const pick0 = carry.start;
+  const [offer, setOffer] = useState(carry.offer);
   const [viewSel, setView] = useState<View>(() => (VIEWS.some(([v]) => v === pick0?.view) ? pick0!.view as View : "price"));
   const [range, setRange] = useState<Range>(() => (RANGES.includes(pick0?.range as Range) ? pick0!.range as Range : "1Y"));
   // Views laid over the one on screen (hold a view's name), each on its own scale.
@@ -949,7 +984,7 @@ export default function FullChart({ symbol }: { symbol: string }) {
     const vis = Object.fromEntries(Object.entries(hidden).map(([k, h]) => [k, !h]));
     // The company chart's Years view has no twin here; left untouched it stays Years there.
     const v = years ? "years" : viewSel;
-    writePick({ view: v, range, overlays, vis, win: peWin, cmp: epsCmp, per: perShare, chg: showChg, sw: salesWin });
+    writePick({ view: v, range, overlays, vis, win: peWin, cmp: epsCmp, per: perShare, chg: showChg, sw: salesWin }, "full");
   }, [viewSel, years, range, overlays, hidden, peWin, epsCmp, perShare, showChg, salesWin]);
   const yearsPrices = useMemo(() => {
     const iso = (d: number) => new Date(d * DAY * 1000).toISOString().slice(0, 10);
@@ -1106,6 +1141,38 @@ export default function FullChart({ symbol }: { symbol: string }) {
     kept.current = null;
   };
   const isHidden = (k: string) => hid(`${view}:${k}`);
+  const nowSnap = (): FullSnap => ({ pick: presetPick, prefs, iv: interval, showDates, showCA, showMkt, marginAt, fvMode });
+  const latestSnap = useRef(nowSnap);
+  useEffect(() => { latestSnap.current = nowSnap; });
+  const advSnap = useRef<FullSnap | null>(null);
+  const advTouched = useRef(false);
+  const [advAsk, setAdvAsk] = useState<{ snap: FullSnap; lines: string[] } | null>(null);
+  useEffect(() => {
+    if (sheet === "adv") {
+      if (!advSnap.current) { advSnap.current = latestSnap.current(); advTouched.current = false; }
+      return;
+    }
+    const before = advSnap.current;
+    if (!before) return;
+    // After the sheet's step back in the history has landed.
+    const t = window.setTimeout(() => {
+      advSnap.current = null;
+      if (!advTouched.current) return;
+      advTouched.current = false;
+      const lines = fullSnapLines(before, latestSnap.current());
+      if (lines.length) setAdvAsk({ snap: before, lines });
+    }, 420);
+    return () => window.clearTimeout(t);
+  }, [sheet]);
+  const restoreSnap = (x: FullSnap) => {
+    applyPreset(x.pick);
+    savePrefs(x.prefs);
+    setIv(x.iv as Interval);
+    setShowDates(x.showDates); setShowCA(x.showCA); setShowMkt(x.showMkt);
+    setMarginAt(x.marginAt as "mid" | "day");
+    setFvMode(x.fvMode as FvMode);
+  };
+  const offerLines = offer ? pickChanges(presetPick, offer) : [];
 
   // Hold a view's name (or right-click it) to lay it over the chart on screen;
   // tap to switch. The company chart's gesture, the same way.
@@ -2752,6 +2819,16 @@ export default function FullChart({ symbol }: { symbol: string }) {
         </div>
       </footer>
 
+      {offer && offerLines.length > 0 && (
+        <ConfirmChanges title="Changes from the company chart" intro="These were changed on the company page's chart. Apply them here too?"
+          lines={offerLines} applyLabel="Apply them" cancelLabel="Keep this chart's"
+          onApply={() => { applyPreset(offer); setOffer(null); }} onCancel={() => { declineOffer("full", offer); setOffer(null); }} />
+      )}
+      {advAsk && (
+        <ConfirmChanges title="Keep these changes?" intro="You changed these in Advanced:" lines={advAsk.lines}
+          applyLabel="Keep" cancelLabel="Undo them"
+          onApply={() => setAdvAsk(null)} onCancel={() => { restoreSnap(advAsk.snap); setAdvAsk(null); }} />
+      )}
       {sheet && (
         <div className="fixed inset-0 z-[70]" onClick={() => setSheet(null)}>
           <div className="rs-fade absolute inset-0 bg-black/50" />
@@ -2760,12 +2837,14 @@ export default function FullChart({ symbol }: { symbol: string }) {
 
             {sheet === "adv" && (
               <div className="px-1 pt-1">
+                <div onClickCapture={() => { advTouched.current = true; }}>
                 <SwipeSections storeKey="rs_fullchart_adv_sec" sections={[
                   { key: "chart", title: "Chart", body: advChartBlock },
                   { key: "this", title: "This chart", body: layersBlock },
                   { key: "ratios", title: "Ratio charts", body: advRatioBlock },
                   { key: "price", title: "Price chart", body: <>{typeBlock}{advPriceBlock}</> },
                 ]} />
+                </div>
               </div>
             )}
 

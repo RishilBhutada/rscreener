@@ -16,6 +16,8 @@ import { fourInRow, quarterX4, ttmMargins, ttmSums } from "@/lib/ttm";
 import SwipeSections, { type Section } from "@/components/SwipeSections";
 import { CASH_COLOUR, cashPrevStep, cashRows, priceToCash } from "@/lib/cashflow";
 import { whyMissing, type DataStatus } from "@/components/DataStatus";
+import { carryOver, declineOffer, pickChanges } from "@/lib/chartpresets";
+import ConfirmChanges from "@/components/ConfirmChanges";
 
 type Pt = [string, number] | [string, number, number | null];
 export type ChartPrices = { monthly?: Pt[]; weekly?: Pt[]; daily?: Pt[] };
@@ -315,6 +317,22 @@ const MAIN_SHARE = 0.7;
 const STRIP_ZONE: [number, number] = [0.76, 1];
 const isMarketKey = (k: string) => /(^|_)m(vix|fii|pcr)$/.test(k);
 
+/** Advanced edits are confirmed when the options sheet closes (owner,
+ *  21-Nov-2026): the set-up as the sheet opened, against the one now. */
+type SmallSnap = { pick: ChartPick; inds: SmallInd[]; marginAt: "mid" | "day"; volMode: "all" | "deliv" | "intra" | "split" };
+const VOL_WORDS: Record<string, string> = { all: "All", deliv: "Delivered", intra: "Same day", split: "Split" };
+const sameRangeSmall = (a: string, b: string) => rangeToCompany(a) === rangeToCompany(b);
+function snapLines(a: SmallSnap, b: SmallSnap): string[] {
+  const out = pickChanges(a.pick, b.pick, sameRangeSmall);
+  for (const [k, name] of SMALL_INDS) {
+    if (a.inds.includes(k) !== b.inds.includes(k)) out.push(`${name}: ${a.inds.includes(k) ? "On" : "Off"} → ${b.inds.includes(k) ? "On" : "Off"}`);
+  }
+  const mp = (m: string) => (m === "day" ? "Result day" : "Mid-quarter");
+  if (a.marginAt !== b.marginAt) out.push(`EBITDA margin point: ${mp(a.marginAt)} → ${mp(b.marginAt)}`);
+  if (a.volMode !== b.volMode) out.push(`Volume shows: ${VOL_WORDS[a.volMode]} → ${VOL_WORDS[b.volMode]}`);
+  return out;
+}
+
 type SmallInd = "sma20" | "ema21" | "bb" | "rsi" | "mvix" | "mfii" | "mpcr" | "events";
 const SMALL_INDS: [SmallInd, string][] = [
   ["sma20", "SMA 20"], ["ema21", "EMA 21"], ["bb", "Bollinger (20, 2)"], ["rsi", "RSI (14)"],
@@ -451,7 +469,12 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cas
 }) {
   // What was picked on this company's chart, here or in the full chart, for
   // this browser session (lib/chartpick.ts): it opens as it was left.
-  const [pick0] = useState(() => readPick());
+  // If the full chart changed the shared set-up since this chart was last
+  // set, start on this chart's own and list the other's changes before
+  // applying them (owner, 21-Nov-2026; lib/chartpresets.carryOver).
+  const [carry] = useState(() => carryOver("small", sameRangeSmall));
+  const pick0 = carry.start;
+  const [offer, setOffer] = useState(carry.offer);
   const [viewSel, setView] = useState<View>(() => (pick0?.view && pick0.view in VIEW_NAME ? pick0.view as View : "price"));
   // A company without the chosen view (no EBITDA filed, say) shows Price; the
   // choice itself is kept for the next company that has it.
@@ -586,7 +609,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cas
     // The full chart has finer ranges (2Y, YTD); one set there that maps to
     // the range shown here is kept, not rounded.
     const r = prev?.range && rangeToCompany(prev.range) === range ? prev.range : rangeToFull(range);
-    writePick({ view: viewSel, range: r, overlays, vis, win: peWin, cmp: epsCmp, per: perShare, chg: showChg, sw: salesWin });
+    writePick({ view: viewSel, range: r, overlays, vis, win: peWin, cmp: epsCmp, per: perShare, chg: showChg, sw: salesWin }, "small");
   }, [viewSel, range, overlays, on, peWin, epsCmp, perShare, showChg, salesWin]);
   const [moreOpen, setMoreOpen] = useState(false);
   useBackClose(moreOpen, () => setMoreOpen(false));
@@ -1275,6 +1298,52 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cas
     for (const [k, b] of Object.entries(on)) { const c = canonKey(k); if (c) vis[c] = b; }
     return { view: viewSel, range: rangeToFull(range), overlays, vis, win: peWin, cmp: epsCmp, per: perShare, chg: showChg, sw: salesWin };
   })();
+  const nowSnap = (): SmallSnap => ({ pick: presetPick, inds, marginAt, volMode });
+  const latestSnap = useRef(nowSnap);
+  useEffect(() => { latestSnap.current = nowSnap; });
+  const advSnap = useRef<SmallSnap | null>(null);
+  const advTouched = useRef(false);
+  const [advAsk, setAdvAsk] = useState<{ snap: SmallSnap; lines: string[] } | null>(null);
+  useEffect(() => {
+    if (sheet) {
+      if (!advSnap.current) { advSnap.current = latestSnap.current(); advTouched.current = false; }
+      return;
+    }
+    const before = advSnap.current;
+    if (!before) return;
+    // After the sheet's own step back in the history has landed, or the
+    // confirmation would be closed by it.
+    const t = window.setTimeout(() => {
+      advSnap.current = null;
+      if (!advTouched.current) return;
+      advTouched.current = false;
+      const lines = snapLines(before, latestSnap.current());
+      if (lines.length) setAdvAsk({ snap: before, lines });
+    }, 420);
+    return () => window.clearTimeout(t);
+  }, [sheet]);
+  const restoreSnap = (x: SmallSnap) => {
+    applyPick(x.pick);
+    setIndsState(x.inds);
+    try { localStorage.setItem("rs_small_inds", JSON.stringify(x.inds)); } catch { /* still applied */ }
+    setMarginAt(x.marginAt);
+    setVolMode(x.volMode);
+  };
+  const offerLines = offer ? pickChanges(presetPick, offer, sameRangeSmall) : [];
+  const confirmations = (
+    <>
+      {offer && offerLines.length > 0 && (
+        <ConfirmChanges title="Changes from the full-screen chart" intro="These were changed on the full-screen chart. Apply them here too?"
+          lines={offerLines} applyLabel="Apply them" cancelLabel="Keep this chart's"
+          onApply={() => { applyPick(offer); setOffer(null); }} onCancel={() => { declineOffer("small", offer); setOffer(null); }} />
+      )}
+      {advAsk && (
+        <ConfirmChanges title="Keep these changes?" intro="You changed these in Advanced:" lines={advAsk.lines}
+          applyLabel="Keep" cancelLabel="Undo them"
+          onApply={() => setAdvAsk(null)} onCancel={() => { restoreSnap(advAsk.snap); setAdvAsk(null); }} />
+      )}
+    </>
+  );
   const presetRow = (
     <>
       <Hint id="chart_hold">Hold a chart tab to lay it over this one. Hold a preset to update, rename or delete it.</Hint>
@@ -1555,7 +1624,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cas
               <span className={`inline-block transition-transform ${adv ? "rotate-180" : ""}`}><ChevronGlyph size={12} /></span>
             </span>
           </button>
-          {adv && <SwipeSections sections={advSections} storeKey="rs_chart_adv_sec" />}
+          {adv && <div onClickCapture={() => { advTouched.current = true; }}><SwipeSections sections={advSections} storeKey="rs_chart_adv_sec" /></div>}
         </div>
       </div>
     </InfoDialog>
@@ -2065,6 +2134,7 @@ export default function StockChart({ prices, peBand, evBand, pbBand, psBand, cas
       {plotAndLegend}
       {qLegend}
       {optionsSheet}
+      {confirmations}
     </ChartShell>
   );
 }

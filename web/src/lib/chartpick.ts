@@ -25,7 +25,12 @@ export type ChartPick = {
   chg: boolean;
   /** Sales & margin: each quarter ("q", the default) or twelve months to each ("ttm") */
   sw?: "q" | "ttm";
+  /** Which chart wrote it last: the company chart ("small") or the full one */
+  by?: ChartSide;
 };
+
+/** The company page's chart and the full-screen one. */
+export type ChartSide = "small" | "full";
 
 const KEY = "rs_chart_pick";
 
@@ -37,8 +42,24 @@ export function readPick(): Partial<ChartPick> | null {
   } catch { return null; }
 }
 
-export function writePick(pick: ChartPick) {
-  try { localStorage.setItem(KEY, JSON.stringify(pick)); } catch { /* private mode */ }
+/** Saved for both charts, and as this chart's own last set-up: when the other
+ *  chart has changed the shared one since, opening this one lists what would
+ *  change before applying it (owner, 21-Nov-2026 - lib/chartpresets.carryOver). */
+export function writePick(pick: ChartPick, by?: ChartSide) {
+  try {
+    const p = by ? { ...pick, by } : pick;
+    localStorage.setItem(KEY, JSON.stringify(p));
+    if (by) localStorage.setItem(`${KEY}_${by}`, JSON.stringify(p));
+  } catch { /* private mode */ }
+}
+
+/** This chart's own last set-up, or null if it was never changed here. */
+export function readOwn(by: ChartSide): Partial<ChartPick> | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(`${KEY}_${by}`);
+    return raw ? (JSON.parse(raw) as Partial<ChartPick>) : null;
+  } catch { return null; }
 }
 
 /* ── ranges ──────────────────────────────────────────────────────────────── */

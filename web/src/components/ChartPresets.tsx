@@ -3,7 +3,8 @@
 import { useRef, useState } from "react";
 import { InfoDialog } from "@/components/InfoTip";
 import type { ChartPick } from "@/lib/chartpick";
-import { describe, loadPresets, samePick, savePresets, type ChartPreset } from "@/lib/chartpresets";
+import { describe, loadPresets, pickChanges, samePick, savePresets, type ChartPreset } from "@/lib/chartpresets";
+import ConfirmChanges from "@/components/ConfirmChanges";
 
 /** The row of chart presets above the company chart (owner's pick A,
  *  2-Nov-2026). Tap a chip: the chart takes that set-up. Hold it (or
@@ -18,6 +19,7 @@ export default function ChartPresets({ current, apply, sameRange, className = "-
   className?: string;
 }) {
   const [list, setList] = useState<ChartPreset[]>(() => (typeof window === "undefined" ? [] : loadPresets()));
+  const [ask, setAsk] = useState<number | null>(null);
   const [dialog, setDialog] = useState<null | { mode: "save" } | { mode: "manage"; i: number; renaming: boolean }>(null);
   const [name, setName] = useState("");
   const store = (next: ChartPreset[]) => { setList(next); savePresets(next); };
@@ -43,7 +45,9 @@ export default function ChartPresets({ current, apply, sameRange, className = "-
     const i = idxOf(e);
     if (swallow.current) { swallow.current = false; return; }
     if (i === null) return;
-    apply(list[i].pick);
+    // What the preset would change, listed before it is applied (owner,
+    // 21-Nov-2026). A preset already on screen changes nothing.
+    if (pickChanges(current, list[i].pick, sameRange).length) setAsk(i);
   };
 
   const chip = "shrink-0 inline-flex items-center rounded-full px-3 py-1.5 sm:py-1 text-xs font-medium whitespace-nowrap border";
@@ -78,6 +82,11 @@ export default function ChartPresets({ current, apply, sameRange, className = "-
           className={`${chip} border-dashed border-[var(--line2)] text-[var(--ink2)]`}>+ Save as preset</button>
       </div>
 
+      {ask !== null && list[ask] && (
+        <ConfirmChanges title={`Apply “${list[ask].name}”?`} lines={pickChanges(current, list[ask].pick, sameRange)}
+          intro="These settings will change on this chart:"
+          onApply={() => { apply(list[ask].pick); setAsk(null); }} onCancel={() => setAsk(null)} />
+      )}
       {dialog?.mode === "save" && (
         <InfoDialog title="Save this chart" onClose={() => setDialog(null)}>
           <div className="space-y-3">
